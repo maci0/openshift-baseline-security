@@ -106,6 +106,9 @@ func (r *ClusterBaselineReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	if err := r.checkScanStorage(ctx, cb); err != nil {
 		return ctrl.Result{}, fmt.Errorf("checking scan storage: %w", err)
 	}
+	// OpenShift-style rollup conditions (Available / Progressing / Degraded).
+	// Degraded is set by checkScanStorage; Available/Progressing summarize readiness.
+	setRollupConditions(cb)
 	if err := r.Status().Update(ctx, cb); err != nil {
 		return ctrl.Result{}, err
 	}
@@ -175,7 +178,39 @@ func appendHistoryRing(hist []baselinev1alpha1.ScoreSnapshot, t metav1.Time, s i
 }
 
 func setCond(cb *baselinev1alpha1.ClusterBaseline, typ string, status metav1.ConditionStatus, reason, msg string) {
-	meta.SetStatusCondition(&cb.Status.Conditions, metav1.Condition{Type: typ, Status: status, Reason: reason, Message: msg})
+	meta.SetStatusCondition(&cb.Status.Conditions, metav1.Condition{
+		Type:               typ,
+		Status:             status,
+		Reason:             reason,
+		Message:            msg,
+		ObservedGeneration: cb.Generation,
+	})
+}
+
+// setRollupConditions sets Available and Progressing from the detailed Ready
+// conditions, matching the OpenShift ClusterOperator condition contract in spirit.
+func setRollupConditions(cb *baselinev1alpha1.ClusterBaseline) {
+	co := meta.FindStatusCondition(cb.Status.Conditions, "ComplianceOperatorReady")
+	scan := meta.FindStatusCondition(cb.Status.Conditions, "ScanConfigured")
+	plugin := meta.FindStatusCondition(cb.Status.Conditions, "ConsolePluginReady")
+
+	coReady := co != nil && co.Status == metav1.ConditionTrue
+	scanOK := scan != nil && scan.Status == metav1.ConditionTrue
+	coInstalling := co != nil && co.Status == metav1.ConditionFalse && co.Reason == "Installing"
+	pluginPending := plugin != nil && plugin.Status == metav1.ConditionFalse &&
+		(plugin.Reason == "ImageMissing" || plugin.Reason == "Installing")
+
+	if coInstalling || pluginPending {
+		setCond(cb, "Progressing", metav1.ConditionTrue, "Reconciling", "installing or configuring dependencies")
+	} else {
+		setCond(cb, "Progressing", metav1.ConditionFalse, "AsExpected", "")
+	}
+
+	if coReady && scanOK {
+		setCond(cb, "Available", metav1.ConditionTrue, "AsExpected", "compliance operator ready and scans configured")
+	} else {
+		setCond(cb, "Available", metav1.ConditionFalse, "NotReady", "waiting for compliance operator and scan configuration")
+	}
 }
 
 func createIfMissing(ctx context.Context, c client.Client, obj client.Object) error {

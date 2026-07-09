@@ -4,7 +4,7 @@ The style standards and guidelines this project follows, with the
 authoritative sources (all URLs verified 2026-07). OpenShift layers its
 conventions: upstream Kubernetes at the bottom, OpenShift-specific rules in
 `openshift/enhancements`, per-area docs on top. Where this repo deviates,
-the gap is called out.
+the gap is called out under **Deliberate deviations**.
 
 ## Go code style
 
@@ -31,7 +31,7 @@ Enforcement is mechanical, not prose:
   [cluster-network-operator](https://github.com/openshift/cluster-network-operator/blob/master/.golangci.yaml)
   (12). Some repos (oc, compliance-operator) rely on gofmt/govet only.
 
-**Here**: `operator/.golangci.yml` (staticcheck, misspell, unconvert,
+**Here**: `operator/.golangci.yml` (staticcheck settings, misspell, unconvert,
 unparam, nilerr + gofmt/goimports), `make lint`, CI drift check for
 generated files.
 
@@ -48,15 +48,18 @@ generated files.
   unions with a required enum discriminator; configuration APIs default in
   the controller, not the schema.
 - [Upstream Kubernetes API conventions](https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md):
-  spec/status separation; conditions as `{type, status, reason, message}`;
-  plural lowercase resources, CamelCase kinds.
+  spec/status separation; conditions as `{type, status, reason, message,
+  observedGeneration}`; plural lowercase resources, CamelCase kinds.
 
 **Here**: `ClusterBaseline` follows the singleton-named-`cluster`,
-conditions, and printer-column conventions. The former spec booleans
-were migrated to string enums per the no-booleans rule:
+conditions with `observedGeneration`, and printer-column conventions.
+Spec booleans are string enums:
 `installComplianceOperator: Automatic|Manual`,
 `console.managementState: Managed|Removed`,
 `remediation.apply: Automatic|Manual`.
+Status conditions include the OpenShift rollup set
+(`Available`, `Progressing`, `Degraded`) plus detail conditions
+(`ComplianceOperatorReady`, `ScanConfigured`, `ConsolePluginReady`).
 
 ## Operator conventions
 
@@ -68,10 +71,11 @@ were migrated to string enums per the no-booleans rule:
   normal upgrades; `Degraded` must not go True during them; `Progressing`
   only while actually rolling out; `relatedObjects` feed must-gather.
 
-**Here**: layered OLM operator, not a ClusterOperator, so the contract is
-followed in spirit on the CR's own conditions
-(`ComplianceOperatorReady`, `ScanConfigured`, `ConsolePluginReady`,
-`Degraded`).
+**Here**: layered OLM operator (not a ClusterOperator). The CR carries
+`Available` / `Progressing` / `Degraded` rollups derived each reconcile,
+plus the detail conditions above. Manager and plugin Deployments run 2
+replicas with preferred pod anti-affinity and leader election on the
+manager. Resource requests only (no limits). Metrics: see deviations.
 
 ## Console / frontend
 
@@ -87,8 +91,11 @@ followed in spirit on the CR's own conditions
   per console release (4.22 = PatternFly 6).
 - [PatternFly design guidelines](https://www.patternfly.org/get-started/design).
 
-**Here**: compliant on all points (TS strict, PF6 only, SDK components,
-i18n namespace `plugin__baseline-security-console-plugin`).
+**Here**: TS strict, no `any`, PF6 only (no SCSS), SDK components
+(`VirtualizedTable`, `ListPageFilter`, `useAccessReview`), i18n namespace
+`plugin__baseline-security-console-plugin` for user-visible strings
+including Results table column titles. Spacing uses PatternFly global
+CSS tokens (`--pf-t--global--spacer--*`) rather than custom stylesheets.
 
 ## Commit / PR workflow
 
@@ -103,29 +110,24 @@ i18n namespace `plugin__baseline-security-console-plugin`).
 - Per-repo example: [cluster-image-registry-operator CONTRIBUTING.md](https://github.com/openshift/cluster-image-registry-operator/blob/main/CONTRIBUTING.md).
 
 **Here**: OWNERS at repo root; Prow/Jira conventions apply only after
-ci-operator onboarding (productization step, SPEC §10).
+ci-operator onboarding (productization step, SPEC §10). GitHub Actions
+covers test, lint, generate drift, and image builds until then.
 
 ## Deliberate deviations
 
-Reviewed line-by-line against the sources above; these are the conscious
-exceptions, with reasons:
+Reviewed against the sources above. These are conscious exceptions only;
+everything else aims to match OpenShift/Kubernetes practice.
 
-- `ProfileKey` enum values are lowercase (`cis`, `pci-dss`) rather than
-  PascalCase: they mirror ComplianceAsCode profile identifiers, which are
-  the values users see in Compliance Operator objects; they are keys, not
-  mode enums.
-- CRD schema defaults (kubebuilder `+default`) instead of pure controller
-  defaulting for this configuration API: schema defaults surface in
-  `oc explain` and the OLM creation form. Revisit at v1beta1 if defaults
-  need to evolve per platform version.
-- Operator metrics bind to loopback without authn instead of HTTPS +
-  authorization: avoids the k8s.io/apiserver dependency tree; documented
-  in `cmd/main.go`. Expose via an authenticating sidecar if cluster
-  scraping is needed.
-- No `system-*` priority class: those are reserved for payload components;
-  an optional addon should not claim node-pressure priority over them.
+| Deviation | Reason | Revisit when |
+|-----------|--------|--------------|
+| `ProfileKey` values are lowercase (`cis`, `pci-dss`) rather than PascalCase | They mirror ComplianceAsCode / Compliance Operator profile identifiers users already see | Never rename without a storage migration; productization may add a display name map |
+| CRD schema defaults (`+kubebuilder:default`) instead of pure controller defaulting | Schema defaults surface in `oc explain` and the OLM create form for this configuration API | v1beta1 if defaults must vary by platform version |
+| Metrics bind to loopback without authn/HTTPS instead of authenticated secure metrics | Avoids the `k8s.io/apiserver` dependency tree for a small addon; documented in `cmd/main.go` | Cluster scrape is required: add authenticating sidecar or FilterProvider |
+| No `system-*` priority class | Reserved for payload components; an optional addon must not outrank them under node pressure | Never for an addon |
+| kubebuilder / controller-runtime instead of library-go | Smaller dependency surface for a single-CR layered OLM operator; OpenShift addons commonly use either stack | Productization if integration with library-go helpers becomes required |
+| Not a ClusterOperator (no CVO status object) | Layered OLM product, not in-cluster payload | Productization if promoted into the platform payload |
 
-## Caveats found while verifying
+## Caveats found while verifying sources
 
 - `openshift/community` is archived (2022); not a conventions source.
 - `openshift/origin` HACKING.md only exists on old branches

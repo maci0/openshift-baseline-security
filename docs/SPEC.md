@@ -154,10 +154,11 @@ Responsibilities:
    0-100 score (pass / (pass+fail), MANUAL and NOT-APPLICABLE excluded;
    score is cleared when there are no countable results), lastScanTime,
    history (oldest first, capped at 30), conditions
-   (`ComplianceOperatorReady` from CSV phase Succeeded, `ScanConfigured`,
-   `ConsolePluginReady`, `Degraded` for owned Pending PVCs). Compliance CRDs
-   are not watched at manager start (they may be absent); the controller
-   requeues every minute and Owns the plugin Deployment/Service.
+   (`Available` / `Progressing` / `Degraded` rollups plus detail:
+   `ComplianceOperatorReady` from CSV phase Succeeded, `ScanConfigured`,
+   `ConsolePluginReady`; `Degraded` for owned Pending PVCs). Compliance
+   CRDs are not watched at manager start (they may be absent); the
+   controller requeues every minute and Owns the plugin Deployment/Service.
    Deleting ClusterBaseline does **not** uninstall the Compliance Operator.
 
 ### 4.2 API: `ClusterBaseline` CRD

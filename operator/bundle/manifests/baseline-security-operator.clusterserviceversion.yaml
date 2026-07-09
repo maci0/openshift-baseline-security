@@ -122,7 +122,7 @@ spec:
       deployments:
         - name: baseline-security-operator
           spec:
-            replicas: 1
+            replicas: 2
             selector:
               matchLabels:
                 app: baseline-security-operator
@@ -136,6 +136,15 @@ spec:
                   runAsNonRoot: true
                   seccompProfile:
                     type: RuntimeDefault
+                affinity:
+                  podAntiAffinity:
+                    preferredDuringSchedulingIgnoredDuringExecution:
+                      - weight: 100
+                        podAffinityTerm:
+                          labelSelector:
+                            matchLabels:
+                              app: baseline-security-operator
+                          topologyKey: kubernetes.io/hostname
                 containers:
                   - name: manager
                     image: quay.io/openshift-baseline-security/baseline-security-operator:0.1.0

@@ -48,12 +48,6 @@ const statusLabel: Record<
   'NOT-APPLICABLE': { color: 'grey', icon: <MinusCircleIcon /> },
 };
 
-const columns: TableColumn<ComplianceCheckResult>[] = [
-  { title: 'Check', id: 'title', sort: 'description' },
-  { title: 'Status', id: 'status', sort: 'status' },
-  { title: 'Severity', id: 'severity', sort: 'severity' },
-];
-
 const ResultsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => {
   const { t } = useTranslation('plugin__baseline-security-console-plugin');
   const [results, loaded, error] = useK8sWatchResource<ComplianceCheckResult[]>({
@@ -62,6 +56,15 @@ const ResultsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => {
     namespace: 'openshift-compliance',
   });
   const [selected, setSelected] = React.useState<ComplianceCheckResult | null>(null);
+
+  const columns: TableColumn<ComplianceCheckResult>[] = React.useMemo(
+    () => [
+      { title: t('Check'), id: 'title', sort: 'description' },
+      { title: t('Status'), id: 'status', sort: 'status' },
+      { title: t('Severity'), id: 'severity', sort: 'severity' },
+    ],
+    [t],
+  );
 
   const profiles = baseline?.spec.profiles;
   const ownedResults = React.useMemo(
