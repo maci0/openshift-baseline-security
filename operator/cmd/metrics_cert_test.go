@@ -52,9 +52,10 @@ func TestMetricsCertProviderLoadsAndReloads(t *testing.T) {
 	}
 
 	writeTestPair(t, dir)
-	certPath := filepath.Join(dir, "tls.crt")
+	// Bump key mtime only (service-ca may rewrite key+cert independently).
+	keyPath := filepath.Join(dir, "tls.key")
 	now := time.Now().Add(2 * time.Second)
-	if err := os.Chtimes(certPath, now, now); err != nil {
+	if err := os.Chtimes(keyPath, now, now); err != nil {
 		t.Fatal(err)
 	}
 	c3, err := p.GetCertificate(nil)
@@ -62,6 +63,19 @@ func TestMetricsCertProviderLoadsAndReloads(t *testing.T) {
 		t.Fatalf("reload: %v", err)
 	}
 	if c3 == c1 {
-		t.Fatal("expected new certificate pointer after mtime change")
+		t.Fatal("expected new certificate pointer after key mtime change")
+	}
+}
+
+func TestIsLoopbackMetricsAddr(t *testing.T) {
+	for _, a := range []string{"0", "", "127.0.0.1:8080", "localhost:8443", "[::1]:8443"} {
+		if !isLoopbackMetricsAddr(a) {
+			t.Fatalf("%q should be loopback", a)
+		}
+	}
+	for _, a := range []string{":8443", "0.0.0.0:8443", "[::]:8443"} {
+		if isLoopbackMetricsAddr(a) {
+			t.Fatalf("%q should not be loopback", a)
+		}
 	}
 }

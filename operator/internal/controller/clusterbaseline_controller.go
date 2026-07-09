@@ -581,7 +581,9 @@ func (r *ClusterBaselineReconciler) ensureConsolePlugin(ctx context.Context, cb 
 		}
 		svc.Annotations["service.beta.openshift.io/serving-cert-secret-name"] = pluginName + "-cert"
 		svc.Spec.Selector = labels
-		svc.Spec.Ports = []corev1.ServicePort{{Port: 9443, TargetPort: intstr.FromInt32(9443)}}
+		svc.Spec.Ports = []corev1.ServicePort{{
+			Name: "https", Port: 9443, TargetPort: intstr.FromInt32(9443), Protocol: corev1.ProtocolTCP,
+		}}
 		return controllerutil.SetControllerReference(cb, svc, r.Scheme)
 	}); err != nil {
 		return err

@@ -12,8 +12,9 @@ import (
 )
 
 // metricsCertProvider loads service-ca certs from certDir when present and
-// reloads on mtime change. Falls back to a one-shot self-signed cert so the
-// metrics server can start before the Secret exists (optional volume).
+// reloads when either tls.crt or tls.key mtime advances. Falls back to a
+// one-shot self-signed cert so the metrics server can start before the Secret
+// exists (optional volume).
 type metricsCertProvider struct {
 	certDir string
 
@@ -23,6 +24,22 @@ type metricsCertProvider struct {
 	selfSigned *tls.Certificate
 }
 
+func certPairModTime(certPath, keyPath string) (time.Time, bool) {
+	cfi, err := os.Stat(certPath)
+	if err != nil {
+		return time.Time{}, false
+	}
+	kfi, err := os.Stat(keyPath)
+	if err != nil {
+		return time.Time{}, false
+	}
+	mt := cfi.ModTime()
+	if kfi.ModTime().After(mt) {
+		mt = kfi.ModTime()
+	}
+	return mt, true
+}
+
 func (p *metricsCertProvider) GetCertificate(_ *tls.ClientHelloInfo) (*tls.Certificate, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -30,16 +47,15 @@ func (p *metricsCertProvider) GetCertificate(_ *tls.ClientHelloInfo) (*tls.Certi
 	if p.certDir != "" {
 		certPath := filepath.Join(p.certDir, "tls.crt")
 		keyPath := filepath.Join(p.certDir, "tls.key")
-		if fi, err := os.Stat(certPath); err == nil {
-			if p.cert != nil && !fi.ModTime().After(p.modTime) {
+		if mt, ok := certPairModTime(certPath, keyPath); ok {
+			if p.cert != nil && !mt.After(p.modTime) {
 				return p.cert, nil
 			}
-			// Load outside the hot path would be nicer, but keeping the lock is
-			// fine: LoadX509KeyPair is rare (startup / cert rotation).
+			// Load under the lock: rare (startup / cert rotation).
 			pair, err := tls.LoadX509KeyPair(certPath, keyPath)
 			if err == nil {
 				p.cert = &pair
-				p.modTime = fi.ModTime()
+				p.modTime = mt
 				return p.cert, nil
 			}
 			// Partial/corrupt Secret: keep last good cert if any.

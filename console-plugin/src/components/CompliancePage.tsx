@@ -93,28 +93,32 @@ const CompliancePage: React.FC = () => {
     }
   };
 
-  const pages = [
-    {
-      href: '',
-      name: t('Overview'),
-      component: () => <Overview baseline={baseline} loaded={loaded} />,
-    },
-    {
-      href: 'results',
-      name: t('Results'),
-      component: () => <ResultsTab baseline={baseline} />,
-    },
-    {
-      href: 'remediations',
-      name: t('Remediations'),
-      component: () => <RemediationsTab baseline={baseline} />,
-    },
-    {
-      href: 'profiles',
-      name: t('Profiles'),
-      component: () => <ProfilesTab baseline={baseline} />,
-    },
-  ];
+  // Stable page list so HorizontalNav does not remount tabs every render.
+  const pages = React.useMemo(
+    () => [
+      {
+        href: '',
+        name: t('Overview'),
+        component: () => <Overview baseline={baseline} loaded={loaded} />,
+      },
+      {
+        href: 'results',
+        name: t('Results'),
+        component: () => <ResultsTab baseline={baseline} />,
+      },
+      {
+        href: 'remediations',
+        name: t('Remediations'),
+        component: () => <RemediationsTab baseline={baseline} />,
+      },
+      {
+        href: 'profiles',
+        name: t('Profiles'),
+        component: () => <ProfilesTab baseline={baseline} />,
+      },
+    ],
+    [t, baseline, loaded],
+  );
 
   return (
     <>

@@ -68,13 +68,15 @@ const RemediationsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline })
     [remediations, baseline?.spec.profiles],
   );
 
-  const run = async (fn: () => Promise<unknown>, failMsg: string) => {
+  const run = async (fn: () => Promise<unknown>, failMsg: string): Promise<boolean> => {
     setBusy(true);
     setError(null);
     try {
       await fn();
+      return true;
     } catch (e) {
       setError(e instanceof Error ? e.message : failMsg);
+      return false;
     } finally {
       setBusy(false);
     }
@@ -206,8 +208,9 @@ const RemediationsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline })
               if (!confirming) return;
               const rem = confirming;
               void (async () => {
-                await setApply(rem, true);
-                setConfirming(null);
+                if (await setApply(rem, true)) {
+                  setConfirming(null);
+                }
               })();
             }}
           >

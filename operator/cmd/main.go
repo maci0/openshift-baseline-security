@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"os"
+	"strings"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -42,14 +43,20 @@ func main() {
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 	setupLog := ctrl.Log.WithName("setup")
 
+	if !secureMetrics && metricsAddr != "0" && !isLoopbackMetricsAddr(metricsAddr) {
+		setupLog.Info("refusing non-loopback insecure metrics; forcing metrics-secure=true",
+			"metricsBindAddress", metricsAddr)
+		secureMetrics = true
+	}
+
 	metricsServerOptions := metricsserver.Options{
 		BindAddress:   metricsAddr,
 		SecureServing: secureMetrics,
-		// Dynamic GetCertificate reloads service-ca files when they appear after
-		// startup (optional volume); falls back to self-signed until then.
-		TLSOpts: metricsTLSOpts(metricsCertDir),
 	}
 	if secureMetrics {
+		// Dynamic GetCertificate reloads service-ca files when they appear after
+		// startup (optional volume); falls back to self-signed until then.
+		metricsServerOptions.TLSOpts = metricsTLSOpts(metricsCertDir)
 		// Requires ClusterRole rules for tokenreviews and subjectaccessreviews.
 		// Scrapers need nonResourceURLs: ["/metrics"] verbs: ["get"].
 		metricsServerOptions.FilterProvider = filters.WithAuthenticationAndAuthorization
@@ -94,4 +101,19 @@ func main() {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
 	}
+}
+
+// isLoopbackMetricsAddr is true for disabled ("0"), empty (defaults elsewhere),
+// or explicit 127.0.0.1 / localhost binds.
+func isLoopbackMetricsAddr(addr string) bool {
+	if addr == "" || addr == "0" {
+		return true
+	}
+	host := addr
+	if i := strings.LastIndex(addr, ":"); i >= 0 {
+		host = addr[:i]
+	}
+	// "[::1]:8443" is loopback; ":8443" binds all interfaces (not loopback).
+	host = strings.Trim(host, "[]")
+	return host == "127.0.0.1" || host == "localhost" || host == "::1"
 }
