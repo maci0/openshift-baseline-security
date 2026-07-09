@@ -26,7 +26,7 @@ import {
   Gallery,
   Icon,
   PageSection,
-  Spinner,
+  Skeleton,
 } from '@patternfly/react-core';
 import {
   CheckCircleIcon,
@@ -63,7 +63,15 @@ const Overview: React.FC<{ baseline?: ClusterBaseline; loaded: boolean }> = ({
   if (!loaded) {
     return (
       <PageSection>
-        <Spinner />
+        <Gallery hasGutter minWidths={{ default: '300px' }}>
+          {[0, 1, 2].map((i) => (
+            <Card key={i}>
+              <CardBody>
+                <Skeleton height="180px" screenreaderText={t('Loading compliance data')} />
+              </CardBody>
+            </Card>
+          ))}
+        </Gallery>
       </PageSection>
     );
   }
@@ -196,6 +204,16 @@ const Overview: React.FC<{ baseline?: ClusterBaseline; loaded: boolean }> = ({
                 </DescriptionListDescription>
               </DescriptionListGroup>
               <DescriptionListGroup>
+                <DescriptionListTerm>{t('Next scan')}</DescriptionListTerm>
+                <DescriptionListDescription>
+                  {baseline.status?.nextScanTime ? (
+                    <Timestamp timestamp={baseline.status.nextScanTime} />
+                  ) : (
+                    '—'
+                  )}
+                </DescriptionListDescription>
+              </DescriptionListGroup>
+              <DescriptionListGroup>
                 <DescriptionListTerm>{t('Schedule')}</DescriptionListTerm>
                 <DescriptionListDescription>
                   <code>{baseline.spec.schedule ?? '—'}</code>
@@ -280,6 +298,52 @@ const Overview: React.FC<{ baseline?: ClusterBaseline; loaded: boolean }> = ({
                 count={p.manual}
                 href={resultsHref('MANUAL', p.key)}
               />
+              </CardBody>
+            </Card>
+          );
+        })}
+        {(baseline.status?.tailoredProfiles ?? []).map((tp) => {
+          const denom = tp.pass + tp.fail;
+          const pScore = denom > 0 ? Math.round((tp.pass * 100) / denom) : null;
+          return (
+            <Card key={`tp-${tp.name}`}>
+              <CardHeader
+                actions={{
+                  actions:
+                    pScore != null ? (
+                      <Label isCompact color={pScore >= 90 ? 'green' : pScore >= 60 ? 'orange' : 'red'}>
+                        {pScore}
+                      </Label>
+                    ) : undefined,
+                  hasNoOffset: true,
+                }}
+              >
+                <CardTitle>
+                  {tp.name} <Label isCompact color="blue">{t('Tailored')}</Label>
+                </CardTitle>
+              </CardHeader>
+              <CardBody>
+                <CountRow
+                  icon={<CheckCircleIcon />}
+                  status="success"
+                  label={t('Pass')}
+                  count={tp.pass}
+                  href={resultsHref('PASS')}
+                />
+                <CountRow
+                  icon={<ExclamationCircleIcon />}
+                  status="danger"
+                  label={t('Fail')}
+                  count={tp.fail}
+                  href={resultsHref('FAIL')}
+                />
+                <CountRow
+                  icon={<ExclamationTriangleIcon />}
+                  status="warning"
+                  label={t('Manual')}
+                  count={tp.manual}
+                  href={resultsHref('MANUAL')}
+                />
               </CardBody>
             </Card>
           );

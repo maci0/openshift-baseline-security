@@ -118,6 +118,15 @@ spec:
                 description: schedule is the scan cron schedule, applied to the owned
                   ScanSetting.
                 type: string
+              tailoredProfiles:
+                description: |-
+                  tailoredProfiles names TailoredProfiles in the openshift-compliance
+                  namespace to also scan with. Create the TailoredProfile with the
+                  Compliance Operator first; this binds it into the baseline scan and
+                  includes its results in the score.
+                items:
+                  type: string
+                type: array
             required:
             - profiles
             type: object
@@ -204,6 +213,11 @@ spec:
               lastScanTime:
                 format: date-time
                 type: string
+              nextScanTime:
+                description: nextScanTime is the next scheduled scan, derived from
+                  spec.schedule.
+                format: date-time
+                type: string
               profiles:
                 items:
                   description: ProfileStatus summarizes check results for one selected
@@ -251,12 +265,65 @@ spec:
                   - pass
                   type: object
                 type: array
+              relatedObjects:
+                description: relatedObjects lists the resources this baseline owns
+                  or drives.
+                items:
+                  description: |-
+                    ObjectRef points at a cluster resource this baseline owns or drives; consumed
+                    by must-gather and support tooling.
+                  properties:
+                    group:
+                      type: string
+                    name:
+                      type: string
+                    namespace:
+                      type: string
+                    resource:
+                      type: string
+                  required:
+                  - name
+                  - resource
+                  type: object
+                type: array
               score:
                 description: |-
                   score is pass/(pass+fail) across all profiles, 0-100. MANUAL and
                   NOT-APPLICABLE results are excluded; their counts are reported per profile.
                 format: int32
                 type: integer
+              tailoredProfiles:
+                description: tailoredProfiles reports results for bound TailoredProfiles.
+                items:
+                  description: TailoredProfileStatus summarizes check results for
+                    one bound TailoredProfile.
+                  properties:
+                    error:
+                      format: int32
+                      type: integer
+                    fail:
+                      format: int32
+                      type: integer
+                    manual:
+                      format: int32
+                      type: integer
+                    name:
+                      type: string
+                    notApplicable:
+                      format: int32
+                      type: integer
+                    pass:
+                      format: int32
+                      type: integer
+                  required:
+                  - error
+                  - fail
+                  - manual
+                  - name
+                  - notApplicable
+                  - pass
+                  type: object
+                type: array
             type: object
         required:
         - spec

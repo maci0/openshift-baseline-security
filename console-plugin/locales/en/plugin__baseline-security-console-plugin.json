@@ -60,5 +60,16 @@
   "Not applicable": "Not applicable",
   "Error": "Error",
   "No results": "No results",
-  "score / 100": "score / 100"
+  "score / 100": "score / 100",
+  "Next scan": "Next scan",
+  "Tailored": "Tailored",
+  "View": "View",
+  "Object": "Object",
+  "reboots nodes": "reboots nodes",
+  "This is a node remediation": "This is a node remediation",
+  "Rendered object": "Rendered object",
+  "No rendered object.": "No rendered object.",
+  "Loading compliance data": "Loading compliance data",
+  "It renders into a MachineConfig; applying it reboots the affected nodes one by one. To batch changes, pause the target MachineConfigPool first (Compute -> MachineConfigPools) and resume it when done.": "It renders into a MachineConfig; applying it reboots the affected nodes one by one. To batch changes, pause the target MachineConfigPool first (Compute -> MachineConfigPools) and resume it when done.",
+  "{{name}} will be applied to the cluster. A rescan is required afterwards for results to reflect the change.": "{{name}} will be applied to the cluster. A rescan is required afterwards for results to reflect the change."
 }

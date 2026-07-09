@@ -40,11 +40,17 @@ func publishMetrics(cb *baselinev1alpha1.ClusterBaseline) {
 	// spec) do not linger with stale values.
 	complianceChecks.Reset()
 	for _, p := range cb.Status.Profiles {
-		profile := string(p.Key)
-		complianceChecks.WithLabelValues(profile, "pass").Set(float64(p.Pass))
-		complianceChecks.WithLabelValues(profile, "fail").Set(float64(p.Fail))
-		complianceChecks.WithLabelValues(profile, "manual").Set(float64(p.Manual))
-		complianceChecks.WithLabelValues(profile, "error").Set(float64(p.Error))
-		complianceChecks.WithLabelValues(profile, "notApplicable").Set(float64(p.NotApplicable))
+		setCheckCounts(string(p.Key), p.ResultCounts)
 	}
+	for _, tp := range cb.Status.TailoredProfiles {
+		setCheckCounts("tp:"+tp.Name, tp.ResultCounts)
+	}
+}
+
+func setCheckCounts(profile string, c baselinev1alpha1.ResultCounts) {
+	complianceChecks.WithLabelValues(profile, "pass").Set(float64(c.Pass))
+	complianceChecks.WithLabelValues(profile, "fail").Set(float64(c.Fail))
+	complianceChecks.WithLabelValues(profile, "manual").Set(float64(c.Manual))
+	complianceChecks.WithLabelValues(profile, "error").Set(float64(c.Error))
+	complianceChecks.WithLabelValues(profile, "notApplicable").Set(float64(c.NotApplicable))
 }

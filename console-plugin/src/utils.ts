@@ -1,4 +1,4 @@
-import { ComplianceCheckResult } from './models';
+import { ComplianceCheckResult, ComplianceRemediation } from './models';
 
 // Normalize k8s watch / fetch errors (string | Error | { message }) for Alerts.
 export const errorMessage = (err: unknown): string | null => {
@@ -35,6 +35,16 @@ const csvCell = (v: string): string =>
 
 // resultsCsv serializes check results to a CSV report (name,title,status,
 // severity). Deterministic column order; one header row.
+// A node remediation renders into a MachineConfig; applying it reboots nodes.
+export const isNodeRemediation = (rem: ComplianceRemediation): boolean =>
+  rem.spec.current?.object?.kind === 'MachineConfig';
+
+// Pretty-printed rendered object for the remediation detail view.
+export const remediationObjectText = (rem: ComplianceRemediation): string => {
+  const obj = rem.spec.current?.object;
+  return obj ? JSON.stringify(obj, null, 2) : '';
+};
+
 // Console URL for a namespaced ComplianceCheckResult, so the detail modal can
 // deep-link to the raw Compliance Operator resource.
 export const checkResultHref = (name: string): string =>

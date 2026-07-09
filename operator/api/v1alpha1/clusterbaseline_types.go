@@ -49,6 +49,13 @@ type ClusterBaselineSpec struct {
 	// +kubebuilder:validation:MinItems=1
 	Profiles []ProfileKey `json:"profiles"`
 
+	// tailoredProfiles names TailoredProfiles in the openshift-compliance
+	// namespace to also scan with. Create the TailoredProfile with the
+	// Compliance Operator first; this binds it into the baseline scan and
+	// includes its results in the score.
+	// +optional
+	TailoredProfiles []string `json:"tailoredProfiles,omitempty"`
+
 	// schedule is the scan cron schedule, applied to the owned ScanSetting.
 	// +kubebuilder:default="0 1 * * *"
 	// +optional
@@ -94,15 +101,35 @@ type ConsoleSpec struct {
 	ManagementState ManagementState `json:"managementState,omitempty"`
 }
 
+// ResultCounts holds check-result tallies shared by profile status types.
+type ResultCounts struct {
+	Pass          int32 `json:"pass"`
+	Fail          int32 `json:"fail"`
+	Manual        int32 `json:"manual"`
+	Error         int32 `json:"error"`
+	NotApplicable int32 `json:"notApplicable"`
+}
+
 // ProfileStatus summarizes check results for one selected profile key.
 type ProfileStatus struct {
-	Key           ProfileKey `json:"key"`
-	ProfileNames  []string   `json:"profileNames,omitempty"`
-	Pass          int32      `json:"pass"`
-	Fail          int32      `json:"fail"`
-	Manual        int32      `json:"manual"`
-	Error         int32      `json:"error"`
-	NotApplicable int32      `json:"notApplicable"`
+	Key          ProfileKey `json:"key"`
+	ProfileNames []string   `json:"profileNames,omitempty"`
+	ResultCounts `json:",inline"`
+}
+
+// TailoredProfileStatus summarizes check results for one bound TailoredProfile.
+type TailoredProfileStatus struct {
+	Name         string `json:"name"`
+	ResultCounts `json:",inline"`
+}
+
+// ObjectRef points at a cluster resource this baseline owns or drives; consumed
+// by must-gather and support tooling.
+type ObjectRef struct {
+	Group     string `json:"group,omitempty"`
+	Resource  string `json:"resource"`
+	Name      string `json:"name"`
+	Namespace string `json:"namespace,omitempty"`
 }
 
 // ScoreSnapshot is one point of score history, recorded when a scan completes.
@@ -121,14 +148,23 @@ type ClusterBaselineStatus struct {
 	Score *int32 `json:"score,omitempty"`
 	// +optional
 	LastScanTime *metav1.Time `json:"lastScanTime,omitempty"`
+	// nextScanTime is the next scheduled scan, derived from spec.schedule.
+	// +optional
+	NextScanTime *metav1.Time `json:"nextScanTime,omitempty"`
 	// +optional
 	ComplianceOperatorVersion string `json:"complianceOperatorVersion,omitempty"`
 	// +optional
 	Profiles []ProfileStatus `json:"profiles,omitempty"`
+	// tailoredProfiles reports results for bound TailoredProfiles.
+	// +optional
+	TailoredProfiles []TailoredProfileStatus `json:"tailoredProfiles,omitempty"`
 	// history holds score snapshots, oldest first, capped at 30 entries.
 	// +optional
 	// +kubebuilder:validation:MaxItems=30
 	History []ScoreSnapshot `json:"history,omitempty"`
+	// relatedObjects lists the resources this baseline owns or drives.
+	// +optional
+	RelatedObjects []ObjectRef `json:"relatedObjects,omitempty"`
 }
 
 // ClusterBaseline is the cluster-scoped singleton configuring baseline

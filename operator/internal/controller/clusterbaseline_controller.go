@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/robfig/cron/v3"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -141,10 +142,27 @@ func (r *ClusterBaselineReconciler) reconcileOwned(ctx context.Context, cb *base
 
 func bindingName(key baselinev1alpha1.ProfileKey) string { return "baseline-" + string(key) }
 
+// tailoredBindingName names the binding for a TailoredProfile. The "tp-" infix
+// keeps its suite label distinct from a built-in profile's "baseline-<key>".
+func tailoredBindingName(name string) string { return "baseline-tp-" + name }
+
+// tailoredNameFromSuite returns the TailoredProfile name for a tailored suite
+// label ("baseline-tp-<name>"), or ("", false) otherwise.
+func tailoredNameFromSuite(suite string) (string, bool) {
+	n, ok := strings.CutPrefix(suite, "baseline-tp-")
+	if !ok || n == "" {
+		return "", false
+	}
+	return n, true
+}
+
 func ownedSuites(cb *baselinev1alpha1.ClusterBaseline) map[string]bool {
-	s := make(map[string]bool, len(cb.Spec.Profiles))
+	s := make(map[string]bool, len(cb.Spec.Profiles)+len(cb.Spec.TailoredProfiles))
 	for _, key := range cb.Spec.Profiles {
 		s[bindingName(key)] = true
+	}
+	for _, name := range cb.Spec.TailoredProfiles {
+		s[tailoredBindingName(name)] = true
 	}
 	return s
 }
@@ -420,6 +438,24 @@ func (r *ClusterBaselineReconciler) ensureScanConfig(ctx context.Context, cb *ba
 		}
 	}
 
+	for _, name := range cb.Spec.TailoredProfiles {
+		binding := u(bindingGVK)
+		binding.SetName(tailoredBindingName(name))
+		binding.SetNamespace(complianceNamespace)
+		_, err := controllerutil.CreateOrUpdate(ctx, r.Client, binding, func() error {
+			binding.Object["profiles"] = []any{map[string]any{
+				"apiGroup": "compliance.openshift.io/v1alpha1", "kind": "TailoredProfile", "name": name,
+			}}
+			binding.Object["settingsRef"] = map[string]any{
+				"apiGroup": "compliance.openshift.io/v1alpha1", "kind": "ScanSetting", "name": scanSettingName,
+			}
+			return controllerutil.SetControllerReference(cb, binding, r.Scheme)
+		})
+		if err != nil {
+			return err
+		}
+	}
+
 	bindings := uList(bindingGVK)
 	if err := r.List(ctx, bindings, client.InNamespace(complianceNamespace)); err != nil {
 		if meta.IsNoMatchError(err) {
@@ -530,7 +566,9 @@ func (r *ClusterBaselineReconciler) aggregateStatus(ctx context.Context, cb *bas
 			// CRDs gone: do not leave a stale score/profile rollup on the CR.
 			cb.Status.Score = nil
 			cb.Status.Profiles = nil
+			cb.Status.TailoredProfiles = nil
 			cb.Status.LastScanTime = nil
+			cb.Status.NextScanTime = nil
 			cb.Status.History = nil
 			return nil
 		}
@@ -541,28 +579,42 @@ func (r *ClusterBaselineReconciler) aggregateStatus(ctx context.Context, cb *bas
 	for _, key := range cb.Spec.Profiles {
 		byProfile[key] = &baselinev1alpha1.ProfileStatus{Key: key, ProfileNames: key.ProfileNames()}
 	}
+	byTailored := map[string]*baselinev1alpha1.TailoredProfileStatus{}
+	for _, name := range cb.Spec.TailoredProfiles {
+		byTailored[name] = &baselinev1alpha1.TailoredProfileStatus{Name: name}
+	}
 
 	var pass, fail int32
-	for _, item := range list.Items {
-		key, ok := profileKeyFromSuite(item.GetLabels()[suiteLabel])
-		ps := byProfile[key]
-		if !ok || ps == nil {
-			continue
-		}
-		status, _, _ := unstructured.NestedString(item.Object, "status")
+	// tally routes one check result's status into the counts and the score.
+	tally := func(c *baselinev1alpha1.ResultCounts, status string) {
 		switch status {
 		case "PASS":
-			ps.Pass++
+			c.Pass++
 			pass++
 		case "FAIL":
-			ps.Fail++
+			c.Fail++
 			fail++
 		case "MANUAL":
-			ps.Manual++
+			c.Manual++
 		case "ERROR":
-			ps.Error++
+			c.Error++
 		case "NOT-APPLICABLE":
-			ps.NotApplicable++
+			c.NotApplicable++
+		}
+	}
+	for _, item := range list.Items {
+		suite := item.GetLabels()[suiteLabel]
+		status, _, _ := unstructured.NestedString(item.Object, "status")
+		if name, ok := tailoredNameFromSuite(suite); ok {
+			if ts := byTailored[name]; ts != nil {
+				tally(&ts.ResultCounts, status)
+			}
+			continue
+		}
+		if key, ok := profileKeyFromSuite(suite); ok {
+			if ps := byProfile[key]; ps != nil {
+				tally(&ps.ResultCounts, status)
+			}
 		}
 	}
 
@@ -570,11 +622,52 @@ func (r *ClusterBaselineReconciler) aggregateStatus(ctx context.Context, cb *bas
 	for _, key := range cb.Spec.Profiles {
 		cb.Status.Profiles = append(cb.Status.Profiles, *byProfile[key])
 	}
+	cb.Status.TailoredProfiles = cb.Status.TailoredProfiles[:0]
+	for _, name := range cb.Spec.TailoredProfiles {
+		cb.Status.TailoredProfiles = append(cb.Status.TailoredProfiles, *byTailored[name])
+	}
 	// LastScanTime is tracked even when no score is computable (all MANUAL /
 	// ERROR / NOT-APPLICABLE results) so completed scans stay visible.
 	cb.Status.Score = score(pass, fail)
 	r.recordHistory(ctx, cb, cb.Status.Score)
+	cb.Status.NextScanTime = nextScanTime(cb.Spec.Schedule, time.Now())
+	cb.Status.RelatedObjects = relatedObjects(cb)
 	return nil
+}
+
+// nextScanTime computes the next cron fire after now, or nil on an invalid or
+// empty schedule.
+func nextScanTime(schedule string, now time.Time) *metav1.Time {
+	if schedule == "" {
+		schedule = "0 1 * * *"
+	}
+	sched, err := cron.ParseStandard(schedule)
+	if err != nil {
+		return nil
+	}
+	next := metav1.NewTime(sched.Next(now))
+	return &next
+}
+
+// relatedObjects lists the resources this baseline owns or drives, for
+// must-gather / support tooling.
+func relatedObjects(cb *baselinev1alpha1.ClusterBaseline) []baselinev1alpha1.ObjectRef {
+	refs := []baselinev1alpha1.ObjectRef{
+		{Group: "compliance.openshift.io", Resource: "scansettings", Name: scanSettingName, Namespace: complianceNamespace},
+		{Group: "apps", Resource: "deployments", Name: pluginName, Namespace: pluginNS},
+		{Group: "console.openshift.io", Resource: "consoleplugins", Name: pluginName},
+	}
+	names := make([]string, 0, len(ownedSuites(cb)))
+	for name := range ownedSuites(cb) {
+		names = append(names, name)
+	}
+	slices.Sort(names) // deterministic order so status does not flap
+	for _, name := range names {
+		refs = append(refs, baselinev1alpha1.ObjectRef{
+			Group: "compliance.openshift.io", Resource: "scansettingbindings", Name: name, Namespace: complianceNamespace,
+		})
+	}
+	return refs
 }
 
 func (r *ClusterBaselineReconciler) recordHistory(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline, s *int32) {

@@ -44,6 +44,15 @@ Legend: `[x]` done · `[ ]` planned · **(H/M/L)** rough value.
 - [x] PrometheusRule: `ComplianceScoreLow`, `ComplianceChecksFailing`.
 - [x] Aggregated `baseline-security-viewer` / `-admin` ClusterRoles.
 
+### 0.3 additions
+- [x] TailoredProfile binding (`spec.tailoredProfiles`) + tailored results in
+      score/status; scheduled next-run time; `relatedObjects` +
+      `hack/must-gather.sh`.
+- [x] Prometheus metrics + PrometheusRule alerts.
+- [x] UI: composition donut, per-profile + tailored score cards, CSV export,
+      check-resource deep-link, remediation rendered-object view + MCP-aware
+      apply, loading skeletons, next-scan time.
+
 ### Packaging & quality
 - [x] OLM bundle + FBC catalog (`make bundle` validates); 0.2.1 replaces
       0.2.0 in the upgrade graph; images/tools digest-pinned.
@@ -62,26 +71,21 @@ Legend: `[x]` done · `[ ]` planned · **(H/M/L)** rough value.
 ### Observability
 - [ ] **(H)** Console dashboard card surfacing the score on the cluster
       Overview (`console.dashboards/*` extension; SPEC §4.3).
-- [ ] **(L)** Trend dashboard from the score metric.
 
 ### UI / UX
-- [ ] **(M)** Show the rendered remediation object / MachineConfig diff on
-      the Remediations tab.
-- [ ] **(L)** Distinct "scan in progress" empty state; loading skeletons.
-- [ ] **(L)** PDF report; severity-weighted score option.
+- [ ] **(L)** Severity-weighted score option.
 
 ### Operator / API
 - [ ] **(M)** Watch compliance CRs via a dynamic informer once the CRDs
       exist, replacing the 1-minute poll.
-- [ ] **(M)** `TailoredProfile` support (enable/disable individual rules;
-      also the path to an NSA/CISA K8s-hardening mapping onto existing rules,
-      since the Compliance Operator ships no dedicated NSA profile).
-- [ ] **(M)** `relatedObjects` in status + a must-gather script.
-- [ ] **(L)** Node-remediation apply with MachineConfigPool pause awareness.
-- [ ] **(L)** Scheduled next-run time in status.
 
-### Delivery
-- [ ] **(L)** Helm chart for non-OLM installs.
+### Backlog (later)
+- [ ] Helm chart for non-OLM installs.
+- [ ] PDF compliance report.
+- [ ] Trend dashboard (Grafana / console) from the score metric.
+- [ ] NSA/CISA K8s-hardening profile: ship as a curated `TailoredProfile`
+      mapping the guidance onto existing rules (the Compliance Operator has
+      no dedicated NSA profile; `spec.tailoredProfiles` already binds one).
 
 ## Productization
 

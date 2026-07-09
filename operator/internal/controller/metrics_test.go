@@ -23,7 +23,12 @@ func TestPublishMetrics(t *testing.T) {
 	cb := &baselinev1alpha1.ClusterBaseline{}
 	cb.Status.Score = ptr.To(int32(87))
 	cb.Status.Profiles = []baselinev1alpha1.ProfileStatus{
-		{Key: "cis", Pass: 10, Fail: 2, Manual: 3, Error: 0, NotApplicable: 1},
+		{
+			Key: "cis",
+			ResultCounts: baselinev1alpha1.ResultCounts{
+				Pass: 10, Fail: 2, Manual: 3, Error: 0, NotApplicable: 1,
+			},
+		},
 	}
 	publishMetrics(cb)
 

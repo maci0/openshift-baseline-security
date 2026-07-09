@@ -1,5 +1,7 @@
 import {
   checkResultHref,
+  isNodeRemediation,
+  remediationObjectText,
   resultsCsv,
   remediationApplyPatch,
   checkBody,
@@ -10,7 +12,7 @@ import {
   scoreColor,
   toggledProfiles,
 } from './utils';
-import { ComplianceCheckResult } from './models';
+import { ComplianceCheckResult, ComplianceRemediation } from './models';
 
 const result = (name: string, description?: string): ComplianceCheckResult =>
   ({ metadata: { name, namespace: 'ns' }, description }) as ComplianceCheckResult;
@@ -255,5 +257,25 @@ describe('checkResultHref', () => {
   });
   it('encodes special characters in the name', () => {
     expect(checkResultHref('a b/c')).toContain(encodeURIComponent('a b/c'));
+  });
+});
+
+describe('remediation helpers', () => {
+  const rem = (kind?: string, obj?: Record<string, unknown>): ComplianceRemediation =>
+    ({
+      metadata: { name: 'r', namespace: 'openshift-compliance' },
+      spec: { apply: false, current: obj ? { object: obj } : kind ? { object: { kind } } : undefined },
+    }) as ComplianceRemediation;
+
+  it('isNodeRemediation detects MachineConfig', () => {
+    expect(isNodeRemediation(rem('MachineConfig'))).toBe(true);
+    expect(isNodeRemediation(rem('APIServer'))).toBe(false);
+    expect(isNodeRemediation(rem())).toBe(false);
+  });
+  it('remediationObjectText pretty-prints the object, empty when absent', () => {
+    expect(remediationObjectText(rem('MachineConfig', { kind: 'MachineConfig', x: 1 }))).toContain(
+      '"kind": "MachineConfig"',
+    );
+    expect(remediationObjectText(rem())).toBe('');
   });
 });

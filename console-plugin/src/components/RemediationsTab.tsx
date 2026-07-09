@@ -8,6 +8,8 @@ import {
 import {
   Alert,
   Button,
+  CodeBlock,
+  CodeBlockCode,
   Label,
   Modal,
   ModalBody,
@@ -28,7 +30,12 @@ import {
   ComplianceRemediationModel,
   isOwnedByBaseline,
 } from '../models';
-import { errorMessage, remediationApplyPatch } from '../utils';
+import {
+  errorMessage,
+  isNodeRemediation,
+  remediationApplyPatch,
+  remediationObjectText,
+} from '../utils';
 
 const stateColor: Record<string, React.ComponentProps<typeof Label>['color']> = {
   Applied: 'green',
@@ -46,6 +53,7 @@ const RemediationsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline })
     namespace: 'openshift-compliance',
   });
   const [confirming, setConfirming] = React.useState<ComplianceRemediation | null>(null);
+  const [viewing, setViewing] = React.useState<ComplianceRemediation | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [canApply, canApplyLoading] = useAccessReview({
@@ -155,6 +163,7 @@ const RemediationsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline })
               <Th>{t('Remediation')}</Th>
               <Th>{t('Kind')}</Th>
               <Th>{t('State')}</Th>
+              <Th screenReaderText={t('Object')} />
               <Th screenReaderText={t('Actions')} />
             </Tr>
           </Thead>
@@ -164,11 +173,23 @@ const RemediationsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline })
               return (
                 <Tr key={rem.metadata.name}>
                   <Td modifier="breakWord">{rem.metadata.name}</Td>
-                  <Td>{rem.spec.current?.object?.kind ?? '—'}</Td>
+                  <Td>
+                    {rem.spec.current?.object?.kind ?? '—'}
+                    {isNodeRemediation(rem) && (
+                      <Label isCompact color="orange" style={{ marginLeft: 8 }}>
+                        {t('reboots nodes')}
+                      </Label>
+                    )}
+                  </Td>
                   <Td>
                     <Label isCompact color={stateColor[state] ?? 'grey'}>
                       {state}
                     </Label>
+                  </Td>
+                  <Td>
+                    <Button variant="link" isInline onClick={() => setViewing(rem)}>
+                      {t('View')}
+                    </Button>
                   </Td>
                   <Td>
                     {rem.spec.apply ? (
@@ -206,8 +227,20 @@ const RemediationsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline })
         <ModalHeader title={t('Apply remediation?')} labelId="apply-remediation-title" />
         <ModalBody>
           {t(
-            '{{name}} will be applied to the cluster. If it renders into a MachineConfig, affected nodes reboot one by one. A rescan is required afterwards for results to reflect the change.',
+            '{{name}} will be applied to the cluster. A rescan is required afterwards for results to reflect the change.',
             { name: confirming?.metadata.name },
+          )}
+          {confirming && isNodeRemediation(confirming) && (
+            <Alert
+              variant="warning"
+              isInline
+              title={t('This is a node remediation')}
+              style={{ marginTop: 'var(--pf-t--global--spacer--md)' }}
+            >
+              {t(
+                'It renders into a MachineConfig; applying it reboots the affected nodes one by one. To batch changes, pause the target MachineConfigPool first (Compute -> MachineConfigPools) and resume it when done.',
+              )}
+            </Alert>
           )}
         </ModalBody>
         <ModalFooter>
@@ -231,6 +264,25 @@ const RemediationsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline })
             {t('Cancel')}
           </Button>
         </ModalFooter>
+      </Modal>
+      <Modal
+        variant="medium"
+        isOpen={!!viewing}
+        onClose={() => setViewing(null)}
+        aria-labelledby="remediation-object-title"
+      >
+        <ModalHeader
+          title={t('Rendered object')}
+          labelId="remediation-object-title"
+          description={viewing?.metadata.name}
+        />
+        <ModalBody>
+          <CodeBlock>
+            <CodeBlockCode>
+              {viewing ? remediationObjectText(viewing) || t('No rendered object.') : ''}
+            </CodeBlockCode>
+          </CodeBlock>
+        </ModalBody>
       </Modal>
     </PageSection>
   );

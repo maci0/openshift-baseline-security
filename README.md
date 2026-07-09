@@ -4,10 +4,29 @@ Baseline compliance scanning for a single OpenShift cluster, built on the
 Red Hat Compliance Operator, with results in the admin console.
 
 Install it and the cluster benchmarks itself against the CIS OpenShift
-Benchmark out of the box (PCI-DSS, NIST 800-53, DISA STIG, NERC CIP,
-ACSC E8, and BSI selectable per profile), rendered natively in the console
-under **Administration → Compliance**: score, filterable check results,
-gated remediation apply, score trend.
+Benchmark out of the box, rendered natively in the console under
+**Administration → Compliance**.
+
+## Features
+
+- **Zero-config baseline**: installing the operator scans the cluster against
+  CIS on a daily schedule; no YAML required.
+- **Profile catalog**: CIS, PCI-DSS, NIST 800-53 moderate/high, DISA STIG,
+  NERC CIP, ACSC Essential Eight, BSI, selectable per profile. Bind your own
+  Compliance Operator `TailoredProfile`s via `spec.tailoredProfiles`.
+- **Console UI**: compliance score (composition donut), per-profile score
+  badges, filterable check results with detail + deep-link to the raw
+  resource, CSV export, score trend, next/last scan times.
+- **Remediations**: gated apply with a confirmation modal, node-remediation
+  (MachineConfig) warnings and MachineConfigPool guidance, rendered-object
+  view, and an auto-apply switch.
+- **Status & conditions**: OpenShift-style Available / Progressing / Degraded
+  rollups, per-profile counts, score history, `relatedObjects`.
+- **Observability**: Prometheus metrics (`baseline_security_compliance_score`,
+  `baseline_security_checks`) with PrometheusRule alerts.
+- **Support**: `hack/must-gather.sh` collects operator + compliance state.
+
+## Layout
 
 - `docs/SPEC.md`: design specification (read this first)
 - `docs/PATTERNS.md`: OpenShift addon patterns this repo follows

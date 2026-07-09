@@ -57,9 +57,18 @@ export type ComplianceCheckResult = {
   instructions?: string;
 };
 
+// The rendered object a remediation applies (a MachineConfig for node
+// remediations, or another cluster resource); shown in the detail view.
+export type RemediationObject = {
+  apiVersion?: string;
+  kind?: string;
+  metadata?: { name?: string };
+  [k: string]: unknown;
+};
+
 export type ComplianceRemediation = {
   metadata: { name: string; namespace: string; labels?: Record<string, string> };
-  spec: { apply: boolean; current?: { object?: { kind?: string } } };
+  spec: { apply: boolean; current?: { object?: RemediationObject } };
   status?: {
     applicationState?: 'Applied' | 'NotApplied' | 'Error' | 'Outdated' | 'MissingDependencies';
   };
@@ -67,9 +76,7 @@ export type ComplianceRemediation = {
 
 export type ScoreSnapshot = { time: string; score: number };
 
-export type ProfileStatus = {
-  key: string;
-  profileNames: string[];
+export type ResultCounts = {
   pass: number;
   fail: number;
   manual: number;
@@ -77,10 +84,18 @@ export type ProfileStatus = {
   notApplicable: number;
 };
 
+export type ProfileStatus = ResultCounts & {
+  key: string;
+  profileNames: string[];
+};
+
+export type TailoredProfileStatus = ResultCounts & { name: string };
+
 export type ClusterBaseline = {
   metadata: { name: string };
   spec: {
     profiles: string[];
+    tailoredProfiles?: string[];
     schedule?: string;
     installComplianceOperator?: 'Automatic' | 'Manual';
     console?: { managementState?: 'Managed' | 'Removed' };
@@ -89,8 +104,10 @@ export type ClusterBaseline = {
   status?: {
     score?: number;
     lastScanTime?: string;
+    nextScanTime?: string;
     complianceOperatorVersion?: string;
     profiles?: ProfileStatus[];
+    tailoredProfiles?: TailoredProfileStatus[];
     conditions?: { type: string; status: string; reason?: string; message?: string }[];
     history?: ScoreSnapshot[];
   };
