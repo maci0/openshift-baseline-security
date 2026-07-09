@@ -384,7 +384,12 @@ func (r *ClusterBaselineReconciler) ensureScanConfig(ctx context.Context, cb *ba
 	}
 
 	bindings := uList(bindingGVK)
-	if err := r.List(ctx, bindings, client.InNamespace(complianceNamespace)); err != nil && !meta.IsNoMatchError(err) {
+	if err := r.List(ctx, bindings, client.InNamespace(complianceNamespace)); err != nil {
+		if meta.IsNoMatchError(err) {
+			setCond(cb, "ScanConfigured", metav1.ConditionFalse, "CRDsMissing",
+				"compliance.openshift.io CRDs not installed")
+			return nil
+		}
 		return err
 	}
 	selected := ownedSuites(cb)
@@ -594,6 +599,12 @@ func (r *ClusterBaselineReconciler) ensureConsolePlugin(ctx context.Context, cb 
 		}
 		for k, v := range labels {
 			dep.Spec.Template.Labels[k] = v
+		}
+		dep.Spec.Template.Spec.SecurityContext = &corev1.PodSecurityContext{
+			RunAsNonRoot: ptr.To(true),
+			SeccompProfile: &corev1.SeccompProfile{
+				Type: corev1.SeccompProfileTypeRuntimeDefault,
+			},
 		}
 		dep.Spec.Template.Spec.Affinity = preferredHostnameAntiAffinity(labels)
 		applyPluginContainer(&dep.Spec.Template.Spec, image)

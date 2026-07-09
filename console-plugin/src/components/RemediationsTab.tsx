@@ -201,14 +201,19 @@ const RemediationsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline })
           <Button
             variant="danger"
             isDisabled={busy}
+            isLoading={busy}
             onClick={() => {
-              if (confirming) void setApply(confirming, true);
-              setConfirming(null);
+              if (!confirming) return;
+              const rem = confirming;
+              void (async () => {
+                await setApply(rem, true);
+                setConfirming(null);
+              })();
             }}
           >
             {t('Apply')}
           </Button>
-          <Button variant="link" onClick={() => setConfirming(null)}>
+          <Button variant="link" isDisabled={busy} onClick={() => setConfirming(null)}>
             {t('Cancel')}
           </Button>
         </ModalFooter>

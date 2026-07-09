@@ -1,19 +1,15 @@
 package main
 
 import (
-	"context"
 	"flag"
 	"os"
 
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
-	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
@@ -83,30 +79,14 @@ func main() {
 	utilruntime.Must(mgr.AddReadyzCheck("readyz", healthz.Ping))
 
 	// Zero-config default: create ClusterBaseline/cluster if none exists.
-	// Opt out with BASELINE_SECURITY_SKIP_DEFAULT_CR=true.
+	// Opt out with BASELINE_SECURITY_SKIP_DEFAULT_CR=true. Leader-only so
+	// HA replicas do not race the create on every pod.
 	if os.Getenv("BASELINE_SECURITY_SKIP_DEFAULT_CR") != "true" {
-		utilruntime.Must(mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
-			if !mgr.GetCache().WaitForCacheSync(ctx) {
-				return nil
-			}
-			list := &baselinev1alpha1.ClusterBaselineList{}
-			if err := mgr.GetClient().List(ctx, list); err != nil {
-				// Default creation is best-effort; do not take the manager down.
-				setupLog.Error(err, "listing ClusterBaselines for default creation")
-				return nil
-			}
-			if len(list.Items) > 0 {
-				return nil
-			}
-			cb := &baselinev1alpha1.ClusterBaseline{
-				ObjectMeta: metav1.ObjectMeta{Name: "cluster"},
-				Spec:       baselinev1alpha1.ClusterBaselineSpec{Profiles: []baselinev1alpha1.ProfileKey{"cis"}},
-			}
-			if err := mgr.GetClient().Create(ctx, cb); err != nil && !apierrors.IsAlreadyExists(err) {
-				setupLog.Error(err, "creating default ClusterBaseline")
-			}
-			return nil
-		})))
+		utilruntime.Must(mgr.Add(&defaultClusterBaseline{
+			Client: mgr.GetClient(),
+			Cache:  mgr.GetCache(),
+			Log:    setupLog,
+		}))
 	}
 
 	setupLog.Info("starting manager")

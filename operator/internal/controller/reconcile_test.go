@@ -262,6 +262,12 @@ func TestEnsureConsolePlugin(t *testing.T) {
 	if img := dep.Spec.Template.Spec.Containers[0].Image; img != "example.test/plugin:1" {
 		t.Fatalf("image = %q", img)
 	}
+	if sc := dep.Spec.Template.Spec.SecurityContext; sc == nil || sc.RunAsNonRoot == nil || !*sc.RunAsNonRoot {
+		t.Fatal("pod SecurityContext.RunAsNonRoot required")
+	}
+	if sc := dep.Spec.Template.Spec.SecurityContext; sc.SeccompProfile == nil || sc.SeccompProfile.Type != corev1.SeccompProfileTypeRuntimeDefault {
+		t.Fatal("pod SeccompProfile RuntimeDefault required")
+	}
 	vol := dep.Spec.Template.Spec.Volumes[0].Secret
 	if vol == nil || vol.Optional == nil || !*vol.Optional {
 		t.Fatal("serving-cert volume must be optional until service-ca mints the Secret")
