@@ -494,6 +494,11 @@ func (r *ClusterBaselineReconciler) checkScanStorage(ctx context.Context, cb *ba
 			profiles[p] = true
 		}
 	}
+	// Tailored scans (and their PVCs) are named after the TailoredProfile, so
+	// include those names or their Pending PVCs would go undetected.
+	for _, name := range cb.Spec.TailoredProfiles {
+		profiles[name] = true
+	}
 	var pending []string
 	for _, pvc := range pvcs.Items {
 		if matchesAnyProfile(pvc.Name, profiles) &&

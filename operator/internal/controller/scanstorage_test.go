@@ -100,3 +100,37 @@ func TestCheckScanStorageEmptyNamespace(t *testing.T) {
 		t.Fatalf("%+v", c)
 	}
 }
+
+func TestCheckScanStorageTailoredPVC(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := clientgoscheme.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	// A tailored scan PVC is named after the TailoredProfile; a Pending one
+	// must flag ScanStorageReady=False.
+	pvc := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "custom",
+			Namespace:         complianceNamespace,
+			CreationTimestamp: metav1.NewTime(time.Now().Add(-5 * time.Minute)),
+		},
+		Status: corev1.PersistentVolumeClaimStatus{Phase: corev1.ClaimPending},
+	}
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(pvc).Build(),
+		Scheme: scheme,
+	}
+	cb := &baselinev1alpha1.ClusterBaseline{
+		Spec: baselinev1alpha1.ClusterBaselineSpec{
+			Profiles:         []baselinev1alpha1.ProfileKey{"cis"},
+			TailoredProfiles: []string{"custom"},
+		},
+	}
+	if err := r.checkScanStorage(context.Background(), cb); err != nil {
+		t.Fatal(err)
+	}
+	c := meta.FindStatusCondition(cb.Status.Conditions, "ScanStorageReady")
+	if c == nil || c.Status != metav1.ConditionFalse {
+		t.Fatalf("tailored Pending PVC should flag ScanStorageReady=False, got %+v", c)
+	}
+}
