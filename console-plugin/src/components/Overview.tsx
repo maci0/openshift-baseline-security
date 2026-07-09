@@ -18,15 +18,54 @@ import {
   DescriptionListTerm,
   EmptyState,
   EmptyStateBody,
+  Flex,
+  FlexItem,
   Gallery,
+  Icon,
   PageSection,
   Spinner,
 } from '@patternfly/react-core';
 import {
+  CheckCircleIcon,
+  ExclamationCircleIcon,
+  ExclamationTriangleIcon,
+} from '@patternfly/react-icons';
+import {
   ClusterBaseline,
+  ComplianceCheckResult,
+  ComplianceCheckResultGVK,
   ComplianceRemediation,
   ComplianceRemediationGVK,
 } from '../models';
+
+// PatternFly semantic status colors (chart fills).
+const scoreColor = (score?: number) =>
+  score == null || score < 60
+    ? 'var(--pf-t--global--icon--color--status--danger--default)'
+    : score < 90
+      ? 'var(--pf-t--global--icon--color--status--warning--default)'
+      : 'var(--pf-t--global--icon--color--status--success--default)';
+
+const resultsHref = (filter: string) =>
+  `/baseline-security/results?rowFilter-result-status=${filter}`;
+
+const CountRow: React.FC<{
+  icon: React.ReactElement;
+  status: React.ComponentProps<typeof Icon>['status'];
+  label: string;
+  count: number;
+  href?: string;
+}> = ({ icon, status, label, count, href }) => (
+  <Flex gap={{ default: 'gapSm' }} alignItems={{ default: 'alignItemsCenter' }}>
+    <FlexItem>
+      <Icon status={status} size="sm">
+        {icon}
+      </Icon>
+    </FlexItem>
+    <FlexItem grow={{ default: 'grow' }}>{label}</FlexItem>
+    <FlexItem>{href && count > 0 ? <a href={href}>{count}</a> : count}</FlexItem>
+  </Flex>
+);
 
 const Overview: React.FC<{ baseline?: ClusterBaseline; loaded: boolean }> = ({
   baseline,
@@ -35,6 +74,11 @@ const Overview: React.FC<{ baseline?: ClusterBaseline; loaded: boolean }> = ({
   const { t } = useTranslation('plugin__baseline-security-console-plugin');
   const [remediations] = useK8sWatchResource<ComplianceRemediation[]>({
     groupVersionKind: ComplianceRemediationGVK,
+    isList: true,
+    namespace: 'openshift-compliance',
+  });
+  const [results] = useK8sWatchResource<ComplianceCheckResult[]>({
+    groupVersionKind: ComplianceCheckResultGVK,
     isList: true,
     namespace: 'openshift-compliance',
   });
@@ -65,10 +109,20 @@ const Overview: React.FC<{ baseline?: ClusterBaseline; loaded: boolean }> = ({
   );
   const score = baseline.status?.score;
 
+  const failBySeverity: Record<string, number> = {};
+  for (const r of results ?? []) {
+    if (r.status === 'FAIL') failBySeverity[r.severity] = (failBySeverity[r.severity] ?? 0) + 1;
+  }
+
   return (
     <PageSection>
       {degraded && (
-        <Alert variant="warning" isInline title={t('Scanning degraded')}>
+        <Alert
+          variant="warning"
+          isInline
+          title={t('Scanning degraded')}
+          style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}
+        >
           {degraded.message}
         </Alert>
       )}
@@ -81,8 +135,7 @@ const Overview: React.FC<{ baseline?: ClusterBaseline; loaded: boolean }> = ({
               data={{ x: t('Score'), y: score ?? 0 }}
               title={score != null ? `${score}` : '—'}
               subTitle={t('of 100')}
-              thresholds={[{ value: 60 }, { value: 90 }]}
-              invert
+              colorScale={[scoreColor(score)]}
               height={200}
               width={300}
             />
@@ -105,7 +158,7 @@ const Overview: React.FC<{ baseline?: ClusterBaseline; loaded: boolean }> = ({
               <DescriptionListGroup>
                 <DescriptionListTerm>{t('Schedule')}</DescriptionListTerm>
                 <DescriptionListDescription>
-                  {baseline.spec.schedule ?? '—'}
+                  <code>{baseline.spec.schedule ?? '—'}</code>
                 </DescriptionListDescription>
               </DescriptionListGroup>
               <DescriptionListGroup>
@@ -128,6 +181,25 @@ const Overview: React.FC<{ baseline?: ClusterBaseline; loaded: boolean }> = ({
             </DescriptionList>
           </CardBody>
         </Card>
+        {Object.keys(failBySeverity).length > 0 && (
+          <Card>
+            <CardTitle>{t('Failed checks by severity')}</CardTitle>
+            <CardBody>
+              {['high', 'medium', 'low', 'unknown']
+                .filter((s) => failBySeverity[s])
+                .map((s) => (
+                  <CountRow
+                    key={s}
+                    icon={s === 'high' ? <ExclamationCircleIcon /> : <ExclamationTriangleIcon />}
+                    status={s === 'high' ? 'danger' : 'warning'}
+                    label={s}
+                    count={failBySeverity[s]}
+                    href={resultsHref('FAIL')}
+                  />
+                ))}
+            </CardBody>
+          </Card>
+        )}
         {(baseline.status?.history?.length ?? 0) > 1 && (
           <Card>
             <CardTitle>{t('Score trend')}</CardTitle>
@@ -158,20 +230,27 @@ const Overview: React.FC<{ baseline?: ClusterBaseline; loaded: boolean }> = ({
           <Card key={p.key}>
             <CardTitle>{p.key.toUpperCase()}</CardTitle>
             <CardBody>
-              <DescriptionList isCompact isHorizontal>
-                <DescriptionListGroup>
-                  <DescriptionListTerm>{t('Pass')}</DescriptionListTerm>
-                  <DescriptionListDescription>{p.pass}</DescriptionListDescription>
-                </DescriptionListGroup>
-                <DescriptionListGroup>
-                  <DescriptionListTerm>{t('Fail')}</DescriptionListTerm>
-                  <DescriptionListDescription>{p.fail}</DescriptionListDescription>
-                </DescriptionListGroup>
-                <DescriptionListGroup>
-                  <DescriptionListTerm>{t('Manual')}</DescriptionListTerm>
-                  <DescriptionListDescription>{p.manual}</DescriptionListDescription>
-                </DescriptionListGroup>
-              </DescriptionList>
+              <CountRow
+                icon={<CheckCircleIcon />}
+                status="success"
+                label={t('Pass')}
+                count={p.pass}
+                href={resultsHref('PASS')}
+              />
+              <CountRow
+                icon={<ExclamationCircleIcon />}
+                status="danger"
+                label={t('Fail')}
+                count={p.fail}
+                href={resultsHref('FAIL')}
+              />
+              <CountRow
+                icon={<ExclamationTriangleIcon />}
+                status="warning"
+                label={t('Manual')}
+                count={p.manual}
+                href={resultsHref('MANUAL')}
+              />
             </CardBody>
           </Card>
         ))}
