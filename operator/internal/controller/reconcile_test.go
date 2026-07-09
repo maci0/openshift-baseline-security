@@ -17,7 +17,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
-	baselinev1alpha1 "github.com/openshift-baseline-security/baseline-security-operator/api/v1alpha1"
+	baselinev1alpha1 "github.com/maci0/baseline-security-operator/api/v1alpha1"
 )
 
 func newCB(profiles ...baselinev1alpha1.ProfileKey) *baselinev1alpha1.ClusterBaseline {

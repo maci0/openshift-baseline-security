@@ -16,7 +16,7 @@ metadata:
     capabilities: Seamless Upgrades
     categories: Security
     containerImage: quay.io/openshift-baseline-security/baseline-security-operator:0.2.0
-    repository: https://github.com/maci0/openshift-baseline-security
+    repository: https://github.com/maci0/baseline-security-operator
     description: Baseline benchmark compliance scanning with a native console UI,
       built on the Red Hat Compliance Operator.
     features.operators.openshift.io/disconnected: "true"
@@ -52,7 +52,7 @@ spec:
     name: openshift-baseline-security
   links:
     - name: Source
-      url: https://github.com/maci0/openshift-baseline-security
+      url: https://github.com/maci0/baseline-security-operator
   # Install into openshift-baseline-security so RBAC subjects and the metrics
   # Service match the ServiceAccount namespace in the bundle manifests.
   installModes:

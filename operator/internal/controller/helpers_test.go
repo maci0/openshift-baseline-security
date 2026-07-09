@@ -12,7 +12,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	baselinev1alpha1 "github.com/openshift-baseline-security/baseline-security-operator/api/v1alpha1"
+	baselinev1alpha1 "github.com/maci0/baseline-security-operator/api/v1alpha1"
 )
 
 func TestSetCond(t *testing.T) {

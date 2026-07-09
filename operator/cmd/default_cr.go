@@ -10,7 +10,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	baselinev1alpha1 "github.com/openshift-baseline-security/baseline-security-operator/api/v1alpha1"
+	baselinev1alpha1 "github.com/maci0/baseline-security-operator/api/v1alpha1"
 )
 
 // defaultClusterBaseline creates ClusterBaseline/cluster once when none exist.

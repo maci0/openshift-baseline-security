@@ -1,0 +1,36 @@
+import { chromium, FullConfig } from '@playwright/test';
+
+// Logs into the OpenShift console once and saves the authenticated storage
+// state so each spec starts already logged in.
+export default async function globalSetup(_config: FullConfig) {
+  const consoleURL = process.env.CONSOLE_URL;
+  const user = process.env.KUBEADMIN_USER ?? 'kubeadmin';
+  const password = process.env.KUBEADMIN_PASSWORD;
+  if (!consoleURL || !password) {
+    throw new Error('CONSOLE_URL and KUBEADMIN_PASSWORD must be set');
+  }
+
+  const browser = await chromium.launch();
+  const page = await browser.newPage({ ignoreHTTPSErrors: true });
+  await page.goto(consoleURL, { waitUntil: 'domcontentloaded' });
+
+  // Multi-IDP clusters show a provider chooser first.
+  const kubeadminLink = page.locator('a', { hasText: 'kube:admin' });
+  if (await kubeadminLink.count()) {
+    await kubeadminLink.click();
+  }
+  await page.fill('#inputUsername', user);
+  await page.fill('#inputPassword', password);
+  await page.click('button[type=submit]');
+  await page.waitForURL('**/console-openshift-console**', { timeout: 30_000 });
+
+  // Dismiss the guided-tour modal if it appears.
+  try {
+    await page.getByRole('button', { name: /skip tour/i }).click({ timeout: 5_000 });
+  } catch {
+    // no tour
+  }
+
+  await page.context().storageState({ path: 'e2e/.auth/state.json' });
+  await browser.close();
+}

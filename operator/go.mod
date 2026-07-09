@@ -1,4 +1,4 @@
-module github.com/openshift-baseline-security/baseline-security-operator
+module github.com/maci0/baseline-security-operator
 
 go 1.25.0
 

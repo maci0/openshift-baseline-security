@@ -7,7 +7,7 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	baselinev1alpha1 "github.com/openshift-baseline-security/baseline-security-operator/api/v1alpha1"
+	baselinev1alpha1 "github.com/maci0/baseline-security-operator/api/v1alpha1"
 )
 
 func TestBindingName(t *testing.T) {

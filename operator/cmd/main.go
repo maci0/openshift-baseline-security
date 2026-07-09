@@ -14,8 +14,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
-	baselinev1alpha1 "github.com/openshift-baseline-security/baseline-security-operator/api/v1alpha1"
-	"github.com/openshift-baseline-security/baseline-security-operator/internal/controller"
+	baselinev1alpha1 "github.com/maci0/baseline-security-operator/api/v1alpha1"
+	"github.com/maci0/baseline-security-operator/internal/controller"
 )
 
 var scheme = runtime.NewScheme()

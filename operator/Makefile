@@ -25,6 +25,12 @@ vet:
 test: fmt vet
 	go test ./...
 
+# Live-cluster e2e; requires KUBECONFIG pointing at a cluster with the operator
+# installed (make deploy or OLM) and a ClusterBaseline reconciled.
+.PHONY: test-e2e
+test-e2e:
+	go test -tags e2e -count=1 -timeout=20m -v ./test/e2e/...
+
 # Short corpus-driven fuzz of pure helpers (matching, score, history ring).
 .PHONY: fuzz
 fuzz:

@@ -10,7 +10,8 @@
     "start": "yarn ts-node node_modules/.bin/webpack serve",
     "ts-node": "ts-node -O '{\"module\":\"commonjs\"}'",
     "lint": "eslint ./src",
-    "test": "jest"
+    "test": "jest",
+    "test-e2e": "playwright test -c e2e/playwright.config.ts"
   },
   "devDependencies": {
     "@openshift-console/dynamic-plugin-sdk": "4.22-latest",
@@ -19,6 +20,7 @@
     "@patternfly/react-core": "^6.4.3",
     "@patternfly/react-icons": "^6.4.0",
     "@patternfly/react-table": "^6.4.3",
+    "@playwright/test": "^1.61.1",
     "@types/jest": "^30.0.0",
     "@types/react": "^18.3.28",
     "@types/react-dom": "^18.3.7",
