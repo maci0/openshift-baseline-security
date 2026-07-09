@@ -136,6 +136,13 @@ Hard-won specifics (all hit during live OLM install testing):
 - Never reuse a bundle/catalog image tag: OLM unpack jobs and kubelet image
   caches happily serve the stale content for a same-tag repush. Version
   every push.
+- installModes must match the target OperatorGroup: a cluster-scoped
+  operator installed into `openshift-operators` (an AllNamespaces
+  OperatorGroup) needs `AllNamespaces: supported: true`; OwnNamespace-only
+  fails with "AllNamespaces InstallModeType not supported".
+- OLM caches unpacked bundles by CSV name+version. Reusing a version string
+  after fixing a bundle serves the stale unpack; bump the version (or clear
+  the unpack jobs) rather than rebuilding the same version.
 
 ## 8. Dependency on another operator
 

@@ -42,6 +42,12 @@
       console.managementState: Managed|Removed, remediation.apply:
       Automatic|Manual)
 
+## Done (continued)
+- [x] Go module renamed to github.com/maci0/baseline-security-operator
+- [x] E2E suites: operator Go (make test-e2e) + console Playwright
+      (yarn test-e2e), the latter also generates docs/screenshots
+- [x] Version 0.2.1 (breaking enum API); OLM upgrade graph via replaces
+
 ## Next
 - [ ] Push versioned images + bundle/catalog to quay.io (needs quay login /
       robot token), swap CatalogSource image

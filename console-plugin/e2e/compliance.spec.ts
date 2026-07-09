@@ -15,13 +15,16 @@ const goto = async (page: Page, subpath: string) => {
 test.describe('Baseline Security console plugin', () => {
   test('Overview shows the compliance score and profile breakdown', async ({ page }) => {
     await goto(page, '');
-    await expect(page.getByText('Compliance score')).toBeVisible();
+    // "Compliance score" appears both as the card title and the donut aria
+    // title; the score denominator label is unambiguous.
     await expect(page.getByText('of 100')).toBeVisible();
     await expect(page.getByText('Details')).toBeVisible();
-    // Compliance Operator version surfaced in the details card.
-    await expect(page.getByText('Compliance Operator')).toBeVisible();
-    // At least one profile summary card (CIS by default).
-    await expect(page.getByText('CIS', { exact: true })).toBeVisible();
+    // Compliance Operator version surfaced in the details card. exact: the
+    // page subtitle also contains the phrase "Compliance Operator".
+    await expect(page.getByText('Compliance Operator', { exact: true })).toBeVisible();
+    // At least one profile summary card (CIS by default); watch-delivered and
+    // rendered as a PatternFly CardTitle (not a heading role), so match text.
+    await expect(page.getByText('CIS', { exact: true }).first()).toBeVisible();
     await shot(page, 'overview');
   });
 

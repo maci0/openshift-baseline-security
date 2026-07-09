@@ -78,15 +78,28 @@ will serve the stale content.
 ## Development
 
 ```sh
-# operator: build, test, run against the current kubeconfig
-cd operator && make test && make install && make run
+# operator: build, unit test, lint, run against the current kubeconfig
+cd operator && make test && make lint && make install && make run
 
 # console plugin
-cd console-plugin && yarn install && yarn build
+cd console-plugin && yarn install && yarn lint && yarn test && yarn build
 # against a live console: yarn start (serves on :9001)
 ```
 
 `make run` needs `RELATED_IMAGE_CONSOLE_PLUGIN` pointing at a plugin image
 the cluster can pull.
+
+## Testing
+
+- Unit + fuzz (Go): `cd operator && make test`.
+- Unit (TypeScript): `cd console-plugin && yarn test`.
+- E2E, live cluster (Go): `cd operator && make test-e2e` with `KUBECONFIG`
+  set. Asserts the ClusterBaseline reaches `Available` with a score and
+  healthy conditions, the owned ScanSetting/bindings and console plugin
+  objects exist and are registered, and a profile add/prune round-trips.
+- E2E, live console (Playwright): `cd console-plugin && yarn test-e2e` with
+  `CONSOLE_URL` and `KUBEADMIN_PASSWORD` set. Drives every tab and doubles
+  as the screenshot generator (`SCREENSHOT_DIR` defaults to
+  `docs/screenshots`).
 
 Targets OpenShift 4.22. License: Apache-2.0.
