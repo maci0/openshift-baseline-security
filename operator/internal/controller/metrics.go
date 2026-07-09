@@ -21,6 +21,11 @@ var (
 
 func init() {
 	metrics.Registry.MustRegister(complianceScore, complianceChecks)
+	// Seed the "no score yet" sentinel so a never-reconciled or
+	// error-before-aggregation state reads as -1, not the gauge default of 0
+	// (which the ComplianceScoreLow alert's `>= 0 and < 80` would treat as a
+	// real low score).
+	complianceScore.Set(-1)
 }
 
 // publishMetrics reflects the aggregated status onto the Prometheus gauges.

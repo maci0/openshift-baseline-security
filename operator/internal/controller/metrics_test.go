@@ -8,6 +8,17 @@ import (
 	"k8s.io/utils/ptr"
 )
 
+// The gauge must read the -1 sentinel before any publish, so a pre-aggregation
+// error state does not look like a real low score to alerting.
+func TestComplianceScoreSeededSentinel(t *testing.T) {
+	// init() seeds -1; publishMetrics with a nil score keeps it there.
+	cb := &baselinev1alpha1.ClusterBaseline{}
+	publishMetrics(cb)
+	if got := testutil.ToFloat64(complianceScore); got != -1 {
+		t.Fatalf("unpublished score gauge = %v, want -1 sentinel", got)
+	}
+}
+
 func TestPublishMetrics(t *testing.T) {
 	cb := &baselinev1alpha1.ClusterBaseline{}
 	cb.Status.Score = ptr.To(int32(87))
