@@ -70,7 +70,7 @@ defaults and presentation are missing. Both are cheap. That is this project.
   is future work.)
 - S2: **Trend and score history**: persist per-scan score snapshots
   (operator writes a compact history into the `ClusterBaseline` status or a
-  ConfigMap ring buffer; long-term via the Compliance Operator's Prometheus
+  status history ring; long-term via the Compliance Operator's Prometheus
   metrics) and render a trendline on the dashboard.
 
 ### Non-goals
@@ -146,7 +146,7 @@ Responsibilities:
    `/var/serving-cert`), Service, `ConsolePlugin` CR in namespace
    `openshift-baseline-security` (created if missing), and registration on
    `consoles.operator.openshift.io/cluster` `spec.plugins` (removed on CR
-   deletion via finalizer, or when `spec.console.enabled` is false).
+   deletion via finalizer, or when `spec.console.managementState` is Removed).
 4. **Status aggregation**: poll `ComplianceCheckResult`s labeled with
    `compliance.openshift.io/suite=baseline-<profile>` (suite name equals the
    owned ScanSettingBinding). Foreign CO suites are ignored. Aggregate into
@@ -157,7 +157,7 @@ Responsibilities:
    (`ComplianceOperatorReady` from CSV phase Succeeded, `ScanConfigured`,
    `ConsolePluginReady`, `Degraded` for owned Pending PVCs). Compliance CRDs
    are not watched at manager start (they may be absent); the controller
-   requeues every minute and Owns the plugin Deployment/Service/ConfigMap.
+   requeues every minute and Owns the plugin Deployment/Service.
    Deleting ClusterBaseline does **not** uninstall the Compliance Operator.
 
 ### 4.2 API: `ClusterBaseline` CRD
@@ -257,8 +257,8 @@ and Red Hat-updated.
 - Operator ClusterRole: CRUD on `compliance.openshift.io` resources; create
   Namespace/OperatorGroup/Subscription (scoped by resourceNames where OLM
   allows); patch `consoles.operator.openshift.io/cluster`; own CRD full
-  access; Deployment/Service/ConfigMap in its own namespace. No secrets
-  access, no node access, no exec.
+  access; Deployment/Service in its own namespace. No secrets access, no
+  node access, no exec.
 - Plugin: no service account of consequence (nginx serves static files);
   every API call is the user's own token via the console proxy.
 - Aggregated ClusterRoles shipped for humans:
@@ -268,7 +268,8 @@ and Red Hat-updated.
   remediations).
 - Remediation apply is the only dangerous write in the system and is
   stretch-gated, confirmation-gated, and RBAC-gated three ways.
-- Plugin ConsolePlugin CSP directives pinned to self only.
+- Plugin loads no external sources, so the console default CSP applies
+  unmodified (no ConsolePlugin contentSecurityPolicy entries needed).
 
 ## 7. Toolchain pins (OCP 4.22 line)
 

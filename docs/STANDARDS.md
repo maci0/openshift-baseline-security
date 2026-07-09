@@ -105,6 +105,26 @@ i18n namespace `plugin__baseline-security-console-plugin`).
 **Here**: OWNERS at repo root; Prow/Jira conventions apply only after
 ci-operator onboarding (productization step, SPEC §10).
 
+## Deliberate deviations
+
+Reviewed line-by-line against the sources above; these are the conscious
+exceptions, with reasons:
+
+- `ProfileKey` enum values are lowercase (`cis`, `pci-dss`) rather than
+  PascalCase: they mirror ComplianceAsCode profile identifiers, which are
+  the values users see in Compliance Operator objects; they are keys, not
+  mode enums.
+- CRD schema defaults (kubebuilder `+default`) instead of pure controller
+  defaulting for this configuration API: schema defaults surface in
+  `oc explain` and the OLM creation form. Revisit at v1beta1 if defaults
+  need to evolve per platform version.
+- Operator metrics bind to loopback without authn instead of HTTPS +
+  authorization: avoids the k8s.io/apiserver dependency tree; documented
+  in `cmd/main.go`. Expose via an authenticating sidecar if cluster
+  scraping is needed.
+- No `system-*` priority class: those are reserved for payload components;
+  an optional addon should not claim node-pressure priority over them.
+
 ## Caveats found while verifying
 
 - `openshift/community` is archived (2022); not a conventions source.

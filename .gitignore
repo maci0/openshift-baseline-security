@@ -1,5 +1,7 @@
 operator/bin/
+operator/catalog/
 node_modules/
 console-plugin/dist/
 console-plugin/.yarn/
+.playwright-mcp/
 *.log

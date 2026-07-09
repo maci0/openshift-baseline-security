@@ -59,6 +59,7 @@ type ClusterBaselineReconciler struct {
 
 // +kubebuilder:rbac:groups=baselinesecurity.io,resources=clusterbaselines,verbs=get;list;watch;create;update;patch
 // +kubebuilder:rbac:groups=baselinesecurity.io,resources=clusterbaselines/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=baselinesecurity.io,resources=clusterbaselines/finalizers,verbs=update
 // +kubebuilder:rbac:groups=compliance.openshift.io,resources=scansettings;scansettingbindings,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=compliance.openshift.io,resources=compliancecheckresults;compliancescans,verbs=get;list;watch
 // +kubebuilder:rbac:groups=operators.coreos.com,resources=subscriptions;operatorgroups,verbs=get;list;watch;create
@@ -370,7 +371,7 @@ func (r *ClusterBaselineReconciler) deregisterConsolePlugin(ctx context.Context)
 	return r.Update(ctx, console)
 }
 
-// removeConsolePlugin tears down plugin objects when spec.console.enabled=false.
+// removeConsolePlugin tears down plugin objects when managementState is Removed.
 func (r *ClusterBaselineReconciler) removeConsolePlugin(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline) error {
 	cp := u(consolePluginGVK)
 	cp.SetName(pluginName)
@@ -503,11 +504,23 @@ func (r *ClusterBaselineReconciler) ensureConsolePlugin(ctx context.Context, cb 
 	dep := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: pluginName, Namespace: pluginNS}}
 	if _, err := controllerutil.CreateOrUpdate(ctx, r.Client, dep, func() error {
 		dep.Spec = appsv1.DeploymentSpec{
-			Replicas: ptr.To(int32(1)),
+			Replicas: ptr.To(int32(2)),
 			Selector: &metav1.LabelSelector{MatchLabels: labels},
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{Labels: labels},
 				Spec: corev1.PodSpec{
+					// Spread the 2 replicas across nodes when possible (CONVENTIONS.md HA).
+					Affinity: &corev1.Affinity{
+						PodAntiAffinity: &corev1.PodAntiAffinity{
+							PreferredDuringSchedulingIgnoredDuringExecution: []corev1.WeightedPodAffinityTerm{{
+								Weight: 100,
+								PodAffinityTerm: corev1.PodAffinityTerm{
+									LabelSelector: &metav1.LabelSelector{MatchLabels: labels},
+									TopologyKey:   "kubernetes.io/hostname",
+								},
+							}},
+						},
+					},
 					Containers: []corev1.Container{{
 						Name:  pluginName,
 						Image: image,
@@ -517,12 +530,12 @@ func (r *ClusterBaselineReconciler) ensureConsolePlugin(ctx context.Context, cb 
 							Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
 							RunAsNonRoot:             ptr.To(true),
 						},
+						// Requests only; limits are discouraged (CONVENTIONS.md).
 						Resources: corev1.ResourceRequirements{
 							Requests: corev1.ResourceList{
 								corev1.ResourceCPU:    resource.MustParse("10m"),
 								corev1.ResourceMemory: resource.MustParse("32Mi"),
 							},
-							Limits: corev1.ResourceList{corev1.ResourceMemory: resource.MustParse("128Mi")},
 						},
 						ReadinessProbe: &corev1.Probe{
 							ProbeHandler: corev1.ProbeHandler{

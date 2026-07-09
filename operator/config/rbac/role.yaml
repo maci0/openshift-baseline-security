@@ -50,6 +50,12 @@ rules:
 - apiGroups:
   - baselinesecurity.io
   resources:
+  - clusterbaselines/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - baselinesecurity.io
+  resources:
   - clusterbaselines/status
   verbs:
   - get

@@ -65,9 +65,10 @@ answer. Bounded lists in status (no unbounded growth).
 **Here**: `ClusterBaseline/cluster` with CEL name enforcement, conditions
 (`ComplianceOperatorReady` when CO CSV phase is Succeeded, `ScanConfigured`,
 `ConsolePluginReady` when the plugin is deployed or Disabled when
-`spec.console.enabled` is false, `Degraded` for owned Pending scan PVCs),
-score + per-profile counts (suite-scoped to `baseline-<profile>` bindings),
-history capped at 30 (oldest first), printer columns Score / Last Scan.
+`spec.console.managementState` is Removed, `Degraded` for owned Pending
+scan PVCs), score + per-profile counts (suite-scoped to
+`baseline-<profile>` bindings), history capped at 30 (oldest first),
+printer columns Score / Last Scan.
 
 ## 5. Console dynamic plugin
 
@@ -105,7 +106,7 @@ confirmation-gated, and RBAC-gated.
 
 **Here**: manager.yaml and CSV carry those pod security settings; remediation
 apply is the only dangerous write and is confirmation-gated in the UI plus
-`autoApply` defaults false.
+`spec.remediation.apply` defaults to Manual.
 
 ## 7. OLM packaging
 
