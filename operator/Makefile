@@ -8,6 +8,9 @@ all: build
 manifests:
 	$(CONTROLLER_GEN) crd rbac:roleName=baseline-security-operator paths="./..." \
 		output:crd:artifacts:config=config/crd/bases output:rbac:artifacts:config=config/rbac
+	# Keep the bundle CRD in sync so an OLM install never gets a stale schema,
+	# and so CI's `make manifests && git diff --exit-code` catches bundle drift.
+	cp config/crd/bases/baselinesecurity.io_clusterbaselines.yaml bundle/manifests/
 
 .PHONY: generate
 generate:
