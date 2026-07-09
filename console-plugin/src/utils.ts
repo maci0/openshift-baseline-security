@@ -55,9 +55,14 @@ export const scoreColor = (score?: number): string =>
       ? 'var(--pf-t--global--icon--color--status--warning--default)'
       : 'var(--pf-t--global--icon--color--status--success--default)';
 
-// Deep-link into Results with a status row filter (PASS/FAIL/…).
+// Deep-link into Results with a status (and optional profile) row filter.
 // Strip unpaired surrogates so encodeURIComponent never throws on garbage.
-export const resultsHref = (filter: string): string =>
-  `/baseline-security/results?rowFilter-result-status=${encodeURIComponent(
-    filter.replace(/[\uD800-\uDFFF]/g, ''),
-  )}`;
+export const resultsHref = (status: string, profile?: string): string => {
+  const clean = (s: string) => s.replace(/[\uD800-\uDFFF]/g, '');
+  const params = new URLSearchParams();
+  params.set('rowFilter-result-status', clean(status));
+  if (profile) {
+    params.set('rowFilter-result-profile', clean(profile));
+  }
+  return `/baseline-security/results?${params.toString()}`;
+};

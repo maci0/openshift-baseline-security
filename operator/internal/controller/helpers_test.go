@@ -3,7 +3,9 @@ package controller
 import (
 	"context"
 	"testing"
+	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -24,7 +26,6 @@ func TestSetCond(t *testing.T) {
 	if c.ObservedGeneration != 7 {
 		t.Fatalf("ObservedGeneration = %d, want 7", c.ObservedGeneration)
 	}
-	// Update in place.
 	setCond(cb, "Degraded", metav1.ConditionFalse, "AsExpected", "")
 	c = meta.FindStatusCondition(cb.Status.Conditions, "Degraded")
 	if c == nil || c.Status != metav1.ConditionFalse || c.Reason != "AsExpected" {
@@ -47,6 +48,19 @@ func TestSetRollupConditions(t *testing.T) {
 		t.Fatalf("Available while installing: %+v", c)
 	}
 
+	setCond(cb, "ComplianceOperatorReady", metav1.ConditionFalse, "CSVNotReady", "phase=Installing")
+	setRollupConditions(cb)
+	if c := meta.FindStatusCondition(cb.Status.Conditions, "Progressing"); c == nil || c.Status != metav1.ConditionTrue {
+		t.Fatalf("Progressing while CSVNotReady: %+v", c)
+	}
+
+	setCond(cb, "ComplianceOperatorReady", metav1.ConditionFalse, "NotInstalled", "manual")
+	setCond(cb, "ScanConfigured", metav1.ConditionFalse, "NotInstalled", "no CRDs")
+	setRollupConditions(cb)
+	if c := meta.FindStatusCondition(cb.Status.Conditions, "Progressing"); c == nil || c.Status != metav1.ConditionFalse {
+		t.Fatalf("Progressing must be False for permanent NotInstalled: %+v", c)
+	}
+
 	setCond(cb, "ComplianceOperatorReady", metav1.ConditionTrue, "CSVSucceeded", "")
 	setCond(cb, "ScanConfigured", metav1.ConditionTrue, "BindingsCreated", "")
 	setCond(cb, "ConsolePluginReady", metav1.ConditionTrue, "Deployed", "")
@@ -62,6 +76,49 @@ func TestSetRollupConditions(t *testing.T) {
 	}
 }
 
+func TestConditionProgressing(t *testing.T) {
+	if conditionProgressing(nil) {
+		t.Fatal("nil")
+	}
+	if conditionProgressing(&metav1.Condition{Status: metav1.ConditionTrue, Reason: "Installing"}) {
+		t.Fatal("True status is not progressing")
+	}
+	for _, reason := range []string{"Installing", "CSVNotReady", "ImageMissing", "WaitingForPods", "CRDsMissing"} {
+		c := &metav1.Condition{Status: metav1.ConditionFalse, Reason: reason}
+		if !conditionProgressing(c) {
+			t.Fatalf("%s should progress", reason)
+		}
+	}
+	if conditionProgressing(&metav1.Condition{Status: metav1.ConditionFalse, Reason: "NotInstalled"}) {
+		t.Fatal("NotInstalled should not progress")
+	}
+	if conditionProgressing(&metav1.Condition{Status: metav1.ConditionFalse, Reason: "Unavailable"}) {
+		t.Fatal("Unavailable should not progress")
+	}
+}
+
+func TestPluginDeploymentUnavailable(t *testing.T) {
+	now := metav1.Now()
+	old := metav1.NewTime(now.Add(-10 * time.Minute))
+	dep := &appsv1.Deployment{}
+	dep.CreationTimestamp = old
+	if !pluginDeploymentUnavailable(dep, 5*time.Minute) {
+		t.Fatal("old creation timestamp should be unavailable")
+	}
+	dep.CreationTimestamp = now
+	if pluginDeploymentUnavailable(dep, 5*time.Minute) {
+		t.Fatal("fresh creation should still be waiting")
+	}
+	dep.Status.Conditions = []appsv1.DeploymentCondition{{
+		Type:               appsv1.DeploymentAvailable,
+		Status:             corev1.ConditionFalse,
+		LastTransitionTime: old,
+	}}
+	if !pluginDeploymentUnavailable(dep, 5*time.Minute) {
+		t.Fatal("Available=False for >timeout should be unavailable")
+	}
+}
+
 func TestCreateIfMissing(t *testing.T) {
 	scheme := testScheme(t)
 	c := fake.NewClientBuilder().WithScheme(scheme).Build()
@@ -73,7 +130,6 @@ func TestCreateIfMissing(t *testing.T) {
 	if err := c.Get(context.Background(), types.NamespacedName{Name: ns.Name}, got); err != nil {
 		t.Fatal(err)
 	}
-	// AlreadyExists is ignored.
 	again := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns.Name}}
 	if err := createIfMissing(context.Background(), c, again); err != nil {
 		t.Fatal("AlreadyExists should be ignored:", err)

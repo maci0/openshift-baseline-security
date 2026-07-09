@@ -132,6 +132,35 @@ func TestEnsureComplianceOperatorOptOut(t *testing.T) {
 	if !apierrors.IsNotFound(err) {
 		t.Fatalf("subscription should not exist, err=%v", err)
 	}
+	c := meta.FindStatusCondition(cb.Status.Conditions, "ComplianceOperatorReady")
+	if c == nil || c.Status != metav1.ConditionFalse || c.Reason != "NotInstalled" {
+		t.Fatalf("Manual without CO must set NotInstalled, got %+v", c)
+	}
+}
+
+func TestEnsureComplianceOperatorManualStillChecksExisting(t *testing.T) {
+	scheme := testScheme(t)
+	sub := u(subscriptionGVK)
+	sub.SetName("compliance-operator")
+	sub.SetNamespace(complianceNamespace)
+	_ = unstructured.SetNestedField(sub.Object, "compliance-operator.v1.0.0", "status", "installedCSV")
+	csv := u(csvGVK)
+	csv.SetName("compliance-operator.v1.0.0")
+	csv.SetNamespace(complianceNamespace)
+	_ = unstructured.SetNestedField(csv.Object, "Succeeded", "status", "phase")
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(sub, csv).Build(),
+		Scheme: scheme,
+	}
+	cb := newCB("cis")
+	cb.Spec.InstallComplianceOperator = baselinev1alpha1.InstallManual
+	if err := r.ensureComplianceOperator(context.Background(), cb); err != nil {
+		t.Fatal(err)
+	}
+	c := meta.FindStatusCondition(cb.Status.Conditions, "ComplianceOperatorReady")
+	if c == nil || c.Status != metav1.ConditionTrue {
+		t.Fatalf("Manual with installed CO must be Ready, got %+v", c)
+	}
 }
 
 func TestEnsureScanConfigCreatesAndPrunes(t *testing.T) {
@@ -197,7 +226,10 @@ func TestEnsureScanConfigCreatesAndPrunes(t *testing.T) {
 func TestEnsureConsolePlugin(t *testing.T) {
 	scheme := testScheme(t)
 	r := &ClusterBaselineReconciler{
-		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(consoleCluster("other")).Build(),
+		Client: fake.NewClientBuilder().WithScheme(scheme).
+			WithObjects(consoleCluster("other")).
+			WithStatusSubresource(&appsv1.Deployment{}).
+			Build(),
 		Scheme: scheme,
 	}
 	cb := newCB("cis")
@@ -251,9 +283,25 @@ func TestEnsureConsolePlugin(t *testing.T) {
 	if len(plugins) != 2 {
 		t.Fatalf("duplicate registration: %v", plugins)
 	}
+	// Pods not ready yet.
 	c = meta.FindStatusCondition(cb.Status.Conditions, "ConsolePluginReady")
-	if c == nil || c.Status != metav1.ConditionTrue {
-		t.Fatalf("condition = %+v", c)
+	if c == nil || c.Status != metav1.ConditionFalse || c.Reason != "WaitingForPods" {
+		t.Fatalf("condition = %+v, want WaitingForPods", c)
+	}
+	// Simulate ready pods via status subresource.
+	if err := r.Get(context.Background(), types.NamespacedName{Namespace: pluginNS, Name: pluginName}, dep); err != nil {
+		t.Fatal(err)
+	}
+	dep.Status.ReadyReplicas = 1
+	if err := r.Status().Update(context.Background(), dep); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.ensureConsolePlugin(context.Background(), cb); err != nil {
+		t.Fatal(err)
+	}
+	c = meta.FindStatusCondition(cb.Status.Conditions, "ConsolePluginReady")
+	if c == nil || c.Status != metav1.ConditionTrue || c.Reason != "Deployed" {
+		t.Fatalf("condition = %+v, want Deployed", c)
 	}
 }
 

@@ -52,15 +52,17 @@ spec:
   links:
     - name: Source
       url: https://github.com/maci0/openshift-baseline-security
+  # Install into openshift-baseline-security so RBAC subjects and the metrics
+  # Service match the ServiceAccount namespace in the bundle manifests.
   installModes:
     - type: OwnNamespace
-      supported: false
+      supported: true
     - type: SingleNamespace
       supported: false
     - type: MultiNamespace
       supported: false
     - type: AllNamespaces
-      supported: true
+      supported: false
   customresourcedefinitions:
     owned:
       - kind: ClusterBaseline
@@ -158,6 +160,7 @@ spec:
                       - --leader-elect
                       - --metrics-bind-address=:8443
                       - --metrics-secure=true
+                      - --metrics-cert-dir=/var/run/metrics-certs
                     env:
                       - name: RELATED_IMAGE_CONSOLE_PLUGIN
                         value: quay.io/openshift-baseline-security/baseline-security-console-plugin:0.1.0
@@ -170,6 +173,10 @@ spec:
                       capabilities:
                         drop: [ALL]
                       readOnlyRootFilesystem: true
+                    volumeMounts:
+                      - name: metrics-certs
+                        mountPath: /var/run/metrics-certs
+                        readOnly: true
                     livenessProbe:
                       httpGet:
                         path: /healthz
@@ -184,6 +191,11 @@ spec:
                       requests:
                         cpu: 10m
                         memory: 64Mi
+                volumes:
+                  - name: metrics-certs
+                    secret:
+                      secretName: baseline-security-operator-metrics-cert
+                      optional: true
   relatedImages:
     - name: console-plugin
       image: quay.io/openshift-baseline-security/baseline-security-console-plugin:0.1.0

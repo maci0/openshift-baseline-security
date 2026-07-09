@@ -87,12 +87,12 @@ replicas with preferred pod anti-affinity; manager uses leader election.
 - No backend: all data via the console's k8s API proxy with the logged-in
   user's token, so RBAC is the user's own. `useAccessReview` to disable
   writes the user cannot perform.
-- Serving: ubi9/nginx-120 defaults (document root `/opt/app-root/src`, drop-in
-  `/opt/app-root/etc/nginx.d/ssl.conf` for TLS) with the service-serving
-  certificate (`service.beta.openshift.io/serving-cert-secret-name`), port
-  9443; ConsolePlugin CR points at the
-  Service; plugin name appended to `consoles.operator.openshift.io/cluster`
-  `spec.plugins` (and removed on uninstall).
+- Serving: ubi9/nginx-120 base, document root `/opt/app-root/src`, checked-in
+  `nginx.conf` (TLS only on 9443, no plaintext 8080) with the service-serving
+  certificate (`service.beta.openshift.io/serving-cert-secret-name`);
+  ConsolePlugin CR points at the Service; plugin name appended to
+  `consoles.operator.openshift.io/cluster` `spec.plugins` (and removed on
+  uninstall).
 
 **Here**: all of the above, including `useAccessReview` gating on rescan,
 remediation apply/unapply, and the auto-apply toggle.

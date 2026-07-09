@@ -177,15 +177,21 @@ describe('resultsHref', () => {
       '/baseline-security/results?rowFilter-result-status=FAIL',
     );
   });
+  it('includes optional profile filter', () => {
+    expect(resultsHref('PASS', 'cis')).toBe(
+      '/baseline-security/results?rowFilter-result-status=PASS&rowFilter-result-profile=cis',
+    );
+  });
   it('encodes special characters', () => {
     expect(resultsHref('NOT-APPLICABLE')).toContain('NOT-APPLICABLE');
-    expect(resultsHref('a b')).toContain('a%20b');
+    expect(resultsHref('a b')).toMatch(/a(\+|%20)b/);
     expect(resultsHref('x&y')).toContain(encodeURIComponent('x&y'));
   });
   it('fuzz: always under /baseline-security/results and never throws', () => {
     for (let i = 0; i < 1000; i++) {
-      const href = resultsHref(randomString(i % 32));
-      expect(href.startsWith('/baseline-security/results?rowFilter-result-status=')).toBe(true);
+      const href = resultsHref(randomString(i % 32), i % 3 === 0 ? 'cis' : undefined);
+      expect(href.startsWith('/baseline-security/results?')).toBe(true);
+      expect(href).toContain('rowFilter-result-status=');
     }
   });
 });

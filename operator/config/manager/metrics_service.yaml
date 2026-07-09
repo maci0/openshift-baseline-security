@@ -6,6 +6,8 @@ metadata:
   labels:
     app: baseline-security-operator
     control-plane: controller-manager
+  annotations:
+    service.beta.openshift.io/serving-cert-secret-name: baseline-security-operator-metrics-cert
 spec:
   ports:
     - name: https

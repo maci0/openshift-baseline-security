@@ -1,0 +1,24 @@
+# Optional: scrape secure metrics via user-workload monitoring.
+# Bind the scrape SA to ClusterRole baseline-security-metrics-reader (GET /metrics).
+# Install when monitoring.coreos.com is available (e.g. user-workload monitoring).
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: baseline-security-operator
+  namespace: openshift-baseline-security
+  labels:
+    app: baseline-security-operator
+spec:
+  selector:
+    matchLabels:
+      app: baseline-security-operator
+      control-plane: controller-manager
+  endpoints:
+    - port: https
+      scheme: https
+      path: /metrics
+      interval: 30s
+      tlsConfig:
+        # service-ca signed serving cert; use CA bundle when available.
+        insecureSkipVerify: true
+      bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token

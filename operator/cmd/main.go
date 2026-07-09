@@ -29,13 +29,14 @@ func init() {
 }
 
 func main() {
-	var metricsAddr, probeAddr string
+	var metricsAddr, probeAddr, metricsCertDir string
 	var enableLeaderElection, secureMetrics bool
 	// HTTPS + authn/authz (TokenReview / SubjectAccessReview), matching
 	// kubebuilder / Operator SDK defaults and OpenShift CONVENTIONS.md.
 	// Disable the endpoint with --metrics-bind-address=0.
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8443", "Metrics endpoint address. Use 0 to disable.")
 	flag.BoolVar(&secureMetrics, "metrics-secure", true, "Serve metrics over HTTPS with authentication and authorization.")
+	flag.StringVar(&metricsCertDir, "metrics-cert-dir", "/var/run/metrics-certs", "Directory with tls.crt/tls.key for metrics (service-ca). Empty or missing files fall back to self-signed.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "Health probe endpoint address.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", true, "Enable leader election.")
 	opts := zap.Options{}
@@ -48,6 +49,9 @@ func main() {
 	metricsServerOptions := metricsserver.Options{
 		BindAddress:   metricsAddr,
 		SecureServing: secureMetrics,
+		// Dynamic GetCertificate reloads service-ca files when they appear after
+		// startup (optional volume); falls back to self-signed until then.
+		TLSOpts: metricsTLSOpts(metricsCertDir),
 	}
 	if secureMetrics {
 		// Requires ClusterRole rules for tokenreviews and subjectaccessreviews.

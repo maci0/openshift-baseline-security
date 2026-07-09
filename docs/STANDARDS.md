@@ -76,7 +76,10 @@ Status conditions include the OpenShift rollup set
 plus the detail conditions above. Manager and plugin Deployments run 2
 replicas with preferred pod anti-affinity and leader election on the
 manager. Resource requests only (no limits). Metrics over HTTPS with
-authn/authz (`filters.WithAuthenticationAndAuthorization` on `:8443`).
+authn/authz (`filters.WithAuthenticationAndAuthorization` on `:8443`),
+service-ca serving cert when present, and optional ServiceMonitor sample
+under `operator/config/prometheus/`. OLM install mode is OwnNamespace into
+`openshift-baseline-security` so metrics Service and RBAC subjects match.
 
 ## Console / frontend
 

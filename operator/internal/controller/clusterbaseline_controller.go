@@ -113,8 +113,12 @@ func (r *ClusterBaselineReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return ctrl.Result{}, err
 	}
 	logger.V(1).Info("reconciled", "score", cb.Status.Score)
-	// ponytail: poll compliance CRs (CRDs absent until CO installs). Owns plugin objects.
-	return ctrl.Result{RequeueAfter: time.Minute}, nil
+	// Poll while CRDs may be absent; requeue faster while still installing.
+	requeue := time.Minute
+	if progressing := meta.FindStatusCondition(cb.Status.Conditions, "Progressing"); progressing != nil && progressing.Status == metav1.ConditionTrue {
+		requeue = 15 * time.Second
+	}
+	return ctrl.Result{RequeueAfter: requeue}, nil
 }
 
 func bindingName(key baselinev1alpha1.ProfileKey) string { return "baseline-" + string(key) }
@@ -196,6 +200,20 @@ func setCond(cb *baselinev1alpha1.ClusterBaseline, typ string, status metav1.Con
 	})
 }
 
+// conditionProgressing is true for non-terminal False detail reasons that mean
+// work is still in flight (not permanent admin action like Manual NotInstalled).
+func conditionProgressing(c *metav1.Condition) bool {
+	if c == nil || c.Status != metav1.ConditionFalse {
+		return false
+	}
+	switch c.Reason {
+	case "Installing", "CSVNotReady", "ImageMissing", "WaitingForPods", "CRDsMissing":
+		return true
+	default:
+		return false
+	}
+}
+
 // setRollupConditions sets Available and Progressing from detail conditions.
 func setRollupConditions(cb *baselinev1alpha1.ClusterBaseline) {
 	co := meta.FindStatusCondition(cb.Status.Conditions, "ComplianceOperatorReady")
@@ -204,8 +222,7 @@ func setRollupConditions(cb *baselinev1alpha1.ClusterBaseline) {
 
 	coReady := co != nil && co.Status == metav1.ConditionTrue
 	scanOK := scan != nil && scan.Status == metav1.ConditionTrue
-	progressing := (co != nil && co.Status == metav1.ConditionFalse && co.Reason == "Installing") ||
-		(plugin != nil && plugin.Status == metav1.ConditionFalse && plugin.Reason == "ImageMissing")
+	progressing := conditionProgressing(co) || conditionProgressing(scan) || conditionProgressing(plugin)
 
 	if progressing {
 		setCond(cb, "Progressing", metav1.ConditionTrue, "Reconciling", "installing or configuring dependencies")
@@ -239,17 +256,28 @@ func uList(gvk schema.GroupVersionKind) *unstructured.UnstructuredList {
 }
 
 func (r *ClusterBaselineReconciler) ensureComplianceOperator(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline) error {
-	if cb.Spec.InstallComplianceOperator == baselinev1alpha1.InstallManual {
-		return nil
-	}
-
 	sub := u(subscriptionGVK)
 	err := r.Get(ctx, types.NamespacedName{Namespace: complianceNamespace, Name: "compliance-operator"}, sub)
 	if err == nil {
+		// Always evaluate readiness, including InstallManual, so Available cannot
+		// stay True after CO is removed.
 		return r.setComplianceOperatorReady(ctx, cb, sub)
+	}
+	if meta.IsNoMatchError(err) {
+		cb.Status.ComplianceOperatorVersion = ""
+		setCond(cb, "ComplianceOperatorReady", metav1.ConditionFalse, "NotInstalled",
+			"OLM Subscription API not available")
+		return nil
 	}
 	if !apierrors.IsNotFound(err) {
 		return err
+	}
+
+	if cb.Spec.InstallComplianceOperator == baselinev1alpha1.InstallManual {
+		cb.Status.ComplianceOperatorVersion = ""
+		setCond(cb, "ComplianceOperatorReady", metav1.ConditionFalse, "NotInstalled",
+			"compliance-operator Subscription not found; install manually or set installComplianceOperator=Automatic")
+		return nil
 	}
 
 	if err := createIfMissing(ctx, r.Client, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: complianceNamespace}}); err != nil {
@@ -312,7 +340,11 @@ func (r *ClusterBaselineReconciler) ensureScanConfig(ctx context.Context, cb *ba
 	ss.SetNamespace(complianceNamespace)
 	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, ss, func() error {
 		autoApply := cb.Spec.Remediation.Apply == baselinev1alpha1.RemediationApplyAutomatic
-		ss.Object["schedule"] = cb.Spec.Schedule
+		schedule := cb.Spec.Schedule
+		if schedule == "" {
+			schedule = "0 1 * * *"
+		}
+		ss.Object["schedule"] = schedule
 		ss.Object["roles"] = []any{"worker", "master"}
 		ss.Object["rawResultStorage"] = map[string]any{"size": "1Gi", "rotation": int64(3)}
 		ss.Object["autoApplyRemediations"] = autoApply
@@ -321,7 +353,9 @@ func (r *ClusterBaselineReconciler) ensureScanConfig(ctx context.Context, cb *ba
 	})
 	if err != nil {
 		if meta.IsNoMatchError(err) {
-			return nil // CO CRDs not installed yet
+			setCond(cb, "ScanConfigured", metav1.ConditionFalse, "CRDsMissing",
+				"compliance.openshift.io CRDs not installed")
+			return nil
 		}
 		return err
 	}
@@ -439,6 +473,9 @@ func (r *ClusterBaselineReconciler) aggregateStatus(ctx context.Context, cb *bas
 	list := uList(checkResultGVK)
 	if err := r.List(ctx, list, client.InNamespace(complianceNamespace)); err != nil {
 		if meta.IsNoMatchError(err) {
+			// CRDs gone: do not leave a stale score/profile rollup on the CR.
+			cb.Status.Score = nil
+			cb.Status.Profiles = nil
 			return nil
 		}
 		return err
@@ -545,51 +582,19 @@ func (r *ClusterBaselineReconciler) ensureConsolePlugin(ctx context.Context, cb 
 
 	dep := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: pluginName, Namespace: pluginNS}}
 	if _, err := controllerutil.CreateOrUpdate(ctx, r.Client, dep, func() error {
-		dep.Spec = appsv1.DeploymentSpec{
-			Replicas: ptr.To(int32(2)),
-			Selector: &metav1.LabelSelector{MatchLabels: labels},
-			Template: corev1.PodTemplateSpec{
-				ObjectMeta: metav1.ObjectMeta{Labels: labels},
-				Spec: corev1.PodSpec{
-					Affinity: preferredHostnameAntiAffinity(labels),
-					Containers: []corev1.Container{{
-						Name:  pluginName,
-						Image: image,
-						Ports: []corev1.ContainerPort{{ContainerPort: 9443}},
-						SecurityContext: &corev1.SecurityContext{
-							AllowPrivilegeEscalation: ptr.To(false),
-							Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
-							RunAsNonRoot:             ptr.To(true),
-						},
-						Resources: corev1.ResourceRequirements{
-							Requests: corev1.ResourceList{
-								corev1.ResourceCPU:    resource.MustParse("10m"),
-								corev1.ResourceMemory: resource.MustParse("32Mi"),
-							},
-						},
-						ReadinessProbe: &corev1.Probe{
-							ProbeHandler: corev1.ProbeHandler{
-								TCPSocket: &corev1.TCPSocketAction{Port: intstr.FromInt32(9443)},
-							},
-							InitialDelaySeconds: 5,
-						},
-						VolumeMounts: []corev1.VolumeMount{
-							{Name: "serving-cert", MountPath: "/var/serving-cert", ReadOnly: true},
-						},
-					}},
-					Volumes: []corev1.Volume{{
-						Name: "serving-cert",
-						VolumeSource: corev1.VolumeSource{
-							// Optional until service-ca mints the Secret.
-							Secret: &corev1.SecretVolumeSource{
-								SecretName: pluginName + "-cert",
-								Optional:   ptr.To(true),
-							},
-						},
-					}},
-				},
-			},
+		// Mutate owned fields only; leave selector immutable after create.
+		if dep.Spec.Selector == nil {
+			dep.Spec.Selector = &metav1.LabelSelector{MatchLabels: labels}
 		}
+		dep.Spec.Replicas = ptr.To(int32(2))
+		if dep.Spec.Template.Labels == nil {
+			dep.Spec.Template.Labels = map[string]string{}
+		}
+		for k, v := range labels {
+			dep.Spec.Template.Labels[k] = v
+		}
+		dep.Spec.Template.Spec.Affinity = preferredHostnameAntiAffinity(labels)
+		applyPluginContainer(&dep.Spec.Template.Spec, image)
 		return controllerutil.SetControllerReference(cb, dep, r.Scheme)
 	}); err != nil {
 		return err
@@ -623,8 +628,104 @@ func (r *ClusterBaselineReconciler) ensureConsolePlugin(ctx context.Context, cb 
 			return err
 		}
 	}
+
+	// Re-read Deployment status so Ready is not claimed before pods are up.
+	if err := r.Get(ctx, types.NamespacedName{Namespace: pluginNS, Name: pluginName}, dep); err != nil {
+		return err
+	}
+	if dep.Status.ReadyReplicas < 1 {
+		reason, msg := "WaitingForPods",
+			fmt.Sprintf("Deployment %s/%s has %d ready replicas", pluginNS, pluginName, dep.Status.ReadyReplicas)
+		if pluginDeploymentUnavailable(dep, 5*time.Minute) {
+			reason = "Unavailable"
+			msg = fmt.Sprintf("Deployment %s/%s has no ready pods for >5m", pluginNS, pluginName)
+		}
+		setCond(cb, "ConsolePluginReady", metav1.ConditionFalse, reason, msg)
+		return nil
+	}
 	setCond(cb, "ConsolePluginReady", metav1.ConditionTrue, "Deployed", "")
 	return nil
+}
+
+// pluginDeploymentUnavailable is true when the Deployment has been Available=False
+// (or merely created) longer than timeout with no ready pods.
+func pluginDeploymentUnavailable(dep *appsv1.Deployment, timeout time.Duration) bool {
+	if timeout <= 0 {
+		return false
+	}
+	for _, c := range dep.Status.Conditions {
+		if c.Type == appsv1.DeploymentAvailable && c.Status == corev1.ConditionFalse {
+			if !c.LastTransitionTime.IsZero() && time.Since(c.LastTransitionTime.Time) > timeout {
+				return true
+			}
+		}
+	}
+	if !dep.CreationTimestamp.IsZero() && time.Since(dep.CreationTimestamp.Time) > timeout {
+		return true
+	}
+	return false
+}
+
+// applyPluginContainer sets the plugin container, volume mounts, and volumes on the pod spec.
+func applyPluginContainer(pod *corev1.PodSpec, image string) {
+	container := corev1.Container{
+		Name:  pluginName,
+		Image: image,
+		Ports: []corev1.ContainerPort{{ContainerPort: 9443}},
+		SecurityContext: &corev1.SecurityContext{
+			AllowPrivilegeEscalation: ptr.To(false),
+			Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
+			RunAsNonRoot:             ptr.To(true),
+		},
+		Resources: corev1.ResourceRequirements{
+			Requests: corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("10m"),
+				corev1.ResourceMemory: resource.MustParse("32Mi"),
+			},
+		},
+		ReadinessProbe: &corev1.Probe{
+			ProbeHandler: corev1.ProbeHandler{
+				TCPSocket: &corev1.TCPSocketAction{Port: intstr.FromInt32(9443)},
+			},
+			InitialDelaySeconds: 5,
+		},
+		VolumeMounts: []corev1.VolumeMount{
+			{Name: "serving-cert", MountPath: "/var/serving-cert", ReadOnly: true},
+		},
+	}
+	found := false
+	for i := range pod.Containers {
+		if pod.Containers[i].Name == pluginName {
+			pod.Containers[i] = container
+			found = true
+			break
+		}
+	}
+	if !found {
+		pod.Containers = append(pod.Containers, container)
+	}
+
+	vol := corev1.Volume{
+		Name: "serving-cert",
+		VolumeSource: corev1.VolumeSource{
+			// Optional until service-ca mints the Secret.
+			Secret: &corev1.SecretVolumeSource{
+				SecretName: pluginName + "-cert",
+				Optional:   ptr.To(true),
+			},
+		},
+	}
+	volFound := false
+	for i := range pod.Volumes {
+		if pod.Volumes[i].Name == "serving-cert" {
+			pod.Volumes[i] = vol
+			volFound = true
+			break
+		}
+	}
+	if !volFound {
+		pod.Volumes = append(pod.Volumes, vol)
+	}
 }
 
 func (r *ClusterBaselineReconciler) SetupWithManager(mgr ctrl.Manager) error {

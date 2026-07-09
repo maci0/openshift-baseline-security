@@ -19,10 +19,19 @@ const PROFILE_INFO: Record<string, { title: string; description: string }> = {
   'pci-dss': { title: 'PCI-DSS', description: 'Payment Card Industry Data Security Standard' },
   'nist-moderate': { title: 'NIST 800-53 Moderate', description: 'FedRAMP Moderate impact baseline' },
   'nist-high': { title: 'NIST 800-53 High', description: 'FedRAMP High impact baseline' },
-  stig: { title: 'DISA STIG', description: 'Defense Information Systems Agency STIG' },
-  'nerc-cip': { title: 'NERC CIP', description: 'NERC Critical Infrastructure Protection' },
+  stig: {
+    title: 'DISA STIG',
+    description: 'Defense Information Systems Agency Security Technical Implementation Guide',
+  },
+  'nerc-cip': {
+    title: 'NERC CIP',
+    description: 'North American Electric Reliability Corporation Critical Infrastructure Protection',
+  },
   e8: { title: 'ACSC Essential Eight', description: 'Australian Cyber Security Centre Essential Eight' },
-  bsi: { title: 'BSI', description: 'German BSI IT-Grundschutz' },
+  bsi: {
+    title: 'BSI',
+    description: 'German Federal Office for Information Security IT-Grundschutz',
+  },
 };
 
 const ProfilesTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => {

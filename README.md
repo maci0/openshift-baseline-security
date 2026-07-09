@@ -57,10 +57,15 @@ spec:
 EOF
 ```
 
-Then install "Baseline Security" from OperatorHub (or create a Subscription
-in `openshift-operators`). The operator default-creates a
-`ClusterBaseline/cluster` with the CIS profile and starts scanning; opt out
-with `BASELINE_SECURITY_SKIP_DEFAULT_CR=true` on the CSV deployment.
+Then install "Baseline Security" from OperatorHub into the
+`openshift-baseline-security` namespace (OwnNamespace). The operator
+default-creates a `ClusterBaseline/cluster` with the CIS profile and starts
+scanning; opt out with `BASELINE_SECURITY_SKIP_DEFAULT_CR=true` on the CSV
+deployment.
+
+Optional metrics scrape: apply `operator/config/prometheus/servicemonitor.yaml`
+when user-workload monitoring is enabled, and bind the scrape ServiceAccount
+to ClusterRole `baseline-security-metrics-reader` (`GET /metrics`).
 
 Deleting the `ClusterBaseline` (or uninstalling this operator) does **not**
 remove the Compliance Operator Subscription; CO is treated as a shared

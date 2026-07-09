@@ -180,21 +180,21 @@ const Overview: React.FC<{ baseline?: ClusterBaseline; loaded: boolean }> = ({
                 status="success"
                 label={t('Pass')}
                 count={p.pass}
-                href={resultsHref('PASS')}
+                href={resultsHref('PASS', p.key)}
               />
               <CountRow
                 icon={<ExclamationCircleIcon />}
                 status="danger"
                 label={t('Fail')}
                 count={p.fail}
-                href={resultsHref('FAIL')}
+                href={resultsHref('FAIL', p.key)}
               />
               <CountRow
                 icon={<ExclamationTriangleIcon />}
                 status="warning"
                 label={t('Manual')}
                 count={p.manual}
-                href={resultsHref('MANUAL')}
+                href={resultsHref('MANUAL', p.key)}
               />
             </CardBody>
           </Card>

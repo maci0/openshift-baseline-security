@@ -98,25 +98,54 @@ const ResultsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => {
     [setSelected],
   );
 
-  const rowFilters: RowFilter<ComplianceCheckResult>[] = [
-    {
-      filterGroupName: t('Status'),
-      type: 'result-status',
-      reducer: (r) => r.status,
-      filter: (input, r) => !input.selected?.length || input.selected.includes(r.status),
-      items: ['PASS', 'FAIL', 'MANUAL', 'ERROR', 'INFO', 'NOT-APPLICABLE'].map((s) => ({
-        id: s,
-        title: s,
-      })),
-    },
-    {
-      filterGroupName: t('Severity'),
-      type: 'result-severity',
-      reducer: (r) => r.severity,
-      filter: (input, r) => !input.selected?.length || input.selected.includes(r.severity),
-      items: ['high', 'medium', 'low', 'info', 'unknown'].map((s) => ({ id: s, title: s })),
-    },
-  ];
+  const profileItems = React.useMemo(() => {
+    const keys = new Set(profiles ?? []);
+    for (const r of ownedResults) {
+      const suite = r.metadata.labels?.['compliance.openshift.io/suite'];
+      if (suite?.startsWith('baseline-')) {
+        keys.add(suite.slice('baseline-'.length));
+      }
+    }
+    return [...keys].sort().map((k) => ({ id: k, title: k }));
+  }, [profiles, ownedResults]);
+
+  const rowFilters: RowFilter<ComplianceCheckResult>[] = React.useMemo(
+    () => [
+      {
+        filterGroupName: t('Status'),
+        type: 'result-status',
+        reducer: (r) => r.status,
+        filter: (input, r) => !input.selected?.length || input.selected.includes(r.status),
+        items: ['PASS', 'FAIL', 'MANUAL', 'ERROR', 'INFO', 'NOT-APPLICABLE'].map((s) => ({
+          id: s,
+          title: s,
+        })),
+      },
+      {
+        filterGroupName: t('Severity'),
+        type: 'result-severity',
+        reducer: (r) => r.severity,
+        filter: (input, r) => !input.selected?.length || input.selected.includes(r.severity),
+        items: ['high', 'medium', 'low', 'info', 'unknown'].map((s) => ({ id: s, title: s })),
+      },
+      {
+        filterGroupName: t('Profiles'),
+        type: 'result-profile',
+        reducer: (r) => {
+          const suite = r.metadata.labels?.['compliance.openshift.io/suite'] ?? '';
+          return suite.startsWith('baseline-') ? suite.slice('baseline-'.length) : '';
+        },
+        filter: (input, r) => {
+          if (!input.selected?.length) return true;
+          const suite = r.metadata.labels?.['compliance.openshift.io/suite'] ?? '';
+          const key = suite.startsWith('baseline-') ? suite.slice('baseline-'.length) : '';
+          return input.selected.includes(key);
+        },
+        items: profileItems,
+      },
+    ],
+    [t, profileItems],
+  );
 
   const [data, filteredData, onFilterChange] = useListPageFilter(ownedResults, rowFilters);
 
