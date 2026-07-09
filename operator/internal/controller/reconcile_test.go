@@ -10,9 +10,12 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	baselinev1alpha1 "github.com/openshift-baseline-security/baseline-security-operator/api/v1alpha1"
 )
@@ -188,6 +191,20 @@ func TestEnsureScanConfigCreatesAndPrunes(t *testing.T) {
 	}
 	if auto, _, _ := unstructured.NestedBool(ss.Object, "autoApplyRemediations"); !auto {
 		t.Fatal("autoApplyRemediations not set")
+	}
+	// Manual (and empty) map to false for both auto flags.
+	cb.Spec.Remediation.Apply = baselinev1alpha1.RemediationApplyManual
+	if err := r.ensureScanConfig(context.Background(), cb); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Get(context.Background(), types.NamespacedName{Namespace: complianceNamespace, Name: scanSettingName}, ss); err != nil {
+		t.Fatal(err)
+	}
+	if auto, _, _ := unstructured.NestedBool(ss.Object, "autoApplyRemediations"); auto {
+		t.Fatal("autoApplyRemediations should be false for Manual")
+	}
+	if auto, _, _ := unstructured.NestedBool(ss.Object, "autoUpdateRemediations"); auto {
+		t.Fatal("autoUpdateRemediations should be false for Manual")
 	}
 	if schedule, _, _ := unstructured.NestedString(ss.Object, "schedule"); schedule != "0 1 * * *" {
 		t.Fatalf("schedule = %q", schedule)
@@ -380,7 +397,7 @@ func TestReconcileNotFound(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Requeue || res.RequeueAfter != 0 {
+	if res.RequeueAfter != 0 {
 		t.Fatalf("unexpected requeue: %+v", res)
 	}
 }
@@ -408,5 +425,123 @@ func TestEnsureComplianceOperatorAlreadyInstalled(t *testing.T) {
 	c := meta.FindStatusCondition(cb.Status.Conditions, "ComplianceOperatorReady")
 	if c == nil || c.Status != metav1.ConditionTrue {
 		t.Fatalf("%+v", c)
+	}
+}
+
+// Full happy path: finalizer present, CO subscription installed with a
+// Succeeded CSV, console present, plugin image set. Reconcile must persist
+// status (score, conditions incl. rollups) and schedule a requeue.
+func TestReconcileHappyPath(t *testing.T) {
+	scheme := testScheme(t)
+	scheme.AddKnownTypeWithName(scanSettingGVK, &unstructured.Unstructured{})
+	bindingList := uList(bindingGVK)
+	scheme.AddKnownTypeWithName(bindingGVK, &unstructured.Unstructured{})
+	scheme.AddKnownTypeWithName(bindingList.GroupVersionKind(), bindingList)
+
+	cb := newCB("cis")
+	cb.Finalizers = []string{finalizerName}
+
+	sub := u(subscriptionGVK)
+	sub.SetName("compliance-operator")
+	sub.SetNamespace(complianceNamespace)
+	_ = unstructured.SetNestedField(sub.Object, "compliance-operator.v1.9.1", "status", "installedCSV")
+	csv := u(csvGVK)
+	csv.SetName("compliance-operator.v1.9.1")
+	csv.SetNamespace(complianceNamespace)
+	_ = unstructured.SetNestedField(csv.Object, "Succeeded", "status", "phase")
+
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).
+			WithObjects(cb, sub, csv, consoleCluster("other"),
+				checkResult("a", "baseline-cis", "PASS"),
+				checkResult("b", "baseline-cis", "FAIL")).
+			WithStatusSubresource(&baselinev1alpha1.ClusterBaseline{}).Build(),
+		Scheme: scheme,
+	}
+	t.Setenv("RELATED_IMAGE_CONSOLE_PLUGIN", "example.test/plugin:1")
+
+	res, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: "cluster"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.RequeueAfter <= 0 {
+		t.Fatalf("expected periodic requeue, got %+v", res)
+	}
+	got := &baselinev1alpha1.ClusterBaseline{}
+	if err := r.Get(context.Background(), types.NamespacedName{Name: "cluster"}, got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Status.Score == nil || *got.Status.Score != 50 {
+		t.Fatalf("persisted score = %v, want 50", got.Status.Score)
+	}
+	for _, typ := range []string{"Available", "Progressing", "Degraded", "ComplianceOperatorReady", "ScanConfigured", "ScanStorageReady"} {
+		if meta.FindStatusCondition(got.Status.Conditions, typ) == nil {
+			t.Fatalf("condition %s not persisted", typ)
+		}
+	}
+	if c := meta.FindStatusCondition(got.Status.Conditions, "Available"); c.Status != metav1.ConditionTrue {
+		t.Fatalf("Available = %+v", c)
+	}
+}
+
+// Compliance CRDs absent (Compliance Operator not yet installed): the
+// NoKindMatch tolerance paths must let Reconcile finish and persist status.
+// The fake client fabricates unknown kinds, so interceptors return the
+// NoKindMatchError a real API server produces for missing CRDs.
+func TestReconcileWithoutComplianceCRDs(t *testing.T) {
+	scheme := testScheme(t)
+	cb := newCB("cis")
+	cb.Finalizers = []string{finalizerName}
+	noMatch := func(gvk schema.GroupVersionKind) error {
+		if gvk.Group == "compliance.openshift.io" {
+			return &meta.NoKindMatchError{GroupKind: gvk.GroupKind()}
+		}
+		return nil
+	}
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).
+			WithObjects(cb, consoleCluster()).
+			WithStatusSubresource(&baselinev1alpha1.ClusterBaseline{}).
+			WithInterceptorFuncs(interceptor.Funcs{
+				Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+					if err := noMatch(obj.GetObjectKind().GroupVersionKind()); err != nil {
+						return err
+					}
+					return c.Get(ctx, key, obj, opts...)
+				},
+				List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+					if err := noMatch(list.GetObjectKind().GroupVersionKind()); err != nil {
+						return err
+					}
+					return c.List(ctx, list, opts...)
+				},
+				Create: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
+					if err := noMatch(obj.GetObjectKind().GroupVersionKind()); err != nil {
+						return err
+					}
+					return c.Create(ctx, obj, opts...)
+				},
+			}).Build(),
+		Scheme: scheme,
+	}
+	t.Setenv("RELATED_IMAGE_CONSOLE_PLUGIN", "example.test/plugin:1")
+
+	if _, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: "cluster"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got := &baselinev1alpha1.ClusterBaseline{}
+	if err := r.Get(context.Background(), types.NamespacedName{Name: "cluster"}, got); err != nil {
+		t.Fatal(err)
+	}
+	c := meta.FindStatusCondition(got.Status.Conditions, "ScanConfigured")
+	if c == nil || c.Status != metav1.ConditionFalse || c.Reason != "CRDsMissing" {
+		t.Fatalf("ScanConfigured = %+v, want False/CRDsMissing", c)
+	}
+	if p := meta.FindStatusCondition(got.Status.Conditions, "Progressing"); p == nil || p.Status != metav1.ConditionTrue {
+		t.Fatalf("Progressing = %+v, want True while CRDs missing", p)
 	}
 }

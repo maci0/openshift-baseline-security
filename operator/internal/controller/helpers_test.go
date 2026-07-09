@@ -74,6 +74,39 @@ func TestSetRollupConditions(t *testing.T) {
 	if c := meta.FindStatusCondition(cb.Status.Conditions, "Available"); c.ObservedGeneration != 3 {
 		t.Fatalf("ObservedGeneration = %d", c.ObservedGeneration)
 	}
+	if c := meta.FindStatusCondition(cb.Status.Conditions, "Degraded"); c == nil || c.Status != metav1.ConditionFalse {
+		t.Fatalf("Degraded when healthy: %+v", c)
+	}
+
+	// Plugin still rolling out (pending reason) keeps Progressing True.
+	setCond(cb, "ConsolePluginReady", metav1.ConditionFalse, "WaitingForPods", "0/2 ready")
+	setRollupConditions(cb)
+	if c := meta.FindStatusCondition(cb.Status.Conditions, "Progressing"); c == nil || c.Status != metav1.ConditionTrue {
+		t.Fatalf("Progressing while plugin pending: %+v", c)
+	}
+	if c := meta.FindStatusCondition(cb.Status.Conditions, "Degraded"); c == nil || c.Status != metav1.ConditionFalse {
+		t.Fatalf("plugin pending must not be Degraded: %+v", c)
+	}
+
+	// Plugin down past grace period rolls into Degraded.
+	setCond(cb, "ConsolePluginReady", metav1.ConditionFalse, "Unavailable", "no ready pods for >5m")
+	setRollupConditions(cb)
+	if c := meta.FindStatusCondition(cb.Status.Conditions, "Degraded"); c == nil || c.Status != metav1.ConditionTrue || c.Reason != "ConsolePluginUnavailable" {
+		t.Fatalf("Degraded for unavailable plugin: %+v", c)
+	}
+
+	// Pending scan storage rolls into Degraded with its own reason/message.
+	setCond(cb, "ConsolePluginReady", metav1.ConditionTrue, "Deployed", "")
+	setCond(cb, "ScanStorageReady", metav1.ConditionFalse, "ScanStoragePending", "PVC pending")
+	setRollupConditions(cb)
+	if c := meta.FindStatusCondition(cb.Status.Conditions, "Degraded"); c == nil || c.Status != metav1.ConditionTrue || c.Reason != "ScanStoragePending" {
+		t.Fatalf("Degraded for pending storage: %+v", c)
+	}
+	setCond(cb, "ScanStorageReady", metav1.ConditionTrue, "AsExpected", "")
+	setRollupConditions(cb)
+	if c := meta.FindStatusCondition(cb.Status.Conditions, "Degraded"); c == nil || c.Status != metav1.ConditionFalse {
+		t.Fatalf("Degraded must clear: %+v", c)
+	}
 }
 
 func TestConditionProgressing(t *testing.T) {
@@ -102,11 +135,11 @@ func TestPluginDeploymentUnavailable(t *testing.T) {
 	old := metav1.NewTime(now.Add(-10 * time.Minute))
 	dep := &appsv1.Deployment{}
 	dep.CreationTimestamp = old
-	if !pluginDeploymentUnavailable(dep, 5*time.Minute) {
+	if !pluginDeploymentUnavailable(dep) {
 		t.Fatal("old creation without Available condition should be unavailable")
 	}
 	dep.CreationTimestamp = now
-	if pluginDeploymentUnavailable(dep, 5*time.Minute) {
+	if pluginDeploymentUnavailable(dep) {
 		t.Fatal("fresh creation should still be waiting")
 	}
 	// Old object with a *recent* Available=False must still be Waiting, not Unavailable.
@@ -116,17 +149,17 @@ func TestPluginDeploymentUnavailable(t *testing.T) {
 		Status:             corev1.ConditionFalse,
 		LastTransitionTime: now,
 	}}
-	if pluginDeploymentUnavailable(dep, 5*time.Minute) {
+	if pluginDeploymentUnavailable(dep) {
 		t.Fatal("recent Available=False on old Deployment must not count as Unavailable")
 	}
 	dep.Status.Conditions[0].LastTransitionTime = old
-	if !pluginDeploymentUnavailable(dep, 5*time.Minute) {
+	if !pluginDeploymentUnavailable(dep) {
 		t.Fatal("Available=False for >timeout should be unavailable")
 	}
 	// Available=True must never flip to Unavailable even if ReadyReplicas is 0.
 	dep.Status.Conditions[0].Status = corev1.ConditionTrue
 	dep.Status.Conditions[0].LastTransitionTime = old
-	if pluginDeploymentUnavailable(dep, 5*time.Minute) {
+	if pluginDeploymentUnavailable(dep) {
 		t.Fatal("Available=True must not count as Unavailable")
 	}
 }

@@ -212,6 +212,7 @@ func FuzzScore(f *testing.F) {
 	f.Add(int32(0), int32(1))
 	f.Add(int32(2), int32(1))
 	f.Add(int32(-1), int32(5))
+	f.Add(int32(2147483647), int32(0)) // int32-overflow regression seed
 	f.Fuzz(func(t *testing.T, pass, fail int32) {
 		s := score(pass, fail)
 		if pass < 0 || fail < 0 || pass+fail == 0 {
@@ -226,7 +227,7 @@ func FuzzScore(f *testing.F) {
 		if *s < 0 || *s > 100 {
 			t.Fatalf("score %d out of range", *s)
 		}
-		want := pass * 100 / (pass + fail)
+		want := int32(int64(pass) * 100 / (int64(pass) + int64(fail)))
 		if *s != want {
 			t.Fatalf("got %d want %d", *s, want)
 		}

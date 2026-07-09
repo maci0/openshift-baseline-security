@@ -103,10 +103,11 @@ func main() {
 	}
 }
 
-// isLoopbackMetricsAddr is true for disabled ("0"), empty (defaults elsewhere),
-// or explicit 127.0.0.1 / localhost binds.
+// isLoopbackMetricsAddr is true for disabled ("0") or explicit
+// 127.0.0.1 / localhost binds. Empty is NOT safe: controller-runtime
+// defaults an empty BindAddress to ":8080" (all interfaces).
 func isLoopbackMetricsAddr(addr string) bool {
-	if addr == "" || addr == "0" {
+	if addr == "0" {
 		return true
 	}
 	host := addr

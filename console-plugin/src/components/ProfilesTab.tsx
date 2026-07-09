@@ -54,7 +54,12 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => 
       await k8sPatch({
         model: ClusterBaselineModel,
         resource: baseline,
-        data: [{ op: 'replace', path: '/spec/profiles', value: profiles }],
+        // test op: reject the patch if another writer changed profiles since
+        // this render, instead of silently clobbering their change.
+        data: [
+          { op: 'test', path: '/spec/profiles', value: baseline.spec.profiles ?? [] },
+          { op: 'replace', path: '/spec/profiles', value: profiles },
+        ],
       });
     } catch (e) {
       setError(e instanceof Error ? e.message : t('Failed to update profiles.'));

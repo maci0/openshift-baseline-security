@@ -1,6 +1,35 @@
-# Optional: scrape secure metrics via user-workload monitoring.
-# Bind the scrape SA to ClusterRole baseline-security-metrics-reader (GET /metrics).
-# Install when monitoring.coreos.com is available (e.g. user-workload monitoring).
+# Optional: scrape secure metrics via user-workload monitoring (UWM).
+# UWM denies on-disk credentials (bearerTokenFile / caFile), so the scrape
+# token comes from a Secret bound to a dedicated scraper ServiceAccount that
+# holds the baseline-security-metrics-reader ClusterRole.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: baseline-security-metrics-scraper
+  namespace: openshift-baseline-security
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: baseline-security-metrics-scraper-token
+  namespace: openshift-baseline-security
+  annotations:
+    kubernetes.io/service-account.name: baseline-security-metrics-scraper
+type: kubernetes.io/service-account-token
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: baseline-security-metrics-scraper
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: baseline-security-metrics-reader
+subjects:
+  - kind: ServiceAccount
+    name: baseline-security-metrics-scraper
+    namespace: openshift-baseline-security
+---
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
@@ -19,6 +48,10 @@ spec:
       path: /metrics
       interval: 30s
       tlsConfig:
-        # service-ca signed serving cert; use CA bundle when available.
+        # service-ca signed serving cert; UWM forbids caFile paths.
         insecureSkipVerify: true
-      bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
+      authorization:
+        type: Bearer
+        credentials:
+          name: baseline-security-metrics-scraper-token
+          key: token

@@ -36,7 +36,7 @@ fuzz:
 	go test ./internal/controller/ -run=^$$ -fuzz=FuzzAppendHistoryRing -fuzztime=3s
 	go test ./internal/controller/ -run=^$$ -fuzz=FuzzProfileNames -fuzztime=3s
 
-GOLANGCI_LINT_VERSION ?= latest
+GOLANGCI_LINT_VERSION ?= v2.12.2
 .PHONY: lint
 lint:
 	go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION) run ./...
@@ -75,7 +75,7 @@ CATALOG_IMG ?= quay.io/openshift-baseline-security/baseline-security-operator-ca
 .PHONY: bundle
 bundle: manifests verify-csv-rbac
 	cp config/crd/bases/baselinesecurity.io_clusterbaselines.yaml bundle/manifests/
-	docker run --rm -v $(CURDIR)/bundle:/bundle:Z quay.io/operator-framework/operator-sdk:latest bundle validate /bundle
+	docker run --rm -v $(CURDIR)/bundle:/bundle:Z quay.io/operator-framework/operator-sdk@sha256:d68086836ecc9ddb28f5785815a88f5dcb33beb00e0271e3056dd13d8d352b36 bundle validate /bundle
 
 # CSV clusterPermissions are hand-maintained; fail if they drift from role.yaml
 # on verbs we know matter for zero-config (clusterbaselines create).
@@ -97,7 +97,7 @@ bundle-push:
 .PHONY: catalog-build
 catalog-build:
 	mkdir -p catalog
-	docker run --rm quay.io/operator-framework/opm:latest render $(BUNDLE_IMG) --output=yaml > catalog/bundle.yaml
+	docker run --rm quay.io/operator-framework/opm@sha256:e1be045e4a8558624eab2320d548b5fd557b0a0a07ebd33876b71f0778a444e4 render $(BUNDLE_IMG) --output=yaml > catalog/bundle.yaml
 	printf 'schema: olm.package\nname: baseline-security-operator\ndefaultChannel: alpha\n---\nschema: olm.channel\npackage: baseline-security-operator\nname: alpha\nentries:\n  - name: baseline-security-operator.v0.1.0\n' > catalog/package.yaml
-	docker run --rm -v $(CURDIR)/catalog:/catalog:Z quay.io/operator-framework/opm:latest validate /catalog
+	docker run --rm -v $(CURDIR)/catalog:/catalog:Z quay.io/operator-framework/opm@sha256:e1be045e4a8558624eab2320d548b5fd557b0a0a07ebd33876b71f0778a444e4 validate /catalog
 	docker build -f catalog.Dockerfile -t $(CATALOG_IMG) .

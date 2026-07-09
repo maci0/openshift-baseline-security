@@ -33,6 +33,7 @@ import {
   ComplianceCheckResult,
   ComplianceCheckResultGVK,
   isOwnedByBaseline,
+  suiteProfileKey,
 } from '../models';
 import { checkBody, checkTitle } from '../utils';
 
@@ -45,6 +46,7 @@ const statusLabel: Record<
   ERROR: { color: 'red', icon: <ExclamationCircleIcon /> },
   MANUAL: { color: 'orange', icon: <ExclamationTriangleIcon /> },
   INFO: { color: 'blue', icon: <InfoCircleIcon /> },
+  INCONSISTENT: { color: 'orange', icon: <ExclamationTriangleIcon /> },
   'NOT-APPLICABLE': { color: 'grey', icon: <MinusCircleIcon /> },
 };
 
@@ -101,9 +103,9 @@ const ResultsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => {
   const profileItems = React.useMemo(() => {
     const keys = new Set(profiles ?? []);
     for (const r of ownedResults) {
-      const suite = r.metadata.labels?.['compliance.openshift.io/suite'];
-      if (suite?.startsWith('baseline-')) {
-        keys.add(suite.slice('baseline-'.length));
+      const key = suiteProfileKey(r.metadata.labels);
+      if (key !== undefined) {
+        keys.add(key);
       }
     }
     return [...keys].sort().map((k) => ({ id: k, title: k }));
@@ -116,7 +118,7 @@ const ResultsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => {
         type: 'result-status',
         reducer: (r) => r.status,
         filter: (input, r) => !input.selected?.length || input.selected.includes(r.status),
-        items: ['PASS', 'FAIL', 'MANUAL', 'ERROR', 'INFO', 'NOT-APPLICABLE'].map((s) => ({
+        items: ['PASS', 'FAIL', 'MANUAL', 'ERROR', 'INFO', 'INCONSISTENT', 'NOT-APPLICABLE'].map((s) => ({
           id: s,
           title: s,
         })),
@@ -131,16 +133,10 @@ const ResultsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => {
       {
         filterGroupName: t('Profiles'),
         type: 'result-profile',
-        reducer: (r) => {
-          const suite = r.metadata.labels?.['compliance.openshift.io/suite'] ?? '';
-          return suite.startsWith('baseline-') ? suite.slice('baseline-'.length) : '';
-        },
-        filter: (input, r) => {
-          if (!input.selected?.length) return true;
-          const suite = r.metadata.labels?.['compliance.openshift.io/suite'] ?? '';
-          const key = suite.startsWith('baseline-') ? suite.slice('baseline-'.length) : '';
-          return input.selected.includes(key);
-        },
+        reducer: (r) => suiteProfileKey(r.metadata.labels) ?? '',
+        filter: (input, r) =>
+          !input.selected?.length ||
+          input.selected.includes(suiteProfileKey(r.metadata.labels) ?? ''),
         items: profileItems,
       },
     ],

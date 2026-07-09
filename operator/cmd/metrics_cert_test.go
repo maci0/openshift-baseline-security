@@ -6,8 +6,9 @@ import (
 	"testing"
 	"time"
 
-	certutil "k8s.io/client-go/util/cert"
 	"net"
+
+	certutil "k8s.io/client-go/util/cert"
 )
 
 func writeTestPair(t *testing.T, dir string) {
@@ -68,12 +69,13 @@ func TestMetricsCertProviderLoadsAndReloads(t *testing.T) {
 }
 
 func TestIsLoopbackMetricsAddr(t *testing.T) {
-	for _, a := range []string{"0", "", "127.0.0.1:8080", "localhost:8443", "[::1]:8443"} {
+	for _, a := range []string{"0", "127.0.0.1:8080", "localhost:8443", "[::1]:8443"} {
 		if !isLoopbackMetricsAddr(a) {
 			t.Fatalf("%q should be loopback", a)
 		}
 	}
-	for _, a := range []string{":8443", "0.0.0.0:8443", "[::]:8443"} {
+	// Empty is not safe: controller-runtime defaults it to ":8080" (all interfaces).
+	for _, a := range []string{"", ":8443", "0.0.0.0:8443", "[::]:8443"} {
 		if isLoopbackMetricsAddr(a) {
 			t.Fatalf("%q should not be loopback", a)
 		}

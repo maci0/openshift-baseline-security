@@ -1,0 +1,16 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: baseline-security-admin
+  labels:
+    rbac.authorization.k8s.io/aggregate-to-admin: "true"
+rules:
+  - apiGroups: [baselinesecurity.io]
+    resources: [clusterbaselines]
+    verbs: [get, list, watch, update, patch]
+  - apiGroups: [compliance.openshift.io]
+    resources: [compliancescans]
+    verbs: [get, list, watch, patch]
+  - apiGroups: [compliance.openshift.io]
+    resources: [complianceremediations]
+    verbs: [get, list, watch, update, patch]

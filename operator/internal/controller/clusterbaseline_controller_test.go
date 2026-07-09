@@ -13,6 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	baselinev1alpha1 "github.com/openshift-baseline-security/baseline-security-operator/api/v1alpha1"
@@ -140,7 +141,7 @@ func TestRecordHistoryRing(t *testing.T) {
 			Score: int32(i),
 		})
 	}
-	r.recordHistory(context.Background(), cb, 77)
+	r.recordHistory(context.Background(), cb, ptr.To(int32(77)))
 	if len(cb.Status.History) != 30 {
 		t.Fatalf("history len = %d, want 30", len(cb.Status.History))
 	}
@@ -150,8 +151,12 @@ func TestRecordHistoryRing(t *testing.T) {
 	if cb.Status.LastScanTime == nil {
 		t.Fatal("LastScanTime not set")
 	}
+	// Must equal the owned scan's endTimestamp; the foreign scan is later but excluded.
+	if !cb.Status.LastScanTime.Time.Equal(time.Date(2026, 7, 9, 1, 0, 0, 0, time.UTC)) {
+		t.Fatalf("LastScanTime = %v, foreign scan leaked into history", cb.Status.LastScanTime)
+	}
 	before := len(cb.Status.History)
-	r.recordHistory(context.Background(), cb, 88)
+	r.recordHistory(context.Background(), cb, ptr.To(int32(88)))
 	if len(cb.Status.History) != before {
 		t.Fatalf("duplicate history append: len %d", len(cb.Status.History))
 	}
@@ -166,7 +171,7 @@ func TestRecordHistoryNoOwnedScans(t *testing.T) {
 	cb := &baselinev1alpha1.ClusterBaseline{
 		Spec: baselinev1alpha1.ClusterBaselineSpec{Profiles: []baselinev1alpha1.ProfileKey{"cis"}},
 	}
-	r.recordHistory(context.Background(), cb, 50)
+	r.recordHistory(context.Background(), cb, ptr.To(int32(50)))
 	if cb.Status.LastScanTime != nil || len(cb.Status.History) != 0 {
 		t.Fatalf("expected no history, got last=%v hist=%v", cb.Status.LastScanTime, cb.Status.History)
 	}

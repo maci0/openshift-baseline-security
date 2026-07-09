@@ -40,7 +40,14 @@ export const ClusterBaselineModel = model(ClusterBaselineGVK, 'clusterbaselines'
 export const ComplianceScanModel = model(ComplianceScanGVK, 'compliancescans', true);
 export const ComplianceRemediationModel = model(ComplianceRemediationGVK, 'complianceremediations', true);
 
-export type CheckStatus = 'PASS' | 'FAIL' | 'INFO' | 'MANUAL' | 'ERROR' | 'NOT-APPLICABLE';
+export type CheckStatus =
+  | 'PASS'
+  | 'FAIL'
+  | 'INFO'
+  | 'MANUAL'
+  | 'ERROR'
+  | 'INCONSISTENT'
+  | 'NOT-APPLICABLE';
 
 export type ComplianceCheckResult = {
   metadata: { name: string; namespace: string; labels?: Record<string, string> };
@@ -89,12 +96,22 @@ export type ClusterBaseline = {
   };
 };
 
+/**
+ * Profile key encoded in a CO object's suite label ("baseline-<key>",
+ * mirroring bindingName in the operator), or undefined when not ours.
+ */
+export const suiteProfileKey = (
+  labels: Record<string, string> | undefined,
+): string | undefined => {
+  const suite = labels?.['compliance.openshift.io/suite'];
+  return suite?.startsWith('baseline-') ? suite.slice('baseline-'.length) : undefined;
+};
+
 /** True when a CO object belongs to a baseline-* suite for a selected profile. */
 export const isOwnedByBaseline = (
   labels: Record<string, string> | undefined,
   profiles: string[] | undefined,
 ): boolean => {
-  const suite = labels?.['compliance.openshift.io/suite'];
-  // suite = "baseline-<key>"; bindingName in the operator.
-  return !!suite?.startsWith('baseline-') && !!profiles?.includes(suite.slice('baseline-'.length));
+  const key = suiteProfileKey(labels);
+  return key !== undefined && !!profiles?.includes(key);
 };

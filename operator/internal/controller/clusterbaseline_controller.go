@@ -66,7 +66,8 @@ type ClusterBaselineReconciler struct {
 // +kubebuilder:rbac:groups=compliance.openshift.io,resources=compliancecheckresults;compliancescans,verbs=get;list;watch
 // +kubebuilder:rbac:groups=operators.coreos.com,resources=subscriptions;operatorgroups,verbs=get;list;watch;create
 // +kubebuilder:rbac:groups=operators.coreos.com,resources=clusterserviceversions,verbs=get;list;watch
-// +kubebuilder:rbac:groups="",resources=namespaces;services,verbs=get;list;watch;create;update;patch
+// +kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch;create
+// +kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;watch
 // +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=console.openshift.io,resources=consoleplugins,verbs=get;list;watch;create;update;patch;delete
@@ -93,23 +94,17 @@ func (r *ClusterBaselineReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return ctrl.Result{}, r.Update(ctx, cb) // update requeues
 	}
 
-	if err := r.ensureComplianceOperator(ctx, cb); err != nil {
-		return ctrl.Result{}, fmt.Errorf("ensuring compliance operator: %w", err)
-	}
-	if err := r.ensureScanConfig(ctx, cb); err != nil {
-		return ctrl.Result{}, fmt.Errorf("ensuring scan config: %w", err)
-	}
-	if err := r.ensureConsolePlugin(ctx, cb); err != nil {
-		return ctrl.Result{}, fmt.Errorf("ensuring console plugin: %w", err)
-	}
-	if err := r.aggregateStatus(ctx, cb); err != nil {
-		return ctrl.Result{}, fmt.Errorf("aggregating status: %w", err)
-	}
-	if err := r.checkScanStorage(ctx, cb); err != nil {
-		return ctrl.Result{}, fmt.Errorf("checking scan storage: %w", err)
+	if err := r.reconcileOwned(ctx, cb); err != nil {
+		// Persist a Degraded condition (best-effort) so a persistently failing
+		// reconcile is visible on the CR instead of leaving stale healthy status.
+		setRollupConditions(cb)
+		setCond(cb, "Degraded", metav1.ConditionTrue, "ReconcileError", err.Error())
+		if serr := r.Status().Update(ctx, cb); serr != nil {
+			logger.V(1).Info("status update after reconcile error failed", "error", serr)
+		}
+		return ctrl.Result{}, err
 	}
 	// OpenShift-style rollup conditions (Available / Progressing / Degraded).
-	// Degraded is set by checkScanStorage; Available/Progressing summarize readiness.
 	setRollupConditions(cb)
 	if err := r.Status().Update(ctx, cb); err != nil {
 		return ctrl.Result{}, err
@@ -121,6 +116,26 @@ func (r *ClusterBaselineReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		requeue = 15 * time.Second
 	}
 	return ctrl.Result{RequeueAfter: requeue}, nil
+}
+
+// reconcileOwned drives every owned object and refreshes status fields.
+func (r *ClusterBaselineReconciler) reconcileOwned(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline) error {
+	if err := r.ensureComplianceOperator(ctx, cb); err != nil {
+		return fmt.Errorf("ensuring compliance operator: %w", err)
+	}
+	if err := r.ensureScanConfig(ctx, cb); err != nil {
+		return fmt.Errorf("ensuring scan config: %w", err)
+	}
+	if err := r.ensureConsolePlugin(ctx, cb); err != nil {
+		return fmt.Errorf("ensuring console plugin: %w", err)
+	}
+	if err := r.aggregateStatus(ctx, cb); err != nil {
+		return fmt.Errorf("aggregating status: %w", err)
+	}
+	if err := r.checkScanStorage(ctx, cb); err != nil {
+		return fmt.Errorf("checking scan storage: %w", err)
+	}
+	return nil
 }
 
 func bindingName(key baselinev1alpha1.ProfileKey) string { return "baseline-" + string(key) }
@@ -155,11 +170,12 @@ func profileKeyFromSuite(suite string) (baselinev1alpha1.ProfileKey, bool) {
 }
 
 // score is pass/(pass+fail)*100, or nil when there are no countable results.
+// Widened to int64 so pass*100 cannot overflow int32.
 func score(pass, fail int32) *int32 {
 	if pass < 0 || fail < 0 || pass+fail == 0 {
 		return nil
 	}
-	s := pass * 100 / (pass + fail)
+	s := int32(int64(pass) * 100 / (int64(pass) + int64(fail)))
 	return &s
 }
 
@@ -217,11 +233,13 @@ func conditionProgressing(c *metav1.Condition) bool {
 	}
 }
 
-// setRollupConditions sets Available and Progressing from detail conditions.
+// setRollupConditions sets Available, Progressing, and Degraded from the
+// detail conditions (ClusterOperator-style rollups).
 func setRollupConditions(cb *baselinev1alpha1.ClusterBaseline) {
 	co := meta.FindStatusCondition(cb.Status.Conditions, "ComplianceOperatorReady")
 	scan := meta.FindStatusCondition(cb.Status.Conditions, "ScanConfigured")
 	plugin := meta.FindStatusCondition(cb.Status.Conditions, "ConsolePluginReady")
+	storage := meta.FindStatusCondition(cb.Status.Conditions, "ScanStorageReady")
 
 	coReady := co != nil && co.Status == metav1.ConditionTrue
 	scanOK := scan != nil && scan.Status == metav1.ConditionTrue
@@ -236,6 +254,16 @@ func setRollupConditions(cb *baselinev1alpha1.ClusterBaseline) {
 		setCond(cb, "Available", metav1.ConditionTrue, "AsExpected", "compliance operator ready and scans configured")
 	} else {
 		setCond(cb, "Available", metav1.ConditionFalse, "NotReady", "waiting for compliance operator and scan configuration")
+	}
+	// Degraded: persistent failures that are not mere installation progress:
+	// scan result storage wedged, or the plugin down past its grace period.
+	switch {
+	case storage != nil && storage.Status == metav1.ConditionFalse:
+		setCond(cb, "Degraded", metav1.ConditionTrue, storage.Reason, storage.Message)
+	case plugin != nil && plugin.Status == metav1.ConditionFalse && plugin.Reason == "Unavailable":
+		setCond(cb, "Degraded", metav1.ConditionTrue, "ConsolePluginUnavailable", plugin.Message)
+	default:
+		setCond(cb, "Degraded", metav1.ConditionFalse, "AsExpected", "")
 	}
 }
 
@@ -415,14 +443,12 @@ func (r *ClusterBaselineReconciler) ensureScanConfig(ctx context.Context, cb *ba
 }
 
 // checkScanStorage flags Degraded when owned scan PVCs stay Pending (no default SC).
+// checkScanStorage sets the ScanStorageReady detail condition; the Degraded
+// rollup propagates it. Listing in a nonexistent namespace returns an empty
+// list, so no NotFound handling is needed.
 func (r *ClusterBaselineReconciler) checkScanStorage(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline) error {
 	pvcs := &corev1.PersistentVolumeClaimList{}
 	if err := r.List(ctx, pvcs, client.InNamespace(complianceNamespace)); err != nil {
-		// Namespace may not exist yet while CO is installing.
-		if apierrors.IsNotFound(err) {
-			setCond(cb, "Degraded", metav1.ConditionFalse, "AsExpected", "")
-			return nil
-		}
 		return err
 	}
 	profiles := map[string]bool{}
@@ -440,12 +466,12 @@ func (r *ClusterBaselineReconciler) checkScanStorage(ctx context.Context, cb *ba
 		}
 	}
 	if len(pending) > 0 {
-		setCond(cb, "Degraded", metav1.ConditionTrue, "ScanStoragePending",
+		setCond(cb, "ScanStorageReady", metav1.ConditionFalse, "ScanStoragePending",
 			fmt.Sprintf("PVC(s) %s/%s Pending >2m; need a default StorageClass",
 				complianceNamespace, strings.Join(pending, ", ")))
 		return nil
 	}
-	setCond(cb, "Degraded", metav1.ConditionFalse, "AsExpected", "")
+	setCond(cb, "ScanStorageReady", metav1.ConditionTrue, "AsExpected", "")
 	return nil
 }
 
@@ -536,16 +562,14 @@ func (r *ClusterBaselineReconciler) aggregateStatus(ctx context.Context, cb *bas
 	for _, key := range cb.Spec.Profiles {
 		cb.Status.Profiles = append(cb.Status.Profiles, *byProfile[key])
 	}
-	if s := score(pass, fail); s != nil {
-		cb.Status.Score = s
-		r.recordHistory(ctx, cb, *s)
-	} else {
-		cb.Status.Score = nil
-	}
+	// LastScanTime is tracked even when no score is computable (all MANUAL /
+	// ERROR / NOT-APPLICABLE results) so completed scans stay visible.
+	cb.Status.Score = score(pass, fail)
+	r.recordHistory(ctx, cb, cb.Status.Score)
 	return nil
 }
 
-func (r *ClusterBaselineReconciler) recordHistory(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline, s int32) {
+func (r *ClusterBaselineReconciler) recordHistory(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline, s *int32) {
 	scans := uList(scanGVK)
 	if err := r.List(ctx, scans, client.InNamespace(complianceNamespace)); err != nil {
 		return
@@ -569,7 +593,9 @@ func (r *ClusterBaselineReconciler) recordHistory(ctx context.Context, cb *basel
 		return
 	}
 	cb.Status.LastScanTime = &last
-	cb.Status.History = appendHistoryRing(cb.Status.History, last, s, historyMax)
+	if s != nil {
+		cb.Status.History = appendHistoryRing(cb.Status.History, last, *s, historyMax)
+	}
 }
 
 func (r *ClusterBaselineReconciler) ensureConsolePlugin(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline) error {
@@ -644,6 +670,12 @@ func (r *ClusterBaselineReconciler) ensureConsolePlugin(ctx context.Context, cb 
 		}
 		return controllerutil.SetControllerReference(cb, cp, r.Scheme)
 	}); err != nil {
+		if meta.IsNoMatchError(err) {
+			// Console capability disabled: no ConsolePlugin CRD on the cluster.
+			setCond(cb, "ConsolePluginReady", metav1.ConditionFalse, "ConsoleMissing",
+				"console CRDs not available (Console capability disabled)")
+			return nil
+		}
 		return err
 	}
 
@@ -659,10 +691,10 @@ func (r *ClusterBaselineReconciler) ensureConsolePlugin(ctx context.Context, cb 
 		_ = unstructured.SetNestedStringSlice(console.Object, append(plugins, pluginName), "spec", "plugins")
 		return r.Update(ctx, console)
 	}); err != nil {
-		if apierrors.IsNotFound(err) {
+		if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) {
 			// Soft-fail: still deploy plugin objects; registration retries later.
 			setCond(cb, "ConsolePluginReady", metav1.ConditionFalse, "ConsoleMissing",
-				"consoles.operator.openshift.io/cluster not found")
+				"consoles.operator.openshift.io/cluster not available")
 			return nil
 		}
 		return err
@@ -677,7 +709,7 @@ func (r *ClusterBaselineReconciler) ensureConsolePlugin(ctx context.Context, cb 
 	if dep.Status.ReadyReplicas < pluginReplicas {
 		reason, msg := "WaitingForPods",
 			fmt.Sprintf("Deployment %s/%s has %d/%d ready replicas", pluginNS, pluginName, dep.Status.ReadyReplicas, pluginReplicas)
-		if pluginDeploymentUnavailable(dep, 5*time.Minute) {
+		if pluginDeploymentUnavailable(dep) {
 			reason = "Unavailable"
 			msg = fmt.Sprintf("Deployment %s/%s has no ready pods for >5m", pluginNS, pluginName)
 		}
@@ -704,14 +736,16 @@ func deploymentAvailable(dep *appsv1.Deployment) bool {
 	return false
 }
 
+// pluginUnavailableGrace is how long the plugin Deployment may be unavailable
+// before it is reported as Degraded rather than merely progressing.
+const pluginUnavailableGrace = 5 * time.Minute
+
 // pluginDeploymentUnavailable is true when the Deployment has been continuously
-// unavailable longer than timeout. Prefer the Available condition's
+// unavailable longer than pluginUnavailableGrace. Prefer the Available condition's
 // LastTransitionTime so a brief ReadyReplicas dip on an old Deployment is not
 // treated as a permanent failure.
-func pluginDeploymentUnavailable(dep *appsv1.Deployment, timeout time.Duration) bool {
-	if timeout <= 0 {
-		return false
-	}
+func pluginDeploymentUnavailable(dep *appsv1.Deployment) bool {
+	timeout := pluginUnavailableGrace
 	for _, c := range dep.Status.Conditions {
 		if c.Type != appsv1.DeploymentAvailable {
 			continue
@@ -728,6 +762,8 @@ func pluginDeploymentUnavailable(dep *appsv1.Deployment, timeout time.Duration) 
 
 // applyPluginContainer sets the plugin container, volume mounts, and volumes on the pod spec.
 func applyPluginContainer(pod *corev1.PodSpec, image string) {
+	// nginx serves static files; it never talks to the API server.
+	pod.AutomountServiceAccountToken = ptr.To(false)
 	container := corev1.Container{
 		Name:  pluginName,
 		Image: image,
