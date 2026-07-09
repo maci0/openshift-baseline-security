@@ -20,11 +20,31 @@ export const toggledProfiles = (
 };
 
 // JSON patch for spec.remediation.autoApply: 'add' must create the parent
-// object when spec.remediation is absent, 'replace' must not clobber siblings.
+// object when spec.remediation is absent/null, 'replace' must not clobber siblings.
 export const autoApplyPatch = (hasRemediation: boolean, checked: boolean) =>
   hasRemediation
     ? [{ op: 'replace' as const, path: '/spec/remediation/autoApply', value: checked }]
     : [{ op: 'add' as const, path: '/spec/remediation', value: { autoApply: checked } }];
+
+// JSON patch to trigger a Compliance Operator rescan. value must change each
+// click so a re-rescan is observed when the annotation already exists.
+// When metadata.annotations is missing, add the whole map (nested add fails).
+export const rescanPatch = (hasAnnotations: boolean, value: string) =>
+  hasAnnotations
+    ? [
+        {
+          op: 'add' as const,
+          path: '/metadata/annotations/compliance.openshift.io~1rescan',
+          value,
+        },
+      ]
+    : [
+        {
+          op: 'add' as const,
+          path: '/metadata/annotations',
+          value: { 'compliance.openshift.io/rescan': value },
+        },
+      ];
 
 // PatternFly semantic status color token for a 0-100 score.
 export const scoreColor = (score?: number): string =>
@@ -33,3 +53,10 @@ export const scoreColor = (score?: number): string =>
     : score < 90
       ? 'var(--pf-t--global--icon--color--status--warning--default)'
       : 'var(--pf-t--global--icon--color--status--success--default)';
+
+// Deep-link into Results with a status row filter (PASS/FAIL/…).
+// Strip unpaired surrogates so encodeURIComponent never throws on garbage.
+export const resultsHref = (filter: string): string =>
+  `/baseline-security/results?rowFilter-result-status=${encodeURIComponent(
+    filter.replace(/[\uD800-\uDFFF]/g, ''),
+  )}`;

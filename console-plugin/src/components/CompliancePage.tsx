@@ -22,13 +22,19 @@ import {
   ComplianceScanModel,
   isOwnedByBaseline,
 } from '../models';
+import { rescanPatch } from '../utils';
 import Overview from './Overview';
 import ResultsTab from './ResultsTab';
 import ProfilesTab from './ProfilesTab';
 import RemediationsTab from './RemediationsTab';
 
 type Scan = {
-  metadata: { name: string; namespace: string; labels?: Record<string, string> };
+  metadata: {
+    name: string;
+    namespace: string;
+    labels?: Record<string, string>;
+    annotations?: Record<string, string>;
+  };
 };
 
 const CompliancePage: React.FC = () => {
@@ -61,19 +67,15 @@ const CompliancePage: React.FC = () => {
   const rescan = async () => {
     setRescanning(true);
     setRescanError(null);
+    // Unique value so a second click still mutates the annotation (CO watches changes).
+    const token = String(Date.now());
     try {
       const results = await Promise.allSettled(
         ownedScans.map((s) =>
           k8sPatch({
             model: ComplianceScanModel,
             resource: s,
-            data: [
-              {
-                op: 'add',
-                path: '/metadata/annotations/compliance.openshift.io~1rescan',
-                value: '',
-              },
-            ],
+            data: rescanPatch(s.metadata.annotations != null, token),
           }),
         ),
       );

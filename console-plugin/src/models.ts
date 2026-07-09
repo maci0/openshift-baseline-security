@@ -95,5 +95,6 @@ export const isOwnedByBaseline = (
   profiles: string[] | undefined,
 ): boolean => {
   const suite = labels?.['compliance.openshift.io/suite'];
-  return !!suite && !!profiles?.some((p) => suite === `baseline-${p}`);
+  // suite = "baseline-<key>"; bindingName in the operator.
+  return !!suite?.startsWith('baseline-') && !!profiles?.includes(suite.slice('baseline-'.length));
 };

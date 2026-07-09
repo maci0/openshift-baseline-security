@@ -68,37 +68,40 @@ const RemediationsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline })
     [remediations, baseline?.spec.profiles],
   );
 
-  const setApply = async (rem: ComplianceRemediation, apply: boolean) => {
+  const run = async (fn: () => Promise<unknown>, failMsg: string) => {
     setBusy(true);
     setError(null);
     try {
-      await k8sPatch({
-        model: ComplianceRemediationModel,
-        resource: rem,
-        data: [{ op: 'replace', path: '/spec/apply', value: apply }],
-      });
+      await fn();
     } catch (e) {
-      setError(e instanceof Error ? e.message : t('Failed to update remediation.'));
+      setError(e instanceof Error ? e.message : failMsg);
     } finally {
       setBusy(false);
     }
   };
 
-  const toggleAutoApply = async (checked: boolean) => {
+  const setApply = (rem: ComplianceRemediation, apply: boolean) =>
+    run(
+      () =>
+        k8sPatch({
+          model: ComplianceRemediationModel,
+          resource: rem,
+          data: [{ op: 'replace', path: '/spec/apply', value: apply }],
+        }),
+      t('Failed to update remediation.'),
+    );
+
+  const toggleAutoApply = (checked: boolean) => {
     if (!baseline) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await k8sPatch({
-        model: ClusterBaselineModel,
-        resource: baseline,
-        data: autoApplyPatch(baseline.spec.remediation !== undefined, checked),
-      });
-    } catch (e) {
-      setError(e instanceof Error ? e.message : t('Failed to update auto-apply setting.'));
-    } finally {
-      setBusy(false);
-    }
+    void run(
+      () =>
+        k8sPatch({
+          model: ClusterBaselineModel,
+          resource: baseline,
+          data: autoApplyPatch(baseline.spec.remediation != null, checked),
+        }),
+      t('Failed to update auto-apply setting.'),
+    );
   };
 
   return (
@@ -126,9 +129,7 @@ const RemediationsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline })
             label={t('Auto-apply remediations after each scan')}
             isChecked={baseline?.spec.remediation?.autoApply ?? false}
             isDisabled={!baseline || !canEditBaseline || busy}
-            onChange={(_e, checked) => {
-              void toggleAutoApply(checked);
-            }}
+            onChange={(_e, checked) => toggleAutoApply(checked)}
           />
         </SplitItem>
       </Split>
@@ -162,9 +163,7 @@ const RemediationsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline })
                         variant="link"
                         isInline
                         isDisabled={!canApply || busy}
-                        onClick={() => {
-                          void setApply(rem, false);
-                        }}
+                        onClick={() => void setApply(rem, false)}
                       >
                         {t('Unapply')}
                       </Button>
@@ -203,9 +202,7 @@ const RemediationsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline })
             variant="danger"
             isDisabled={busy}
             onClick={() => {
-              if (confirming) {
-                void setApply(confirming, true);
-              }
+              if (confirming) void setApply(confirming, true);
               setConfirming(null);
             }}
           >

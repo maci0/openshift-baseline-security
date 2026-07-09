@@ -38,8 +38,17 @@ func TestCheckScanStorageDegradedOnPendingPVC(t *testing.T) {
 		},
 		Status: corev1.PersistentVolumeClaimStatus{Phase: corev1.ClaimPending},
 	}
+	// Fresh pending PVC (<2m) for our profile must not flip Degraded yet.
+	fresh := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "ocp4-cis-node-master",
+			Namespace:         complianceNamespace,
+			CreationTimestamp: metav1.Time{Time: time.Now().Add(-30 * time.Second)},
+		},
+		Status: corev1.PersistentVolumeClaimStatus{Phase: corev1.ClaimPending},
+	}
 	r := &ClusterBaselineReconciler{
-		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(stale, other).Build(),
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(stale, other, fresh).Build(),
 		Scheme: scheme,
 	}
 
@@ -56,14 +65,38 @@ func TestCheckScanStorageDegradedOnPendingPVC(t *testing.T) {
 	if c.Message == "" || !strings.Contains(c.Message, "ocp4-cis") {
 		t.Fatalf("Message should list ocp4-cis: %q", c.Message)
 	}
+	if strings.Contains(c.Message, "ocp4-cis-node-master") {
+		t.Fatalf("fresh PVC should not be reported: %q", c.Message)
+	}
 
 	// Bound PVC clears it.
 	stale.Status.Phase = corev1.ClaimBound
-	r.Client = fake.NewClientBuilder().WithScheme(scheme).WithObjects(stale, other).Build()
+	r.Client = fake.NewClientBuilder().WithScheme(scheme).WithObjects(stale, other, fresh).Build()
 	if err := r.checkScanStorage(context.Background(), cb); err != nil {
 		t.Fatal(err)
 	}
 	if c := meta.FindStatusCondition(cb.Status.Conditions, "Degraded"); c == nil || c.Status != metav1.ConditionFalse {
 		t.Fatalf("Degraded condition = %+v, want False", c)
+	}
+}
+
+func TestCheckScanStorageEmptyNamespace(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := clientgoscheme.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).Build(),
+		Scheme: scheme,
+	}
+	cb := &baselinev1alpha1.ClusterBaseline{
+		Spec: baselinev1alpha1.ClusterBaselineSpec{Profiles: []baselinev1alpha1.ProfileKey{"cis"}},
+	}
+	if err := r.checkScanStorage(context.Background(), cb); err != nil {
+		t.Fatal(err)
+	}
+	c := meta.FindStatusCondition(cb.Status.Conditions, "Degraded")
+	if c == nil || c.Status != metav1.ConditionFalse {
+		t.Fatalf("%+v", c)
 	}
 }

@@ -31,10 +31,7 @@ import {
   ExclamationTriangleIcon,
 } from '@patternfly/react-icons';
 import { ClusterBaseline } from '../models';
-import { scoreColor } from '../utils';
-
-const resultsHref = (filter: string) =>
-  `/baseline-security/results?rowFilter-result-status=${filter}`;
+import { resultsHref, scoreColor } from '../utils';
 
 const CountRow: React.FC<{
   icon: React.ReactElement;

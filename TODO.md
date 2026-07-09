@@ -37,6 +37,10 @@
       opm catalog images need the cache precomputed at build time.
 
 ## Next
+- [ ] API: replace spec booleans (installComplianceOperator, console.enabled,
+      remediation.autoApply) with string enums per
+      openshift/enhancements dev-guide/api-conventions.md (before v1beta1;
+      see docs/STANDARDS.md)
 - [ ] Push versioned images + bundle/catalog to quay.io (needs quay login /
       robot token), swap CatalogSource image
 - [ ] community-operators submission once bundle is stable

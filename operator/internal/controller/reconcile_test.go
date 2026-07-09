@@ -205,17 +205,25 @@ func TestEnsureConsolePlugin(t *testing.T) {
 	cb := newCB("cis")
 
 	t.Setenv("RELATED_IMAGE_CONSOLE_PLUGIN", "")
-	if err := r.ensureConsolePlugin(context.Background(), cb); err == nil {
-		t.Fatal("want error when RELATED_IMAGE_CONSOLE_PLUGIN unset")
+	// Soft-fail: missing image must not block reconcile of scans/status.
+	if err := r.ensureConsolePlugin(context.Background(), cb); err != nil {
+		t.Fatal(err)
 	}
 	c := meta.FindStatusCondition(cb.Status.Conditions, "ConsolePluginReady")
-	if c == nil || c.Reason != "ImageMissing" {
+	if c == nil || c.Reason != "ImageMissing" || c.Status != metav1.ConditionFalse {
 		t.Fatalf("condition = %+v", c)
 	}
 
 	t.Setenv("RELATED_IMAGE_CONSOLE_PLUGIN", "example.test/plugin:1")
 	if err := r.ensureConsolePlugin(context.Background(), cb); err != nil {
 		t.Fatal(err)
+	}
+	svc := &corev1.Service{}
+	if err := r.Get(context.Background(), types.NamespacedName{Namespace: pluginNS, Name: pluginName}, svc); err != nil {
+		t.Fatal(err)
+	}
+	if svc.Annotations["service.beta.openshift.io/serving-cert-secret-name"] != pluginName+"-cert" {
+		t.Fatal("serving-cert annotation missing")
 	}
 	dep := &appsv1.Deployment{}
 	if err := r.Get(context.Background(), types.NamespacedName{Namespace: pluginNS, Name: pluginName}, dep); err != nil {
@@ -224,12 +232,9 @@ func TestEnsureConsolePlugin(t *testing.T) {
 	if img := dep.Spec.Template.Spec.Containers[0].Image; img != "example.test/plugin:1" {
 		t.Fatalf("image = %q", img)
 	}
-	svc := &corev1.Service{}
-	if err := r.Get(context.Background(), types.NamespacedName{Namespace: pluginNS, Name: pluginName}, svc); err != nil {
-		t.Fatal(err)
-	}
-	if svc.Annotations["service.beta.openshift.io/serving-cert-secret-name"] != pluginName+"-cert" {
-		t.Fatal("serving-cert annotation missing")
+	vol := dep.Spec.Template.Spec.Volumes[0].Secret
+	if vol == nil || vol.Optional == nil || !*vol.Optional {
+		t.Fatal("serving-cert volume must be optional until service-ca mints the Secret")
 	}
 	console := consoleCluster()
 	if err := r.Get(context.Background(), types.NamespacedName{Name: "cluster"}, console); err != nil {
@@ -270,5 +275,72 @@ func TestDeregisterConsolePluginNoop(t *testing.T) {
 	plugins, _, _ := unstructured.NestedStringSlice(console.Object, "spec", "plugins")
 	if len(plugins) != 1 || plugins[0] != "other" {
 		t.Fatalf("plugins = %v, want [other] untouched", plugins)
+	}
+}
+
+func TestEnsureConsolePluginDisabled(t *testing.T) {
+	scheme := testScheme(t)
+	dep := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: pluginName, Namespace: pluginNS}}
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).
+			WithObjects(dep, consoleCluster(pluginName, "other")).Build(),
+		Scheme: scheme,
+	}
+	cb := newCB("cis")
+	no := false
+	cb.Spec.Console.Enabled = &no
+	if err := r.ensureConsolePlugin(context.Background(), cb); err != nil {
+		t.Fatal(err)
+	}
+	err := r.Get(context.Background(), types.NamespacedName{Namespace: pluginNS, Name: pluginName}, &appsv1.Deployment{})
+	if !apierrors.IsNotFound(err) {
+		t.Fatalf("deployment should be gone, err=%v", err)
+	}
+	c := meta.FindStatusCondition(cb.Status.Conditions, "ConsolePluginReady")
+	if c == nil || c.Reason != "Disabled" {
+		t.Fatalf("%+v", c)
+	}
+}
+
+func TestReconcileNotFound(t *testing.T) {
+	scheme := testScheme(t)
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).Build(),
+		Scheme: scheme,
+	}
+	res, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: "cluster"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Requeue || res.RequeueAfter != 0 {
+		t.Fatalf("unexpected requeue: %+v", res)
+	}
+}
+
+func TestEnsureComplianceOperatorAlreadyInstalled(t *testing.T) {
+	scheme := testScheme(t)
+	csv := &unstructured.Unstructured{}
+	csv.SetGroupVersionKind(csvGVK)
+	csv.SetName("compliance-operator.v1.0.0")
+	csv.SetNamespace(complianceNamespace)
+	_ = unstructured.SetNestedField(csv.Object, "Succeeded", "status", "phase")
+	sub := &unstructured.Unstructured{}
+	sub.SetGroupVersionKind(subscriptionGVK)
+	sub.SetName("compliance-operator")
+	sub.SetNamespace(complianceNamespace)
+	_ = unstructured.SetNestedField(sub.Object, "compliance-operator.v1.0.0", "status", "installedCSV")
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(csv, sub).Build(),
+		Scheme: scheme,
+	}
+	cb := newCB("cis")
+	if err := r.ensureComplianceOperator(context.Background(), cb); err != nil {
+		t.Fatal(err)
+	}
+	c := meta.FindStatusCondition(cb.Status.Conditions, "ComplianceOperatorReady")
+	if c == nil || c.Status != metav1.ConditionTrue {
+		t.Fatalf("%+v", c)
 	}
 }

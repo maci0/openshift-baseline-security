@@ -25,6 +25,17 @@ vet:
 test: fmt vet
 	go test ./...
 
+# Short corpus-driven fuzz of pure helpers (matching, score, history ring).
+.PHONY: fuzz
+fuzz:
+	go test ./internal/controller/ -run=^$$ -fuzz=FuzzScore -fuzztime=5s
+	go test ./internal/controller/ -run=^$$ -fuzz=FuzzBindingNameRoundTrip -fuzztime=3s
+	go test ./internal/controller/ -run=^$$ -fuzz=FuzzProfileKeyFromSuite -fuzztime=3s
+	go test ./internal/controller/ -run=^$$ -fuzz=FuzzMatchesAnyProfile -fuzztime=3s
+	go test ./internal/controller/ -run=^$$ -fuzz=FuzzWithoutPlugin -fuzztime=3s
+	go test ./internal/controller/ -run=^$$ -fuzz=FuzzAppendHistoryRing -fuzztime=3s
+	go test ./internal/controller/ -run=^$$ -fuzz=FuzzProfileNames -fuzztime=3s
+
 GOLANGCI_LINT_VERSION ?= latest
 .PHONY: lint
 lint:

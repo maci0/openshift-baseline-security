@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -34,6 +35,7 @@ const (
 	pluginName          = "baseline-security-console-plugin"
 	pluginNS            = "openshift-baseline-security"
 	suiteLabel          = "compliance.openshift.io/suite"
+	historyMax          = 30
 )
 
 // Foreign CRs are unstructured so we do not import their Go API modules.
@@ -111,9 +113,7 @@ func (r *ClusterBaselineReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	return ctrl.Result{RequeueAfter: time.Minute}, nil
 }
 
-func bindingName(key baselinev1alpha1.ProfileKey) string {
-	return "baseline-" + string(key)
-}
+func bindingName(key baselinev1alpha1.ProfileKey) string { return "baseline-" + string(key) }
 
 func ownedSuites(cb *baselinev1alpha1.ClusterBaseline) map[string]bool {
 	s := make(map[string]bool, len(cb.Spec.Profiles))
@@ -134,17 +134,47 @@ func matchesAnyProfile(name string, profiles map[string]bool) bool {
 	return false
 }
 
-// profileKeyFromSuite inverts bindingName: suite labels on owned CO objects
-// carry the binding name "baseline-<key>".
+// profileKeyFromSuite inverts bindingName ("baseline-<key>").
+// Requires a non-empty key after the prefix so "baseline-" alone is rejected.
 func profileKeyFromSuite(suite string) (baselinev1alpha1.ProfileKey, bool) {
 	p, ok := strings.CutPrefix(suite, "baseline-")
-	return baselinev1alpha1.ProfileKey(p), ok
+	if !ok || p == "" {
+		return "", false
+	}
+	return baselinev1alpha1.ProfileKey(p), true
+}
+
+// score is pass/(pass+fail)*100, or nil when there are no countable results.
+func score(pass, fail int32) *int32 {
+	if pass < 0 || fail < 0 || pass+fail == 0 {
+		return nil
+	}
+	s := pass * 100 / (pass + fail)
+	return &s
+}
+
+// withoutPlugin drops name from plugins (may reuse the input slice backing).
+func withoutPlugin(plugins []string, name string) []string {
+	kept := plugins[:0]
+	for _, p := range plugins {
+		if p != name {
+			kept = append(kept, p)
+		}
+	}
+	return kept
+}
+
+// appendHistoryRing appends a snapshot and keeps at most max entries (oldest first).
+func appendHistoryRing(hist []baselinev1alpha1.ScoreSnapshot, t metav1.Time, s int32, max int) []baselinev1alpha1.ScoreSnapshot {
+	hist = append(hist, baselinev1alpha1.ScoreSnapshot{Time: t, Score: s})
+	if max > 0 && len(hist) > max {
+		hist = hist[len(hist)-max:]
+	}
+	return hist
 }
 
 func setCond(cb *baselinev1alpha1.ClusterBaseline, typ string, status metav1.ConditionStatus, reason, msg string) {
-	meta.SetStatusCondition(&cb.Status.Conditions, metav1.Condition{
-		Type: typ, Status: status, Reason: reason, Message: msg,
-	})
+	meta.SetStatusCondition(&cb.Status.Conditions, metav1.Condition{Type: typ, Status: status, Reason: reason, Message: msg})
 }
 
 func createIfMissing(ctx context.Context, c client.Client, obj client.Object) error {
@@ -154,13 +184,24 @@ func createIfMissing(ctx context.Context, c client.Client, obj client.Object) er
 	return nil
 }
 
+func u(gvk schema.GroupVersionKind) *unstructured.Unstructured {
+	o := &unstructured.Unstructured{}
+	o.SetGroupVersionKind(gvk)
+	return o
+}
+
+func uList(gvk schema.GroupVersionKind) *unstructured.UnstructuredList {
+	l := &unstructured.UnstructuredList{}
+	l.SetGroupVersionKind(gvk.GroupVersion().WithKind(gvk.Kind + "List"))
+	return l
+}
+
 func (r *ClusterBaselineReconciler) ensureComplianceOperator(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline) error {
 	if cb.Spec.InstallComplianceOperator != nil && !*cb.Spec.InstallComplianceOperator {
 		return nil
 	}
 
-	sub := &unstructured.Unstructured{}
-	sub.SetGroupVersionKind(subscriptionGVK)
+	sub := u(subscriptionGVK)
 	err := r.Get(ctx, types.NamespacedName{Namespace: complianceNamespace, Name: "compliance-operator"}, sub)
 	if err == nil {
 		return r.setComplianceOperatorReady(ctx, cb, sub)
@@ -172,8 +213,7 @@ func (r *ClusterBaselineReconciler) ensureComplianceOperator(ctx context.Context
 	if err := createIfMissing(ctx, r.Client, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: complianceNamespace}}); err != nil {
 		return err
 	}
-	og := &unstructured.Unstructured{}
-	og.SetGroupVersionKind(operatorGroupGVK)
+	og := u(operatorGroupGVK)
 	og.SetName("compliance-operator")
 	og.SetNamespace(complianceNamespace)
 	_ = unstructured.SetNestedStringSlice(og.Object, []string{complianceNamespace}, "spec", "targetNamespaces")
@@ -185,8 +225,7 @@ func (r *ClusterBaselineReconciler) ensureComplianceOperator(ctx context.Context
 	if source == "" {
 		source = "redhat-operators"
 	}
-	sub = &unstructured.Unstructured{}
-	sub.SetGroupVersionKind(subscriptionGVK)
+	sub = u(subscriptionGVK)
 	sub.SetName("compliance-operator")
 	sub.SetNamespace(complianceNamespace)
 	sub.Object["spec"] = map[string]any{
@@ -208,8 +247,7 @@ func (r *ClusterBaselineReconciler) setComplianceOperatorReady(ctx context.Conte
 	}
 	cb.Status.ComplianceOperatorVersion = strings.TrimPrefix(csvName, "compliance-operator.v")
 
-	csv := &unstructured.Unstructured{}
-	csv.SetGroupVersionKind(csvGVK)
+	csv := u(csvGVK)
 	if err := r.Get(ctx, types.NamespacedName{Namespace: complianceNamespace, Name: csvName}, csv); err != nil {
 		if apierrors.IsNotFound(err) {
 			setCond(cb, "ComplianceOperatorReady", metav1.ConditionFalse, "Installing", "waiting for CSV "+csvName)
@@ -227,8 +265,7 @@ func (r *ClusterBaselineReconciler) setComplianceOperatorReady(ctx context.Conte
 }
 
 func (r *ClusterBaselineReconciler) ensureScanConfig(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline) error {
-	ss := &unstructured.Unstructured{}
-	ss.SetGroupVersionKind(scanSettingGVK)
+	ss := u(scanSettingGVK)
 	ss.SetName(scanSettingName)
 	ss.SetNamespace(complianceNamespace)
 	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, ss, func() error {
@@ -248,8 +285,7 @@ func (r *ClusterBaselineReconciler) ensureScanConfig(ctx context.Context, cb *ba
 	}
 
 	for _, key := range cb.Spec.Profiles {
-		binding := &unstructured.Unstructured{}
-		binding.SetGroupVersionKind(bindingGVK)
+		binding := u(bindingGVK)
 		binding.SetName(bindingName(key))
 		binding.SetNamespace(complianceNamespace)
 		_, err := controllerutil.CreateOrUpdate(ctx, r.Client, binding, func() error {
@@ -270,8 +306,7 @@ func (r *ClusterBaselineReconciler) ensureScanConfig(ctx context.Context, cb *ba
 		}
 	}
 
-	bindings := &unstructured.UnstructuredList{}
-	bindings.SetGroupVersionKind(bindingGVK.GroupVersion().WithKind(bindingGVK.Kind + "List"))
+	bindings := uList(bindingGVK)
 	if err := r.List(ctx, bindings, client.InNamespace(complianceNamespace)); err != nil && !meta.IsNoMatchError(err) {
 		return err
 	}
@@ -322,18 +357,12 @@ func (r *ClusterBaselineReconciler) checkScanStorage(ctx context.Context, cb *ba
 // deregisterConsolePlugin drops our entry from consoles.operator.openshift.io/cluster.
 // Owned Deployment/Service/ConsolePlugin are GCed via owner refs on CR delete.
 func (r *ClusterBaselineReconciler) deregisterConsolePlugin(ctx context.Context) error {
-	console := &unstructured.Unstructured{}
-	console.SetGroupVersionKind(consoleGVK)
+	console := u(consoleGVK)
 	if err := r.Get(ctx, types.NamespacedName{Name: "cluster"}, console); err != nil {
 		return client.IgnoreNotFound(err)
 	}
 	plugins, _, _ := unstructured.NestedStringSlice(console.Object, "spec", "plugins")
-	kept := plugins[:0]
-	for _, p := range plugins {
-		if p != pluginName {
-			kept = append(kept, p)
-		}
-	}
+	kept := withoutPlugin(plugins, pluginName)
 	if len(kept) == len(plugins) {
 		return nil
 	}
@@ -343,8 +372,7 @@ func (r *ClusterBaselineReconciler) deregisterConsolePlugin(ctx context.Context)
 
 // removeConsolePlugin tears down plugin objects when spec.console.enabled=false.
 func (r *ClusterBaselineReconciler) removeConsolePlugin(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline) error {
-	cp := &unstructured.Unstructured{}
-	cp.SetGroupVersionKind(consolePluginGVK)
+	cp := u(consolePluginGVK)
 	cp.SetName(pluginName)
 	if err := client.IgnoreNotFound(r.Delete(ctx, cp)); err != nil {
 		return err
@@ -365,8 +393,7 @@ func (r *ClusterBaselineReconciler) removeConsolePlugin(ctx context.Context, cb 
 }
 
 func (r *ClusterBaselineReconciler) aggregateStatus(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline) error {
-	list := &unstructured.UnstructuredList{}
-	list.SetGroupVersionKind(checkResultGVK.GroupVersion().WithKind(checkResultGVK.Kind + "List"))
+	list := uList(checkResultGVK)
 	if err := r.List(ctx, list, client.InNamespace(complianceNamespace)); err != nil {
 		if meta.IsNoMatchError(err) {
 			return nil
@@ -383,7 +410,7 @@ func (r *ClusterBaselineReconciler) aggregateStatus(ctx context.Context, cb *bas
 	for _, item := range list.Items {
 		key, ok := profileKeyFromSuite(item.GetLabels()[suiteLabel])
 		ps := byProfile[key]
-		if !ok || ps == nil { // not ours or profile not selected
+		if !ok || ps == nil {
 			continue
 		}
 		status, _, _ := unstructured.NestedString(item.Object, "status")
@@ -407,29 +434,27 @@ func (r *ClusterBaselineReconciler) aggregateStatus(ctx context.Context, cb *bas
 	for _, key := range cb.Spec.Profiles {
 		cb.Status.Profiles = append(cb.Status.Profiles, *byProfile[key])
 	}
-	if pass+fail > 0 {
-		score := pass * 100 / (pass + fail)
-		cb.Status.Score = &score
-		r.recordHistory(ctx, cb, score)
+	if s := score(pass, fail); s != nil {
+		cb.Status.Score = s
+		r.recordHistory(ctx, cb, *s)
 	} else {
 		cb.Status.Score = nil
 	}
 	return nil
 }
 
-func (r *ClusterBaselineReconciler) recordHistory(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline, score int32) {
-	scans := &unstructured.UnstructuredList{}
-	scans.SetGroupVersionKind(scanGVK.GroupVersion().WithKind(scanGVK.Kind + "List"))
+func (r *ClusterBaselineReconciler) recordHistory(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline, s int32) {
+	scans := uList(scanGVK)
 	if err := r.List(ctx, scans, client.InNamespace(complianceNamespace)); err != nil {
 		return
 	}
 	suites := ownedSuites(cb)
 	var latest time.Time
-	for _, s := range scans.Items {
-		if suite := s.GetLabels()[suiteLabel]; suite == "" || !suites[suite] {
+	for _, item := range scans.Items {
+		if suite := item.GetLabels()[suiteLabel]; suite == "" || !suites[suite] {
 			continue
 		}
-		ts, _, _ := unstructured.NestedString(s.Object, "status", "endTimestamp")
+		ts, _, _ := unstructured.NestedString(item.Object, "status", "endTimestamp")
 		if t, err := time.Parse(time.RFC3339, ts); err == nil && t.After(latest) {
 			latest = t
 		}
@@ -442,10 +467,7 @@ func (r *ClusterBaselineReconciler) recordHistory(ctx context.Context, cb *basel
 		return
 	}
 	cb.Status.LastScanTime = &last
-	cb.Status.History = append(cb.Status.History, baselinev1alpha1.ScoreSnapshot{Time: last, Score: score})
-	if len(cb.Status.History) > 30 {
-		cb.Status.History = cb.Status.History[len(cb.Status.History)-30:]
-	}
+	cb.Status.History = appendHistoryRing(cb.Status.History, last, s, historyMax)
 }
 
 func (r *ClusterBaselineReconciler) ensureConsolePlugin(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline) error {
@@ -454,14 +476,30 @@ func (r *ClusterBaselineReconciler) ensureConsolePlugin(ctx context.Context, cb 
 	}
 	image := os.Getenv("RELATED_IMAGE_CONSOLE_PLUGIN")
 	if image == "" {
+		// Soft-fail: still reconcile scans/status; requeue will retry when env is fixed.
 		setCond(cb, "ConsolePluginReady", metav1.ConditionFalse, "ImageMissing", "RELATED_IMAGE_CONSOLE_PLUGIN not set")
-		return fmt.Errorf("RELATED_IMAGE_CONSOLE_PLUGIN not set")
+		return nil
 	}
 	if err := createIfMissing(ctx, r.Client, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: pluginNS}}); err != nil {
 		return err
 	}
 
 	labels := map[string]string{"app": pluginName}
+
+	// Service first so service-ca can mint the serving-cert Secret before pods start.
+	svc := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: pluginName, Namespace: pluginNS}}
+	if _, err := controllerutil.CreateOrUpdate(ctx, r.Client, svc, func() error {
+		if svc.Annotations == nil {
+			svc.Annotations = map[string]string{}
+		}
+		svc.Annotations["service.beta.openshift.io/serving-cert-secret-name"] = pluginName + "-cert"
+		svc.Spec.Selector = labels
+		svc.Spec.Ports = []corev1.ServicePort{{Port: 9443, TargetPort: intstr.FromInt32(9443)}}
+		return controllerutil.SetControllerReference(cb, svc, r.Scheme)
+	}); err != nil {
+		return err
+	}
+
 	dep := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: pluginName, Namespace: pluginNS}}
 	if _, err := controllerutil.CreateOrUpdate(ctx, r.Client, dep, func() error {
 		dep.Spec = appsv1.DeploymentSpec{
@@ -473,7 +511,7 @@ func (r *ClusterBaselineReconciler) ensureConsolePlugin(ctx context.Context, cb 
 					Containers: []corev1.Container{{
 						Name:  pluginName,
 						Image: image,
-						Ports: []corev1.ContainerPort{{Name: "https", ContainerPort: 9443}},
+						Ports: []corev1.ContainerPort{{ContainerPort: 9443}},
 						SecurityContext: &corev1.SecurityContext{
 							AllowPrivilegeEscalation: ptr.To(false),
 							Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
@@ -491,7 +529,6 @@ func (r *ClusterBaselineReconciler) ensureConsolePlugin(ctx context.Context, cb 
 								TCPSocket: &corev1.TCPSocketAction{Port: intstr.FromInt32(9443)},
 							},
 							InitialDelaySeconds: 5,
-							PeriodSeconds:       10,
 						},
 						VolumeMounts: []corev1.VolumeMount{
 							{Name: "serving-cert", MountPath: "/var/serving-cert", ReadOnly: true},
@@ -500,7 +537,11 @@ func (r *ClusterBaselineReconciler) ensureConsolePlugin(ctx context.Context, cb 
 					Volumes: []corev1.Volume{{
 						Name: "serving-cert",
 						VolumeSource: corev1.VolumeSource{
-							Secret: &corev1.SecretVolumeSource{SecretName: pluginName + "-cert"},
+							// Optional until service-ca writes the Secret (avoids CreateContainerConfigError).
+							Secret: &corev1.SecretVolumeSource{
+								SecretName: pluginName + "-cert",
+								Optional:   ptr.To(true),
+							},
 						},
 					}},
 				},
@@ -511,21 +552,7 @@ func (r *ClusterBaselineReconciler) ensureConsolePlugin(ctx context.Context, cb 
 		return err
 	}
 
-	svc := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: pluginName, Namespace: pluginNS}}
-	if _, err := controllerutil.CreateOrUpdate(ctx, r.Client, svc, func() error {
-		if svc.Annotations == nil {
-			svc.Annotations = map[string]string{}
-		}
-		svc.Annotations["service.beta.openshift.io/serving-cert-secret-name"] = pluginName + "-cert"
-		svc.Spec.Selector = labels
-		svc.Spec.Ports = []corev1.ServicePort{{Name: "https", Port: 9443, TargetPort: intstr.FromInt32(9443)}}
-		return controllerutil.SetControllerReference(cb, svc, r.Scheme)
-	}); err != nil {
-		return err
-	}
-
-	cp := &unstructured.Unstructured{}
-	cp.SetGroupVersionKind(consolePluginGVK)
+	cp := u(consolePluginGVK)
 	cp.SetName(pluginName)
 	if _, err := controllerutil.CreateOrUpdate(ctx, r.Client, cp, func() error {
 		cp.Object["spec"] = map[string]any{
@@ -542,21 +569,16 @@ func (r *ClusterBaselineReconciler) ensureConsolePlugin(ctx context.Context, cb 
 		return err
 	}
 
-	console := &unstructured.Unstructured{}
-	console.SetGroupVersionKind(consoleGVK)
+	console := u(consoleGVK)
 	if err := r.Get(ctx, types.NamespacedName{Name: "cluster"}, console); err != nil {
 		return err
 	}
 	plugins, _, _ := unstructured.NestedStringSlice(console.Object, "spec", "plugins")
-	for _, p := range plugins {
-		if p == pluginName {
-			setCond(cb, "ConsolePluginReady", metav1.ConditionTrue, "Deployed", "")
-			return nil
+	if !slices.Contains(plugins, pluginName) {
+		_ = unstructured.SetNestedStringSlice(console.Object, append(plugins, pluginName), "spec", "plugins")
+		if err := r.Update(ctx, console); err != nil {
+			return err
 		}
-	}
-	_ = unstructured.SetNestedStringSlice(console.Object, append(plugins, pluginName), "spec", "plugins")
-	if err := r.Update(ctx, console); err != nil {
-		return err
 	}
 	setCond(cb, "ConsolePluginReady", metav1.ConditionTrue, "Deployed", "")
 	return nil

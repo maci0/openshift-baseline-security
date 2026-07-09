@@ -11,6 +11,7 @@ gated remediation apply, score trend.
 
 - `docs/SPEC.md`: design specification (read this first)
 - `docs/PATTERNS.md`: OpenShift addon patterns this repo follows
+- `docs/STANDARDS.md`: coding standards reference with authoritative links
 - `operator/`: Go operator (kubebuilder go/v4) reconciling the
   `ClusterBaseline` CRD: installs/adopts the Compliance Operator, owns
   ScanSetting/ScanSettingBinding defaults, deploys the console plugin,
