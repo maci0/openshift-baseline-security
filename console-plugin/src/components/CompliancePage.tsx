@@ -23,10 +23,13 @@ import {
   isOwnedByBaseline,
 } from '../models';
 import { rescanPatch } from '../utils';
-import Overview from './Overview';
-import ResultsTab from './ResultsTab';
-import ProfilesTab from './ProfilesTab';
-import RemediationsTab from './RemediationsTab';
+import {
+  BaselineContext,
+  OverviewRoute,
+  ProfilesRoute,
+  RemediationsRoute,
+  ResultsRoute,
+} from '../baselineContext';
 
 type Scan = {
   metadata: {
@@ -93,49 +96,21 @@ const CompliancePage: React.FC = () => {
     }
   };
 
-  // Keep page component types stable across baseline watch updates so tab
-  // local state (filters, modals) is not wiped when the CR refreshes.
-  const baselineRef = React.useRef(baseline);
-  baselineRef.current = baseline;
-  const loadedRef = React.useRef(loaded);
-  loadedRef.current = loaded;
+  const ctx = React.useMemo(() => ({ baseline, loaded }), [baseline, loaded]);
 
+  // Page component types are module-level (stable). Only labels depend on t.
   const pages = React.useMemo(
     () => [
-      {
-        href: '',
-        name: t('Overview'),
-        component: function OverviewRoute() {
-          return <Overview baseline={baselineRef.current} loaded={loadedRef.current} />;
-        },
-      },
-      {
-        href: 'results',
-        name: t('Results'),
-        component: function ResultsRoute() {
-          return <ResultsTab baseline={baselineRef.current} />;
-        },
-      },
-      {
-        href: 'remediations',
-        name: t('Remediations'),
-        component: function RemediationsRoute() {
-          return <RemediationsTab baseline={baselineRef.current} />;
-        },
-      },
-      {
-        href: 'profiles',
-        name: t('Profiles'),
-        component: function ProfilesRoute() {
-          return <ProfilesTab baseline={baselineRef.current} />;
-        },
-      },
+      { href: '', name: t('Overview'), component: OverviewRoute },
+      { href: 'results', name: t('Results'), component: ResultsRoute },
+      { href: 'remediations', name: t('Remediations'), component: RemediationsRoute },
+      { href: 'profiles', name: t('Profiles'), component: ProfilesRoute },
     ],
     [t],
   );
 
   return (
-    <>
+    <BaselineContext.Provider value={ctx}>
       <PageSection hasBodyWrapper={false}>
         <Split hasGutter>
           <SplitItem isFilled>
@@ -166,7 +141,7 @@ const CompliancePage: React.FC = () => {
         )}
       </PageSection>
       <HorizontalNav pages={pages} />
-    </>
+    </BaselineContext.Provider>
   );
 };
 

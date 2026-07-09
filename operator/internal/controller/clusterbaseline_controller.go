@@ -313,14 +313,15 @@ func (r *ClusterBaselineReconciler) ensureComplianceOperator(ctx context.Context
 func (r *ClusterBaselineReconciler) setComplianceOperatorReady(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline, sub *unstructured.Unstructured) error {
 	csvName, _, _ := unstructured.NestedString(sub.Object, "status", "installedCSV")
 	if csvName == "" {
+		cb.Status.ComplianceOperatorVersion = ""
 		setCond(cb, "ComplianceOperatorReady", metav1.ConditionFalse, "Installing", "installedCSV empty")
 		return nil
 	}
-	cb.Status.ComplianceOperatorVersion = strings.TrimPrefix(csvName, "compliance-operator.v")
 
 	csv := u(csvGVK)
 	if err := r.Get(ctx, types.NamespacedName{Namespace: complianceNamespace, Name: csvName}, csv); err != nil {
 		if apierrors.IsNotFound(err) {
+			cb.Status.ComplianceOperatorVersion = ""
 			setCond(cb, "ComplianceOperatorReady", metav1.ConditionFalse, "Installing", "waiting for CSV "+csvName)
 			return nil
 		}
@@ -328,9 +329,13 @@ func (r *ClusterBaselineReconciler) setComplianceOperatorReady(ctx context.Conte
 	}
 	phase, _, _ := unstructured.NestedString(csv.Object, "status", "phase")
 	if phase == "Succeeded" {
+		cb.Status.ComplianceOperatorVersion = strings.TrimPrefix(csvName, "compliance-operator.v")
 		setCond(cb, "ComplianceOperatorReady", metav1.ConditionTrue, "CSVSucceeded", "")
 		return nil
 	}
+	// Keep version empty until Succeeded so the UI does not show a green-looking
+	// version string while the CSV is still Installing/Failed.
+	cb.Status.ComplianceOperatorVersion = ""
 	setCond(cb, "ComplianceOperatorReady", metav1.ConditionFalse, "CSVNotReady", "phase="+phase)
 	return nil
 }
@@ -660,14 +665,24 @@ func (r *ClusterBaselineReconciler) ensureConsolePlugin(ctx context.Context, cb 
 	if err := r.Get(ctx, types.NamespacedName{Namespace: pluginNS, Name: pluginName}, dep); err != nil {
 		return err
 	}
+	desired := int32(1)
+	if dep.Spec.Replicas != nil {
+		desired = *dep.Spec.Replicas
+	}
 	if dep.Status.ReadyReplicas < 1 {
 		reason, msg := "WaitingForPods",
-			fmt.Sprintf("Deployment %s/%s has %d ready replicas", pluginNS, pluginName, dep.Status.ReadyReplicas)
+			fmt.Sprintf("Deployment %s/%s has %d/%d ready replicas", pluginNS, pluginName, dep.Status.ReadyReplicas, desired)
 		if pluginDeploymentUnavailable(dep, 5*time.Minute) {
 			reason = "Unavailable"
 			msg = fmt.Sprintf("Deployment %s/%s has no ready pods for >5m", pluginNS, pluginName)
 		}
 		setCond(cb, "ConsolePluginReady", metav1.ConditionFalse, reason, msg)
+		return nil
+	}
+	// At least one ready pod: surface partial rollout as still Progressing.
+	if dep.Status.ReadyReplicas < desired {
+		setCond(cb, "ConsolePluginReady", metav1.ConditionFalse, "WaitingForPods",
+			fmt.Sprintf("Deployment %s/%s has %d/%d ready replicas", pluginNS, pluginName, dep.Status.ReadyReplicas, desired))
 		return nil
 	}
 	setCond(cb, "ConsolePluginReady", metav1.ConditionTrue, "Deployed", "")

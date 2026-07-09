@@ -294,11 +294,22 @@ func TestEnsureConsolePlugin(t *testing.T) {
 	if c == nil || c.Status != metav1.ConditionFalse || c.Reason != "WaitingForPods" {
 		t.Fatalf("condition = %+v, want WaitingForPods", c)
 	}
-	// Simulate ready pods via status subresource.
+	// Simulate full readiness (replicas=2) via status subresource.
 	if err := r.Get(context.Background(), types.NamespacedName{Namespace: pluginNS, Name: pluginName}, dep); err != nil {
 		t.Fatal(err)
 	}
 	dep.Status.ReadyReplicas = 1
+	if err := r.Status().Update(context.Background(), dep); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.ensureConsolePlugin(context.Background(), cb); err != nil {
+		t.Fatal(err)
+	}
+	c = meta.FindStatusCondition(cb.Status.Conditions, "ConsolePluginReady")
+	if c == nil || c.Status != metav1.ConditionFalse || c.Reason != "WaitingForPods" {
+		t.Fatalf("partial ready = %+v, want WaitingForPods", c)
+	}
+	dep.Status.ReadyReplicas = 2
 	if err := r.Status().Update(context.Background(), dep); err != nil {
 		t.Fatal(err)
 	}
