@@ -294,7 +294,7 @@ func TestEnsureConsolePlugin(t *testing.T) {
 	if c == nil || c.Status != metav1.ConditionFalse || c.Reason != "WaitingForPods" {
 		t.Fatalf("condition = %+v, want WaitingForPods", c)
 	}
-	// Simulate full readiness (replicas=2) via status subresource.
+	// Simulate full readiness (replicas=2 + Available) via status subresource.
 	if err := r.Get(context.Background(), types.NamespacedName{Namespace: pluginNS, Name: pluginName}, dep); err != nil {
 		t.Fatal(err)
 	}
@@ -309,7 +309,11 @@ func TestEnsureConsolePlugin(t *testing.T) {
 	if c == nil || c.Status != metav1.ConditionFalse || c.Reason != "WaitingForPods" {
 		t.Fatalf("partial ready = %+v, want WaitingForPods", c)
 	}
-	dep.Status.ReadyReplicas = 2
+	dep.Status.ReadyReplicas = pluginReplicas
+	dep.Status.Conditions = []appsv1.DeploymentCondition{{
+		Type:   appsv1.DeploymentAvailable,
+		Status: corev1.ConditionTrue,
+	}}
 	if err := r.Status().Update(context.Background(), dep); err != nil {
 		t.Fatal(err)
 	}

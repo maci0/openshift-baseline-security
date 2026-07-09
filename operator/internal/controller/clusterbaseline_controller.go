@@ -19,6 +19,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/client-go/util/retry"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -36,6 +37,7 @@ const (
 	pluginNS            = "openshift-baseline-security"
 	suiteLabel          = "compliance.openshift.io/suite"
 	historyMax          = 30
+	pluginReplicas      = int32(2)
 )
 
 // Foreign CRs are unstructured so we do not import their Go API modules.
@@ -450,17 +452,19 @@ func (r *ClusterBaselineReconciler) checkScanStorage(ctx context.Context, cb *ba
 // deregisterConsolePlugin drops our entry from consoles.operator.openshift.io/cluster.
 // Owned Deployment/Service/ConsolePlugin are GCed via owner refs on CR delete.
 func (r *ClusterBaselineReconciler) deregisterConsolePlugin(ctx context.Context) error {
-	console := u(consoleGVK)
-	if err := r.Get(ctx, types.NamespacedName{Name: "cluster"}, console); err != nil {
-		return client.IgnoreNotFound(err)
-	}
-	plugins, _, _ := unstructured.NestedStringSlice(console.Object, "spec", "plugins")
-	kept := withoutPlugin(plugins, pluginName)
-	if len(kept) == len(plugins) {
-		return nil
-	}
-	_ = unstructured.SetNestedStringSlice(console.Object, kept, "spec", "plugins")
-	return r.Update(ctx, console)
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		console := u(consoleGVK)
+		if err := r.Get(ctx, types.NamespacedName{Name: "cluster"}, console); err != nil {
+			return client.IgnoreNotFound(err)
+		}
+		plugins, _, _ := unstructured.NestedStringSlice(console.Object, "spec", "plugins")
+		kept := withoutPlugin(plugins, pluginName)
+		if len(kept) == len(plugins) {
+			return nil
+		}
+		_ = unstructured.SetNestedStringSlice(console.Object, kept, "spec", "plugins")
+		return r.Update(ctx, console)
+	})
 }
 
 // removeConsolePlugin tears down plugin objects when managementState is Removed.
@@ -606,7 +610,7 @@ func (r *ClusterBaselineReconciler) ensureConsolePlugin(ctx context.Context, cb 
 		if dep.Spec.Selector == nil {
 			dep.Spec.Selector = &metav1.LabelSelector{MatchLabels: labels}
 		}
-		dep.Spec.Replicas = ptr.To(int32(2))
+		dep.Spec.Replicas = ptr.To(pluginReplicas)
 		if dep.Spec.Template.Labels == nil {
 			dep.Spec.Template.Labels = map[string]string{}
 		}
@@ -643,8 +647,18 @@ func (r *ClusterBaselineReconciler) ensureConsolePlugin(ctx context.Context, cb 
 		return err
 	}
 
-	console := u(consoleGVK)
-	if err := r.Get(ctx, types.NamespacedName{Name: "cluster"}, console); err != nil {
+	if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		console := u(consoleGVK)
+		if err := r.Get(ctx, types.NamespacedName{Name: "cluster"}, console); err != nil {
+			return err
+		}
+		plugins, _, _ := unstructured.NestedStringSlice(console.Object, "spec", "plugins")
+		if slices.Contains(plugins, pluginName) {
+			return nil
+		}
+		_ = unstructured.SetNestedStringSlice(console.Object, append(plugins, pluginName), "spec", "plugins")
+		return r.Update(ctx, console)
+	}); err != nil {
 		if apierrors.IsNotFound(err) {
 			// Soft-fail: still deploy plugin objects; registration retries later.
 			setCond(cb, "ConsolePluginReady", metav1.ConditionFalse, "ConsoleMissing",
@@ -653,25 +667,16 @@ func (r *ClusterBaselineReconciler) ensureConsolePlugin(ctx context.Context, cb 
 		}
 		return err
 	}
-	plugins, _, _ := unstructured.NestedStringSlice(console.Object, "spec", "plugins")
-	if !slices.Contains(plugins, pluginName) {
-		_ = unstructured.SetNestedStringSlice(console.Object, append(plugins, pluginName), "spec", "plugins")
-		if err := r.Update(ctx, console); err != nil {
-			return err
-		}
-	}
 
 	// Re-read Deployment status so Ready is not claimed before pods are up.
+	// Use the managed replica count (not cached Spec.Replicas) to avoid a
+	// false Deployed when the informer has not observed our CreateOrUpdate yet.
 	if err := r.Get(ctx, types.NamespacedName{Namespace: pluginNS, Name: pluginName}, dep); err != nil {
 		return err
 	}
-	desired := int32(1)
-	if dep.Spec.Replicas != nil {
-		desired = *dep.Spec.Replicas
-	}
-	if dep.Status.ReadyReplicas < 1 {
+	if dep.Status.ReadyReplicas < pluginReplicas {
 		reason, msg := "WaitingForPods",
-			fmt.Sprintf("Deployment %s/%s has %d/%d ready replicas", pluginNS, pluginName, dep.Status.ReadyReplicas, desired)
+			fmt.Sprintf("Deployment %s/%s has %d/%d ready replicas", pluginNS, pluginName, dep.Status.ReadyReplicas, pluginReplicas)
 		if pluginDeploymentUnavailable(dep, 5*time.Minute) {
 			reason = "Unavailable"
 			msg = fmt.Sprintf("Deployment %s/%s has no ready pods for >5m", pluginNS, pluginName)
@@ -679,14 +684,24 @@ func (r *ClusterBaselineReconciler) ensureConsolePlugin(ctx context.Context, cb 
 		setCond(cb, "ConsolePluginReady", metav1.ConditionFalse, reason, msg)
 		return nil
 	}
-	// At least one ready pod: surface partial rollout as still Progressing.
-	if dep.Status.ReadyReplicas < desired {
+	if !deploymentAvailable(dep) {
 		setCond(cb, "ConsolePluginReady", metav1.ConditionFalse, "WaitingForPods",
-			fmt.Sprintf("Deployment %s/%s has %d/%d ready replicas", pluginNS, pluginName, dep.Status.ReadyReplicas, desired))
+			fmt.Sprintf("Deployment %s/%s ready pods present but Available is not True", pluginNS, pluginName))
 		return nil
 	}
 	setCond(cb, "ConsolePluginReady", metav1.ConditionTrue, "Deployed", "")
 	return nil
+}
+
+// deploymentAvailable is true when the Deployment Available condition is True.
+// Missing condition is treated as not yet available.
+func deploymentAvailable(dep *appsv1.Deployment) bool {
+	for _, c := range dep.Status.Conditions {
+		if c.Type == appsv1.DeploymentAvailable {
+			return c.Status == corev1.ConditionTrue
+		}
+	}
+	return false
 }
 
 // pluginDeploymentUnavailable is true when the Deployment has been continuously

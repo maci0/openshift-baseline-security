@@ -51,7 +51,9 @@ const CompliancePage: React.FC = () => {
     isList: true,
     namespace: 'openshift-compliance',
   });
-  const baseline = baselines?.[0];
+  // CRD requires metadata.name == "cluster"; prefer that over list order.
+  const baseline =
+    baselines?.find((b) => b.metadata.name === 'cluster') ?? baselines?.[0];
   const [rescanning, setRescanning] = React.useState(false);
   const [rescanError, setRescanError] = React.useState<string | null>(null);
   const [canRescan] = useAccessReview({
@@ -122,7 +124,9 @@ const CompliancePage: React.FC = () => {
           <SplitItem>
             <Button
               variant="secondary"
-              onClick={rescan}
+              onClick={() => {
+                void rescan();
+              }}
               isDisabled={rescanning || !ownedScans.length || !canRescan}
               isLoading={rescanning}
             >

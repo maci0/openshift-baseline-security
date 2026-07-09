@@ -131,6 +131,23 @@ func TestPluginDeploymentUnavailable(t *testing.T) {
 	}
 }
 
+func TestDeploymentAvailable(t *testing.T) {
+	dep := &appsv1.Deployment{}
+	if deploymentAvailable(dep) {
+		t.Fatal("missing condition is not available")
+	}
+	dep.Status.Conditions = []appsv1.DeploymentCondition{{
+		Type: appsv1.DeploymentAvailable, Status: corev1.ConditionFalse,
+	}}
+	if deploymentAvailable(dep) {
+		t.Fatal("False is not available")
+	}
+	dep.Status.Conditions[0].Status = corev1.ConditionTrue
+	if !deploymentAvailable(dep) {
+		t.Fatal("True should be available")
+	}
+}
+
 func TestCreateIfMissing(t *testing.T) {
 	scheme := testScheme(t)
 	c := fake.NewClientBuilder().WithScheme(scheme).Build()
