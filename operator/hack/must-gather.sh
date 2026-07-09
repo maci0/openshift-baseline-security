@@ -12,7 +12,7 @@ oc -n openshift-compliance get scansettings,scansettingbindings,compliancesuites
 oc get consoleplugin baseline-security-console-plugin -o yaml > "$OUT/consoleplugin.yaml" 2>/dev/null || true
 
 # relatedObjects declared by the CR (group/resource/name[/namespace]).
-oc get clusterbaseline cluster -o jsonpath='{range .status.relatedObjects[*]}{.resource}.{.group} {.name} {.namespace}{"\n"}{end}' 2>/dev/null \
+{ oc get clusterbaseline cluster -o jsonpath='{range .status.relatedObjects[*]}{.resource}.{.group} {.name} {.namespace}{"\n"}{end}' 2>/dev/null || true; } \
   | while read -r res name ns; do
       [ -z "$res" ] && continue
       if [ -n "$ns" ]; then oc -n "$ns" get "$res" "$name" -o yaml >> "$OUT/related-objects.yaml" 2>/dev/null || true

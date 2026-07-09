@@ -1,4 +1,4 @@
-import { ComplianceCheckResult, ComplianceRemediation } from './models';
+import { ComplianceCheckResult, ComplianceRemediation, ResultCounts } from './models';
 
 // Normalize k8s watch / fetch errors (string | Error | { message }) for Alerts.
 export const errorMessage = (err: unknown): string | null => {
@@ -19,6 +19,20 @@ export const errorMessage = (err: unknown): string | null => {
   }
   return String(err);
 };
+
+// Sum result counts across profiles (built-in + tailored) for the composition
+// donut, so its slices match the score, which includes all of them.
+export const aggregateCounts = (...groups: ResultCounts[]): ResultCounts =>
+  groups.reduce(
+    (a, g) => ({
+      pass: a.pass + g.pass,
+      fail: a.fail + g.fail,
+      manual: a.manual + g.manual,
+      error: a.error + g.error,
+      notApplicable: a.notApplicable + g.notApplicable,
+    }),
+    { pass: 0, fail: 0, manual: 0, error: 0, notApplicable: 0 },
+  );
 
 // The description's first line is the rule title; the rest is the rationale.
 // description comes from ComplianceCheckResult CRs, i.e. untrusted input.

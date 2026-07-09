@@ -34,7 +34,7 @@ import {
   ExclamationTriangleIcon,
 } from '@patternfly/react-icons';
 import { ClusterBaseline } from '../models';
-import { resultsHref } from '../utils';
+import { aggregateCounts, resultsHref } from '../utils';
 
 const CountRow: React.FC<{
   icon: React.ReactElement;
@@ -106,18 +106,12 @@ const Overview: React.FC<{ baseline?: ClusterBaseline; loaded: boolean }> = ({
         : t('Installing'));
   const score = baseline.status?.score;
 
-  // Aggregate per-status counts across profiles for the composition donut, so
-  // failing/manual checks are shown as distinct slices instead of the score
-  // gauge reading as "all green" at a high percentage.
-  const totals = (baseline.status?.profiles ?? []).reduce(
-    (a, p) => ({
-      pass: a.pass + p.pass,
-      fail: a.fail + p.fail,
-      manual: a.manual + p.manual,
-      error: a.error + p.error,
-      notApplicable: a.notApplicable + p.notApplicable,
-    }),
-    { pass: 0, fail: 0, manual: 0, error: 0, notApplicable: 0 },
+  // Aggregate per-status counts across built-in AND tailored profiles for the
+  // composition donut, so the slices match the score (which includes both) and
+  // failing/manual checks are shown as distinct slices.
+  const totals = aggregateCounts(
+    ...(baseline.status?.profiles ?? []),
+    ...(baseline.status?.tailoredProfiles ?? []),
   );
   const green = 'var(--pf-t--global--icon--color--status--success--default)';
   const red = 'var(--pf-t--global--icon--color--status--danger--default)';
