@@ -322,21 +322,21 @@ const Overview: React.FC<{ baseline?: ClusterBaseline; loaded: boolean }> = ({
                   status="success"
                   label={t('Pass')}
                   count={tp.pass}
-                  href={resultsHref('PASS')}
+                  href={resultsHref('PASS', `tp-${tp.name}`)}
                 />
                 <CountRow
                   icon={<ExclamationCircleIcon />}
                   status="danger"
                   label={t('Fail')}
                   count={tp.fail}
-                  href={resultsHref('FAIL')}
+                  href={resultsHref('FAIL', `tp-${tp.name}`)}
                 />
                 <CountRow
                   icon={<ExclamationTriangleIcon />}
                   status="warning"
                   label={t('Manual')}
                   count={tp.manual}
-                  href={resultsHref('MANUAL')}
+                  href={resultsHref('MANUAL', `tp-${tp.name}`)}
                 />
               </CardBody>
             </Card>

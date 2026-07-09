@@ -112,7 +112,9 @@ const ResultsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => {
         keys.add(key);
       }
     }
-    return [...keys].sort().map((k) => ({ id: k, title: k }));
+    // Keep the id as the suite key (reducer + resultsHref depend on it) but
+    // show tailored profiles by their clean name, not the "tp-" binding prefix.
+    return [...keys].sort().map((k) => ({ id: k, title: k.startsWith('tp-') ? k.slice(3) : k }));
   }, [profiles, ownedResults]);
 
   const rowFilters: RowFilter<ComplianceCheckResult>[] = React.useMemo(

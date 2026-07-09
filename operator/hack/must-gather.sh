@@ -8,7 +8,7 @@ mkdir -p "$OUT"
 oc get clusterbaseline cluster -o yaml > "$OUT/clusterbaseline.yaml" 2>/dev/null || true
 oc -n openshift-baseline-security get all,configmap,servicemonitor,prometheusrule -o yaml > "$OUT/operator-namespace.yaml" 2>/dev/null || true
 oc -n openshift-baseline-security logs deploy/baseline-security-operator --tail=-1 > "$OUT/operator.log" 2>/dev/null || true
-oc -n openshift-compliance get scansettings,scansettingbindings,compliancesuites,compliancescans,compliancecheckresults,complianceremediations -o yaml > "$OUT/compliance.yaml" 2>/dev/null || true
+oc -n openshift-compliance get scansettings,scansettingbindings,tailoredprofiles,compliancesuites,compliancescans,compliancecheckresults,complianceremediations -o yaml > "$OUT/compliance.yaml" 2>/dev/null || true
 oc get consoleplugin baseline-security-console-plugin -o yaml > "$OUT/consoleplugin.yaml" 2>/dev/null || true
 
 # relatedObjects declared by the CR (group/resource/name[/namespace]).
