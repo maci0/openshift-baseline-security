@@ -28,6 +28,28 @@ export const checkTitle = (r: ComplianceCheckResult): string =>
 export const checkBody = (r: ComplianceCheckResult): string =>
   r.description?.split('\n').slice(1).join('\n').trim() ?? '';
 
+// RFC 4180 CSV cell: quote when it contains a comma, quote, CR or LF, and
+// double embedded quotes. Values come from CR data, i.e. untrusted input.
+const csvCell = (v: string): string =>
+  /[",\r\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
+
+// resultsCsv serializes check results to a CSV report (name,title,status,
+// severity). Deterministic column order; one header row.
+// Console URL for a namespaced ComplianceCheckResult, so the detail modal can
+// deep-link to the raw Compliance Operator resource.
+export const checkResultHref = (name: string): string =>
+  `/k8s/ns/openshift-compliance/compliance.openshift.io~v1alpha1~ComplianceCheckResult/${encodeURIComponent(
+    name,
+  )}`;
+
+export const resultsCsv = (results: ComplianceCheckResult[]): string => {
+  const header = ['name', 'title', 'status', 'severity'];
+  const rows = results.map((r) =>
+    [r.metadata.name, checkTitle(r), r.status, r.severity].map((c) => csvCell(String(c ?? ''))).join(','),
+  );
+  return [header.join(','), ...rows].join('\r\n');
+};
+
 // New profile list after toggling one key; null when the change is invalid
 // (the CRD requires at least one profile).
 export const toggledProfiles = (

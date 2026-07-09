@@ -55,5 +55,10 @@
   "Defense Information Systems Agency Security Technical Implementation Guide": "Defense Information Systems Agency Security Technical Implementation Guide",
   "North American Electric Reliability Corporation Critical Infrastructure Protection": "North American Electric Reliability Corporation Critical Infrastructure Protection",
   "Australian Cyber Security Centre Essential Eight": "Australian Cyber Security Centre Essential Eight",
-  "German Federal Office for Information Security IT-Grundschutz": "German Federal Office for Information Security IT-Grundschutz"
+  "German Federal Office for Information Security IT-Grundschutz": "German Federal Office for Information Security IT-Grundschutz",
+  "Export CSV": "Export CSV",
+  "Not applicable": "Not applicable",
+  "Error": "Error",
+  "No results": "No results",
+  "score / 100": "score / 100"
 }

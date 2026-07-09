@@ -37,6 +37,8 @@ test.describe('Baseline Security console plugin', () => {
     await expect(page.getByRole('columnheader', { name: 'Severity' })).toBeVisible();
     // Rows are rendered (link buttons carry the human-readable title).
     await expect(page.getByRole('button', { name: /registries|Identity Provider|etcd|audit/i }).first()).toBeVisible();
+    // CSV export button present.
+    await expect(page.getByRole('button', { name: 'Export CSV' })).toBeVisible();
     await shot(page, 'results');
   });
 

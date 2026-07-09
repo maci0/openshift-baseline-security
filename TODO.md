@@ -1,91 +1,96 @@
-# TODO
+# Roadmap
+
+Status of **openshift-baseline-security**. Current release **0.2.1**
+(cluster-scoped `ClusterBaseline` API, string-enum spec). Verified end to end
+on a single-node OpenShift 4.22 cluster: operator + console plugin installed
+via OLM, CIS scan scored, both e2e suites green, five adversarial review
+rounds converged clean.
+
+Legend: `[x]` done · `[ ]` planned · **(H/M/L)** rough value.
 
 ## Done
-- [x] Spec (docs/SPEC.md), operator + console-plugin scaffold, repo + CI
-- [x] SNO test cluster via vmetal-openshift (OCP 4.22.0)
-- [x] Reconciler refresh: 1-minute requeue so score updates after scans
-- [x] Console plugin served over TLS (service-serving cert, nginx, 9443)
-- [x] Finalizer (console plugin dereg) + pruning of deselected profile bindings
-- [x] E2e on SNO: CO install -> CIS scan -> score 96 in status -> plugin renders
-- [x] Aggregation fix: role-suffixed node scan names (found by e2e)
-- [x] Degraded condition when scan PVCs stay Pending (no default StorageClass)
-- [x] Console-native UI: Administration nav, HorizontalNav tabs, donut score,
-      VirtualizedTable results with filters, profile cards, rescan button
-- [x] Screenshots in docs/screenshots/
 
-## Done (continued)
-- [x] OLM bundle + CSV, validated (`make bundle`); catalog targets in Makefile
-- [x] Result detail modal (human-readable titles, description, instructions)
-- [x] Stretch S1: Remediations tab, confirmation-gated apply, auto-apply switch
-- [x] Stretch S2: score history in status (30-entry ring) + trend chart
+### Core
+- [x] Design spec, `PATTERNS.md`, `STANDARDS.md`; repo layout mirroring
+      OpenShift components; Apache-2.0.
+- [x] Operator (kubebuilder go/v4) reconciling `ClusterBaseline/cluster`:
+      installs/adopts the Compliance Operator, owns ScanSetting +
+      per-profile ScanSettingBindings, deploys the console plugin,
+      aggregates score + 30-entry history into status.
+- [x] String-enum spec per api-conventions.md
+      (`installComplianceOperator`, `console.managementState`,
+      `remediation.apply`); no booleans.
+- [x] OpenShift-style rollup conditions (Available / Progressing /
+      Degraded) plus detail conditions, with `observedGeneration`.
+- [x] Default-create `ClusterBaseline/cluster` on start
+      (`BASELINE_SECURITY_SKIP_DEFAULT_CR=true` to opt out).
+- [x] Finalizer cleanup; prune deselected-profile bindings; tolerate the
+      Console capability being disabled (NoKindMatch) on every path.
 
-## Done (continued)
-- [x] Default-create ClusterBaseline on operator start (opt out:
-      BASELINE_SECURITY_SKIP_DEFAULT_CR=true)
-- [x] Aggregated viewer/admin ClusterRoles (aggregate to view/cluster-reader/admin)
-- [x] docs/PATTERNS.md; useAccessReview gating; nav at top of Administration;
-      results scrollbar fix (single-line virtualized rows); remediation count
-      on Overview
-- [x] vmetal-openshift bug reported: maci0/vmetal-openshift#1
+### Console plugin (React 18 / PatternFly 6 / SDK 4.22)
+- [x] Compliance page under **Administration**: Overview, Results,
+      Remediations, Profiles (HorizontalNav), rescan button.
+- [x] Composition donut (Pass/Fail/Manual slices) + per-profile score badge.
+- [x] Results: VirtualizedTable with status/severity/profile filters,
+      human-readable titles, detail modal (description, instructions, link
+      to the raw ComplianceCheckResult), CSV export of the filtered view.
+- [x] Remediations: gated apply (confirmation modal), auto-apply switch.
+- [x] `useAccessReview` gating on every write; TLS via service-serving cert.
 
-## Done (continued)
-- [x] Full OLM install path verified on the SNO without quay: images + bundle +
-      FBC catalog pushed to the cluster-internal registry, CatalogSource +
-      Subscription in openshift-operators, CSV Succeeded, operator runs
-      in-cluster and reconciles (replaced the local `make run` process).
-      Found + fixed: CSV missing namespaced leader-election RBAC (leases),
-      opm catalog images need the cache precomputed at build time.
+### Observability
+- [x] Prometheus metrics on the secure endpoint:
+      `baseline_security_compliance_score`,
+      `baseline_security_checks{profile,status}`.
+- [x] PrometheusRule: `ComplianceScoreLow`, `ComplianceChecksFailing`.
+- [x] Aggregated `baseline-security-viewer` / `-admin` ClusterRoles.
 
-## Done (continued)
-- [x] API booleans replaced with string enums per api-conventions.md
-      (installComplianceOperator: Automatic|Manual,
-      console.managementState: Managed|Removed, remediation.apply:
-      Automatic|Manual)
+### Packaging & quality
+- [x] OLM bundle + FBC catalog (`make bundle` validates); 0.2.1 replaces
+      0.2.0 in the upgrade graph; images/tools digest-pinned.
+- [x] CI (unit, fuzz, lint, generated-file drift, image builds).
+- [x] E2E: operator Go (`make test-e2e`) + console Playwright
+      (`yarn test-e2e`, also regenerates `docs/screenshots`).
+- [x] Full OLM install + upgrade verified on the SNO via the internal
+      registry (no quay dependency).
 
-## Done (continued)
-- [x] Go module renamed to github.com/maci0/baseline-security-operator
-- [x] E2E suites: operator Go (make test-e2e) + console Playwright
-      (yarn test-e2e), the latter also generates docs/screenshots
-- [x] Version 0.2.1 (breaking enum API); OLM upgrade graph via replaces
+## Planned
 
-## Next
-- [ ] Push versioned images + bundle/catalog to quay.io (needs quay login /
-      robot token), swap CatalogSource image
-- [ ] community-operators submission once bundle is stable
+### Next up
+- [ ] **(H)** Push versioned images + bundle + catalog to quay.io; submit to
+      community-operators once stable. Needs a quay robot token.
 
-## Ideas / backlog
-
-Prioritized; top 3 (marked [implemented]) done this pass.
-
-### Observability (high value, completes existing infra)
-- [implemented] Prometheus metrics: baseline_security_compliance_score gauge +
-  baseline_security_checks{profile,status}. The secure-metrics endpoint was
-  built but exposed nothing custom.
-- [implemented] PrometheusRule: ComplianceScoreLow, ComplianceChecksFailing.
-- [ ] Console dashboard card (console.dashboards/card) surfacing the score on
-  the cluster Overview page (SPEC extension, not yet wired).
-- [ ] Grafana/console dashboard for score trend from the metric.
+### Observability
+- [ ] **(H)** Console dashboard card surfacing the score on the cluster
+      Overview (`console.dashboards/*` extension; SPEC §4.3).
+- [ ] **(L)** Trend dashboard from the score metric.
 
 ### UI / UX
-- [implemented] Composition donut (Pass/Fail/Manual slices) instead of the
-  all-green utilization gauge.
-- [implemented] Per-profile score badge on profile cards.
-- [ ] Result detail: link each check to its ComplianceCheckResult resource;
-  show the rendered remediation object/MachineConfig diff on Remediations.
-- [ ] Progressing/scans-running empty state distinct from "not configured".
-- [ ] Loading skeletons instead of a bare Spinner.
-- [ ] Downloadable compliance report (results CSV / PDF).
-- [ ] Severity-weighted score option.
+- [ ] **(M)** Show the rendered remediation object / MachineConfig diff on
+      the Remediations tab.
+- [ ] **(L)** Distinct "scan in progress" empty state; loading skeletons.
+- [ ] **(L)** PDF report; severity-weighted score option.
 
 ### Operator / API
-- [ ] Watch compliance CRs via dynamic informer once CRDs exist (replace the
-  1-minute poll).
-- [ ] relatedObjects in status + must-gather script for support/insights.
-- [ ] TailoredProfile support (enable/disable individual rules; would also
-  allow an NSA/CISA K8s hardening mapping onto existing rules).
-- [ ] Node remediation apply with MachineConfigPool pause awareness.
-- [ ] Scheduled-scan next-run time in status.
+- [ ] **(M)** Watch compliance CRs via a dynamic informer once the CRDs
+      exist, replacing the 1-minute poll.
+- [ ] **(M)** `TailoredProfile` support (enable/disable individual rules;
+      also the path to an NSA/CISA K8s-hardening mapping onto existing rules,
+      since the Compliance Operator ships no dedicated NSA profile).
+- [ ] **(M)** `relatedObjects` in status + a must-gather script.
+- [ ] **(L)** Node-remediation apply with MachineConfigPool pause awareness.
+- [ ] **(L)** Scheduled next-run time in status.
 
-### Packaging / delivery
-- [ ] Push versioned images + bundle/catalog to quay.io; community-operators.
-- [ ] Helm chart for non-OLM installs.
+### Delivery
+- [ ] **(L)** Helm chart for non-OLM installs.
+
+## Productization
+
+Rename the API group under an `openshift.io` domain, add a
+`registry.ci.openshift.org` build variant, onboard ci-operator, split the
+plugin into its own repo, and file an enhancement proposal referencing
+`docs/SPEC.md`.
+
+## External
+
+- vmetal-openshift lvms playbook bug:
+  [maci0/vmetal-openshift#1](https://github.com/maci0/vmetal-openshift/issues/1).

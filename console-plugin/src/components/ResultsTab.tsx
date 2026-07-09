@@ -18,10 +18,13 @@ import {
   Modal,
   ModalBody,
   ModalHeader,
+  Split,
+  SplitItem,
   Title,
 } from '@patternfly/react-core';
 import {
   CheckCircleIcon,
+  DownloadIcon,
   ExclamationCircleIcon,
   ExclamationTriangleIcon,
   InfoCircleIcon,
@@ -35,7 +38,7 @@ import {
   isOwnedByBaseline,
   suiteProfileKey,
 } from '../models';
-import { checkBody, checkTitle } from '../utils';
+import { checkBody, checkResultHref, checkTitle, resultsCsv } from '../utils';
 
 const statusLabel: Record<
   CheckStatus,
@@ -145,14 +148,39 @@ const ResultsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => {
 
   const [data, filteredData, onFilterChange] = useListPageFilter(ownedResults, rowFilters);
 
+  const downloadCsv = React.useCallback(() => {
+    // Export the currently filtered rows so the download matches the view.
+    const blob = new Blob([resultsCsv(filteredData)], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'compliance-results.csv';
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [filteredData]);
+
   return (
     <ListPageBody>
-      <ListPageFilter
-        data={data}
-        loaded={loaded}
-        rowFilters={rowFilters}
-        onFilterChange={onFilterChange}
-      />
+      <Split hasGutter>
+        <SplitItem isFilled>
+          <ListPageFilter
+            data={data}
+            loaded={loaded}
+            rowFilters={rowFilters}
+            onFilterChange={onFilterChange}
+          />
+        </SplitItem>
+        <SplitItem>
+          <Button
+            variant="secondary"
+            icon={<DownloadIcon />}
+            isDisabled={!loaded || filteredData.length === 0}
+            onClick={downloadCsv}
+          >
+            {t('Export CSV')}
+          </Button>
+        </SplitItem>
+      </Split>
       <VirtualizedTable<ComplianceCheckResult>
         data={filteredData}
         unfilteredData={data}
@@ -186,6 +214,11 @@ const ResultsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => {
                   </Content>
                 </>
               )}
+              <Content component="p" style={{ marginTop: 'var(--pf-t--global--spacer--md)' }}>
+                <a href={checkResultHref(selected.metadata.name)}>
+                  {t('View ComplianceCheckResult resource')}
+                </a>
+              </Content>
             </>
           )}
         </ModalBody>

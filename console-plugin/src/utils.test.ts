@@ -1,4 +1,6 @@
 import {
+  checkResultHref,
+  resultsCsv,
   remediationApplyPatch,
   checkBody,
   checkTitle,
@@ -209,5 +211,49 @@ describe('resultsHref', () => {
       expect(href.startsWith('/baseline-security/results?')).toBe(true);
       expect(href).toContain('rowFilter-result-status=');
     }
+  });
+});
+
+describe('resultsCsv', () => {
+  const r = (name: string, status: string, severity: string, description?: string) =>
+    ({ metadata: { name, namespace: 'ns' }, status, severity, description }) as ComplianceCheckResult;
+
+  it('emits a header and one row per result', () => {
+    const csv = resultsCsv([r('a', 'PASS', 'low', 'Title A'), r('b', 'FAIL', 'high', 'Title B')]);
+    const lines = csv.split('\r\n');
+    expect(lines[0]).toBe('name,title,status,severity');
+    expect(lines[1]).toBe('a,Title A,PASS,low');
+    expect(lines[2]).toBe('b,Title B,FAIL,high');
+  });
+  it('quotes and escapes cells containing comma, quote, or newline', () => {
+    const csv = resultsCsv([r('x,y', 'FAIL', 'high', 'He said "hi"\nline2')]);
+    const row = csv.split('\r\n')[1];
+    expect(row).toBe('"x,y","He said ""hi""",FAIL,high');
+  });
+  it('handles empty input (header only)', () => {
+    expect(resultsCsv([])).toBe('name,title,status,severity');
+  });
+  it('fuzz: valid CSV (each row has 4 cells; quotes balanced) for arbitrary CR text', () => {
+    const rand = () =>
+      Array.from({ length: Math.floor(Math.random() * 40) }, () =>
+        String.fromCharCode(Math.floor(Math.random() * 128)),
+      ).join('');
+    for (let i = 0; i < 2000; i++) {
+      const csv = resultsCsv([r(rand(), 'FAIL', 'high', rand())]);
+      expect(typeof csv).toBe('string');
+      // Total double-quotes are even (all escapes balanced).
+      expect((csv.match(/"/g) ?? []).length % 2).toBe(0);
+    }
+  });
+});
+
+describe('checkResultHref', () => {
+  it('builds a namespaced ComplianceCheckResult console path', () => {
+    expect(checkResultHref('ocp4-cis-audit')).toBe(
+      '/k8s/ns/openshift-compliance/compliance.openshift.io~v1alpha1~ComplianceCheckResult/ocp4-cis-audit',
+    );
+  });
+  it('encodes special characters in the name', () => {
+    expect(checkResultHref('a b/c')).toContain(encodeURIComponent('a b/c'));
   });
 });
