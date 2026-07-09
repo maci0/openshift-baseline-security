@@ -28,7 +28,15 @@
       on Overview
 - [x] vmetal-openshift bug reported: maci0/vmetal-openshift#1
 
+## Done (continued)
+- [x] Full OLM install path verified on the SNO without quay: images + bundle +
+      FBC catalog pushed to the cluster-internal registry, CatalogSource +
+      Subscription in openshift-operators, CSV Succeeded, operator runs
+      in-cluster and reconciles (replaced the local `make run` process).
+      Found + fixed: CSV missing namespaced leader-election RBAC (leases),
+      opm catalog images need the cache precomputed at build time.
+
 ## Next
-- [ ] Push versioned images + bundle/catalog to quay.io, install via CatalogSource
-      (in-cluster operator deployment replaces local `make run`)
+- [ ] Push versioned images + bundle/catalog to quay.io (needs quay login /
+      robot token), swap CatalogSource image
 - [ ] community-operators submission once bundle is stable

@@ -120,6 +120,18 @@ opm; SQLite catalogs are dead. Validate with `operator-sdk bundle validate`
 **Here**: `make bundle` validates in the operator-sdk container; `make
 bundle-build/bundle-push/catalog-build` produce bundle + FBC catalog images.
 
+Hard-won specifics (all hit during live OLM install testing):
+- The CSV needs namespaced `permissions` (leases + events) for
+  leader election, not just `clusterPermissions`; without them the manager
+  runs but never acquires the lock, and no controller starts. `operator-sdk
+  bundle validate` does not catch this.
+- opm-served catalog images must precompute the cache at build time
+  (`RUN opm serve /configs --cache-dir=... --cache-only`); otherwise the
+  catalog pod crash-loops on an integrity check.
+- Never reuse a bundle/catalog image tag: OLM unpack jobs and kubelet image
+  caches happily serve the stale content for a same-tag repush. Version
+  every push.
+
 ## 8. Dependency on another operator
 
 **Pattern**: OLM v0 `dependencies.yaml` resolves into the dependent's

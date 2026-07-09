@@ -61,7 +61,7 @@ defaults and presentation are missing. Both are cheap. That is this project.
   and build conventions match openshift org components so productization is
   a re-namespace, not a rewrite.
 
-### Stretch goals (documented, not v1)
+### Stretch goals (implemented)
 
 - S1: **Remediation apply from the UI**: one-click `spec.apply: true` on a
   `ComplianceRemediation`, with an explicit warning that node remediations
@@ -173,8 +173,8 @@ spec:
   complianceCatalogSource: redhat-operators   # okd/disconnected override
   console:
     enabled: true
-  remediation:                 # stretch S1; validated+rejected until implemented
-    autoApply: false
+  remediation:
+    autoApply: false           # ScanSetting autoApplyRemediations/autoUpdateRemediations
 status:
   conditions: [...]
   complianceOperatorVersion: 1.8.2
@@ -334,13 +334,13 @@ same Makefile targets (`test`, `lint`, `docker-build`).
 
 ## 10. Roadmap
 
-| Milestone | Content |
-|---|---|
-| 0.1 | Operator: CO install/adopt + CIS default binding + status score. Plugin: dashboard + results list. Manual image deploy. |
-| 0.2 | Full profile catalog (G2), rescan button, overview card, OLM bundle + catalog, community-operators submission. |
-| 0.3 (S2) | Score history + trendline. |
-| 0.4 (S1) | Remediation viewing + gated apply, auto-apply toggle. |
-| Productization | Rename API group to openshift.io namespace, Dockerfile.rhel + ci-operator onboarding, split repos, Red Hat enhancement proposal referencing this spec. |
+| Milestone | Content | Status |
+|---|---|---|
+| 0.1 | Operator: CO install/adopt + CIS default binding + status score. Plugin: dashboard + results list. | Done; verified e2e on SNO 4.22.0 (score 96 from 277 CIS results) |
+| 0.2 | Full profile catalog (G2), rescan button, OLM bundle + catalog. | Done; OLM install path verified on-cluster. community-operators submission pending |
+| 0.3 (S2) | Score history + trendline. | Done (30-entry status ring + trend chart) |
+| 0.4 (S1) | Remediation viewing + gated apply, auto-apply toggle. | Done (confirmation modal, useAccessReview gating) |
+| Productization | Rename API group to openshift.io namespace, Dockerfile.rhel + ci-operator onboarding, split repos, Red Hat enhancement proposal referencing this spec. | Open |
 
 ## 11. Prerequisites
 
@@ -356,13 +356,18 @@ same Makefile targets (`test`, `lint`, `docker-build`).
 
 ## 12. Open questions
 
-- Default-create the `ClusterBaseline` CR on install, or require one
-  explicit user action? (Spec leans default-create; zero-config is the
-  point.)
-- Nav placement: new "Compliance" nav section vs item under an existing
-  section. Needs a console UX pass.
+Resolved during implementation:
+
+- Default-create: implemented. The operator creates `ClusterBaseline/cluster`
+  (CIS) on start when none exists; opt out with
+  `BASELINE_SECURITY_SKIP_DEFAULT_CR=true`.
+- Nav placement: "Compliance" at the top of the Administration section
+  (`insertBefore` cluster-settings).
+- MANUAL results: excluded from the score, surfaced as a separate count per
+  profile and as a results filter.
+
+Still open:
+
 - OKD support: upstream catalog/content images differ (ghcr.io); the
   `complianceCatalogSource` knob covers the Subscription, content image
   override may also be needed.
-- Score formula treatment of MANUAL results (excluded in v1; surface count
-  separately so the number is honest).
