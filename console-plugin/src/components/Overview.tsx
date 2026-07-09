@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { useTranslation } from 'react-i18next';
-import { Timestamp } from '@openshift-console/dynamic-plugin-sdk';
+import { Timestamp, useK8sWatchResource } from '@openshift-console/dynamic-plugin-sdk';
 import {
   Chart,
   ChartArea,
@@ -22,13 +22,22 @@ import {
   PageSection,
   Spinner,
 } from '@patternfly/react-core';
-import { ClusterBaseline } from '../models';
+import {
+  ClusterBaseline,
+  ComplianceRemediation,
+  ComplianceRemediationGVK,
+} from '../models';
 
 const Overview: React.FC<{ baseline?: ClusterBaseline; loaded: boolean }> = ({
   baseline,
   loaded,
 }) => {
   const { t } = useTranslation('plugin__baseline-security-console-plugin');
+  const [remediations] = useK8sWatchResource<ComplianceRemediation[]>({
+    groupVersionKind: ComplianceRemediationGVK,
+    isList: true,
+    namespace: 'openshift-compliance',
+  });
 
   if (!loaded) {
     return (
@@ -103,6 +112,17 @@ const Overview: React.FC<{ baseline?: ClusterBaseline; loaded: boolean }> = ({
                 <DescriptionListTerm>{t('Compliance Operator')}</DescriptionListTerm>
                 <DescriptionListDescription>
                   {baseline.status?.complianceOperatorVersion || t('Installing')}
+                </DescriptionListDescription>
+              </DescriptionListGroup>
+              <DescriptionListGroup>
+                <DescriptionListTerm>{t('Remediations')}</DescriptionListTerm>
+                <DescriptionListDescription>
+                  <a href="/baseline-security/remediations">
+                    {t('{{available}} available, {{applied}} applied', {
+                      available: (remediations ?? []).filter((r) => !r.spec.apply).length,
+                      applied: (remediations ?? []).filter((r) => r.spec.apply).length,
+                    })}
+                  </a>
                 </DescriptionListDescription>
               </DescriptionListGroup>
             </DescriptionList>

@@ -66,12 +66,11 @@ const ResultsTab: React.FC = () => {
       return (
         <>
           <TableData id="title" activeColumnIDs={activeColumnIDs}>
+            {/* Single-line rows: VirtualizedTable virtualizes with a fixed row
+                height; the raw check name lives in the detail modal. */}
             <Button variant="link" isInline onClick={() => setSelected(obj)}>
               {checkTitle(obj)}
             </Button>
-            <Content component="small" style={{ display: 'block', opacity: 0.7 }}>
-              {obj.metadata.name}
-            </Content>
           </TableData>
           <TableData id="status" activeColumnIDs={activeColumnIDs}>
             <Label isCompact color={s.color} icon={s.icon}>

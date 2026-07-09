@@ -42,6 +42,7 @@ rules:
   resources:
   - clusterbaselines
   verbs:
+  - create
   - get
   - list
   - patch

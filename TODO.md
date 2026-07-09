@@ -19,11 +19,16 @@
 - [x] Stretch S1: Remediations tab, confirmation-gated apply, auto-apply switch
 - [x] Stretch S2: score history in status (30-entry ring) + trend chart
 
+## Done (continued)
+- [x] Default-create ClusterBaseline on operator start (opt out:
+      BASELINE_SECURITY_SKIP_DEFAULT_CR=true)
+- [x] Aggregated viewer/admin ClusterRoles (aggregate to view/cluster-reader/admin)
+- [x] docs/PATTERNS.md; useAccessReview gating; nav at top of Administration;
+      results scrollbar fix (single-line virtualized rows); remediation count
+      on Overview
+- [x] vmetal-openshift bug reported: maci0/vmetal-openshift#1
+
 ## Next
 - [ ] Push versioned images + bundle/catalog to quay.io, install via CatalogSource
       (in-cluster operator deployment replaces local `make run`)
-- [ ] Default-create ClusterBaseline on install (SPEC open question)
-- [ ] Aggregated viewer/admin ClusterRoles for non-admin users (SPEC §6)
 - [ ] community-operators submission once bundle is stable
-- [ ] Report vmetal-openshift bug: lvms playbook fatals on missing
-      operator-catalog.yaml on connected clusters (workaround: touch the file)

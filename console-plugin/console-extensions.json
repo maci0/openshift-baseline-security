@@ -6,7 +6,8 @@
       "name": "%plugin__baseline-security-console-plugin~Compliance%",
       "href": "/baseline-security",
       "perspective": "admin",
-      "section": "administration"
+      "section": "administration",
+      "insertBefore": ["cluster-settings", "clustersettings"]
     }
   },
   {

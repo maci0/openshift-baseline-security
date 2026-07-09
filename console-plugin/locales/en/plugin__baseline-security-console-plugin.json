@@ -22,6 +22,7 @@
   "Status": "Status",
   "Severity": "Severity",
   "Score trend": "Score trend",
+  "{{available}} available, {{applied}} applied": "{{available}} available, {{applied}} applied",
   "How to verify": "How to verify",
   "No description provided.": "No description provided.",
   "Remediations": "Remediations",
