@@ -16,6 +16,7 @@
   "devDependencies": {
     "@openshift-console/dynamic-plugin-sdk": "4.22-latest",
     "@openshift-console/dynamic-plugin-sdk-webpack": "4.22-latest",
+    "@patternfly/react-charts": "~8.4.1",
     "@patternfly/react-core": "^6.4.3",
     "@patternfly/react-icons": "^6.4.0",
     "@patternfly/react-table": "^6.4.3",
@@ -31,6 +32,7 @@
     "ts-loader": "^9.5.4",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3",
+    "victory": "^37.3.6",
     "webpack": "^5.107.2",
     "webpack-cli": "^6.0.1",
     "webpack-dev-server": "^5.2.4"
@@ -41,9 +43,7 @@
     "displayName": "Baseline Security",
     "description": "Cluster compliance baseline dashboard driven by the Compliance Operator.",
     "exposedModules": {
-      "DashboardPage": "./components/DashboardPage",
-      "ResultsPage": "./components/ResultsPage",
-      "ProfilesPage": "./components/ProfilesPage"
+      "CompliancePage": "./components/CompliancePage"
     },
     "dependencies": {
       "@console/pluginAPI": ">=4.22.0-0"

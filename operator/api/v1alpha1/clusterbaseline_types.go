@@ -36,6 +36,20 @@ type ClusterBaselineSpec struct {
 	// console configures the console plugin deployment.
 	// +optional
 	Console ConsoleSpec `json:"console,omitempty"`
+
+	// remediation configures how ComplianceRemediations are handled.
+	// +optional
+	Remediation RemediationSpec `json:"remediation,omitempty"`
+}
+
+// RemediationSpec configures remediation handling.
+type RemediationSpec struct {
+	// autoApply applies remediations automatically after each scan
+	// (ScanSetting autoApplyRemediations/autoUpdateRemediations). Node
+	// remediations render into MachineConfigs and reboot nodes.
+	// +kubebuilder:default=false
+	// +optional
+	AutoApply *bool `json:"autoApply,omitempty"`
 }
 
 // ConsoleSpec configures the console plugin.
@@ -58,6 +72,12 @@ type ProfileStatus struct {
 	NotApplicable int32      `json:"notApplicable"`
 }
 
+// ScoreSnapshot is one point of score history, recorded when a scan completes.
+type ScoreSnapshot struct {
+	Time  metav1.Time `json:"time"`
+	Score int32       `json:"score"`
+}
+
 // ClusterBaselineStatus is the observed state.
 type ClusterBaselineStatus struct {
 	// +optional
@@ -72,6 +92,10 @@ type ClusterBaselineStatus struct {
 	ComplianceOperatorVersion string `json:"complianceOperatorVersion,omitempty"`
 	// +optional
 	Profiles []ProfileStatus `json:"profiles,omitempty"`
+	// history holds score snapshots, oldest first, capped at 30 entries.
+	// +optional
+	// +kubebuilder:validation:MaxItems=30
+	History []ScoreSnapshot `json:"history,omitempty"`
 }
 
 // ClusterBaseline is the cluster-scoped singleton configuring baseline

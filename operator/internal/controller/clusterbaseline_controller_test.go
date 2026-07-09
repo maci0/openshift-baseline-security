@@ -39,7 +39,7 @@ func TestAggregateStatus(t *testing.T) {
 		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(
 			checkResult("a", "ocp4-cis", "PASS"),
 			checkResult("b", "ocp4-cis", "PASS"),
-			checkResult("c", "ocp4-cis-node", "FAIL"),
+			checkResult("c", "ocp4-cis-node-master", "FAIL"), // role-suffixed scan name
 			checkResult("d", "ocp4-cis", "MANUAL"),
 			checkResult("e", "unrelated-scan", "FAIL"), // not ours, ignored
 		).Build(),

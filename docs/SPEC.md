@@ -342,7 +342,19 @@ same Makefile targets (`test`, `lint`, `docker-build`).
 | 0.4 (S1) | Remediation viewing + gated apply, auto-apply toggle. |
 | Productization | Rename API group to openshift.io namespace, Dockerfile.rhel + ci-operator onboarding, split repos, Red Hat enhancement proposal referencing this spec. |
 
-## 11. Open questions
+## 11. Prerequisites
+
+- A default StorageClass. Compliance scans persist raw ARF results to a PVC
+  (`ScanSetting.rawResultStorage`, 1Gi); without a default StorageClass the
+  PVCs stay Pending and scans hang without any error from the Compliance
+  Operator. The operator surfaces this as a `Degraded` condition
+  (`ScanStoragePending`) on the ClusterBaseline. Verified on SNO: LVM
+  Storage (LVMS) on a spare disk is sufficient.
+- Cluster reachability to an OLM catalog carrying `compliance-operator`
+  (`redhat-operators` by default, `spec.complianceCatalogSource` to
+  override for OKD/disconnected).
+
+## 12. Open questions
 
 - Default-create the `ClusterBaseline` CR on install, or require one
   explicit user action? (Spec leans default-create; zero-config is the

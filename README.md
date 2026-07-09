@@ -12,6 +12,14 @@ Red Hat Compliance Operator, with results in the admin console.
   PatternFly 6, dynamic-plugin-sdk 4.22) rendering dashboard, check
   results, and profile selection
 
+## Screenshots
+
+Live against a single-node OpenShift 4.22 cluster (CIS profile):
+
+![Compliance overview](docs/screenshots/overview.png)
+![Check results](docs/screenshots/results.png)
+![Remediations](docs/screenshots/remediations.png)
+
 ## Quick start (development)
 
 ```sh

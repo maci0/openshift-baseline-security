@@ -1,0 +1,157 @@
+apiVersion: operators.coreos.com/v1alpha1
+kind: ClusterServiceVersion
+metadata:
+  name: baseline-security-operator.v0.1.0
+  namespace: placeholder
+  annotations:
+    alm-examples: |-
+      [
+        {
+          "apiVersion": "baselinesecurity.io/v1alpha1",
+          "kind": "ClusterBaseline",
+          "metadata": {"name": "cluster"},
+          "spec": {"profiles": ["cis"]}
+        }
+      ]
+    capabilities: Seamless Upgrades
+    categories: Security
+    containerImage: quay.io/openshift-baseline-security/baseline-security-operator:0.1.0
+    repository: https://github.com/maci0/openshift-baseline-security
+    description: Baseline benchmark compliance scanning with a native console UI,
+      built on the Red Hat Compliance Operator.
+    features.operators.openshift.io/disconnected: "true"
+    features.operators.openshift.io/fips-compliant: "false"
+    features.operators.openshift.io/proxy-aware: "false"
+    features.operators.openshift.io/tls-profiles: "false"
+    features.operators.openshift.io/token-auth-aws: "false"
+    features.operators.openshift.io/token-auth-azure: "false"
+    features.operators.openshift.io/token-auth-gcp: "false"
+spec:
+  displayName: Baseline Security
+  description: |
+    Gives the cluster an out-of-the-box compliance baseline: install, and the
+    cluster continuously benchmarks itself against the CIS OpenShift Benchmark
+    (optionally PCI-DSS, NIST 800-53, DISA STIG, NERC CIP, ACSC E8, BSI),
+    with results rendered natively in the OpenShift web console.
+
+    The scan engine is the Red Hat Compliance Operator (installed automatically
+    if absent). This operator adds zero-configuration defaults, score
+    aggregation, and an admin-console plugin: dashboard, filterable check
+    results, remediation apply, and profile selection.
+
+    Requires a default StorageClass for scan result storage.
+  maturity: alpha
+  version: 0.1.0
+  minKubeVersion: 1.35.0
+  keywords: [security, compliance, cis, benchmark, openscap]
+  maintainers:
+    - name: maci
+      email: maci.stgn@gmail.com
+  provider:
+    name: openshift-baseline-security
+  links:
+    - name: Source
+      url: https://github.com/maci0/openshift-baseline-security
+  installModes:
+    - type: OwnNamespace
+      supported: false
+    - type: SingleNamespace
+      supported: false
+    - type: MultiNamespace
+      supported: false
+    - type: AllNamespaces
+      supported: true
+  customresourcedefinitions:
+    owned:
+      - kind: ClusterBaseline
+        name: clusterbaselines.baselinesecurity.io
+        version: v1alpha1
+        displayName: Cluster Baseline
+        description: Cluster-scoped singleton configuring baseline compliance scanning.
+  install:
+    strategy: deployment
+    spec:
+      clusterPermissions:
+        - serviceAccountName: baseline-security-operator
+          rules:
+            - apiGroups: [""]
+              resources: [configmaps, namespaces, services]
+              verbs: [create, get, list, patch, update, watch]
+            - apiGroups: [""]
+              resources: [persistentvolumeclaims]
+              verbs: [get, list, watch]
+            - apiGroups: [apps]
+              resources: [deployments]
+              verbs: [create, delete, get, list, patch, update, watch]
+            - apiGroups: [baselinesecurity.io]
+              resources: [clusterbaselines]
+              verbs: [get, list, patch, update, watch]
+            - apiGroups: [baselinesecurity.io]
+              resources: [clusterbaselines/status]
+              verbs: [get, patch, update]
+            - apiGroups: [compliance.openshift.io]
+              resources: [compliancecheckresults, compliancescans, compliancesuites]
+              verbs: [get, list, watch]
+            - apiGroups: [compliance.openshift.io]
+              resources: [scansettingbindings, scansettings]
+              verbs: [create, delete, get, list, patch, update, watch]
+            - apiGroups: [console.openshift.io]
+              resources: [consoleplugins]
+              verbs: [create, delete, get, list, patch, update, watch]
+            - apiGroups: [operator.openshift.io]
+              resources: [consoles]
+              verbs: [get, list, patch, update, watch]
+            - apiGroups: [operators.coreos.com]
+              resources: [clusterserviceversions]
+              verbs: [get, list, watch]
+            - apiGroups: [operators.coreos.com]
+              resources: [operatorgroups, subscriptions]
+              verbs: [create, get, list, watch]
+      deployments:
+        - name: baseline-security-operator
+          spec:
+            replicas: 1
+            selector:
+              matchLabels:
+                app: baseline-security-operator
+            template:
+              metadata:
+                labels:
+                  app: baseline-security-operator
+              spec:
+                serviceAccountName: baseline-security-operator
+                securityContext:
+                  runAsNonRoot: true
+                  seccompProfile:
+                    type: RuntimeDefault
+                containers:
+                  - name: manager
+                    image: quay.io/openshift-baseline-security/baseline-security-operator:0.1.0
+                    args: [--leader-elect]
+                    env:
+                      - name: RELATED_IMAGE_CONSOLE_PLUGIN
+                        value: quay.io/openshift-baseline-security/baseline-security-console-plugin:0.1.0
+                    securityContext:
+                      allowPrivilegeEscalation: false
+                      capabilities:
+                        drop: [ALL]
+                      readOnlyRootFilesystem: true
+                    livenessProbe:
+                      httpGet:
+                        path: /healthz
+                        port: 8081
+                      initialDelaySeconds: 15
+                    readinessProbe:
+                      httpGet:
+                        path: /readyz
+                        port: 8081
+                      initialDelaySeconds: 5
+                    resources:
+                      requests:
+                        cpu: 10m
+                        memory: 64Mi
+                      limits:
+                        memory: 256Mi
+  relatedImages:
+    - name: console-plugin
+      image: quay.io/openshift-baseline-security/baseline-security-console-plugin:0.1.0

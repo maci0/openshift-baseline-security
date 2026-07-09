@@ -1,9 +1,10 @@
 FROM registry.access.redhat.com/ubi9/nodejs-22:latest AS build
 USER root
-RUN command -v yarn || npm i -g yarn
+ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
+RUN npm i -g corepack && corepack enable
 WORKDIR /usr/src/app
-COPY package.json yarn.lock* .yarnrc.yml* ./
-RUN yarn install --immutable || yarn install
+COPY package.json yarn.lock .yarnrc.yml ./
+RUN yarn install --immutable
 COPY . .
 RUN yarn build
 

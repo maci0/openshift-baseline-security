@@ -18,6 +18,30 @@ export const ComplianceScanGVK: K8sGroupVersionKind = {
   kind: 'ComplianceScan',
 };
 
+export const ClusterBaselineModel = {
+  apiGroup: ClusterBaselineGVK.group,
+  apiVersion: ClusterBaselineGVK.version,
+  kind: ClusterBaselineGVK.kind,
+  plural: 'clusterbaselines',
+  abbr: 'cb',
+  label: 'ClusterBaseline',
+  labelPlural: 'ClusterBaselines',
+  id: '',
+  namespaced: false,
+};
+
+export const ComplianceScanModel = {
+  apiGroup: ComplianceScanGVK.group,
+  apiVersion: ComplianceScanGVK.version,
+  kind: ComplianceScanGVK.kind,
+  plural: 'compliancescans',
+  abbr: 'cs',
+  label: 'ComplianceScan',
+  labelPlural: 'ComplianceScans',
+  id: '',
+  namespaced: true,
+};
+
 export type CheckStatus = 'PASS' | 'FAIL' | 'INFO' | 'MANUAL' | 'ERROR' | 'NOT-APPLICABLE';
 
 export type ComplianceCheckResult = {
@@ -30,6 +54,34 @@ export type ComplianceCheckResult = {
   description?: string;
   instructions?: string;
 };
+
+export const ComplianceRemediationGVK: K8sGroupVersionKind = {
+  group: 'compliance.openshift.io',
+  version: 'v1alpha1',
+  kind: 'ComplianceRemediation',
+};
+
+export const ComplianceRemediationModel = {
+  apiGroup: ComplianceRemediationGVK.group,
+  apiVersion: ComplianceRemediationGVK.version,
+  kind: ComplianceRemediationGVK.kind,
+  plural: 'complianceremediations',
+  abbr: 'cr',
+  label: 'ComplianceRemediation',
+  labelPlural: 'ComplianceRemediations',
+  id: '',
+  namespaced: true,
+};
+
+export type ComplianceRemediation = {
+  apiVersion: string;
+  kind: string;
+  metadata: { name: string; namespace: string };
+  spec: { apply: boolean; current?: { object?: { kind?: string } } };
+  status?: { applicationState?: 'Applied' | 'NotApplied' | 'Error' | 'Outdated' | 'MissingDependencies' };
+};
+
+export type ScoreSnapshot = { time: string; score: number };
 
 export type ProfileStatus = {
   key: string;
@@ -50,6 +102,7 @@ export type ClusterBaseline = {
     schedule?: string;
     installComplianceOperator?: boolean;
     console?: { enabled?: boolean };
+    remediation?: { autoApply?: boolean };
   };
   status?: {
     score?: number;
@@ -57,6 +110,7 @@ export type ClusterBaseline = {
     complianceOperatorVersion?: string;
     profiles?: ProfileStatus[];
     conditions?: { type: string; status: string; message?: string }[];
+    history?: ScoreSnapshot[];
   };
 };
 
