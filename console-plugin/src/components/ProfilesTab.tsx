@@ -46,7 +46,7 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => 
 
   const toggle = async (key: string, checked: boolean) => {
     if (!baseline) return;
-    const profiles = toggledProfiles(baseline.spec.profiles, key, checked);
+    const profiles = toggledProfiles(baseline.spec.profiles ?? [], key, checked);
     if (!profiles) return; // CRD requires at least one profile
     setPending(true);
     setError(null);
@@ -75,7 +75,8 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => 
       )}
       <Gallery hasGutter minWidths={{ default: '330px' }}>
         {Object.keys(PROFILE_INFO).map((key) => {
-          const enabled = baseline?.spec.profiles.includes(key) ?? false;
+          const profileCount = baseline?.spec.profiles?.length ?? 0;
+          const enabled = baseline?.spec.profiles?.includes(key) ?? false;
           return (
             <Card key={key}>
               <CardHeader
@@ -90,7 +91,7 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => 
                         !canEdit ||
                         canEditLoading ||
                         pending ||
-                        (enabled && baseline.spec.profiles.length === 1)
+                        (enabled && profileCount === 1)
                       }
                       onChange={(_e, checked) => {
                         void toggle(key, checked);

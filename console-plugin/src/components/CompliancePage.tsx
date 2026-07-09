@@ -22,7 +22,7 @@ import {
   ComplianceScanModel,
   isOwnedByBaseline,
 } from '../models';
-import { rescanPatch } from '../utils';
+import { errorMessage, rescanPatch } from '../utils';
 import {
   BaselineContext,
   OverviewRoute,
@@ -62,12 +62,7 @@ const CompliancePage: React.FC = () => {
     verb: 'patch',
     namespace: 'openshift-compliance',
   });
-  const watchError =
-    baselineError instanceof Error
-      ? baselineError.message
-      : scansError instanceof Error
-        ? scansError.message
-        : null;
+  const watchError = errorMessage(baselineError) ?? errorMessage(scansError);
 
   const profiles = baseline?.spec.profiles;
   const ownedScans = React.useMemo(

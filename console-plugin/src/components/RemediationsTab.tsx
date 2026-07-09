@@ -28,7 +28,7 @@ import {
   ComplianceRemediationModel,
   isOwnedByBaseline,
 } from '../models';
-import { remediationApplyPatch } from '../utils';
+import { errorMessage, remediationApplyPatch } from '../utils';
 
 const stateColor: Record<string, React.ComponentProps<typeof Label>['color']> = {
   Applied: 'green',
@@ -59,7 +59,7 @@ const RemediationsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline })
     resource: 'clusterbaselines',
     verb: 'patch',
   });
-  const watchError = loadError instanceof Error ? loadError.message : null;
+  const watchError = errorMessage(loadError);
 
   const owned = React.useMemo(
     () =>

@@ -2,6 +2,7 @@ import {
   remediationApplyPatch,
   checkBody,
   checkTitle,
+  errorMessage,
   rescanPatch,
   resultsHref,
   scoreColor,
@@ -168,6 +169,21 @@ describe('scoreColor', () => {
       const color = scoreColor(s);
       expect(color.startsWith('var(--pf-t--')).toBe(true);
     }
+  });
+});
+
+describe('errorMessage', () => {
+  it('returns null for empty values', () => {
+    expect(errorMessage(null)).toBeNull();
+    expect(errorMessage(undefined)).toBeNull();
+    expect(errorMessage('')).toBeNull();
+  });
+  it('handles string and Error', () => {
+    expect(errorMessage('boom')).toBe('boom');
+    expect(errorMessage(new Error('nope'))).toBe('nope');
+  });
+  it('handles message-bearing objects (k8s / HttpError shapes)', () => {
+    expect(errorMessage({ message: 'forbidden' })).toBe('forbidden');
   });
 });
 

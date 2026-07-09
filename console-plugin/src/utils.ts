@@ -1,5 +1,25 @@
 import { ComplianceCheckResult } from './models';
 
+// Normalize k8s watch / fetch errors (string | Error | { message }) for Alerts.
+export const errorMessage = (err: unknown): string | null => {
+  if (err == null || err === '') {
+    return null;
+  }
+  if (typeof err === 'string') {
+    return err;
+  }
+  if (err instanceof Error) {
+    return err.message || err.name;
+  }
+  if (typeof err === 'object' && 'message' in err) {
+    const m = (err as { message: unknown }).message;
+    if (typeof m === 'string' && m) {
+      return m;
+    }
+  }
+  return String(err);
+};
+
 // The description's first line is the rule title; the rest is the rationale.
 // description comes from ComplianceCheckResult CRs, i.e. untrusted input.
 export const checkTitle = (r: ComplianceCheckResult): string =>

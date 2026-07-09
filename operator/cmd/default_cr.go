@@ -31,10 +31,12 @@ func (d *defaultClusterBaseline) Start(ctx context.Context) error {
 		if err := d.ensureOnce(ctx); err == nil {
 			return nil
 		}
+		timer := time.NewTimer(10 * time.Second)
 		select {
 		case <-ctx.Done():
+			timer.Stop()
 			return nil
-		case <-time.After(10 * time.Second):
+		case <-timer.C:
 		}
 	}
 }
