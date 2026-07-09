@@ -1,4 +1,4 @@
-import { K8sGroupVersionKind } from '@openshift-console/dynamic-plugin-sdk';
+import { K8sGroupVersionKind, K8sModel } from '@openshift-console/dynamic-plugin-sdk';
 
 export const ClusterBaselineGVK: K8sGroupVersionKind = {
   group: 'baselinesecurity.io',
@@ -18,73 +18,40 @@ export const ComplianceScanGVK: K8sGroupVersionKind = {
   kind: 'ComplianceScan',
 };
 
-export const ClusterBaselineModel = {
-  apiGroup: ClusterBaselineGVK.group,
-  apiVersion: ClusterBaselineGVK.version,
-  kind: ClusterBaselineGVK.kind,
-  plural: 'clusterbaselines',
-  abbr: 'cb',
-  label: 'ClusterBaseline',
-  labelPlural: 'ClusterBaselines',
-  id: '',
-  namespaced: false,
-};
-
-export const ComplianceScanModel = {
-  apiGroup: ComplianceScanGVK.group,
-  apiVersion: ComplianceScanGVK.version,
-  kind: ComplianceScanGVK.kind,
-  plural: 'compliancescans',
-  abbr: 'cs',
-  label: 'ComplianceScan',
-  labelPlural: 'ComplianceScans',
-  id: '',
-  namespaced: true,
-};
-
-export type CheckStatus = 'PASS' | 'FAIL' | 'INFO' | 'MANUAL' | 'ERROR' | 'NOT-APPLICABLE';
-
-export type ComplianceCheckResult = {
-  apiVersion: string;
-  kind: string;
-  metadata: {
-    name: string;
-    namespace: string;
-    labels?: Record<string, string>;
-  };
-  id: string;
-  status: CheckStatus;
-  severity: 'unknown' | 'info' | 'low' | 'medium' | 'high';
-  description?: string;
-  instructions?: string;
-};
-
 export const ComplianceRemediationGVK: K8sGroupVersionKind = {
   group: 'compliance.openshift.io',
   version: 'v1alpha1',
   kind: 'ComplianceRemediation',
 };
 
-export const ComplianceRemediationModel = {
-  apiGroup: ComplianceRemediationGVK.group,
-  apiVersion: ComplianceRemediationGVK.version,
-  kind: ComplianceRemediationGVK.kind,
-  plural: 'complianceremediations',
-  abbr: 'cr',
-  label: 'ComplianceRemediation',
-  labelPlural: 'ComplianceRemediations',
+const model = (gvk: K8sGroupVersionKind, plural: string, namespaced: boolean): K8sModel => ({
+  apiGroup: gvk.group,
+  apiVersion: gvk.version,
+  kind: gvk.kind,
+  plural,
+  abbr: '',
+  label: gvk.kind,
+  labelPlural: plural,
   id: '',
-  namespaced: true,
+  namespaced,
+});
+
+export const ClusterBaselineModel = model(ClusterBaselineGVK, 'clusterbaselines', false);
+export const ComplianceScanModel = model(ComplianceScanGVK, 'compliancescans', true);
+export const ComplianceRemediationModel = model(ComplianceRemediationGVK, 'complianceremediations', true);
+
+export type CheckStatus = 'PASS' | 'FAIL' | 'INFO' | 'MANUAL' | 'ERROR' | 'NOT-APPLICABLE';
+
+export type ComplianceCheckResult = {
+  metadata: { name: string; namespace: string; labels?: Record<string, string> };
+  status: CheckStatus;
+  severity: 'unknown' | 'info' | 'low' | 'medium' | 'high';
+  description?: string;
+  instructions?: string;
 };
 
 export type ComplianceRemediation = {
-  apiVersion: string;
-  kind: string;
-  metadata: {
-    name: string;
-    namespace: string;
-    labels?: Record<string, string>;
-  };
+  metadata: { name: string; namespace: string; labels?: Record<string, string> };
   spec: { apply: boolean; current?: { object?: { kind?: string } } };
   status?: {
     applicationState?: 'Applied' | 'NotApplied' | 'Error' | 'Outdated' | 'MissingDependencies';
@@ -104,8 +71,6 @@ export type ProfileStatus = {
 };
 
 export type ClusterBaseline = {
-  apiVersion: string;
-  kind: string;
   metadata: { name: string };
   spec: {
     profiles: string[];
@@ -124,28 +89,11 @@ export type ClusterBaseline = {
   };
 };
 
-// Profile keys the operator understands, mirrored from the CRD enum.
-export const PROFILE_KEYS = [
-  'cis',
-  'pci-dss',
-  'nist-moderate',
-  'nist-high',
-  'stig',
-  'nerc-cip',
-  'e8',
-  'bsi',
-] as const;
-
-/** Suite label value = ScanSettingBinding name owned by the operator. */
-export const suiteLabel = (profileKey: string) => `baseline-${profileKey}`;
-
-/** True if a CO object belongs to one of the selected baseline profile bindings. */
+/** True when a CO object belongs to a baseline-* suite for a selected profile. */
 export const isOwnedByBaseline = (
   labels: Record<string, string> | undefined,
   profiles: string[] | undefined,
 ): boolean => {
-  if (!profiles?.length) return false;
   const suite = labels?.['compliance.openshift.io/suite'];
-  if (!suite) return false;
-  return profiles.some((p) => suite === suiteLabel(p));
+  return !!suite && !!profiles?.some((p) => suite === `baseline-${p}`);
 };

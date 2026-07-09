@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { useTranslation } from 'react-i18next';
-import { Timestamp, useK8sWatchResource } from '@openshift-console/dynamic-plugin-sdk';
+import { Timestamp } from '@openshift-console/dynamic-plugin-sdk';
 import {
   Chart,
   ChartArea,
@@ -30,14 +30,7 @@ import {
   ExclamationCircleIcon,
   ExclamationTriangleIcon,
 } from '@patternfly/react-icons';
-import {
-  ClusterBaseline,
-  ComplianceCheckResult,
-  ComplianceCheckResultGVK,
-  ComplianceRemediation,
-  ComplianceRemediationGVK,
-  isOwnedByBaseline,
-} from '../models';
+import { ClusterBaseline } from '../models';
 import { scoreColor } from '../utils';
 
 const resultsHref = (filter: string) =>
@@ -66,16 +59,6 @@ const Overview: React.FC<{ baseline?: ClusterBaseline; loaded: boolean }> = ({
   loaded,
 }) => {
   const { t } = useTranslation('plugin__baseline-security-console-plugin');
-  const [remediations] = useK8sWatchResource<ComplianceRemediation[]>({
-    groupVersionKind: ComplianceRemediationGVK,
-    isList: true,
-    namespace: 'openshift-compliance',
-  });
-  const [results] = useK8sWatchResource<ComplianceCheckResult[]>({
-    groupVersionKind: ComplianceCheckResultGVK,
-    isList: true,
-    namespace: 'openshift-compliance',
-  });
 
   if (!loaded) {
     return (
@@ -102,18 +85,6 @@ const Overview: React.FC<{ baseline?: ClusterBaseline; loaded: boolean }> = ({
     (c) => c.type === 'Degraded' && c.status === 'True',
   );
   const score = baseline.status?.score;
-
-  const ownedRemediations = (remediations ?? []).filter((r) =>
-    isOwnedByBaseline(r.metadata.labels, baseline.spec.profiles),
-  );
-  const ownedResults = (results ?? []).filter((r) =>
-    isOwnedByBaseline(r.metadata.labels, baseline.spec.profiles),
-  );
-
-  const failBySeverity: Record<string, number> = {};
-  for (const r of ownedResults) {
-    if (r.status === 'FAIL') failBySeverity[r.severity] = (failBySeverity[r.severity] ?? 0) + 1;
-  }
 
   return (
     <PageSection>
@@ -171,36 +142,12 @@ const Overview: React.FC<{ baseline?: ClusterBaseline; loaded: boolean }> = ({
               <DescriptionListGroup>
                 <DescriptionListTerm>{t('Remediations')}</DescriptionListTerm>
                 <DescriptionListDescription>
-                  <a href="/baseline-security/remediations">
-                    {t('{{available}} available, {{applied}} applied', {
-                      available: ownedRemediations.filter((r) => !r.spec.apply).length,
-                      applied: ownedRemediations.filter((r) => r.spec.apply).length,
-                    })}
-                  </a>
+                  <a href="/baseline-security/remediations">{t('Manage remediations')}</a>
                 </DescriptionListDescription>
               </DescriptionListGroup>
             </DescriptionList>
           </CardBody>
         </Card>
-        {Object.keys(failBySeverity).length > 0 && (
-          <Card>
-            <CardTitle>{t('Failed checks by severity')}</CardTitle>
-            <CardBody>
-              {['high', 'medium', 'low', 'unknown']
-                .filter((s) => failBySeverity[s])
-                .map((s) => (
-                  <CountRow
-                    key={s}
-                    icon={s === 'high' ? <ExclamationCircleIcon /> : <ExclamationTriangleIcon />}
-                    status={s === 'high' ? 'danger' : 'warning'}
-                    label={s}
-                    count={failBySeverity[s]}
-                    href={resultsHref('FAIL')}
-                  />
-                ))}
-            </CardBody>
-          </Card>
-        )}
         {(baseline.status?.history?.length ?? 0) > 1 && (
           <Card>
             <CardTitle>{t('Score trend')}</CardTitle>

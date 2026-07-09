@@ -84,8 +84,11 @@ spec:
         - serviceAccountName: baseline-security-operator
           rules:
             - apiGroups: [""]
-              resources: [configmaps, namespaces, services]
+              resources: [namespaces, services]
               verbs: [create, get, list, patch, update, watch]
+            - apiGroups: [""]
+              resources: [configmaps]
+              verbs: [get, list, watch, delete]
             - apiGroups: [""]
               resources: [persistentvolumeclaims]
               verbs: [get, list, watch]
@@ -99,7 +102,7 @@ spec:
               resources: [clusterbaselines/status]
               verbs: [get, patch, update]
             - apiGroups: [compliance.openshift.io]
-              resources: [compliancecheckresults, compliancescans, compliancesuites]
+              resources: [compliancecheckresults, compliancescans]
               verbs: [get, list, watch]
             - apiGroups: [compliance.openshift.io]
               resources: [scansettingbindings, scansettings]

@@ -10,5 +10,6 @@ RUN yarn build
 
 FROM registry.access.redhat.com/ubi9/nginx-120:latest
 COPY --from=build /usr/src/app/dist /usr/share/nginx/html
+COPY nginx.conf /etc/nginx/nginx.conf
 USER 1001
-ENTRYPOINT ["nginx", "-g", "daemon off;"]
+ENTRYPOINT ["nginx", "-c", "/etc/nginx/nginx.conf", "-g", "daemon off;"]

@@ -34,7 +34,7 @@ import {
   ComplianceCheckResultGVK,
   isOwnedByBaseline,
 } from '../models';
-import { checkTitle } from '../utils';
+import { checkBody, checkTitle } from '../utils';
 
 const statusLabel: Record<
   CheckStatus,
@@ -148,8 +148,7 @@ const ResultsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => {
           {selected && (
             <>
               <Content component="p" style={{ whiteSpace: 'pre-wrap' }}>
-                {selected.description?.split('\n').slice(1).join('\n').trim() ||
-                  t('No description provided.')}
+                {checkBody(selected) || t('No description provided.')}
               </Content>
               {selected.instructions && (
                 <>

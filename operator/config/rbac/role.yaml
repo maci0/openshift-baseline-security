@@ -7,7 +7,6 @@ rules:
 - apiGroups:
   - ""
   resources:
-  - configmaps
   - namespaces
   - services
   verbs:
@@ -61,7 +60,6 @@ rules:
   resources:
   - compliancecheckresults
   - compliancescans
-  - compliancesuites
   verbs:
   - get
   - list

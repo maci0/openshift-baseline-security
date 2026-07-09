@@ -45,16 +45,14 @@ func testScheme(t *testing.T) *runtime.Scheme {
 	return scheme
 }
 
-func checkResult(name, suite, scan, status string) *unstructured.Unstructured {
+func checkResult(name, suite, status string) *unstructured.Unstructured {
 	u := &unstructured.Unstructured{}
 	u.SetGroupVersionKind(checkResultGVK)
 	u.SetName(name)
 	u.SetNamespace(complianceNamespace)
-	labels := map[string]string{scanNameLabel: scan}
 	if suite != "" {
-		labels[suiteLabel] = suite
+		u.SetLabels(map[string]string{suiteLabel: suite})
 	}
-	u.SetLabels(labels)
 	u.Object["status"] = status
 	return u
 }
@@ -63,12 +61,13 @@ func TestAggregateStatus(t *testing.T) {
 	scheme := testScheme(t)
 	r := &ClusterBaselineReconciler{
 		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(
-			checkResult("a", "baseline-cis", "ocp4-cis", "PASS"),
-			checkResult("b", "baseline-cis", "ocp4-cis", "PASS"),
-			checkResult("c", "baseline-cis", "ocp4-cis-node-master", "FAIL"),
-			checkResult("d", "baseline-cis", "ocp4-cis", "MANUAL"),
-			checkResult("e", "other-suite", "ocp4-cis", "FAIL"),
-			checkResult("f", "", "ocp4-cis", "FAIL"),
+			checkResult("a", "baseline-cis", "PASS"),
+			checkResult("b", "baseline-cis", "PASS"),
+			checkResult("c", "baseline-cis", "FAIL"),
+			checkResult("d", "baseline-cis", "MANUAL"),
+			checkResult("e", "other-suite", "FAIL"),   // foreign suite, ignored
+			checkResult("f", "baseline-stig", "FAIL"), // unselected profile, ignored
+			checkResult("g", "", "FAIL"),              // no suite label, ignored
 		).Build(),
 		Scheme: scheme,
 	}
@@ -194,7 +193,6 @@ func TestRemoveConsolePlugin(t *testing.T) {
 	scheme := testScheme(t)
 	dep := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: pluginName, Namespace: pluginNS}}
 	svc := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: pluginName, Namespace: pluginNS}}
-	cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: pluginName + "-nginx", Namespace: pluginNS}}
 	cp := &unstructured.Unstructured{}
 	cp.SetGroupVersionKind(consolePluginGVK)
 	cp.SetName(pluginName)
@@ -204,7 +202,7 @@ func TestRemoveConsolePlugin(t *testing.T) {
 	_ = unstructured.SetNestedStringSlice(console.Object, []string{pluginName, "other"}, "spec", "plugins")
 
 	r := &ClusterBaselineReconciler{
-		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(dep, svc, cm, cp, console).Build(),
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(dep, svc, cp, console).Build(),
 		Scheme: scheme,
 	}
 	cb := &baselinev1alpha1.ClusterBaseline{}

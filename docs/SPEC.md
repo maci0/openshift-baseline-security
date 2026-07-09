@@ -141,10 +141,10 @@ Responsibilities:
    mapping the CR's profile keys to real Profile names
    (`cis` → `ocp4-cis` + `ocp4-cis-node`, `stig` → `ocp4-stig` +
    `ocp4-stig-node` + `rhcos4-stig`, etc.).
-3. **Console plugin deployment** (G3): nginx Deployment (2 replicas,
-   service-serving-cert TLS, hardened securityContext + probes), Service,
-   `ConsolePlugin` CR in namespace `openshift-baseline-security` (created if
-   missing), and appending the plugin name to
+3. **Console plugin deployment** (G3): nginx Deployment (1 replica; TLS conf
+   baked into the plugin image, service-serving-cert mounted at
+   `/var/serving-cert`), Service, `ConsolePlugin` CR in namespace
+   `openshift-baseline-security` (created if missing), and registration on
    `consoles.operator.openshift.io/cluster` `spec.plugins` (removed on CR
    deletion via finalizer, or when `spec.console.enabled` is false).
 4. **Status aggregation**: poll `ComplianceCheckResult`s labeled with

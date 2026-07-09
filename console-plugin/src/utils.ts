@@ -5,6 +5,9 @@ import { ComplianceCheckResult } from './models';
 export const checkTitle = (r: ComplianceCheckResult): string =>
   r.description?.split('\n')[0]?.trim() || r.metadata.name;
 
+export const checkBody = (r: ComplianceCheckResult): string =>
+  r.description?.split('\n').slice(1).join('\n').trim() ?? '';
+
 // PatternFly semantic status color token for a 0-100 score.
 export const scoreColor = (score?: number): string =>
   score == null || score < 60
