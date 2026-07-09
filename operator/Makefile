@@ -98,6 +98,6 @@ bundle-push:
 catalog-build:
 	mkdir -p catalog
 	docker run --rm quay.io/operator-framework/opm@sha256:e1be045e4a8558624eab2320d548b5fd557b0a0a07ebd33876b71f0778a444e4 render $(BUNDLE_IMG) --output=yaml > catalog/bundle.yaml
-	printf 'schema: olm.package\nname: baseline-security-operator\ndefaultChannel: alpha\n---\nschema: olm.channel\npackage: baseline-security-operator\nname: alpha\nentries:\n  - name: baseline-security-operator.v0.1.0\n' > catalog/package.yaml
+	printf 'schema: olm.package\nname: baseline-security-operator\ndefaultChannel: alpha\n---\nschema: olm.channel\npackage: baseline-security-operator\nname: alpha\nentries:\n  - name: baseline-security-operator.v0.2.0\n' > catalog/package.yaml
 	docker run --rm -v $(CURDIR)/catalog:/catalog:Z quay.io/operator-framework/opm@sha256:e1be045e4a8558624eab2320d548b5fd557b0a0a07ebd33876b71f0778a444e4 validate /catalog
 	docker build -f catalog.Dockerfile -t $(CATALOG_IMG) .
