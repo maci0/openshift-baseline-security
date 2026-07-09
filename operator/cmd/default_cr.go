@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"time"
 
 	"github.com/go-logr/logr"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -24,11 +25,25 @@ func (d *defaultClusterBaseline) Start(ctx context.Context) error {
 	if !d.Cache.WaitForCacheSync(ctx) {
 		return nil
 	}
+	// Retry on transient list/create failures so a brief API blip does not
+	// leave the cluster without the zero-config CR until restart.
+	for {
+		if err := d.ensureOnce(ctx); err == nil {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-time.After(10 * time.Second):
+		}
+	}
+}
+
+func (d *defaultClusterBaseline) ensureOnce(ctx context.Context) error {
 	list := &baselinev1alpha1.ClusterBaselineList{}
 	if err := d.Client.List(ctx, list); err != nil {
-		// Best-effort: do not take the manager down.
 		d.Log.Error(err, "listing ClusterBaselines for default creation")
-		return nil
+		return err
 	}
 	if len(list.Items) > 0 {
 		return nil
@@ -39,6 +54,7 @@ func (d *defaultClusterBaseline) Start(ctx context.Context) error {
 	}
 	if err := d.Client.Create(ctx, cb); err != nil && !apierrors.IsAlreadyExists(err) {
 		d.Log.Error(err, "creating default ClusterBaseline")
+		return err
 	}
 	return nil
 }

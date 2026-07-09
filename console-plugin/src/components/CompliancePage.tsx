@@ -42,11 +42,11 @@ type Scan = {
 
 const CompliancePage: React.FC = () => {
   const { t } = useTranslation('plugin__baseline-security-console-plugin');
-  const [baselines, loaded] = useK8sWatchResource<ClusterBaseline[]>({
+  const [baselines, loaded, baselineError] = useK8sWatchResource<ClusterBaseline[]>({
     groupVersionKind: ClusterBaselineGVK,
     isList: true,
   });
-  const [scans] = useK8sWatchResource<Scan[]>({
+  const [scans, , scansError] = useK8sWatchResource<Scan[]>({
     groupVersionKind: ComplianceScanGVK,
     isList: true,
     namespace: 'openshift-compliance',
@@ -56,12 +56,18 @@ const CompliancePage: React.FC = () => {
     baselines?.find((b) => b.metadata.name === 'cluster') ?? baselines?.[0];
   const [rescanning, setRescanning] = React.useState(false);
   const [rescanError, setRescanError] = React.useState<string | null>(null);
-  const [canRescan] = useAccessReview({
+  const [canRescan, canRescanLoading] = useAccessReview({
     group: 'compliance.openshift.io',
     resource: 'compliancescans',
     verb: 'patch',
     namespace: 'openshift-compliance',
   });
+  const watchError =
+    baselineError instanceof Error
+      ? baselineError.message
+      : scansError instanceof Error
+        ? scansError.message
+        : null;
 
   const profiles = baseline?.spec.profiles;
   const ownedScans = React.useMemo(
@@ -127,13 +133,25 @@ const CompliancePage: React.FC = () => {
               onClick={() => {
                 void rescan();
               }}
-              isDisabled={rescanning || !ownedScans.length || !canRescan}
+              isDisabled={
+                rescanning || !ownedScans.length || !canRescan || canRescanLoading || !!watchError
+              }
               isLoading={rescanning}
             >
               {t('Rescan now')}
             </Button>
           </SplitItem>
         </Split>
+        {watchError && (
+          <Alert
+            variant="danger"
+            isInline
+            title={t('Failed to load compliance data.')}
+            style={{ marginTop: 'var(--pf-t--global--spacer--md)' }}
+          >
+            {watchError}
+          </Alert>
+        )}
         {rescanError && (
           <Alert
             variant="danger"

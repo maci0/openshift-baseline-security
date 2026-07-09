@@ -40,7 +40,7 @@ const stateColor: Record<string, React.ComponentProps<typeof Label>['color']> = 
 
 const RemediationsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => {
   const { t } = useTranslation('plugin__baseline-security-console-plugin');
-  const [remediations, loaded] = useK8sWatchResource<ComplianceRemediation[]>({
+  const [remediations, loaded, loadError] = useK8sWatchResource<ComplianceRemediation[]>({
     groupVersionKind: ComplianceRemediationGVK,
     isList: true,
     namespace: 'openshift-compliance',
@@ -48,17 +48,18 @@ const RemediationsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline })
   const [confirming, setConfirming] = React.useState<ComplianceRemediation | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
-  const [canApply] = useAccessReview({
+  const [canApply, canApplyLoading] = useAccessReview({
     group: 'compliance.openshift.io',
     resource: 'complianceremediations',
     verb: 'patch',
     namespace: 'openshift-compliance',
   });
-  const [canEditBaseline] = useAccessReview({
+  const [canEditBaseline, canEditBaselineLoading] = useAccessReview({
     group: 'baselinesecurity.io',
     resource: 'clusterbaselines',
     verb: 'patch',
   });
+  const watchError = loadError instanceof Error ? loadError.message : null;
 
   const owned = React.useMemo(
     () =>
@@ -115,6 +116,16 @@ const RemediationsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline })
           'Node remediations render into MachineConfigs. Applying them triggers rolling node reboots.',
         )}
       />
+      {watchError && (
+        <Alert
+          variant="danger"
+          isInline
+          title={t('Failed to load remediations.')}
+          style={{ marginTop: 'var(--pf-t--global--spacer--md)' }}
+        >
+          {watchError}
+        </Alert>
+      )}
       {error && (
         <Alert
           variant="danger"
@@ -130,7 +141,7 @@ const RemediationsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline })
             id="auto-apply"
             label={t('Auto-apply remediations after each scan')}
             isChecked={baseline?.spec.remediation?.apply === 'Automatic'}
-            isDisabled={!baseline || !canEditBaseline || busy}
+            isDisabled={!baseline || !canEditBaseline || canEditBaselineLoading || busy}
             onChange={(_e, checked) => toggleAutoApply(checked)}
           />
         </SplitItem>
@@ -164,7 +175,7 @@ const RemediationsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline })
                       <Button
                         variant="link"
                         isInline
-                        isDisabled={!canApply || busy}
+                        isDisabled={!canApply || canApplyLoading || busy}
                         onClick={() => void setApply(rem, false)}
                       >
                         {t('Unapply')}
@@ -173,7 +184,7 @@ const RemediationsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline })
                       <Button
                         variant="link"
                         isInline
-                        isDisabled={!canApply || busy}
+                        isDisabled={!canApply || canApplyLoading || busy}
                         onClick={() => setConfirming(rem)}
                       >
                         {t('Apply')}

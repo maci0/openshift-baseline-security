@@ -38,7 +38,7 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => 
   const { t } = useTranslation('plugin__baseline-security-console-plugin');
   const [pending, setPending] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
-  const [canEdit] = useAccessReview({
+  const [canEdit, canEditLoading] = useAccessReview({
     group: 'baselinesecurity.io',
     resource: 'clusterbaselines',
     verb: 'patch',
@@ -88,6 +88,7 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => 
                       isDisabled={
                         !baseline ||
                         !canEdit ||
+                        canEditLoading ||
                         pending ||
                         (enabled && baseline.spec.profiles.length === 1)
                       }

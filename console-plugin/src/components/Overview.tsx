@@ -81,6 +81,9 @@ const Overview: React.FC<{ baseline?: ClusterBaseline; loaded: boolean }> = ({
   const degraded = baseline.status?.conditions?.find(
     (c) => c.type === 'Degraded' && c.status === 'True',
   );
+  const progressing = baseline.status?.conditions?.find(
+    (c) => c.type === 'Progressing' && c.status === 'True',
+  );
   const coReady = baseline.status?.conditions?.find((c) => c.type === 'ComplianceOperatorReady');
   const coVersion = baseline.status?.complianceOperatorVersion;
   const coLabel =
@@ -102,6 +105,16 @@ const Overview: React.FC<{ baseline?: ClusterBaseline; loaded: boolean }> = ({
           style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}
         >
           {degraded.message}
+        </Alert>
+      )}
+      {progressing && !degraded && (
+        <Alert
+          variant="info"
+          isInline
+          title={t('Baseline is progressing')}
+          style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}
+        >
+          {progressing.message || t('installing or configuring dependencies')}
         </Alert>
       )}
       <Gallery hasGutter minWidths={{ default: '300px' }}>
