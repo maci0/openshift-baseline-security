@@ -12,6 +12,7 @@ import {
   Switch,
 } from '@patternfly/react-core';
 import { ClusterBaseline, ClusterBaselineModel } from '../models';
+import { toggledProfiles } from '../utils';
 
 const PROFILE_INFO: Record<string, { title: string; description: string }> = {
   cis: { title: 'CIS', description: 'CIS Red Hat OpenShift Container Platform Benchmark' },
@@ -36,10 +37,8 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => 
 
   const toggle = async (key: string, checked: boolean) => {
     if (!baseline) return;
-    const profiles = checked
-      ? [...baseline.spec.profiles, key]
-      : baseline.spec.profiles.filter((p) => p !== key);
-    if (!profiles.length) return; // CRD requires at least one profile
+    const profiles = toggledProfiles(baseline.spec.profiles, key, checked);
+    if (!profiles) return; // CRD requires at least one profile
     setPending(true);
     setError(null);
     try {

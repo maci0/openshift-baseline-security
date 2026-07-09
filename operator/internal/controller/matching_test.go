@@ -61,6 +61,22 @@ func TestProfileNames(t *testing.T) {
 	}
 }
 
+// Suite labels are untrusted cluster data.
+func FuzzProfileKeyFromSuite(f *testing.F) {
+	for _, seed := range []string{"baseline-cis", "baseline-", "other", "", "baseline-baseline-x"} {
+		f.Add(seed)
+	}
+	f.Fuzz(func(t *testing.T, suite string) {
+		key, ok := profileKeyFromSuite(suite)
+		if ok != strings.HasPrefix(suite, "baseline-") {
+			t.Fatalf("ok = %v for %q", ok, suite)
+		}
+		if ok && "baseline-"+string(key) != suite {
+			t.Fatalf("key %q does not round-trip to %q", key, suite)
+		}
+	})
+}
+
 // PVC names come from cluster objects anything with API access can create: untrusted.
 func FuzzMatchesAnyProfile(f *testing.F) {
 	profiles := map[string]bool{"ocp4-cis": true, "ocp4-cis-node": true, "rhcos4-e8": true}
