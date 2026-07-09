@@ -1,0 +1,7 @@
+apiVersion: baselinesecurity.io/v1alpha1
+kind: ClusterBaseline
+metadata:
+  name: cluster
+spec:
+  profiles:
+    - cis

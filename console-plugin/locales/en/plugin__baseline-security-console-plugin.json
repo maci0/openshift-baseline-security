@@ -1,0 +1,12 @@
+{
+  "Compliance": "Compliance",
+  "Compliance score": "Compliance score",
+  "Baseline not configured": "Baseline not configured",
+  "No ClusterBaseline resource found. Install the baseline-security operator and create a ClusterBaseline to start scanning.": "No ClusterBaseline resource found. Install the baseline-security operator and create a ClusterBaseline to start scanning.",
+  "{{pass}} pass / {{fail}} fail / {{manual}} manual": "{{pass}} pass / {{fail}} fail / {{manual}} manual",
+  "Check results": "Check results",
+  "Check": "Check",
+  "Status": "Status",
+  "Severity": "Severity",
+  "Profiles": "Profiles"
+}

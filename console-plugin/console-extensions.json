@@ -1,0 +1,36 @@
+[
+  {
+    "type": "console.navigation/href",
+    "properties": {
+      "id": "baseline-security",
+      "name": "%plugin__baseline-security-console-plugin~Compliance%",
+      "href": "/baseline-security",
+      "perspective": "admin",
+      "section": "home"
+    }
+  },
+  {
+    "type": "console.page/route",
+    "properties": {
+      "exact": true,
+      "path": "/baseline-security",
+      "component": { "$codeRef": "DashboardPage" }
+    }
+  },
+  {
+    "type": "console.page/route",
+    "properties": {
+      "exact": true,
+      "path": "/baseline-security/results",
+      "component": { "$codeRef": "ResultsPage" }
+    }
+  },
+  {
+    "type": "console.page/route",
+    "properties": {
+      "exact": true,
+      "path": "/baseline-security/profiles",
+      "component": { "$codeRef": "ProfilesPage" }
+    }
+  }
+]
