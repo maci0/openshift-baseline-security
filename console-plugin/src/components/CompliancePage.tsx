@@ -65,9 +65,10 @@ const CompliancePage: React.FC = () => {
   const watchError = errorMessage(baselineError) ?? errorMessage(scansError);
 
   const profiles = baseline?.spec.profiles;
+  const tailored = baseline?.spec.tailoredProfiles;
   const ownedScans = React.useMemo(
-    () => (scans ?? []).filter((s) => isOwnedByBaseline(s.metadata.labels, profiles)),
-    [scans, profiles],
+    () => (scans ?? []).filter((s) => isOwnedByBaseline(s.metadata.labels, profiles, tailored)),
+    [scans, profiles, tailored],
   );
 
   const rescan = async () => {

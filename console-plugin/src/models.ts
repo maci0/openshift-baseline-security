@@ -114,8 +114,9 @@ export type ClusterBaseline = {
 };
 
 /**
- * Profile key encoded in a CO object's suite label ("baseline-<key>",
- * mirroring bindingName in the operator), or undefined when not ours.
+ * Display key encoded in a CO object's suite label. Built-in profiles use
+ * "baseline-<key>"; tailored profiles use "baseline-tp-<name>" (mirroring the
+ * operator's binding names). Returns undefined when the label is not ours.
  */
 export const suiteProfileKey = (
   labels: Record<string, string> | undefined,
@@ -124,11 +125,27 @@ export const suiteProfileKey = (
   return suite?.startsWith('baseline-') ? suite.slice('baseline-'.length) : undefined;
 };
 
-/** True when a CO object belongs to a baseline-* suite for a selected profile. */
+/** TailoredProfile name for a "baseline-tp-<name>" suite, else undefined. */
+export const suiteTailoredName = (
+  labels: Record<string, string> | undefined,
+): string | undefined => {
+  const suite = labels?.['compliance.openshift.io/suite'];
+  return suite?.startsWith('baseline-tp-') ? suite.slice('baseline-tp-'.length) : undefined;
+};
+
+/**
+ * True when a CO object belongs to this baseline: a built-in profile suite for
+ * a selected profile, or a tailored suite for a bound TailoredProfile.
+ */
 export const isOwnedByBaseline = (
   labels: Record<string, string> | undefined,
   profiles: string[] | undefined,
+  tailoredProfiles?: string[],
 ): boolean => {
+  const tailored = suiteTailoredName(labels);
+  if (tailored !== undefined) {
+    return !!tailoredProfiles?.includes(tailored);
+  }
   const key = suiteProfileKey(labels);
   return key !== undefined && !!profiles?.includes(key);
 };

@@ -72,9 +72,10 @@ const ResultsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => {
   );
 
   const profiles = baseline?.spec.profiles;
+  const tailored = baseline?.spec.tailoredProfiles;
   const ownedResults = React.useMemo(
-    () => (results ?? []).filter((r) => isOwnedByBaseline(r.metadata.labels, profiles)),
-    [results, profiles],
+    () => (results ?? []).filter((r) => isOwnedByBaseline(r.metadata.labels, profiles, tailored)),
+    [results, profiles, tailored],
   );
 
   const Row = React.useCallback(

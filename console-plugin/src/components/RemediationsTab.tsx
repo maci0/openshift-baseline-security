@@ -72,9 +72,9 @@ const RemediationsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline })
   const owned = React.useMemo(
     () =>
       (remediations ?? []).filter((r) =>
-        isOwnedByBaseline(r.metadata.labels, baseline?.spec.profiles),
+        isOwnedByBaseline(r.metadata.labels, baseline?.spec.profiles, baseline?.spec.tailoredProfiles),
       ),
-    [remediations, baseline?.spec.profiles],
+    [remediations, baseline?.spec.profiles, baseline?.spec.tailoredProfiles],
   );
 
   const run = async (fn: () => Promise<unknown>, failMsg: string): Promise<boolean> => {

@@ -1,4 +1,4 @@
-import { isOwnedByBaseline } from './models';
+import { isOwnedByBaseline, suiteTailoredName } from './models';
 
 describe('isOwnedByBaseline', () => {
   it('matches suite label to selected profiles', () => {
@@ -40,5 +40,21 @@ describe('isOwnedByBaseline', () => {
       const want = !!suite && selected.some((s) => suite === `baseline-${s}`);
       expect(got).toBe(want);
     }
+  });
+});
+
+describe('tailored suite ownership', () => {
+  const lbl = (suite: string) => ({ 'compliance.openshift.io/suite': suite });
+  it('suiteTailoredName extracts the tailored name', () => {
+    expect(suiteTailoredName(lbl('baseline-tp-custom'))).toBe('custom');
+    expect(suiteTailoredName(lbl('baseline-cis'))).toBeUndefined();
+    expect(suiteTailoredName(undefined)).toBeUndefined();
+  });
+  it('isOwnedByBaseline recognizes bound tailored profiles', () => {
+    expect(isOwnedByBaseline(lbl('baseline-tp-custom'), ['cis'], ['custom'])).toBe(true);
+    expect(isOwnedByBaseline(lbl('baseline-tp-custom'), ['cis'], [])).toBe(false);
+    expect(isOwnedByBaseline(lbl('baseline-tp-custom'), ['cis'], undefined)).toBe(false);
+    // built-in still works, and a tailored suite is not matched as a profile
+    expect(isOwnedByBaseline(lbl('baseline-cis'), ['cis'], ['custom'])).toBe(true);
   });
 });
