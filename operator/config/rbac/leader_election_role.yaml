@@ -1,0 +1,26 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: baseline-security-leader-election
+  namespace: openshift-baseline-security
+rules:
+  - apiGroups: [coordination.k8s.io]
+    resources: [leases]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [""]
+    resources: [events]
+    verbs: [create, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: baseline-security-leader-election
+  namespace: openshift-baseline-security
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: baseline-security-leader-election
+subjects:
+  - kind: ServiceAccount
+    name: baseline-security-operator
+    namespace: openshift-baseline-security

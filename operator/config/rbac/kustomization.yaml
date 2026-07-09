@@ -4,3 +4,4 @@ resources:
   - role.yaml
   - service_account.yaml
   - user_roles.yaml
+  - leader_election_role.yaml
