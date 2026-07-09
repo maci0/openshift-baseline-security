@@ -26,6 +26,7 @@ import {
   ComplianceRemediation,
   ComplianceRemediationGVK,
   ComplianceRemediationModel,
+  isOwnedByBaseline,
 } from '../models';
 
 const stateColor: Record<string, React.ComponentProps<typeof Label>['color']> = {
@@ -44,6 +45,8 @@ const RemediationsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline })
     namespace: 'openshift-compliance',
   });
   const [confirming, setConfirming] = React.useState<ComplianceRemediation | null>(null);
+  const [busy, setBusy] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
   const [canApply] = useAccessReview({
     group: 'compliance.openshift.io',
     resource: 'complianceremediations',
@@ -56,20 +59,49 @@ const RemediationsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline })
     verb: 'patch',
   });
 
-  const setApply = (rem: ComplianceRemediation, apply: boolean) =>
-    k8sPatch({
-      model: ComplianceRemediationModel,
-      resource: rem,
-      data: [{ op: 'replace', path: '/spec/apply', value: apply }],
-    });
+  const owned = React.useMemo(
+    () =>
+      (remediations ?? []).filter((r) =>
+        isOwnedByBaseline(r.metadata.labels, baseline?.spec.profiles),
+      ),
+    [remediations, baseline?.spec.profiles],
+  );
 
-  const toggleAutoApply = (checked: boolean) => {
+  const setApply = async (rem: ComplianceRemediation, apply: boolean) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await k8sPatch({
+        model: ComplianceRemediationModel,
+        resource: rem,
+        data: [{ op: 'replace', path: '/spec/apply', value: apply }],
+      });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : t('Failed to update remediation.'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const toggleAutoApply = async (checked: boolean) => {
     if (!baseline) return;
-    k8sPatch({
-      model: ClusterBaselineModel,
-      resource: baseline,
-      data: [{ op: 'add', path: '/spec/remediation', value: { autoApply: checked } }],
-    });
+    setBusy(true);
+    setError(null);
+    try {
+      // Patch the leaf field so other remediation settings are preserved.
+      const hasRemediation = baseline.spec.remediation !== undefined;
+      await k8sPatch({
+        model: ClusterBaselineModel,
+        resource: baseline,
+        data: hasRemediation
+          ? [{ op: 'replace', path: '/spec/remediation/autoApply', value: checked }]
+          : [{ op: 'add', path: '/spec/remediation', value: { autoApply: checked } }],
+      });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : t('Failed to update auto-apply setting.'));
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -81,6 +113,14 @@ const RemediationsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline })
           'Node remediations render into MachineConfigs. Applying them triggers rolling node reboots.',
         )}
       />
+      {error && (
+        <Alert
+          variant="danger"
+          isInline
+          title={error}
+          style={{ marginTop: 'var(--pf-t--global--spacer--md)' }}
+        />
+      )}
       <Split hasGutter style={{ marginTop: 'var(--pf-t--global--spacer--md)' }}>
         <SplitItem isFilled />
         <SplitItem>
@@ -88,8 +128,10 @@ const RemediationsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline })
             id="auto-apply"
             label={t('Auto-apply remediations after each scan')}
             isChecked={baseline?.spec.remediation?.autoApply ?? false}
-            isDisabled={!baseline || !canEditBaseline}
-            onChange={(_e, checked) => toggleAutoApply(checked)}
+            isDisabled={!baseline || !canEditBaseline || busy}
+            onChange={(_e, checked) => {
+              void toggleAutoApply(checked);
+            }}
           />
         </SplitItem>
       </Split>
@@ -106,7 +148,7 @@ const RemediationsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline })
             </Tr>
           </Thead>
           <Tbody>
-            {(remediations ?? []).map((rem) => {
+            {owned.map((rem) => {
               const state = rem.status?.applicationState ?? 'NotApplied';
               return (
                 <Tr key={rem.metadata.name}>
@@ -122,8 +164,10 @@ const RemediationsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline })
                       <Button
                         variant="link"
                         isInline
-                        isDisabled={!canApply}
-                        onClick={() => setApply(rem, false)}
+                        isDisabled={!canApply || busy}
+                        onClick={() => {
+                          void setApply(rem, false);
+                        }}
                       >
                         {t('Unapply')}
                       </Button>
@@ -131,7 +175,7 @@ const RemediationsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline })
                       <Button
                         variant="link"
                         isInline
-                        isDisabled={!canApply}
+                        isDisabled={!canApply || busy}
                         onClick={() => setConfirming(rem)}
                       >
                         {t('Apply')}
@@ -160,8 +204,11 @@ const RemediationsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline })
         <ModalFooter>
           <Button
             variant="danger"
+            isDisabled={busy}
             onClick={() => {
-              if (confirming) setApply(confirming, true);
+              if (confirming) {
+                void setApply(confirming, true);
+              }
               setConfirming(null);
             }}
           >

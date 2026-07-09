@@ -63,10 +63,11 @@ with `metav1.Condition` arrays; printer columns for the obvious `oc get`
 answer. Bounded lists in status (no unbounded growth).
 
 **Here**: `ClusterBaseline/cluster` with CEL name enforcement, conditions
-(`ComplianceOperatorReady`, `ScanConfigured`, `ConsolePluginReady`,
-`Degraded`), score + per-profile counts, history capped at 30, printer
-columns Score / Last Scan. `Degraded` mirrors the ClusterOperator condition
-vocabulary so cluster-health surfaces can consume it later.
+(`ComplianceOperatorReady` when CO CSV phase is Succeeded, `ScanConfigured`,
+`ConsolePluginReady` when the plugin is deployed or Disabled when
+`spec.console.enabled` is false, `Degraded` for owned Pending scan PVCs),
+score + per-profile counts (suite-scoped to `baseline-<profile>` bindings),
+history capped at 30 (oldest first), printer columns Score / Last Scan.
 
 ## 5. Console dynamic plugin
 

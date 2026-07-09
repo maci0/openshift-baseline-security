@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -28,12 +29,23 @@ func TestCheckScanStorageDegradedOnPendingPVC(t *testing.T) {
 		},
 		Status: corev1.PersistentVolumeClaimStatus{Phase: corev1.ClaimPending},
 	}
+	// Unrelated PVC must not flip Degraded.
+	other := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "someone-else-scan",
+			Namespace:         complianceNamespace,
+			CreationTimestamp: metav1.Time{Time: time.Now().Add(-10 * time.Minute)},
+		},
+		Status: corev1.PersistentVolumeClaimStatus{Phase: corev1.ClaimPending},
+	}
 	r := &ClusterBaselineReconciler{
-		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(stale).Build(),
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(stale, other).Build(),
 		Scheme: scheme,
 	}
 
-	cb := &baselinev1alpha1.ClusterBaseline{}
+	cb := &baselinev1alpha1.ClusterBaseline{
+		Spec: baselinev1alpha1.ClusterBaselineSpec{Profiles: []baselinev1alpha1.ProfileKey{"cis"}},
+	}
 	if err := r.checkScanStorage(context.Background(), cb); err != nil {
 		t.Fatal(err)
 	}
@@ -41,10 +53,13 @@ func TestCheckScanStorageDegradedOnPendingPVC(t *testing.T) {
 	if c == nil || c.Status != metav1.ConditionTrue || c.Reason != "ScanStoragePending" {
 		t.Fatalf("Degraded condition = %+v, want True/ScanStoragePending", c)
 	}
+	if c.Message == "" || !strings.Contains(c.Message, "ocp4-cis") {
+		t.Fatalf("Message should list ocp4-cis: %q", c.Message)
+	}
 
 	// Bound PVC clears it.
 	stale.Status.Phase = corev1.ClaimBound
-	r.Client = fake.NewClientBuilder().WithScheme(scheme).WithObjects(stale).Build()
+	r.Client = fake.NewClientBuilder().WithScheme(scheme).WithObjects(stale, other).Build()
 	if err := r.checkScanStorage(context.Background(), cb); err != nil {
 		t.Fatal(err)
 	}

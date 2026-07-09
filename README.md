@@ -61,6 +61,11 @@ in `openshift-operators`). The operator default-creates a
 `ClusterBaseline/cluster` with the CIS profile and starts scanning; opt out
 with `BASELINE_SECURITY_SKIP_DEFAULT_CR=true` on the CSV deployment.
 
+Deleting the `ClusterBaseline` (or uninstalling this operator) does **not**
+remove the Compliance Operator Subscription; CO is treated as a shared
+cluster component. The console plugin and owned ScanSetting/bindings are
+cleaned up via owner references and the finalizer.
+
 Never reuse bundle/catalog image tags between pushes; OLM and kubelet caches
 will serve the stale content.
 

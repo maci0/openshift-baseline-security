@@ -1,7 +1,8 @@
 import * as React from 'react';
 import { useTranslation } from 'react-i18next';
-import { k8sPatch } from '@openshift-console/dynamic-plugin-sdk';
+import { k8sPatch, useAccessReview } from '@openshift-console/dynamic-plugin-sdk';
 import {
+  Alert,
   Card,
   CardBody,
   CardHeader,
@@ -17,30 +18,64 @@ const PROFILE_INFO: Record<string, { title: string; description: string }> = {
   'pci-dss': { title: 'PCI-DSS', description: 'Payment Card Industry Data Security Standard' },
   'nist-moderate': { title: 'NIST 800-53 Moderate', description: 'FedRAMP Moderate impact baseline' },
   'nist-high': { title: 'NIST 800-53 High', description: 'FedRAMP High impact baseline' },
-  stig: { title: 'DISA STIG', description: 'Defense Information Systems Agency Security Technical Implementation Guide' },
-  'nerc-cip': { title: 'NERC CIP', description: 'North American Electric Reliability Corporation Critical Infrastructure Protection' },
+  stig: {
+    title: 'DISA STIG',
+    description:
+      'Defense Information Systems Agency Security Technical Implementation Guide',
+  },
+  'nerc-cip': {
+    title: 'NERC CIP',
+    description:
+      'North American Electric Reliability Corporation Critical Infrastructure Protection',
+  },
   e8: { title: 'ACSC Essential Eight', description: 'Australian Cyber Security Centre Essential Eight' },
-  bsi: { title: 'BSI', description: 'German Federal Office for Information Security IT-Grundschutz' },
+  bsi: {
+    title: 'BSI',
+    description: 'German Federal Office for Information Security IT-Grundschutz',
+  },
 };
 
 const ProfilesTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => {
   const { t } = useTranslation('plugin__baseline-security-console-plugin');
+  const [pending, setPending] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+  const [canEdit] = useAccessReview({
+    group: 'baselinesecurity.io',
+    resource: 'clusterbaselines',
+    verb: 'patch',
+  });
 
-  const toggle = (key: string, checked: boolean) => {
+  const toggle = async (key: string, checked: boolean) => {
     if (!baseline) return;
     const profiles = checked
       ? [...baseline.spec.profiles, key]
       : baseline.spec.profiles.filter((p) => p !== key);
     if (!profiles.length) return; // CRD requires at least one profile
-    k8sPatch({
-      model: ClusterBaselineModel,
-      resource: baseline,
-      data: [{ op: 'replace', path: '/spec/profiles', value: profiles }],
-    });
+    setPending(true);
+    setError(null);
+    try {
+      await k8sPatch({
+        model: ClusterBaselineModel,
+        resource: baseline,
+        data: [{ op: 'replace', path: '/spec/profiles', value: profiles }],
+      });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : t('Failed to update profiles.'));
+    } finally {
+      setPending(false);
+    }
   };
 
   return (
     <PageSection>
+      {error && (
+        <Alert
+          variant="danger"
+          isInline
+          title={error}
+          style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}
+        />
+      )}
       <Gallery hasGutter minWidths={{ default: '330px' }}>
         {PROFILE_KEYS.map((key) => {
           const enabled = baseline?.spec.profiles.includes(key) ?? false;
@@ -53,8 +88,15 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => 
                       id={`profile-${key}`}
                       aria-label={key}
                       isChecked={enabled}
-                      isDisabled={!baseline || (enabled && baseline.spec.profiles.length === 1)}
-                      onChange={(_e, checked) => toggle(key, checked)}
+                      isDisabled={
+                        !baseline ||
+                        !canEdit ||
+                        pending ||
+                        (enabled && baseline.spec.profiles.length === 1)
+                      }
+                      onChange={(_e, checked) => {
+                        void toggle(key, checked);
+                      }}
                     />
                   ),
                 }}

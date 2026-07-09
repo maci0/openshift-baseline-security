@@ -36,6 +36,7 @@ import {
   ComplianceCheckResultGVK,
   ComplianceRemediation,
   ComplianceRemediationGVK,
+  isOwnedByBaseline,
 } from '../models';
 
 // PatternFly semantic status colors (chart fills).
@@ -109,8 +110,15 @@ const Overview: React.FC<{ baseline?: ClusterBaseline; loaded: boolean }> = ({
   );
   const score = baseline.status?.score;
 
+  const ownedRemediations = (remediations ?? []).filter((r) =>
+    isOwnedByBaseline(r.metadata.labels, baseline.spec.profiles),
+  );
+  const ownedResults = (results ?? []).filter((r) =>
+    isOwnedByBaseline(r.metadata.labels, baseline.spec.profiles),
+  );
+
   const failBySeverity: Record<string, number> = {};
-  for (const r of results ?? []) {
+  for (const r of ownedResults) {
     if (r.status === 'FAIL') failBySeverity[r.severity] = (failBySeverity[r.severity] ?? 0) + 1;
   }
 
@@ -172,8 +180,8 @@ const Overview: React.FC<{ baseline?: ClusterBaseline; loaded: boolean }> = ({
                 <DescriptionListDescription>
                   <a href="/baseline-security/remediations">
                     {t('{{available}} available, {{applied}} applied', {
-                      available: (remediations ?? []).filter((r) => !r.spec.apply).length,
-                      applied: (remediations ?? []).filter((r) => r.spec.apply).length,
+                      available: ownedRemediations.filter((r) => !r.spec.apply).length,
+                      applied: ownedRemediations.filter((r) => r.spec.apply).length,
                     })}
                   </a>
                 </DescriptionListDescription>

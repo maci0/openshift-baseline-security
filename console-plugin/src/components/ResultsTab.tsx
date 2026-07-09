@@ -27,7 +27,13 @@ import {
   InfoCircleIcon,
   MinusCircleIcon,
 } from '@patternfly/react-icons';
-import { CheckStatus, ComplianceCheckResult, ComplianceCheckResultGVK } from '../models';
+import {
+  CheckStatus,
+  ClusterBaseline,
+  ComplianceCheckResult,
+  ComplianceCheckResultGVK,
+  isOwnedByBaseline,
+} from '../models';
 
 const statusLabel: Record<
   CheckStatus,
@@ -51,7 +57,7 @@ const columns: TableColumn<ComplianceCheckResult>[] = [
   { title: 'Severity', id: 'severity', sort: 'severity' },
 ];
 
-const ResultsTab: React.FC = () => {
+const ResultsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => {
   const { t } = useTranslation('plugin__baseline-security-console-plugin');
   const [results, loaded, error] = useK8sWatchResource<ComplianceCheckResult[]>({
     groupVersionKind: ComplianceCheckResultGVK,
@@ -59,6 +65,14 @@ const ResultsTab: React.FC = () => {
     namespace: 'openshift-compliance',
   });
   const [selected, setSelected] = React.useState<ComplianceCheckResult | null>(null);
+
+  const ownedResults = React.useMemo(
+    () =>
+      (results ?? []).filter((r) =>
+        isOwnedByBaseline(r.metadata.labels, baseline?.spec.profiles),
+      ),
+    [results, baseline?.spec.profiles],
+  );
 
   const Row = React.useCallback(
     ({ obj, activeColumnIDs }: RowProps<ComplianceCheckResult>) => {
@@ -106,7 +120,7 @@ const ResultsTab: React.FC = () => {
     },
   ];
 
-  const [data, filteredData, onFilterChange] = useListPageFilter(results ?? [], rowFilters);
+  const [data, filteredData, onFilterChange] = useListPageFilter(ownedResults, rowFilters);
 
   return (
     <ListPageBody>

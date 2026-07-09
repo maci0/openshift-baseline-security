@@ -30,7 +30,9 @@ func init() {
 func main() {
 	var metricsAddr, probeAddr string
 	var enableLeaderElection bool
-	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8443", "Metrics endpoint address.")
+	// Metrics default to loopback only (no auth filter; avoids pulling k8s.io/apiserver).
+	// Disable with --metrics-bind-address=0. Expose via a sidecar if cluster scrape is needed.
+	flag.StringVar(&metricsAddr, "metrics-bind-address", "127.0.0.1:8080", "Metrics endpoint address (loopback by default).")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "Health probe endpoint address.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", true, "Enable leader election.")
 	opts := zap.Options{}
@@ -42,7 +44,7 @@ func main() {
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme:                 scheme,
-		Metrics:                metricsserver.Options{BindAddress: metricsAddr, SecureServing: true},
+		Metrics:                metricsserver.Options{BindAddress: metricsAddr},
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,
 		LeaderElectionID:       "baseline-security-operator-lock",

@@ -65,8 +65,9 @@ defaults and presentation are missing. Both are cheap. That is this project.
 
 - S1: **Remediation apply from the UI**: one-click `spec.apply: true` on a
   `ComplianceRemediation`, with an explicit warning that node remediations
-  render into MachineConfigs and reboot nodes; MachineConfigPool pause
-  awareness; "auto-apply" toggle mapping to `ScanSetting.autoApplyRemediations`.
+  render into MachineConfigs and reboot nodes; "auto-apply" toggle mapping
+  to `ScanSetting.autoApplyRemediations`. (MachineConfigPool pause awareness
+  is future work.)
 - S2: **Trend and score history**: persist per-scan score snapshots
   (operator writes a compact history into the `ClusterBaseline` status or a
   ConfigMap ring buffer; long-term via the Compliance Operator's Prometheus
@@ -141,17 +142,23 @@ Responsibilities:
    (`cis` → `ocp4-cis` + `ocp4-cis-node`, `stig` → `ocp4-stig` +
    `ocp4-stig-node` + `rhcos4-stig`, etc.).
 3. **Console plugin deployment** (G3): nginx Deployment (2 replicas,
-   service-serving-cert TLS), Service, `ConsolePlugin` CR, and appending the
-   plugin name to `consoles.operator.openshift.io/cluster` `spec.plugins`
-   (removed again on CR deletion via finalizer).
-4. **Status aggregation**: watch `ComplianceSuite`s and `ComplianceCheckResult`s
-   it owns (label selector on the ScanSettingBinding-generated suites),
-   aggregate into `ClusterBaseline.status`: per-profile pass/fail/manual/
-   error counts, a 0-100 score (pass / (pass+fail), MANUAL and
-   NOT-APPLICABLE excluded), lastScanTime, conditions
-   (`ComplianceOperatorReady`, `ScanConfigured`, `ConsolePluginReady`,
-   `Degraded`). This status is what the dashboard's headline reads, so the
-   score definition lives in exactly one place.
+   service-serving-cert TLS, hardened securityContext + probes), Service,
+   `ConsolePlugin` CR in namespace `openshift-baseline-security` (created if
+   missing), and appending the plugin name to
+   `consoles.operator.openshift.io/cluster` `spec.plugins` (removed on CR
+   deletion via finalizer, or when `spec.console.enabled` is false).
+4. **Status aggregation**: poll `ComplianceCheckResult`s labeled with
+   `compliance.openshift.io/suite=baseline-<profile>` (suite name equals the
+   owned ScanSettingBinding). Foreign CO suites are ignored. Aggregate into
+   `ClusterBaseline.status`: per-profile pass/fail/manual/error counts, a
+   0-100 score (pass / (pass+fail), MANUAL and NOT-APPLICABLE excluded;
+   score is cleared when there are no countable results), lastScanTime,
+   history (oldest first, capped at 30), conditions
+   (`ComplianceOperatorReady` from CSV phase Succeeded, `ScanConfigured`,
+   `ConsolePluginReady`, `Degraded` for owned Pending PVCs). Compliance CRDs
+   are not watched at manager start (they may be absent); the controller
+   requeues every minute and Owns the plugin Deployment/Service/ConfigMap.
+   Deleting ClusterBaseline does **not** uninstall the Compliance Operator.
 
 ### 4.2 API: `ClusterBaseline` CRD
 
@@ -188,7 +195,7 @@ status:
       manual: 9
       error: 0
       notApplicable: 3
-  history: []                  # stretch S2: bounded ring, newest first
+  history: []                  # stretch S2: bounded ring, oldest first, max 30
 ```
 
 ### 4.3 Console plugin (`baseline-security-console-plugin`)
@@ -207,12 +214,12 @@ Extension points (exact SDK types):
 
 | Extension | Type | Purpose |
 |---|---|---|
-| Nav item "Compliance" under Home or a new section | `console.navigation/href` (`perspective: admin`) | entry point |
-| Dashboard page `/baseline-security` | `console.page/route` | score, per-profile donut, severity breakdown, last/next scan, rescan button |
-| Results page `/baseline-security/results` | `console.page/route` | virtualized ComplianceCheckResult table: filter by status, severity, profile, text; row expands to description + instructions |
-| Profiles page `/baseline-security/profiles` | `console.page/route` | catalog of shipped profiles with enable checkboxes writing `ClusterBaseline.spec.profiles` |
-| Cluster overview card | `console.dashboards/card` | compact score + fail count on the main Overview |
-| Overview health item | `console.dashboards/overview/health/resource` | ClusterBaseline condition surfaced in cluster health |
+| Nav item "Compliance" under Administration | `console.navigation/href` (`perspective: admin`, `section: administration`) | entry point |
+| Page `/baseline-security` with HorizontalNav tabs | `console.page/route` | Overview (score, severity, trend), Results, Remediations, Profiles |
+| Results tab | (in-page) | virtualized ComplianceCheckResult table: filter by status/severity; detail modal for description + instructions; suite-scoped to baseline bindings |
+| Profiles tab | (in-page) | catalog of shipped profiles with enable switches writing `ClusterBaseline.spec.profiles` (`useAccessReview`) |
+| Remediations tab | (in-page) | apply/unapply with confirmation; auto-apply toggle |
+| Cluster overview card / health item | future | not in v0.1.0 |
 
 Behaviors that write to the cluster:
 

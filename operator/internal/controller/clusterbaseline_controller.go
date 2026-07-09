@@ -11,12 +11,13 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -30,17 +31,25 @@ const (
 	complianceNamespace = "openshift-compliance"
 	scanSettingName     = "baseline"
 	finalizerName       = "baselinesecurity.io/cleanup"
+	pluginName          = "baseline-security-console-plugin"
+	pluginNS            = "openshift-baseline-security"
+	bindingNamePrefix   = "baseline-"
+	suiteLabel          = "compliance.openshift.io/suite"
+	scanNameLabel       = "compliance.openshift.io/scan-name"
 )
 
 // Compliance Operator and OLM resources are accessed unstructured: importing
 // their Go APIs would pull both dependency trees into this module for four
 // object shapes we only create/read. Revisit if the surface grows.
 var (
-	subscriptionGVK = schema.GroupVersionKind{Group: "operators.coreos.com", Version: "v1alpha1", Kind: "Subscription"}
-	scanSettingGVK  = schema.GroupVersionKind{Group: "compliance.openshift.io", Version: "v1alpha1", Kind: "ScanSetting"}
-	bindingGVK      = schema.GroupVersionKind{Group: "compliance.openshift.io", Version: "v1alpha1", Kind: "ScanSettingBinding"}
-	checkResultGVK  = schema.GroupVersionKind{Group: "compliance.openshift.io", Version: "v1alpha1", Kind: "ComplianceCheckResult"}
-	scanGVK         = schema.GroupVersionKind{Group: "compliance.openshift.io", Version: "v1alpha1", Kind: "ComplianceScan"}
+	subscriptionGVK  = schema.GroupVersionKind{Group: "operators.coreos.com", Version: "v1alpha1", Kind: "Subscription"}
+	csvGVK           = schema.GroupVersionKind{Group: "operators.coreos.com", Version: "v1alpha1", Kind: "ClusterServiceVersion"}
+	scanSettingGVK   = schema.GroupVersionKind{Group: "compliance.openshift.io", Version: "v1alpha1", Kind: "ScanSetting"}
+	bindingGVK       = schema.GroupVersionKind{Group: "compliance.openshift.io", Version: "v1alpha1", Kind: "ScanSettingBinding"}
+	checkResultGVK   = schema.GroupVersionKind{Group: "compliance.openshift.io", Version: "v1alpha1", Kind: "ComplianceCheckResult"}
+	scanGVK          = schema.GroupVersionKind{Group: "compliance.openshift.io", Version: "v1alpha1", Kind: "ComplianceScan"}
+	consolePluginGVK = schema.GroupVersionKind{Group: "console.openshift.io", Version: "v1", Kind: "ConsolePlugin"}
+	consoleGVK       = schema.GroupVersionKind{Group: "operator.openshift.io", Version: "v1", Kind: "Console"}
 )
 
 // ClusterBaselineReconciler reconciles the ClusterBaseline singleton.
@@ -82,6 +91,7 @@ func (r *ClusterBaselineReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		if err := r.Update(ctx, cb); err != nil {
 			return ctrl.Result{}, err
 		}
+		return ctrl.Result{Requeue: true}, nil
 	}
 
 	if err := r.ensureComplianceOperator(ctx, cb); err != nil {
@@ -104,16 +114,32 @@ func (r *ClusterBaselineReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return ctrl.Result{}, err
 	}
 	logger.V(1).Info("reconciled", "score", cb.Status.Score)
-	// ponytail: poll instead of watching compliance CRs; their CRDs don't exist
-	// until the Compliance Operator is installed, and a manager-start watch on a
-	// missing CRD fails. Upgrade path: conditional watch once CRD presence is
-	// detected (or controller-runtime lazy informers).
+	// Compliance CRDs do not exist until the Compliance Operator is installed;
+	// a manager-start watch on a missing CRD fails. Poll for check results and
+	// Own in-scheme plugin objects (Deployment/Service/ConfigMap) instead.
 	return ctrl.Result{RequeueAfter: time.Minute}, nil
+}
+
+// bindingName returns the ScanSettingBinding name for a profile key.
+// The Compliance Operator names the ComplianceSuite after the binding, and
+// labels check results with compliance.openshift.io/suite=<binding name>.
+func bindingName(key baselinev1alpha1.ProfileKey) string {
+	return bindingNamePrefix + string(key)
+}
+
+// ownedSuites is the set of suite names this CR owns (one per selected profile).
+func ownedSuites(cb *baselinev1alpha1.ClusterBaseline) map[string]bool {
+	s := make(map[string]bool, len(cb.Spec.Profiles))
+	for _, key := range cb.Spec.Profiles {
+		s[bindingName(key)] = true
+	}
+	return s
 }
 
 // ensureComplianceOperator creates namespace + OperatorGroup + Subscription
 // for the Compliance Operator unless it is already installed or installation
-// is disabled.
+// is disabled. Deleting ClusterBaseline does not uninstall the Compliance
+// Operator (shared cluster resource; leave it for other consumers).
 func (r *ClusterBaselineReconciler) ensureComplianceOperator(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline) error {
 	if cb.Spec.InstallComplianceOperator != nil && !*cb.Spec.InstallComplianceOperator {
 		return nil
@@ -123,14 +149,7 @@ func (r *ClusterBaselineReconciler) ensureComplianceOperator(ctx context.Context
 	sub.SetGroupVersionKind(subscriptionGVK)
 	err := r.Get(ctx, types.NamespacedName{Namespace: complianceNamespace, Name: "compliance-operator"}, sub)
 	if err == nil {
-		// installedCSV is "compliance-operator.v1.9.1"; strip to the version.
-		if csv, _, _ := unstructured.NestedString(sub.Object, "status", "installedCSV"); csv != "" {
-			cb.Status.ComplianceOperatorVersion = strings.TrimPrefix(csv, "compliance-operator.v")
-		}
-		meta.SetStatusCondition(&cb.Status.Conditions, metav1.Condition{
-			Type: "ComplianceOperatorReady", Status: metav1.ConditionTrue, Reason: "Subscribed",
-		})
-		return nil
+		return r.setComplianceOperatorReady(ctx, cb, sub)
 	}
 	if !apierrors.IsNotFound(err) {
 		return err
@@ -154,10 +173,14 @@ func (r *ClusterBaselineReconciler) ensureComplianceOperator(ctx context.Context
 	sub.SetGroupVersionKind(subscriptionGVK)
 	sub.SetName("compliance-operator")
 	sub.SetNamespace(complianceNamespace)
+	source := cb.Spec.ComplianceCatalogSource
+	if source == "" {
+		source = "redhat-operators"
+	}
 	sub.Object["spec"] = map[string]any{
 		"name":            "compliance-operator",
 		"channel":         "stable",
-		"source":          cb.Spec.ComplianceCatalogSource,
+		"source":          source,
 		"sourceNamespace": "openshift-marketplace",
 	}
 	if err := r.Create(ctx, sub); err != nil && !apierrors.IsAlreadyExists(err) {
@@ -165,6 +188,47 @@ func (r *ClusterBaselineReconciler) ensureComplianceOperator(ctx context.Context
 	}
 	meta.SetStatusCondition(&cb.Status.Conditions, metav1.Condition{
 		Type: "ComplianceOperatorReady", Status: metav1.ConditionFalse, Reason: "Installing",
+		Message: "Subscription created; waiting for CSV to succeed",
+	})
+	return nil
+}
+
+// setComplianceOperatorReady sets the condition from Subscription installedCSV
+// and the CSV phase (Succeeded required for True).
+func (r *ClusterBaselineReconciler) setComplianceOperatorReady(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline, sub *unstructured.Unstructured) error {
+	csvName, _, _ := unstructured.NestedString(sub.Object, "status", "installedCSV")
+	if csvName == "" {
+		meta.SetStatusCondition(&cb.Status.Conditions, metav1.Condition{
+			Type: "ComplianceOperatorReady", Status: metav1.ConditionFalse, Reason: "Installing",
+			Message: "Subscription present but installedCSV is empty",
+		})
+		return nil
+	}
+	cb.Status.ComplianceOperatorVersion = strings.TrimPrefix(csvName, "compliance-operator.v")
+
+	csv := &unstructured.Unstructured{}
+	csv.SetGroupVersionKind(csvGVK)
+	if err := r.Get(ctx, types.NamespacedName{Namespace: complianceNamespace, Name: csvName}, csv); err != nil {
+		if apierrors.IsNotFound(err) {
+			meta.SetStatusCondition(&cb.Status.Conditions, metav1.Condition{
+				Type: "ComplianceOperatorReady", Status: metav1.ConditionFalse, Reason: "Installing",
+				Message: fmt.Sprintf("waiting for CSV %s", csvName),
+			})
+			return nil
+		}
+		return err
+	}
+	phase, _, _ := unstructured.NestedString(csv.Object, "status", "phase")
+	if phase == "Succeeded" {
+		meta.SetStatusCondition(&cb.Status.Conditions, metav1.Condition{
+			Type: "ComplianceOperatorReady", Status: metav1.ConditionTrue, Reason: "CSVSucceeded",
+			Message: fmt.Sprintf("CSV %s is Succeeded", csvName),
+		})
+		return nil
+	}
+	meta.SetStatusCondition(&cb.Status.Conditions, metav1.Condition{
+		Type: "ComplianceOperatorReady", Status: metav1.ConditionFalse, Reason: "CSVNotReady",
+		Message: fmt.Sprintf("CSV %s phase=%s", csvName, phase),
 	})
 	return nil
 }
@@ -197,7 +261,7 @@ func (r *ClusterBaselineReconciler) ensureScanConfig(ctx context.Context, cb *ba
 	for _, key := range cb.Spec.Profiles {
 		binding := &unstructured.Unstructured{}
 		binding.SetGroupVersionKind(bindingGVK)
-		binding.SetName(fmt.Sprintf("baseline-%s", key))
+		binding.SetName(bindingName(key))
 		binding.SetNamespace(complianceNamespace)
 		_, err := controllerutil.CreateOrUpdate(ctx, r.Client, binding, func() error {
 			profiles := make([]any, 0, len(key.ProfileNames()))
@@ -223,10 +287,7 @@ func (r *ClusterBaselineReconciler) ensureScanConfig(ctx context.Context, cb *ba
 	if err := r.List(ctx, bindings, client.InNamespace(complianceNamespace)); err != nil && !meta.IsNoMatchError(err) {
 		return err
 	}
-	selected := map[string]bool{}
-	for _, key := range cb.Spec.Profiles {
-		selected[fmt.Sprintf("baseline-%s", key)] = true
-	}
+	selected := ownedSuites(cb)
 	for i := range bindings.Items {
 		b := &bindings.Items[i]
 		if selected[b.GetName()] || !metav1.IsControlledBy(b, cb) {
@@ -245,24 +306,48 @@ func (r *ClusterBaselineReconciler) ensureScanConfig(ctx context.Context, cb *ba
 // checkScanStorage surfaces the silent-hang failure mode where scan PVCs stay
 // Pending because the cluster has no default StorageClass: scans never start
 // and nothing in the Compliance Operator reports an error.
+// Only PVCs whose names match selected profile scans (or role-suffixed variants)
+// are considered, so unrelated CO users do not flip our Degraded condition.
 func (r *ClusterBaselineReconciler) checkScanStorage(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline) error {
 	pvcs := &corev1.PersistentVolumeClaimList{}
 	if err := r.List(ctx, pvcs, client.InNamespace(complianceNamespace)); err != nil {
 		return err
 	}
-	for _, pvc := range pvcs.Items {
-		if pvc.Status.Phase == corev1.ClaimPending && time.Since(pvc.CreationTimestamp.Time) > 2*time.Minute {
-			meta.SetStatusCondition(&cb.Status.Conditions, metav1.Condition{
-				Type:   "Degraded",
-				Status: metav1.ConditionTrue,
-				Reason: "ScanStoragePending",
-				Message: fmt.Sprintf("PVC %s/%s has been Pending for over 2 minutes; "+
-					"compliance scans cannot store results. Ensure the cluster has a default "+
-					"StorageClass (or configure ScanSetting rawResultStorage accordingly).",
-					complianceNamespace, pvc.Name),
-			})
-			return nil
+	profileNames := map[string]bool{}
+	for _, key := range cb.Spec.Profiles {
+		for _, p := range key.ProfileNames() {
+			profileNames[p] = true
 		}
+	}
+	isOurs := func(name string) bool {
+		for p := range profileNames {
+			if name == p || strings.HasPrefix(name, p+"-") {
+				return true
+			}
+		}
+		return false
+	}
+
+	var pending []string
+	for _, pvc := range pvcs.Items {
+		if !isOurs(pvc.Name) {
+			continue
+		}
+		if pvc.Status.Phase == corev1.ClaimPending && time.Since(pvc.CreationTimestamp.Time) > 2*time.Minute {
+			pending = append(pending, pvc.Name)
+		}
+	}
+	if len(pending) > 0 {
+		meta.SetStatusCondition(&cb.Status.Conditions, metav1.Condition{
+			Type:   "Degraded",
+			Status: metav1.ConditionTrue,
+			Reason: "ScanStoragePending",
+			Message: fmt.Sprintf("PVC(s) %s/%s have been Pending for over 2 minutes; "+
+				"compliance scans cannot store results. Ensure the cluster has a default "+
+				"StorageClass (or configure ScanSetting rawResultStorage accordingly).",
+				complianceNamespace, strings.Join(pending, ", ")),
+		})
+		return nil
 	}
 	meta.SetStatusCondition(&cb.Status.Conditions, metav1.Condition{
 		Type: "Degraded", Status: metav1.ConditionFalse, Reason: "AsExpected",
@@ -275,14 +360,14 @@ func (r *ClusterBaselineReconciler) checkScanStorage(ctx context.Context, cb *ba
 // the console config entry is the one thing garbage collection can't clean.
 func (r *ClusterBaselineReconciler) deregisterConsolePlugin(ctx context.Context) error {
 	console := &unstructured.Unstructured{}
-	console.SetGroupVersionKind(schema.GroupVersionKind{Group: "operator.openshift.io", Version: "v1", Kind: "Console"})
+	console.SetGroupVersionKind(consoleGVK)
 	if err := r.Get(ctx, types.NamespacedName{Name: "cluster"}, console); err != nil {
 		return client.IgnoreNotFound(err)
 	}
 	plugins, _, _ := unstructured.NestedStringSlice(console.Object, "spec", "plugins")
 	kept := plugins[:0]
 	for _, p := range plugins {
-		if p != "baseline-security-console-plugin" {
+		if p != pluginName {
 			kept = append(kept, p)
 		}
 	}
@@ -293,8 +378,38 @@ func (r *ClusterBaselineReconciler) deregisterConsolePlugin(ctx context.Context)
 	return r.Update(ctx, console)
 }
 
+// removeConsolePlugin tears down plugin objects and deregisters from the
+// console operator (used when spec.console.enabled is false).
+func (r *ClusterBaselineReconciler) removeConsolePlugin(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline) error {
+	// Cluster-scoped ConsolePlugin (ownerRef may still GC it; delete explicitly).
+	cp := &unstructured.Unstructured{}
+	cp.SetGroupVersionKind(consolePluginGVK)
+	cp.SetName(pluginName)
+	if err := r.Delete(ctx, cp); err != nil && !apierrors.IsNotFound(err) {
+		return err
+	}
+	// Namespaced objects: Deployment, Service, ConfigMap.
+	for _, obj := range []client.Object{
+		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: pluginName, Namespace: pluginNS}},
+		&corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: pluginName, Namespace: pluginNS}},
+		&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: pluginName + "-nginx", Namespace: pluginNS}},
+	} {
+		if err := r.Delete(ctx, obj); err != nil && !apierrors.IsNotFound(err) {
+			return err
+		}
+	}
+	if err := r.deregisterConsolePlugin(ctx); err != nil {
+		return err
+	}
+	meta.SetStatusCondition(&cb.Status.Conditions, metav1.Condition{
+		Type: "ConsolePluginReady", Status: metav1.ConditionFalse, Reason: "Disabled",
+		Message: "spec.console.enabled is false",
+	})
+	return nil
+}
+
 // aggregateStatus recomputes per-profile counts and the overall score from
-// ComplianceCheckResults.
+// ComplianceCheckResults belonging to our ScanSettingBindings (suite label).
 func (r *ClusterBaselineReconciler) aggregateStatus(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline) error {
 	list := &unstructured.UnstructuredList{}
 	list.SetGroupVersionKind(checkResultGVK.GroupVersion().WithKind(checkResultGVK.Kind + "List"))
@@ -305,6 +420,7 @@ func (r *ClusterBaselineReconciler) aggregateStatus(ctx context.Context, cb *bas
 		return err
 	}
 
+	suites := ownedSuites(cb)
 	byProfile := map[baselinev1alpha1.ProfileKey]*baselinev1alpha1.ProfileStatus{}
 	profileToKey := map[string]baselinev1alpha1.ProfileKey{}
 	for _, key := range cb.Spec.Profiles {
@@ -331,7 +447,14 @@ func (r *ClusterBaselineReconciler) aggregateStatus(ctx context.Context, cb *bas
 
 	var pass, fail int32
 	for _, item := range list.Items {
-		scan := item.GetLabels()["compliance.openshift.io/scan-name"]
+		// Prefer suite label (binding name) so foreign scans of the same profile
+		// are excluded. Fall back to scan-name matching only when the suite label
+		// is one of ours (label always present on modern CO; empty suite skips).
+		suite := item.GetLabels()[suiteLabel]
+		if suite == "" || !suites[suite] {
+			continue
+		}
+		scan := item.GetLabels()[scanNameLabel]
 		key, ok := keyForScan(scan)
 		if !ok {
 			continue
@@ -362,20 +485,47 @@ func (r *ClusterBaselineReconciler) aggregateStatus(ctx context.Context, cb *bas
 		score := pass * 100 / (pass + fail)
 		cb.Status.Score = &score
 		r.recordHistory(ctx, cb, score)
+	} else {
+		// No countable results for selected profiles: clear stale score.
+		cb.Status.Score = nil
 	}
 	return nil
 }
 
-// recordHistory sets lastScanTime from the newest scan endTimestamp and
-// appends a score snapshot once per completed scan run (30-entry ring).
+// recordHistory sets lastScanTime from the newest owned scan endTimestamp and
+// appends a score snapshot once per completed scan run (30-entry ring, oldest first).
 func (r *ClusterBaselineReconciler) recordHistory(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline, score int32) {
 	scans := &unstructured.UnstructuredList{}
 	scans.SetGroupVersionKind(scanGVK.GroupVersion().WithKind(scanGVK.Kind + "List"))
 	if err := r.List(ctx, scans, client.InNamespace(complianceNamespace)); err != nil {
 		return
 	}
+	suites := ownedSuites(cb)
 	var latest time.Time
 	for _, s := range scans.Items {
+		// ComplianceScan is labeled with the suite (binding) name when present.
+		if suite := s.GetLabels()[suiteLabel]; suite != "" && !suites[suite] {
+			continue
+		}
+		// Also accept scans whose name matches our profile names when suite is absent.
+		if suite := s.GetLabels()[suiteLabel]; suite == "" {
+			name := s.GetName()
+			matched := false
+			for _, key := range cb.Spec.Profiles {
+				for _, p := range key.ProfileNames() {
+					if name == p || strings.HasPrefix(name, p+"-") {
+						matched = true
+						break
+					}
+				}
+				if matched {
+					break
+				}
+			}
+			if !matched {
+				continue
+			}
+		}
 		ts, _, _ := unstructured.NestedString(s.Object, "status", "endTimestamp")
 		if t, err := time.Parse(time.RFC3339, ts); err == nil && t.After(latest) {
 			latest = t
@@ -396,18 +546,25 @@ func (r *ClusterBaselineReconciler) recordHistory(ctx context.Context, cb *basel
 }
 
 // ensureConsolePlugin deploys the plugin web server and registers the
-// ConsolePlugin with the console operator.
+// ConsolePlugin with the console operator. When disabled, tears down prior deploy.
 func (r *ClusterBaselineReconciler) ensureConsolePlugin(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline) error {
 	if cb.Spec.Console.Enabled != nil && !*cb.Spec.Console.Enabled {
-		return nil
+		return r.removeConsolePlugin(ctx, cb)
 	}
-	const (
-		pluginName = "baseline-security-console-plugin"
-		pluginNS   = "openshift-baseline-security"
-	)
 	image := os.Getenv("RELATED_IMAGE_CONSOLE_PLUGIN")
 	if image == "" {
+		meta.SetStatusCondition(&cb.Status.Conditions, metav1.Condition{
+			Type: "ConsolePluginReady", Status: metav1.ConditionFalse, Reason: "ImageMissing",
+			Message: "RELATED_IMAGE_CONSOLE_PLUGIN not set",
+		})
 		return fmt.Errorf("RELATED_IMAGE_CONSOLE_PLUGIN not set")
+	}
+
+	// Namespace must exist for OLM AllNamespaces installs (operator often runs
+	// in openshift-operators; plugin lives in openshift-baseline-security).
+	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: pluginNS}}
+	if err := r.Create(ctx, ns); err != nil && !apierrors.IsAlreadyExists(err) {
+		return err
 	}
 
 	// The console only talks HTTPS to plugin backends: nginx terminates TLS
@@ -440,16 +597,51 @@ http {
 	dep := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: pluginName, Namespace: pluginNS}}
 	if _, err := controllerutil.CreateOrUpdate(ctx, r.Client, dep, func() error {
 		dep.Spec = appsv1.DeploymentSpec{
-			Replicas: ptr.To(int32(1)),
+			Replicas: ptr.To(int32(2)),
 			Selector: &metav1.LabelSelector{MatchLabels: labels},
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{Labels: labels},
 				Spec: corev1.PodSpec{
+					SecurityContext: &corev1.PodSecurityContext{
+						RunAsNonRoot: ptr.To(true),
+						SeccompProfile: &corev1.SeccompProfile{
+							Type: corev1.SeccompProfileTypeRuntimeDefault,
+						},
+					},
 					Containers: []corev1.Container{{
-						Name:  pluginName,
-						Image: image,
-						Ports: []corev1.ContainerPort{{ContainerPort: 9443}},
+						Name:    pluginName,
+						Image:   image,
+						Ports:   []corev1.ContainerPort{{Name: "https", ContainerPort: 9443}},
 						Command: []string{"nginx", "-c", "/etc/nginx-plugin/nginx.conf", "-g", "daemon off;"},
+						SecurityContext: &corev1.SecurityContext{
+							AllowPrivilegeEscalation: ptr.To(false),
+							Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
+							RunAsNonRoot:             ptr.To(true),
+						},
+						Resources: corev1.ResourceRequirements{
+							Requests: corev1.ResourceList{
+								corev1.ResourceCPU:    resource.MustParse("10m"),
+								corev1.ResourceMemory: resource.MustParse("32Mi"),
+							},
+							Limits: corev1.ResourceList{
+								corev1.ResourceMemory: resource.MustParse("128Mi"),
+							},
+						},
+						// HTTPS only; readiness after serving-cert is mounted.
+						ReadinessProbe: &corev1.Probe{
+							ProbeHandler: corev1.ProbeHandler{
+								TCPSocket: &corev1.TCPSocketAction{Port: intstr.FromInt32(9443)},
+							},
+							InitialDelaySeconds: 5,
+							PeriodSeconds:       10,
+						},
+						LivenessProbe: &corev1.Probe{
+							ProbeHandler: corev1.ProbeHandler{
+								TCPSocket: &corev1.TCPSocketAction{Port: intstr.FromInt32(9443)},
+							},
+							InitialDelaySeconds: 15,
+							PeriodSeconds:       20,
+						},
 						VolumeMounts: []corev1.VolumeMount{
 							{Name: "serving-cert", MountPath: "/var/serving-cert", ReadOnly: true},
 							{Name: "nginx-conf", MountPath: "/etc/nginx-plugin", ReadOnly: true},
@@ -480,14 +672,14 @@ http {
 		}
 		svc.Annotations["service.beta.openshift.io/serving-cert-secret-name"] = pluginName + "-cert"
 		svc.Spec.Selector = labels
-		svc.Spec.Ports = []corev1.ServicePort{{Port: 9443, TargetPort: intstr.FromInt32(9443)}}
+		svc.Spec.Ports = []corev1.ServicePort{{Name: "https", Port: 9443, TargetPort: intstr.FromInt32(9443)}}
 		return controllerutil.SetControllerReference(cb, svc, r.Scheme)
 	}); err != nil {
 		return err
 	}
 
 	cp := &unstructured.Unstructured{}
-	cp.SetGroupVersionKind(schema.GroupVersionKind{Group: "console.openshift.io", Version: "v1", Kind: "ConsolePlugin"})
+	cp.SetGroupVersionKind(consolePluginGVK)
 	cp.SetName(pluginName)
 	if _, err := controllerutil.CreateOrUpdate(ctx, r.Client, cp, func() error {
 		cp.Object["spec"] = map[string]any{
@@ -506,23 +698,37 @@ http {
 
 	// Register with the console operator config; idempotent append.
 	console := &unstructured.Unstructured{}
-	console.SetGroupVersionKind(schema.GroupVersionKind{Group: "operator.openshift.io", Version: "v1", Kind: "Console"})
+	console.SetGroupVersionKind(consoleGVK)
 	if err := r.Get(ctx, types.NamespacedName{Name: "cluster"}, console); err != nil {
 		return err
 	}
 	plugins, _, _ := unstructured.NestedStringSlice(console.Object, "spec", "plugins")
+	found := false
 	for _, p := range plugins {
 		if p == pluginName {
-			return nil
+			found = true
+			break
 		}
 	}
-	_ = unstructured.SetNestedStringSlice(console.Object, append(plugins, pluginName), "spec", "plugins")
-	return r.Update(ctx, console)
+	if !found {
+		_ = unstructured.SetNestedStringSlice(console.Object, append(plugins, pluginName), "spec", "plugins")
+		if err := r.Update(ctx, console); err != nil {
+			return err
+		}
+	}
+	meta.SetStatusCondition(&cb.Status.Conditions, metav1.Condition{
+		Type: "ConsolePluginReady", Status: metav1.ConditionTrue, Reason: "Deployed",
+		Message: "plugin Deployment, Service, and ConsolePlugin registered",
+	})
+	return nil
 }
 
 func (r *ClusterBaselineReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&baselinev1alpha1.ClusterBaseline{}).
+		Owns(&appsv1.Deployment{}).
+		Owns(&corev1.Service{}).
+		Owns(&corev1.ConfigMap{}).
 		Named("clusterbaseline").
 		Complete(r)
 }

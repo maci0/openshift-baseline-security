@@ -57,9 +57,17 @@ BUNDLE_IMG ?= quay.io/openshift-baseline-security/baseline-security-operator-bun
 CATALOG_IMG ?= quay.io/openshift-baseline-security/baseline-security-operator-catalog:latest
 
 .PHONY: bundle
-bundle: manifests
+bundle: manifests verify-csv-rbac
 	cp config/crd/bases/baselinesecurity.io_clusterbaselines.yaml bundle/manifests/
 	docker run --rm -v $(CURDIR)/bundle:/bundle:Z quay.io/operator-framework/operator-sdk:latest bundle validate /bundle
+
+# CSV clusterPermissions are hand-maintained; fail if they drift from role.yaml
+# on verbs we know matter for zero-config (clusterbaselines create).
+.PHONY: verify-csv-rbac
+verify-csv-rbac:
+	@grep -A1 'resources: \[clusterbaselines\]' bundle/manifests/baseline-security-operator.clusterserviceversion.yaml \
+		| grep -q 'create' \
+		|| (echo "CSV missing create on clusterbaselines; sync with config/rbac/role.yaml" && exit 1)
 
 .PHONY: bundle-build
 bundle-build: bundle

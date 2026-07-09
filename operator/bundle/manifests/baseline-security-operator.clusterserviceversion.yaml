@@ -94,7 +94,7 @@ spec:
               verbs: [create, delete, get, list, patch, update, watch]
             - apiGroups: [baselinesecurity.io]
               resources: [clusterbaselines]
-              verbs: [get, list, patch, update, watch]
+              verbs: [create, get, list, patch, update, watch]
             - apiGroups: [baselinesecurity.io]
               resources: [clusterbaselines/status]
               verbs: [get, patch, update]

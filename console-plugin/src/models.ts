@@ -47,7 +47,11 @@ export type CheckStatus = 'PASS' | 'FAIL' | 'INFO' | 'MANUAL' | 'ERROR' | 'NOT-A
 export type ComplianceCheckResult = {
   apiVersion: string;
   kind: string;
-  metadata: { name: string; namespace: string; labels?: Record<string, string> };
+  metadata: {
+    name: string;
+    namespace: string;
+    labels?: Record<string, string>;
+  };
   id: string;
   status: CheckStatus;
   severity: 'unknown' | 'info' | 'low' | 'medium' | 'high';
@@ -76,9 +80,15 @@ export const ComplianceRemediationModel = {
 export type ComplianceRemediation = {
   apiVersion: string;
   kind: string;
-  metadata: { name: string; namespace: string };
+  metadata: {
+    name: string;
+    namespace: string;
+    labels?: Record<string, string>;
+  };
   spec: { apply: boolean; current?: { object?: { kind?: string } } };
-  status?: { applicationState?: 'Applied' | 'NotApplied' | 'Error' | 'Outdated' | 'MissingDependencies' };
+  status?: {
+    applicationState?: 'Applied' | 'NotApplied' | 'Error' | 'Outdated' | 'MissingDependencies';
+  };
 };
 
 export type ScoreSnapshot = { time: string; score: number };
@@ -125,3 +135,17 @@ export const PROFILE_KEYS = [
   'e8',
   'bsi',
 ] as const;
+
+/** Suite label value = ScanSettingBinding name owned by the operator. */
+export const suiteLabel = (profileKey: string) => `baseline-${profileKey}`;
+
+/** True if a CO object belongs to one of the selected baseline profile bindings. */
+export const isOwnedByBaseline = (
+  labels: Record<string, string> | undefined,
+  profiles: string[] | undefined,
+): boolean => {
+  if (!profiles?.length) return false;
+  const suite = labels?.['compliance.openshift.io/suite'];
+  if (!suite) return false;
+  return profiles.some((p) => suite === suiteLabel(p));
+};
