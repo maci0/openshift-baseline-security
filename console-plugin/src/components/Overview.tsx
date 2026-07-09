@@ -81,6 +81,15 @@ const Overview: React.FC<{ baseline?: ClusterBaseline; loaded: boolean }> = ({
   const degraded = baseline.status?.conditions?.find(
     (c) => c.type === 'Degraded' && c.status === 'True',
   );
+  const coReady = baseline.status?.conditions?.find((c) => c.type === 'ComplianceOperatorReady');
+  const coVersion = baseline.status?.complianceOperatorVersion;
+  const coLabel =
+    coVersion ||
+    (coReady?.reason === 'NotInstalled'
+      ? t('Not installed')
+      : coReady?.status === 'True'
+        ? t('Installed')
+        : t('Installing'));
   const score = baseline.status?.score;
 
   return (
@@ -132,9 +141,7 @@ const Overview: React.FC<{ baseline?: ClusterBaseline; loaded: boolean }> = ({
               </DescriptionListGroup>
               <DescriptionListGroup>
                 <DescriptionListTerm>{t('Compliance Operator')}</DescriptionListTerm>
-                <DescriptionListDescription>
-                  {baseline.status?.complianceOperatorVersion || t('Installing')}
-                </DescriptionListDescription>
+                <DescriptionListDescription>{coLabel}</DescriptionListDescription>
               </DescriptionListGroup>
               <DescriptionListGroup>
                 <DescriptionListTerm>{t('Remediations')}</DescriptionListTerm>

@@ -24,26 +24,31 @@ type metricsCertProvider struct {
 }
 
 func (p *metricsCertProvider) GetCertificate(_ *tls.ClientHelloInfo) (*tls.Certificate, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
 	if p.certDir != "" {
 		certPath := filepath.Join(p.certDir, "tls.crt")
 		keyPath := filepath.Join(p.certDir, "tls.key")
 		if fi, err := os.Stat(certPath); err == nil {
-			p.mu.Lock()
-			defer p.mu.Unlock()
 			if p.cert != nil && !fi.ModTime().After(p.modTime) {
 				return p.cert, nil
 			}
+			// Load outside the hot path would be nicer, but keeping the lock is
+			// fine: LoadX509KeyPair is rare (startup / cert rotation).
 			pair, err := tls.LoadX509KeyPair(certPath, keyPath)
 			if err == nil {
 				p.cert = &pair
 				p.modTime = fi.ModTime()
 				return p.cert, nil
 			}
+			// Partial/corrupt Secret: keep last good cert if any.
+			if p.cert != nil {
+				return p.cert, nil
+			}
 		}
 	}
 
-	p.mu.Lock()
-	defer p.mu.Unlock()
 	if p.selfSigned != nil {
 		return p.selfSigned, nil
 	}

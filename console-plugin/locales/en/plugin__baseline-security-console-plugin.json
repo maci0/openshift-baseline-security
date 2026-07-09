@@ -14,6 +14,8 @@
   "Schedule": "Schedule",
   "Compliance Operator": "Compliance Operator",
   "Installing": "Installing",
+  "Installed": "Installed",
+  "Not installed": "Not installed",
   "Pass": "Pass",
   "Fail": "Fail",
   "Manual": "Manual",

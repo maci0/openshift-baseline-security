@@ -84,7 +84,7 @@ export type ClusterBaseline = {
     lastScanTime?: string;
     complianceOperatorVersion?: string;
     profiles?: ProfileStatus[];
-    conditions?: { type: string; status: string; message?: string }[];
+    conditions?: { type: string; status: string; reason?: string; message?: string }[];
     history?: ScoreSnapshot[];
   };
 };

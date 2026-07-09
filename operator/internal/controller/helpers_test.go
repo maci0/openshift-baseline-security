@@ -83,7 +83,7 @@ func TestConditionProgressing(t *testing.T) {
 	if conditionProgressing(&metav1.Condition{Status: metav1.ConditionTrue, Reason: "Installing"}) {
 		t.Fatal("True status is not progressing")
 	}
-	for _, reason := range []string{"Installing", "CSVNotReady", "ImageMissing", "WaitingForPods", "CRDsMissing"} {
+	for _, reason := range []string{"Installing", "CSVNotReady", "ImageMissing", "WaitingForPods", "CRDsMissing", "ConsoleMissing"} {
 		c := &metav1.Condition{Status: metav1.ConditionFalse, Reason: reason}
 		if !conditionProgressing(c) {
 			t.Fatalf("%s should progress", reason)
@@ -103,17 +103,23 @@ func TestPluginDeploymentUnavailable(t *testing.T) {
 	dep := &appsv1.Deployment{}
 	dep.CreationTimestamp = old
 	if !pluginDeploymentUnavailable(dep, 5*time.Minute) {
-		t.Fatal("old creation timestamp should be unavailable")
+		t.Fatal("old creation without Available condition should be unavailable")
 	}
 	dep.CreationTimestamp = now
 	if pluginDeploymentUnavailable(dep, 5*time.Minute) {
 		t.Fatal("fresh creation should still be waiting")
 	}
+	// Old object with a *recent* Available=False must still be Waiting, not Unavailable.
+	dep.CreationTimestamp = old
 	dep.Status.Conditions = []appsv1.DeploymentCondition{{
 		Type:               appsv1.DeploymentAvailable,
 		Status:             corev1.ConditionFalse,
-		LastTransitionTime: old,
+		LastTransitionTime: now,
 	}}
+	if pluginDeploymentUnavailable(dep, 5*time.Minute) {
+		t.Fatal("recent Available=False on old Deployment must not count as Unavailable")
+	}
+	dep.Status.Conditions[0].LastTransitionTime = old
 	if !pluginDeploymentUnavailable(dep, 5*time.Minute) {
 		t.Fatal("Available=False for >timeout should be unavailable")
 	}

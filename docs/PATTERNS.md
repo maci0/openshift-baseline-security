@@ -113,14 +113,16 @@ apply is the only dangerous write and is confirmation-gated in the UI plus
 
 **Pattern**: `bundle/` with `manifests/` (CSV + owned CRDs) and
 `metadata/annotations.yaml`; `bundle.Dockerfile` FROM scratch with matching
-labels; CSV carries `alm-examples`, install modes (AllNamespaces for
-cluster-scoped operators), `minKubeVersion`, feature annotations
-(`features.operators.openshift.io/*`), `relatedImages`. OCP compatibility via
-`com.redhat.openshift.versions`. Catalogs are file-based (FBC) rendered with
-opm; SQLite catalogs are dead. Validate with `operator-sdk bundle validate`
-(run via container, the CLI is deprecated on hosts).
+labels; CSV carries `alm-examples`, install modes, `minKubeVersion`, feature
+annotations (`features.operators.openshift.io/*`), `relatedImages`. OCP
+compatibility via `com.redhat.openshift.versions`. Catalogs are file-based
+(FBC) rendered with opm; SQLite catalogs are dead. Validate with
+`operator-sdk bundle validate` (run via container, the CLI is deprecated on
+hosts).
 
-**Here**: `make bundle` validates in the operator-sdk container; `make
+**Here**: OwnNamespace install into `openshift-baseline-security` (metrics
+Service and RBAC subjects are fixed to that namespace). `make bundle`
+validates in the operator-sdk container; `make
 bundle-build/bundle-push/catalog-build` produce bundle + FBC catalog images.
 
 Hard-won specifics (all hit during live OLM install testing):

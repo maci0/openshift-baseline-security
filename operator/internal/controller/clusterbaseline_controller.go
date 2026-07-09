@@ -207,7 +207,7 @@ func conditionProgressing(c *metav1.Condition) bool {
 		return false
 	}
 	switch c.Reason {
-	case "Installing", "CSVNotReady", "ImageMissing", "WaitingForPods", "CRDsMissing":
+	case "Installing", "CSVNotReady", "ImageMissing", "WaitingForPods", "CRDsMissing", "ConsoleMissing":
 		return true
 	default:
 		return false
@@ -476,6 +476,8 @@ func (r *ClusterBaselineReconciler) aggregateStatus(ctx context.Context, cb *bas
 			// CRDs gone: do not leave a stale score/profile rollup on the CR.
 			cb.Status.Score = nil
 			cb.Status.Profiles = nil
+			cb.Status.LastScanTime = nil
+			cb.Status.History = nil
 			return nil
 		}
 		return err
@@ -619,6 +621,12 @@ func (r *ClusterBaselineReconciler) ensureConsolePlugin(ctx context.Context, cb 
 
 	console := u(consoleGVK)
 	if err := r.Get(ctx, types.NamespacedName{Name: "cluster"}, console); err != nil {
+		if apierrors.IsNotFound(err) {
+			// Soft-fail: still deploy plugin objects; registration retries later.
+			setCond(cb, "ConsolePluginReady", metav1.ConditionFalse, "ConsoleMissing",
+				"consoles.operator.openshift.io/cluster not found")
+			return nil
+		}
 		return err
 	}
 	plugins, _, _ := unstructured.NestedStringSlice(console.Object, "spec", "plugins")
@@ -647,23 +655,21 @@ func (r *ClusterBaselineReconciler) ensureConsolePlugin(ctx context.Context, cb 
 	return nil
 }
 
-// pluginDeploymentUnavailable is true when the Deployment has been Available=False
-// (or merely created) longer than timeout with no ready pods.
+// pluginDeploymentUnavailable is true when the Deployment has been continuously
+// unavailable longer than timeout. Prefer the Available condition's
+// LastTransitionTime so a brief ReadyReplicas dip on an old Deployment is not
+// treated as a permanent failure.
 func pluginDeploymentUnavailable(dep *appsv1.Deployment, timeout time.Duration) bool {
 	if timeout <= 0 {
 		return false
 	}
 	for _, c := range dep.Status.Conditions {
 		if c.Type == appsv1.DeploymentAvailable && c.Status == corev1.ConditionFalse {
-			if !c.LastTransitionTime.IsZero() && time.Since(c.LastTransitionTime.Time) > timeout {
-				return true
-			}
+			return !c.LastTransitionTime.IsZero() && time.Since(c.LastTransitionTime.Time) > timeout
 		}
 	}
-	if !dep.CreationTimestamp.IsZero() && time.Since(dep.CreationTimestamp.Time) > timeout {
-		return true
-	}
-	return false
+	// No Available condition yet (brand-new object): use creation time.
+	return !dep.CreationTimestamp.IsZero() && time.Since(dep.CreationTimestamp.Time) > timeout
 }
 
 // applyPluginContainer sets the plugin container, volume mounts, and volumes on the pod spec.
