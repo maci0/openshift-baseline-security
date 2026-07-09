@@ -122,8 +122,7 @@ func TestEnsureComplianceOperatorOptOut(t *testing.T) {
 		Scheme: scheme,
 	}
 	cb := newCB("cis")
-	no := false
-	cb.Spec.InstallComplianceOperator = &no
+	cb.Spec.InstallComplianceOperator = baselinev1alpha1.InstallManual
 	if err := r.ensureComplianceOperator(context.Background(), cb); err != nil {
 		t.Fatal(err)
 	}
@@ -148,8 +147,7 @@ func TestEnsureScanConfigCreatesAndPrunes(t *testing.T) {
 		Scheme: scheme,
 	}
 	cb := newCB("cis")
-	yes := true
-	cb.Spec.Remediation.AutoApply = &yes
+	cb.Spec.Remediation.Apply = baselinev1alpha1.RemediationApplyAutomatic
 	if err := r.ensureScanConfig(context.Background(), cb); err != nil {
 		t.Fatal(err)
 	}
@@ -287,8 +285,7 @@ func TestEnsureConsolePluginDisabled(t *testing.T) {
 		Scheme: scheme,
 	}
 	cb := newCB("cis")
-	no := false
-	cb.Spec.Console.Enabled = &no
+	cb.Spec.Console.ManagementState = baselinev1alpha1.Removed
 	if err := r.ensureConsolePlugin(context.Background(), cb); err != nil {
 		t.Fatal(err)
 	}

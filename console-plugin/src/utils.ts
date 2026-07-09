@@ -19,12 +19,14 @@ export const toggledProfiles = (
   return next.length ? next : null;
 };
 
-// JSON patch for spec.remediation.autoApply: 'add' must create the parent
-// object when spec.remediation is absent/null, 'replace' must not clobber siblings.
-export const autoApplyPatch = (hasRemediation: boolean, checked: boolean) =>
-  hasRemediation
-    ? [{ op: 'replace' as const, path: '/spec/remediation/autoApply', value: checked }]
-    : [{ op: 'add' as const, path: '/spec/remediation', value: { autoApply: checked } }];
+// JSON patch for spec.remediation.apply (Automatic|Manual): 'add' must create the
+// parent when spec.remediation is absent/null, 'replace' must not clobber siblings.
+export const autoApplyPatch = (hasRemediation: boolean, checked: boolean) => {
+  const apply = checked ? 'Automatic' : 'Manual';
+  return hasRemediation
+    ? [{ op: 'replace' as const, path: '/spec/remediation/apply', value: apply }]
+    : [{ op: 'add' as const, path: '/spec/remediation', value: { apply } }];
+};
 
 // JSON patch to trigger a Compliance Operator rescan. value must change each
 // click so a re-rescan is observed when the annotation already exists.

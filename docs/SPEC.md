@@ -176,12 +176,12 @@ spec:
   profiles: [cis]              # enum keys: cis, pci-dss, nist-moderate,
                                # nist-high, stig, nerc-cip, e8, bsi
   schedule: "0 1 * * *"        # cron, passed to ScanSetting
-  installComplianceOperator: true
+  installComplianceOperator: Automatic # or Manual
   complianceCatalogSource: redhat-operators   # okd/disconnected override
   console:
-    enabled: true
+    managementState: Managed         # or Removed
   remediation:
-    autoApply: false           # ScanSetting autoApplyRemediations/autoUpdateRemediations
+    apply: Manual                    # Automatic maps to ScanSetting autoApplyRemediations
 status:
   conditions: [...]
   complianceOperatorVersion: 1.8.2

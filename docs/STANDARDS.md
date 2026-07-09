@@ -52,10 +52,11 @@ generated files.
   plural lowercase resources, CamelCase kinds.
 
 **Here**: `ClusterBaseline` follows the singleton-named-`cluster`,
-conditions, and printer-column conventions. **Known gap**: three spec
-booleans (`installComplianceOperator`, `console.enabled`,
-`remediation.autoApply`) violate the no-booleans rule; acceptable at
-v1alpha1, must become string enums before v1beta1 (tracked in TODO.md).
+conditions, and printer-column conventions. The former spec booleans
+were migrated to string enums per the no-booleans rule:
+`installComplianceOperator: Automatic|Manual`,
+`console.managementState: Managed|Removed`,
+`remediation.apply: Automatic|Manual`.
 
 ## Operator conventions
 

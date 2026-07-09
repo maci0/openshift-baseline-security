@@ -58,19 +58,25 @@ spec:
               console:
                 description: console configures the console plugin deployment.
                 properties:
-                  enabled:
-                    default: true
+                  managementState:
+                    default: Managed
                     description: |-
-                      enabled deploys the baseline-security console plugin and registers it
-                      with the console operator.
-                    type: boolean
+                      managementState set to Managed deploys the baseline-security console
+                      plugin and registers it with the console operator; Removed tears it down.
+                    enum:
+                    - Managed
+                    - Removed
+                    type: string
                 type: object
               installComplianceOperator:
-                default: true
+                default: Automatic
                 description: |-
                   installComplianceOperator controls whether the operator creates an OLM
                   Subscription for the Compliance Operator when it is not installed.
-                type: boolean
+                enum:
+                - Automatic
+                - Manual
+                type: string
               profiles:
                 default:
                 - cis
@@ -96,13 +102,16 @@ spec:
                 description: remediation configures how ComplianceRemediations are
                   handled.
                 properties:
-                  autoApply:
-                    default: false
+                  apply:
+                    default: Manual
                     description: |-
-                      autoApply applies remediations automatically after each scan
+                      apply set to Automatic applies remediations after each scan
                       (ScanSetting autoApplyRemediations/autoUpdateRemediations). Node
                       remediations render into MachineConfigs and reboot nodes.
-                    type: boolean
+                    enum:
+                    - Automatic
+                    - Manual
+                    type: string
                 type: object
               schedule:
                 default: 0 1 * * *

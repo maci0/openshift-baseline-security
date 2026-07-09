@@ -127,7 +127,7 @@ const RemediationsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline })
           <Switch
             id="auto-apply"
             label={t('Auto-apply remediations after each scan')}
-            isChecked={baseline?.spec.remediation?.autoApply ?? false}
+            isChecked={baseline?.spec.remediation?.apply === 'Automatic'}
             isDisabled={!baseline || !canEditBaseline || busy}
             onChange={(_e, checked) => toggleAutoApply(checked)}
           />

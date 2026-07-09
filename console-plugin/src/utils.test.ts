@@ -88,22 +88,28 @@ describe('toggledProfiles', () => {
 describe('autoApplyPatch', () => {
   it('replaces the leaf when spec.remediation exists', () => {
     expect(autoApplyPatch(true, true)).toEqual([
-      { op: 'replace', path: '/spec/remediation/autoApply', value: true },
+      { op: 'replace', path: '/spec/remediation/apply', value: 'Automatic' },
+    ]);
+    expect(autoApplyPatch(true, false)).toEqual([
+      { op: 'replace', path: '/spec/remediation/apply', value: 'Manual' },
     ]);
   });
   it('adds the parent object when spec.remediation is absent', () => {
     expect(autoApplyPatch(false, true)).toEqual([
-      { op: 'add', path: '/spec/remediation', value: { autoApply: true } },
+      { op: 'add', path: '/spec/remediation', value: { apply: 'Automatic' } },
+    ]);
+    expect(autoApplyPatch(false, false)).toEqual([
+      { op: 'add', path: '/spec/remediation', value: { apply: 'Manual' } },
     ]);
   });
-  it('fuzz: always a single op with boolean value', () => {
+  it('fuzz: always a single op carrying a valid enum value', () => {
     for (const has of [true, false]) {
       for (const checked of [true, false]) {
         const patch = autoApplyPatch(has, checked);
         expect(patch).toHaveLength(1);
-        expect(typeof patch[0].value === 'boolean' || typeof patch[0].value === 'object').toBe(
-          true,
-        );
+        const v = patch[0].value;
+        const apply = typeof v === 'string' ? v : (v as { apply: string }).apply;
+        expect(['Automatic', 'Manual']).toContain(apply);
       }
     }
   });

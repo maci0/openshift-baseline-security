@@ -75,9 +75,9 @@ export type ClusterBaseline = {
   spec: {
     profiles: string[];
     schedule?: string;
-    installComplianceOperator?: boolean;
-    console?: { enabled?: boolean };
-    remediation?: { autoApply?: boolean };
+    installComplianceOperator?: 'Automatic' | 'Manual';
+    console?: { managementState?: 'Managed' | 'Removed' };
+    remediation?: { apply?: 'Automatic' | 'Manual' };
   };
   status?: {
     score?: number;

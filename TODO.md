@@ -36,11 +36,13 @@
       Found + fixed: CSV missing namespaced leader-election RBAC (leases),
       opm catalog images need the cache precomputed at build time.
 
+## Done (continued)
+- [x] API booleans replaced with string enums per api-conventions.md
+      (installComplianceOperator: Automatic|Manual,
+      console.managementState: Managed|Removed, remediation.apply:
+      Automatic|Manual)
+
 ## Next
-- [ ] API: replace spec booleans (installComplianceOperator, console.enabled,
-      remediation.autoApply) with string enums per
-      openshift/enhancements dev-guide/api-conventions.md (before v1beta1;
-      see docs/STANDARDS.md)
 - [ ] Push versioned images + bundle/catalog to quay.io (needs quay login /
       robot token), swap CatalogSource image
 - [ ] community-operators submission once bundle is stable

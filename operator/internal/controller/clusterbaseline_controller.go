@@ -197,7 +197,7 @@ func uList(gvk schema.GroupVersionKind) *unstructured.UnstructuredList {
 }
 
 func (r *ClusterBaselineReconciler) ensureComplianceOperator(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline) error {
-	if cb.Spec.InstallComplianceOperator != nil && !*cb.Spec.InstallComplianceOperator {
+	if cb.Spec.InstallComplianceOperator == baselinev1alpha1.InstallManual {
 		return nil
 	}
 
@@ -269,7 +269,7 @@ func (r *ClusterBaselineReconciler) ensureScanConfig(ctx context.Context, cb *ba
 	ss.SetName(scanSettingName)
 	ss.SetNamespace(complianceNamespace)
 	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, ss, func() error {
-		autoApply := cb.Spec.Remediation.AutoApply != nil && *cb.Spec.Remediation.AutoApply
+		autoApply := cb.Spec.Remediation.Apply == baselinev1alpha1.RemediationApplyAutomatic
 		ss.Object["schedule"] = cb.Spec.Schedule
 		ss.Object["roles"] = []any{"worker", "master"}
 		ss.Object["rawResultStorage"] = map[string]any{"size": "1Gi", "rotation": int64(3)}
@@ -471,7 +471,7 @@ func (r *ClusterBaselineReconciler) recordHistory(ctx context.Context, cb *basel
 }
 
 func (r *ClusterBaselineReconciler) ensureConsolePlugin(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline) error {
-	if cb.Spec.Console.Enabled != nil && !*cb.Spec.Console.Enabled {
+	if cb.Spec.Console.ManagementState == baselinev1alpha1.Removed {
 		return r.removeConsolePlugin(ctx, cb)
 	}
 	image := os.Getenv("RELATED_IMAGE_CONSOLE_PLUGIN")

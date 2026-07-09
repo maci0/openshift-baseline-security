@@ -9,6 +9,39 @@ import (
 // +kubebuilder:validation:Enum=cis;pci-dss;nist-moderate;nist-high;stig;nerc-cip;e8;bsi
 type ProfileKey string
 
+// InstallPolicy controls whether the operator installs a dependency itself.
+// +kubebuilder:validation:Enum=Automatic;Manual
+type InstallPolicy string
+
+const (
+	// InstallAutomatic creates the dependency's OLM Subscription when absent.
+	InstallAutomatic InstallPolicy = "Automatic"
+	// InstallManual leaves dependency installation to the cluster admin.
+	InstallManual InstallPolicy = "Manual"
+)
+
+// ManagementState controls whether a managed component is deployed.
+// +kubebuilder:validation:Enum=Managed;Removed
+type ManagementState string
+
+const (
+	// Managed deploys and reconciles the component.
+	Managed ManagementState = "Managed"
+	// Removed removes the component.
+	Removed ManagementState = "Removed"
+)
+
+// RemediationApplyPolicy controls how ComplianceRemediations are applied.
+// +kubebuilder:validation:Enum=Automatic;Manual
+type RemediationApplyPolicy string
+
+const (
+	// RemediationApplyAutomatic applies remediations after each scan.
+	RemediationApplyAutomatic RemediationApplyPolicy = "Automatic"
+	// RemediationApplyManual requires explicit per-remediation apply.
+	RemediationApplyManual RemediationApplyPolicy = "Manual"
+)
+
 // ClusterBaselineSpec defines the desired baseline compliance posture.
 type ClusterBaselineSpec struct {
 	// profiles selects which benchmark profile sets to scan with.
@@ -23,9 +56,9 @@ type ClusterBaselineSpec struct {
 
 	// installComplianceOperator controls whether the operator creates an OLM
 	// Subscription for the Compliance Operator when it is not installed.
-	// +kubebuilder:default=true
+	// +kubebuilder:default=Automatic
 	// +optional
-	InstallComplianceOperator *bool `json:"installComplianceOperator,omitempty"`
+	InstallComplianceOperator InstallPolicy `json:"installComplianceOperator,omitempty"`
 
 	// complianceCatalogSource is the OLM CatalogSource providing the
 	// compliance-operator package (override for OKD or disconnected clusters).
@@ -44,21 +77,21 @@ type ClusterBaselineSpec struct {
 
 // RemediationSpec configures remediation handling.
 type RemediationSpec struct {
-	// autoApply applies remediations automatically after each scan
+	// apply set to Automatic applies remediations after each scan
 	// (ScanSetting autoApplyRemediations/autoUpdateRemediations). Node
 	// remediations render into MachineConfigs and reboot nodes.
-	// +kubebuilder:default=false
+	// +kubebuilder:default=Manual
 	// +optional
-	AutoApply *bool `json:"autoApply,omitempty"`
+	Apply RemediationApplyPolicy `json:"apply,omitempty"`
 }
 
 // ConsoleSpec configures the console plugin.
 type ConsoleSpec struct {
-	// enabled deploys the baseline-security console plugin and registers it
-	// with the console operator.
-	// +kubebuilder:default=true
+	// managementState set to Managed deploys the baseline-security console
+	// plugin and registers it with the console operator; Removed tears it down.
+	// +kubebuilder:default=Managed
 	// +optional
-	Enabled *bool `json:"enabled,omitempty"`
+	ManagementState ManagementState `json:"managementState,omitempty"`
 }
 
 // ProfileStatus summarizes check results for one selected profile key.
