@@ -8,8 +8,27 @@ RUN yarn install --immutable
 COPY . .
 RUN yarn build
 
+# Keep the image's default nginx.conf (listen 8080, root /opt/app-root/src,
+# include nginx.d/*.conf). Only add a TLS server block for the ConsolePlugin
+# backend (service-ca certs mounted at /var/serving-cert).
 FROM registry.access.redhat.com/ubi9/nginx-120:latest
-COPY --from=build /usr/src/app/dist /usr/share/nginx/html
-COPY nginx.conf /etc/nginx/nginx.conf
+COPY --from=build /usr/src/app/dist /opt/app-root/src
+USER root
+RUN printf '%s\n' \
+  'server {' \
+  '  listen 9443 ssl;' \
+  '  listen [::]:9443 ssl;' \
+  '  server_name _;' \
+  '  root /opt/app-root/src;' \
+  '  ssl_certificate /var/serving-cert/tls.crt;' \
+  '  ssl_certificate_key /var/serving-cert/tls.key;' \
+  '  ssl_session_cache shared:SSL:1m;' \
+  '  ssl_session_timeout 10m;' \
+  '  ssl_ciphers PROFILE=SYSTEM;' \
+  '  ssl_prefer_server_ciphers on;' \
+  '  include /opt/app-root/etc/nginx.default.d/*.conf;' \
+  '}' \
+  > /opt/app-root/etc/nginx.d/ssl.conf \
+  && chown 1001:0 /opt/app-root/etc/nginx.d/ssl.conf
 USER 1001
-ENTRYPOINT ["nginx", "-c", "/etc/nginx/nginx.conf", "-g", "daemon off;"]
+# Image entrypoint: nginx -g "daemon off;"

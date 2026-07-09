@@ -91,9 +91,13 @@ func TestScore(t *testing.T) {
 
 func TestWithoutPlugin(t *testing.T) {
 	in := []string{"a", pluginName, "b", pluginName}
-	got := withoutPlugin(append([]string{}, in...), pluginName)
+	got := withoutPlugin(in, pluginName)
 	if len(got) != 2 || got[0] != "a" || got[1] != "b" {
 		t.Fatalf("%v", got)
+	}
+	// Input must not be mutated.
+	if len(in) != 4 {
+		t.Fatalf("input mutated: %v", in)
 	}
 	if len(withoutPlugin([]string{"x"}, pluginName)) != 1 {
 		t.Fatal("untouched when absent")
@@ -238,14 +242,16 @@ func FuzzWithoutPlugin(f *testing.F) {
 		if csv != "" {
 			in = strings.Split(csv, ",")
 		}
-		// Copy so withoutPlugin can reuse backing array safely in the test.
-		got := withoutPlugin(append([]string{}, in...), drop)
+		origLen := len(in)
+		got := withoutPlugin(in, drop)
+		if len(in) != origLen {
+			t.Fatal("input mutated")
+		}
 		for _, p := range got {
 			if p == drop {
 				t.Fatalf("drop %q still present in %v", drop, got)
 			}
 		}
-		// Every kept element was in the input.
 		for _, p := range got {
 			found := false
 			for _, o := range in {

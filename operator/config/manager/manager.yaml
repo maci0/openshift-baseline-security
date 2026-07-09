@@ -39,9 +39,15 @@ spec:
           image: quay.io/openshift-baseline-security/baseline-security-operator:latest
           args:
             - --leader-elect
+            - --metrics-bind-address=:8443
+            - --metrics-secure=true
           env:
             - name: RELATED_IMAGE_CONSOLE_PLUGIN
               value: quay.io/openshift-baseline-security/baseline-security-console-plugin:latest
+          ports:
+            - name: https-metrics
+              containerPort: 8443
+              protocol: TCP
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:

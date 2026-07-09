@@ -75,7 +75,8 @@ Status conditions include the OpenShift rollup set
 `Available` / `Progressing` / `Degraded` rollups derived each reconcile,
 plus the detail conditions above. Manager and plugin Deployments run 2
 replicas with preferred pod anti-affinity and leader election on the
-manager. Resource requests only (no limits). Metrics: see deviations.
+manager. Resource requests only (no limits). Metrics over HTTPS with
+authn/authz (`filters.WithAuthenticationAndAuthorization` on `:8443`).
 
 ## Console / frontend
 
@@ -122,7 +123,6 @@ everything else aims to match OpenShift/Kubernetes practice.
 |-----------|--------|--------------|
 | `ProfileKey` values are lowercase (`cis`, `pci-dss`) rather than PascalCase | They mirror ComplianceAsCode / Compliance Operator profile identifiers users already see | Never rename without a storage migration; productization may add a display name map |
 | CRD schema defaults (`+kubebuilder:default`) instead of pure controller defaulting | Schema defaults surface in `oc explain` and the OLM create form for this configuration API | v1beta1 if defaults must vary by platform version |
-| Metrics bind to loopback without authn/HTTPS instead of authenticated secure metrics | Avoids the `k8s.io/apiserver` dependency tree for a small addon; documented in `cmd/main.go` | Cluster scrape is required: add authenticating sidecar or FilterProvider |
 | No `system-*` priority class | Reserved for payload components; an optional addon must not outrank them under node pressure | Never for an addon |
 | kubebuilder / controller-runtime instead of library-go | Smaller dependency surface for a single-CR layered OLM operator; OpenShift addons commonly use either stack | Productization if integration with library-go helpers becomes required |
 | Not a ClusterOperator (no CVO status object) | Layered OLM product, not in-cluster payload | Productization if promoted into the platform payload |

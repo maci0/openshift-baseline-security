@@ -14,6 +14,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	baselinev1alpha1 "github.com/openshift-baseline-security/baseline-security-operator/api/v1alpha1"
@@ -29,10 +30,12 @@ func init() {
 
 func main() {
 	var metricsAddr, probeAddr string
-	var enableLeaderElection bool
-	// Metrics default to loopback only (no auth filter; avoids pulling k8s.io/apiserver).
-	// Disable with --metrics-bind-address=0. Expose via a sidecar if cluster scrape is needed.
-	flag.StringVar(&metricsAddr, "metrics-bind-address", "127.0.0.1:8080", "Metrics endpoint address (loopback by default).")
+	var enableLeaderElection, secureMetrics bool
+	// HTTPS + authn/authz (TokenReview / SubjectAccessReview), matching
+	// kubebuilder / Operator SDK defaults and OpenShift CONVENTIONS.md.
+	// Disable the endpoint with --metrics-bind-address=0.
+	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8443", "Metrics endpoint address. Use 0 to disable.")
+	flag.BoolVar(&secureMetrics, "metrics-secure", true, "Serve metrics over HTTPS with authentication and authorization.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "Health probe endpoint address.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", true, "Enable leader election.")
 	opts := zap.Options{}
@@ -42,9 +45,19 @@ func main() {
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 	setupLog := ctrl.Log.WithName("setup")
 
+	metricsServerOptions := metricsserver.Options{
+		BindAddress:   metricsAddr,
+		SecureServing: secureMetrics,
+	}
+	if secureMetrics {
+		// Requires ClusterRole rules for tokenreviews and subjectaccessreviews.
+		// Scrapers need nonResourceURLs: ["/metrics"] verbs: ["get"].
+		metricsServerOptions.FilterProvider = filters.WithAuthenticationAndAuthorization
+	}
+
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme:                 scheme,
-		Metrics:                metricsserver.Options{BindAddress: metricsAddr},
+		Metrics:                metricsServerOptions,
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,
 		LeaderElectionID:       "baseline-security-operator-lock",

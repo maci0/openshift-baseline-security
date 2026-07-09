@@ -19,10 +19,9 @@ export const toggledProfiles = (
   return next.length ? next : null;
 };
 
-// JSON patch for spec.remediation.apply (Automatic|Manual): 'add' must create the
-// parent when spec.remediation is absent/null, 'replace' must not clobber siblings.
-export const autoApplyPatch = (hasRemediation: boolean, checked: boolean) => {
-  const apply = checked ? 'Automatic' : 'Manual';
+// JSON patch for spec.remediation.apply (Automatic|Manual).
+export const remediationApplyPatch = (hasRemediation: boolean, automatic: boolean) => {
+  const apply = automatic ? 'Automatic' : 'Manual';
   return hasRemediation
     ? [{ op: 'replace' as const, path: '/spec/remediation/apply', value: apply }]
     : [{ op: 'add' as const, path: '/spec/remediation', value: { apply } }];

@@ -1,0 +1,25 @@
+# Authn/authz for the manager metrics endpoint (filters.WithAuthenticationAndAuthorization).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: baseline-security-metrics-auth
+rules:
+  - apiGroups: [authentication.k8s.io]
+    resources: [tokenreviews]
+    verbs: [create]
+  - apiGroups: [authorization.k8s.io]
+    resources: [subjectaccessreviews]
+    verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: baseline-security-metrics-auth
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: baseline-security-metrics-auth
+subjects:
+  - kind: ServiceAccount
+    name: baseline-security-operator
+    namespace: openshift-baseline-security

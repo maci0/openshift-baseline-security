@@ -157,15 +157,24 @@ func score(pass, fail int32) *int32 {
 	return &s
 }
 
-// withoutPlugin drops name from plugins (may reuse the input slice backing).
+// withoutPlugin returns plugins without name (copy; does not mutate input).
 func withoutPlugin(plugins []string, name string) []string {
-	kept := plugins[:0]
-	for _, p := range plugins {
-		if p != name {
-			kept = append(kept, p)
-		}
+	return slices.DeleteFunc(slices.Clone(plugins), func(p string) bool { return p == name })
+}
+
+// preferredHostnameAntiAffinity spreads pods across nodes (CONVENTIONS.md HA).
+func preferredHostnameAntiAffinity(labels map[string]string) *corev1.Affinity {
+	return &corev1.Affinity{
+		PodAntiAffinity: &corev1.PodAntiAffinity{
+			PreferredDuringSchedulingIgnoredDuringExecution: []corev1.WeightedPodAffinityTerm{{
+				Weight: 100,
+				PodAffinityTerm: corev1.PodAffinityTerm{
+					LabelSelector: &metav1.LabelSelector{MatchLabels: labels},
+					TopologyKey:   "kubernetes.io/hostname",
+				},
+			}},
+		},
 	}
-	return kept
 }
 
 // appendHistoryRing appends a snapshot and keeps at most max entries (oldest first).
@@ -187,8 +196,7 @@ func setCond(cb *baselinev1alpha1.ClusterBaseline, typ string, status metav1.Con
 	})
 }
 
-// setRollupConditions sets Available and Progressing from the detailed Ready
-// conditions, matching the OpenShift ClusterOperator condition contract in spirit.
+// setRollupConditions sets Available and Progressing from detail conditions.
 func setRollupConditions(cb *baselinev1alpha1.ClusterBaseline) {
 	co := meta.FindStatusCondition(cb.Status.Conditions, "ComplianceOperatorReady")
 	scan := meta.FindStatusCondition(cb.Status.Conditions, "ScanConfigured")
@@ -196,16 +204,14 @@ func setRollupConditions(cb *baselinev1alpha1.ClusterBaseline) {
 
 	coReady := co != nil && co.Status == metav1.ConditionTrue
 	scanOK := scan != nil && scan.Status == metav1.ConditionTrue
-	coInstalling := co != nil && co.Status == metav1.ConditionFalse && co.Reason == "Installing"
-	pluginPending := plugin != nil && plugin.Status == metav1.ConditionFalse &&
-		(plugin.Reason == "ImageMissing" || plugin.Reason == "Installing")
+	progressing := (co != nil && co.Status == metav1.ConditionFalse && co.Reason == "Installing") ||
+		(plugin != nil && plugin.Status == metav1.ConditionFalse && plugin.Reason == "ImageMissing")
 
-	if coInstalling || pluginPending {
+	if progressing {
 		setCond(cb, "Progressing", metav1.ConditionTrue, "Reconciling", "installing or configuring dependencies")
 	} else {
 		setCond(cb, "Progressing", metav1.ConditionFalse, "AsExpected", "")
 	}
-
 	if coReady && scanOK {
 		setCond(cb, "Available", metav1.ConditionTrue, "AsExpected", "compliance operator ready and scans configured")
 	} else {
@@ -325,8 +331,9 @@ func (r *ClusterBaselineReconciler) ensureScanConfig(ctx context.Context, cb *ba
 		binding.SetName(bindingName(key))
 		binding.SetNamespace(complianceNamespace)
 		_, err := controllerutil.CreateOrUpdate(ctx, r.Client, binding, func() error {
-			profiles := make([]any, 0, len(key.ProfileNames()))
-			for _, p := range key.ProfileNames() {
+			names := key.ProfileNames()
+			profiles := make([]any, 0, len(names))
+			for _, p := range names {
 				profiles = append(profiles, map[string]any{
 					"apiGroup": "compliance.openshift.io/v1alpha1", "kind": "Profile", "name": p,
 				})
@@ -544,18 +551,7 @@ func (r *ClusterBaselineReconciler) ensureConsolePlugin(ctx context.Context, cb 
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{Labels: labels},
 				Spec: corev1.PodSpec{
-					// Spread the 2 replicas across nodes when possible (CONVENTIONS.md HA).
-					Affinity: &corev1.Affinity{
-						PodAntiAffinity: &corev1.PodAntiAffinity{
-							PreferredDuringSchedulingIgnoredDuringExecution: []corev1.WeightedPodAffinityTerm{{
-								Weight: 100,
-								PodAffinityTerm: corev1.PodAffinityTerm{
-									LabelSelector: &metav1.LabelSelector{MatchLabels: labels},
-									TopologyKey:   "kubernetes.io/hostname",
-								},
-							}},
-						},
-					},
+					Affinity: preferredHostnameAntiAffinity(labels),
 					Containers: []corev1.Container{{
 						Name:  pluginName,
 						Image: image,
@@ -565,7 +561,6 @@ func (r *ClusterBaselineReconciler) ensureConsolePlugin(ctx context.Context, cb 
 							Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
 							RunAsNonRoot:             ptr.To(true),
 						},
-						// Requests only; limits are discouraged (CONVENTIONS.md).
 						Resources: corev1.ResourceRequirements{
 							Requests: corev1.ResourceList{
 								corev1.ResourceCPU:    resource.MustParse("10m"),
@@ -585,7 +580,7 @@ func (r *ClusterBaselineReconciler) ensureConsolePlugin(ctx context.Context, cb 
 					Volumes: []corev1.Volume{{
 						Name: "serving-cert",
 						VolumeSource: corev1.VolumeSource{
-							// Optional until service-ca writes the Secret (avoids CreateContainerConfigError).
+							// Optional until service-ca mints the Secret.
 							Secret: &corev1.SecretVolumeSource{
 								SecretName: pluginName + "-cert",
 								Optional:   ptr.To(true),

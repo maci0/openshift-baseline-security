@@ -28,7 +28,7 @@ import {
   ComplianceRemediationModel,
   isOwnedByBaseline,
 } from '../models';
-import { autoApplyPatch } from '../utils';
+import { remediationApplyPatch } from '../utils';
 
 const stateColor: Record<string, React.ComponentProps<typeof Label>['color']> = {
   Applied: 'green',
@@ -98,7 +98,7 @@ const RemediationsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline })
         k8sPatch({
           model: ClusterBaselineModel,
           resource: baseline,
-          data: autoApplyPatch(baseline.spec.remediation != null, checked),
+          data: remediationApplyPatch(baseline.spec.remediation != null, checked),
         }),
       t('Failed to update auto-apply setting.'),
     );

@@ -5,3 +5,5 @@ resources:
   - service_account.yaml
   - user_roles.yaml
   - leader_election_role.yaml
+  - metrics_auth_role.yaml
+  - metrics_reader_role.yaml

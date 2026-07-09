@@ -1,0 +1,8 @@
+# Grant scrapers (e.g. Prometheus) access to the secured /metrics endpoint.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: baseline-security-metrics-reader
+rules:
+  - nonResourceURLs: ["/metrics"]
+    verbs: [get]

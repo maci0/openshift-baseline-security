@@ -119,6 +119,12 @@ spec:
             - apiGroups: [operators.coreos.com]
               resources: [operatorgroups, subscriptions]
               verbs: [create, get, list, watch]
+            - apiGroups: [authentication.k8s.io]
+              resources: [tokenreviews]
+              verbs: [create]
+            - apiGroups: [authorization.k8s.io]
+              resources: [subjectaccessreviews]
+              verbs: [create]
       deployments:
         - name: baseline-security-operator
           spec:
@@ -148,10 +154,17 @@ spec:
                 containers:
                   - name: manager
                     image: quay.io/openshift-baseline-security/baseline-security-operator:0.1.0
-                    args: [--leader-elect]
+                    args:
+                      - --leader-elect
+                      - --metrics-bind-address=:8443
+                      - --metrics-secure=true
                     env:
                       - name: RELATED_IMAGE_CONSOLE_PLUGIN
                         value: quay.io/openshift-baseline-security/baseline-security-console-plugin:0.1.0
+                    ports:
+                      - name: https-metrics
+                        containerPort: 8443
+                        protocol: TCP
                     securityContext:
                       allowPrivilegeEscalation: false
                       capabilities:
