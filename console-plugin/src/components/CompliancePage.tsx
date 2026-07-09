@@ -93,31 +93,45 @@ const CompliancePage: React.FC = () => {
     }
   };
 
-  // Stable page list so HorizontalNav does not remount tabs every render.
+  // Keep page component types stable across baseline watch updates so tab
+  // local state (filters, modals) is not wiped when the CR refreshes.
+  const baselineRef = React.useRef(baseline);
+  baselineRef.current = baseline;
+  const loadedRef = React.useRef(loaded);
+  loadedRef.current = loaded;
+
   const pages = React.useMemo(
     () => [
       {
         href: '',
         name: t('Overview'),
-        component: () => <Overview baseline={baseline} loaded={loaded} />,
+        component: function OverviewRoute() {
+          return <Overview baseline={baselineRef.current} loaded={loadedRef.current} />;
+        },
       },
       {
         href: 'results',
         name: t('Results'),
-        component: () => <ResultsTab baseline={baseline} />,
+        component: function ResultsRoute() {
+          return <ResultsTab baseline={baselineRef.current} />;
+        },
       },
       {
         href: 'remediations',
         name: t('Remediations'),
-        component: () => <RemediationsTab baseline={baseline} />,
+        component: function RemediationsRoute() {
+          return <RemediationsTab baseline={baselineRef.current} />;
+        },
       },
       {
         href: 'profiles',
         name: t('Profiles'),
-        component: () => <ProfilesTab baseline={baseline} />,
+        component: function ProfilesRoute() {
+          return <ProfilesTab baseline={baselineRef.current} />;
+        },
       },
     ],
-    [t, baseline, loaded],
+    [t],
   );
 
   return (

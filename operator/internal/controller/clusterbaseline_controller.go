@@ -182,10 +182,11 @@ func preferredHostnameAntiAffinity(labels map[string]string) *corev1.Affinity {
 }
 
 // appendHistoryRing appends a snapshot and keeps at most max entries (oldest first).
+// The returned slice does not alias the input backing array after truncation.
 func appendHistoryRing(hist []baselinev1alpha1.ScoreSnapshot, t metav1.Time, s int32, max int) []baselinev1alpha1.ScoreSnapshot {
 	hist = append(hist, baselinev1alpha1.ScoreSnapshot{Time: t, Score: s})
 	if max > 0 && len(hist) > max {
-		hist = hist[len(hist)-max:]
+		hist = append([]baselinev1alpha1.ScoreSnapshot(nil), hist[len(hist)-max:]...)
 	}
 	return hist
 }
@@ -410,6 +411,11 @@ func (r *ClusterBaselineReconciler) ensureScanConfig(ctx context.Context, cb *ba
 func (r *ClusterBaselineReconciler) checkScanStorage(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline) error {
 	pvcs := &corev1.PersistentVolumeClaimList{}
 	if err := r.List(ctx, pvcs, client.InNamespace(complianceNamespace)); err != nil {
+		// Namespace may not exist yet while CO is installing.
+		if apierrors.IsNotFound(err) {
+			setCond(cb, "Degraded", metav1.ConditionFalse, "AsExpected", "")
+			return nil
+		}
 		return err
 	}
 	profiles := map[string]bool{}
@@ -677,9 +683,14 @@ func pluginDeploymentUnavailable(dep *appsv1.Deployment, timeout time.Duration) 
 		return false
 	}
 	for _, c := range dep.Status.Conditions {
-		if c.Type == appsv1.DeploymentAvailable && c.Status == corev1.ConditionFalse {
+		if c.Type != appsv1.DeploymentAvailable {
+			continue
+		}
+		if c.Status == corev1.ConditionFalse {
 			return !c.LastTransitionTime.IsZero() && time.Since(c.LastTransitionTime.Time) > timeout
 		}
+		// Available True/Unknown with ReadyReplicas==0 is transient; not a failure.
+		return false
 	}
 	// No Available condition yet (brand-new object): use creation time.
 	return !dep.CreationTimestamp.IsZero() && time.Since(dep.CreationTimestamp.Time) > timeout
@@ -690,7 +701,7 @@ func applyPluginContainer(pod *corev1.PodSpec, image string) {
 	container := corev1.Container{
 		Name:  pluginName,
 		Image: image,
-		Ports: []corev1.ContainerPort{{ContainerPort: 9443}},
+		Ports: []corev1.ContainerPort{{Name: "https", ContainerPort: 9443, Protocol: corev1.ProtocolTCP}},
 		SecurityContext: &corev1.SecurityContext{
 			AllowPrivilegeEscalation: ptr.To(false),
 			Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},

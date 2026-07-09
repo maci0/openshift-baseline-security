@@ -123,6 +123,12 @@ func TestPluginDeploymentUnavailable(t *testing.T) {
 	if !pluginDeploymentUnavailable(dep, 5*time.Minute) {
 		t.Fatal("Available=False for >timeout should be unavailable")
 	}
+	// Available=True must never flip to Unavailable even if ReadyReplicas is 0.
+	dep.Status.Conditions[0].Status = corev1.ConditionTrue
+	dep.Status.Conditions[0].LastTransitionTime = old
+	if pluginDeploymentUnavailable(dep, 5*time.Minute) {
+		t.Fatal("Available=True must not count as Unavailable")
+	}
 }
 
 func TestCreateIfMissing(t *testing.T) {
