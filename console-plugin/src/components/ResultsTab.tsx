@@ -34,6 +34,7 @@ import {
   ComplianceCheckResultGVK,
   isOwnedByBaseline,
 } from '../models';
+import { checkTitle } from '../utils';
 
 const statusLabel: Record<
   CheckStatus,
@@ -46,10 +47,6 @@ const statusLabel: Record<
   INFO: { color: 'blue', icon: <InfoCircleIcon /> },
   'NOT-APPLICABLE': { color: 'grey', icon: <MinusCircleIcon /> },
 };
-
-// The description's first line is the rule title; the rest is the rationale.
-export const checkTitle = (r: ComplianceCheckResult): string =>
-  r.description?.split('\n')[0]?.trim() || r.metadata.name;
 
 const columns: TableColumn<ComplianceCheckResult>[] = [
   { title: 'Check', id: 'title', sort: 'description' },
@@ -66,12 +63,10 @@ const ResultsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => {
   });
   const [selected, setSelected] = React.useState<ComplianceCheckResult | null>(null);
 
+  const profiles = baseline?.spec.profiles;
   const ownedResults = React.useMemo(
-    () =>
-      (results ?? []).filter((r) =>
-        isOwnedByBaseline(r.metadata.labels, baseline?.spec.profiles),
-      ),
-    [results, baseline?.spec.profiles],
+    () => (results ?? []).filter((r) => isOwnedByBaseline(r.metadata.labels, profiles)),
+    [results, profiles],
   );
 
   const Row = React.useCallback(

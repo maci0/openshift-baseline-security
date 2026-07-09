@@ -1,5 +1,5 @@
 operator/bin/
-console-plugin/node_modules/
+node_modules/
 console-plugin/dist/
 console-plugin/.yarn/
 *.log

@@ -52,12 +52,10 @@ const CompliancePage: React.FC = () => {
     namespace: 'openshift-compliance',
   });
 
+  const profiles = baseline?.spec.profiles;
   const ownedScans = React.useMemo(
-    () =>
-      (scans ?? []).filter((s) =>
-        isOwnedByBaseline(s.metadata.labels, baseline?.spec.profiles),
-      ),
-    [scans, baseline?.spec.profiles],
+    () => (scans ?? []).filter((s) => isOwnedByBaseline(s.metadata.labels, profiles)),
+    [scans, profiles],
   );
 
   const rescan = async () => {

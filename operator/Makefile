@@ -25,6 +25,11 @@ vet:
 test: fmt vet
 	go test ./...
 
+GOLANGCI_LINT_VERSION ?= latest
+.PHONY: lint
+lint:
+	go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION) run ./...
+
 .PHONY: build
 build: generate manifests fmt vet
 	go build -o bin/manager ./cmd

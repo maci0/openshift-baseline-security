@@ -88,10 +88,8 @@ func (r *ClusterBaselineReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return ctrl.Result{}, nil
 	}
 	if controllerutil.AddFinalizer(cb, finalizerName) {
-		if err := r.Update(ctx, cb); err != nil {
-			return ctrl.Result{}, err
-		}
-		return ctrl.Result{Requeue: true}, nil
+		// The update event retriggers reconciliation with a fresh object.
+		return ctrl.Result{}, r.Update(ctx, cb)
 	}
 
 	if err := r.ensureComplianceOperator(ctx, cb); err != nil {
@@ -134,6 +132,46 @@ func ownedSuites(cb *baselinev1alpha1.ClusterBaseline) map[string]bool {
 		s[bindingName(key)] = true
 	}
 	return s
+}
+
+// selectedProfileNames is the set of Compliance Operator Profile names for the
+// selected profile keys.
+func selectedProfileNames(cb *baselinev1alpha1.ClusterBaseline) map[string]bool {
+	names := map[string]bool{}
+	for _, key := range cb.Spec.Profiles {
+		for _, p := range key.ProfileNames() {
+			names[p] = true
+		}
+	}
+	return names
+}
+
+// matchesAnyProfile reports whether name equals a profile name or is a
+// role-suffixed variant of one (ocp4-cis-node -> ocp4-cis-node-master).
+// name comes from cluster object names/labels, i.e. untrusted input.
+func matchesAnyProfile(name string, profiles map[string]bool) bool {
+	for p := range profiles {
+		if name == p || strings.HasPrefix(name, p+"-") {
+			return true
+		}
+	}
+	return false
+}
+
+// longestProfileMatch maps a scan name (untrusted label value) to the profile
+// key of the longest matching profile name, so ocp4-cis does not swallow
+// ocp4-cis-node-* scans.
+func longestProfileMatch(profileToKey map[string]baselinev1alpha1.ProfileKey, scan string) (baselinev1alpha1.ProfileKey, bool) {
+	best := ""
+	for p := range profileToKey {
+		if (scan == p || strings.HasPrefix(scan, p+"-")) && len(p) > len(best) {
+			best = p
+		}
+	}
+	if best == "" {
+		return "", false
+	}
+	return profileToKey[best], true
 }
 
 // ensureComplianceOperator creates namespace + OperatorGroup + Subscription
@@ -313,24 +351,11 @@ func (r *ClusterBaselineReconciler) checkScanStorage(ctx context.Context, cb *ba
 	if err := r.List(ctx, pvcs, client.InNamespace(complianceNamespace)); err != nil {
 		return err
 	}
-	profileNames := map[string]bool{}
-	for _, key := range cb.Spec.Profiles {
-		for _, p := range key.ProfileNames() {
-			profileNames[p] = true
-		}
-	}
-	isOurs := func(name string) bool {
-		for p := range profileNames {
-			if name == p || strings.HasPrefix(name, p+"-") {
-				return true
-			}
-		}
-		return false
-	}
+	profileNames := selectedProfileNames(cb)
 
 	var pending []string
 	for _, pvc := range pvcs.Items {
-		if !isOurs(pvc.Name) {
+		if !matchesAnyProfile(pvc.Name, profileNames) {
 			continue
 		}
 		if pvc.Status.Phase == corev1.ClaimPending && time.Since(pvc.CreationTimestamp.Time) > 2*time.Minute {
@@ -429,22 +454,6 @@ func (r *ClusterBaselineReconciler) aggregateStatus(ctx context.Context, cb *bas
 			profileToKey[p] = key
 		}
 	}
-	// Scan names are the profile name, optionally suffixed with the node role
-	// (ocp4-cis-node -> ocp4-cis-node-master). Longest profile-name match wins
-	// so ocp4-cis does not swallow ocp4-cis-node-* scans.
-	keyForScan := func(scan string) (baselinev1alpha1.ProfileKey, bool) {
-		best := ""
-		for p := range profileToKey {
-			if (scan == p || strings.HasPrefix(scan, p+"-")) && len(p) > len(best) {
-				best = p
-			}
-		}
-		if best == "" {
-			return "", false
-		}
-		return profileToKey[best], true
-	}
-
 	var pass, fail int32
 	for _, item := range list.Items {
 		// Prefer suite label (binding name) so foreign scans of the same profile
@@ -455,7 +464,7 @@ func (r *ClusterBaselineReconciler) aggregateStatus(ctx context.Context, cb *bas
 			continue
 		}
 		scan := item.GetLabels()[scanNameLabel]
-		key, ok := keyForScan(scan)
+		key, ok := longestProfileMatch(profileToKey, scan)
 		if !ok {
 			continue
 		}
@@ -501,30 +510,17 @@ func (r *ClusterBaselineReconciler) recordHistory(ctx context.Context, cb *basel
 		return
 	}
 	suites := ownedSuites(cb)
+	profileNames := selectedProfileNames(cb)
 	var latest time.Time
 	for _, s := range scans.Items {
-		// ComplianceScan is labeled with the suite (binding) name when present.
-		if suite := s.GetLabels()[suiteLabel]; suite != "" && !suites[suite] {
-			continue
-		}
-		// Also accept scans whose name matches our profile names when suite is absent.
-		if suite := s.GetLabels()[suiteLabel]; suite == "" {
-			name := s.GetName()
-			matched := false
-			for _, key := range cb.Spec.Profiles {
-				for _, p := range key.ProfileNames() {
-					if name == p || strings.HasPrefix(name, p+"-") {
-						matched = true
-						break
-					}
-				}
-				if matched {
-					break
-				}
-			}
-			if !matched {
+		// ComplianceScan is labeled with the suite (binding) name when present;
+		// fall back to profile-name matching when the label is absent.
+		if suite := s.GetLabels()[suiteLabel]; suite != "" {
+			if !suites[suite] {
 				continue
 			}
+		} else if !matchesAnyProfile(s.GetName(), profileNames) {
+			continue
 		}
 		ts, _, _ := unstructured.NestedString(s.Object, "status", "endTimestamp")
 		if t, err := time.Parse(time.RFC3339, ts); err == nil && t.After(latest) {

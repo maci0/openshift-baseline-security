@@ -73,7 +73,12 @@ func main() {
 				return nil
 			}
 			list := &baselinev1alpha1.ClusterBaselineList{}
-			if err := mgr.GetClient().List(ctx, list); err != nil || len(list.Items) > 0 {
+			if err := mgr.GetClient().List(ctx, list); err != nil {
+				// Default creation is best-effort; do not take the manager down.
+				setupLog.Error(err, "listing ClusterBaselines for default creation")
+				return nil
+			}
+			if len(list.Items) > 0 {
 				return nil
 			}
 			cb := &baselinev1alpha1.ClusterBaseline{

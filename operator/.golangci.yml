@@ -1,0 +1,14 @@
+version: "2"
+linters:
+  enable:
+    - misspell
+    - unconvert
+    - unparam
+    - nilerr
+  settings:
+    staticcheck:
+      checks: ["all", "-ST1000"]
+formatters:
+  enable:
+    - gofmt
+    - goimports

@@ -38,14 +38,7 @@ import {
   ComplianceRemediationGVK,
   isOwnedByBaseline,
 } from '../models';
-
-// PatternFly semantic status colors (chart fills).
-const scoreColor = (score?: number) =>
-  score == null || score < 60
-    ? 'var(--pf-t--global--icon--color--status--danger--default)'
-    : score < 90
-      ? 'var(--pf-t--global--icon--color--status--warning--default)'
-      : 'var(--pf-t--global--icon--color--status--success--default)';
+import { scoreColor } from '../utils';
 
 const resultsHref = (filter: string) =>
   `/baseline-security/results?rowFilter-result-status=${filter}`;
