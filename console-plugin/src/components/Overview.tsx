@@ -5,13 +5,16 @@ import {
   Chart,
   ChartArea,
   ChartAxis,
-  ChartDonutUtilization,
+  ChartDonut,
+  ChartLegend,
 } from '@patternfly/react-charts/victory';
 import {
   Alert,
   Card,
   CardBody,
+  CardHeader,
   CardTitle,
+  Label,
   DescriptionList,
   DescriptionListDescription,
   DescriptionListGroup,
@@ -31,7 +34,7 @@ import {
   ExclamationTriangleIcon,
 } from '@patternfly/react-icons';
 import { ClusterBaseline } from '../models';
-import { resultsHref, scoreColor } from '../utils';
+import { resultsHref } from '../utils';
 
 const CountRow: React.FC<{
   icon: React.ReactElement;
@@ -95,6 +98,32 @@ const Overview: React.FC<{ baseline?: ClusterBaseline; loaded: boolean }> = ({
         : t('Installing'));
   const score = baseline.status?.score;
 
+  // Aggregate per-status counts across profiles for the composition donut, so
+  // failing/manual checks are shown as distinct slices instead of the score
+  // gauge reading as "all green" at a high percentage.
+  const totals = (baseline.status?.profiles ?? []).reduce(
+    (a, p) => ({
+      pass: a.pass + p.pass,
+      fail: a.fail + p.fail,
+      manual: a.manual + p.manual,
+      error: a.error + p.error,
+      notApplicable: a.notApplicable + p.notApplicable,
+    }),
+    { pass: 0, fail: 0, manual: 0, error: 0, notApplicable: 0 },
+  );
+  const green = 'var(--pf-t--global--icon--color--status--success--default)';
+  const red = 'var(--pf-t--global--icon--color--status--danger--default)';
+  const orange = 'var(--pf-t--global--icon--color--status--warning--default)';
+  const grey = 'var(--pf-t--global--icon--color--disabled)';
+  const segments = [
+    { label: t('Pass'), value: totals.pass, color: green },
+    { label: t('Fail'), value: totals.fail, color: red },
+    { label: t('Manual'), value: totals.manual, color: orange },
+    { label: t('Error'), value: totals.error, color: red },
+    { label: t('Not applicable'), value: totals.notApplicable, color: grey },
+  ].filter((s) => s.value > 0);
+  const totalChecks = segments.reduce((n, s) => n + s.value, 0);
+
   return (
     <PageSection>
       {degraded && (
@@ -120,16 +149,36 @@ const Overview: React.FC<{ baseline?: ClusterBaseline; loaded: boolean }> = ({
       <Gallery hasGutter minWidths={{ default: '300px' }}>
         <Card>
           <CardTitle>{t('Compliance score')}</CardTitle>
-          <CardBody style={{ height: 230 }}>
-            <ChartDonutUtilization
-              ariaTitle={t('Compliance score')}
-              data={{ x: t('Score'), y: score ?? 0 }}
-              title={score != null ? `${score}` : '—'}
-              subTitle={t('of 100')}
-              colorScale={[scoreColor(score)]}
-              height={200}
-              width={300}
-            />
+          <CardBody style={{ height: 260 }}>
+            {totalChecks === 0 ? (
+              <ChartDonut
+                ariaTitle={t('Compliance score')}
+                data={[{ x: t('No results'), y: 1 }]}
+                colorScale={[grey]}
+                title={score != null ? `${score}` : '—'}
+                subTitle={t('of 100')}
+                height={200}
+                width={300}
+              />
+            ) : (
+              <ChartDonut
+                ariaTitle={t('Check results')}
+                ariaDesc={t('Composition of compliance check results')}
+                constrainToVisibleArea
+                data={segments.map((s) => ({ x: s.label, y: s.value }))}
+                colorScale={segments.map((s) => s.color)}
+                labels={({ datum }) => `${datum.x}: ${datum.y}`}
+                title={score != null ? `${score}` : '—'}
+                subTitle={t('score / 100')}
+                height={200}
+                width={300}
+                legendData={segments.map((s) => ({ name: `${s.label} (${s.value})` }))}
+                legendOrientation="vertical"
+                legendPosition="right"
+                legendComponent={<ChartLegend gutter={8} />}
+                padding={{ top: 10, bottom: 10, left: 10, right: 140 }}
+              />
+            )}
           </CardBody>
         </Card>
         <Card>
@@ -191,10 +240,25 @@ const Overview: React.FC<{ baseline?: ClusterBaseline; loaded: boolean }> = ({
             </CardBody>
           </Card>
         )}
-        {(baseline.status?.profiles ?? []).map((p) => (
-          <Card key={p.key}>
-            <CardTitle>{p.key.toUpperCase()}</CardTitle>
-            <CardBody>
+        {(baseline.status?.profiles ?? []).map((p) => {
+          const denom = p.pass + p.fail;
+          const pScore = denom > 0 ? Math.round((p.pass * 100) / denom) : null;
+          return (
+            <Card key={p.key}>
+              <CardHeader
+                actions={{
+                  actions:
+                    pScore != null ? (
+                      <Label isCompact color={pScore >= 90 ? 'green' : pScore >= 60 ? 'orange' : 'red'}>
+                        {pScore}
+                      </Label>
+                    ) : undefined,
+                  hasNoOffset: true,
+                }}
+              >
+                <CardTitle>{p.key.toUpperCase()}</CardTitle>
+              </CardHeader>
+              <CardBody>
               <CountRow
                 icon={<CheckCircleIcon />}
                 status="success"
@@ -216,9 +280,10 @@ const Overview: React.FC<{ baseline?: ClusterBaseline; loaded: boolean }> = ({
                 count={p.manual}
                 href={resultsHref('MANUAL', p.key)}
               />
-            </CardBody>
-          </Card>
-        ))}
+              </CardBody>
+            </Card>
+          );
+        })}
       </Gallery>
     </PageSection>
   );

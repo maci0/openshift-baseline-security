@@ -52,3 +52,40 @@
 - [ ] Push versioned images + bundle/catalog to quay.io (needs quay login /
       robot token), swap CatalogSource image
 - [ ] community-operators submission once bundle is stable
+
+## Ideas / backlog
+
+Prioritized; top 3 (marked [implemented]) done this pass.
+
+### Observability (high value, completes existing infra)
+- [implemented] Prometheus metrics: baseline_security_compliance_score gauge +
+  baseline_security_checks{profile,status}. The secure-metrics endpoint was
+  built but exposed nothing custom.
+- [implemented] PrometheusRule: ComplianceScoreLow, ComplianceChecksFailing.
+- [ ] Console dashboard card (console.dashboards/card) surfacing the score on
+  the cluster Overview page (SPEC extension, not yet wired).
+- [ ] Grafana/console dashboard for score trend from the metric.
+
+### UI / UX
+- [implemented] Composition donut (Pass/Fail/Manual slices) instead of the
+  all-green utilization gauge.
+- [implemented] Per-profile score badge on profile cards.
+- [ ] Result detail: link each check to its ComplianceCheckResult resource;
+  show the rendered remediation object/MachineConfig diff on Remediations.
+- [ ] Progressing/scans-running empty state distinct from "not configured".
+- [ ] Loading skeletons instead of a bare Spinner.
+- [ ] Downloadable compliance report (results CSV / PDF).
+- [ ] Severity-weighted score option.
+
+### Operator / API
+- [ ] Watch compliance CRs via dynamic informer once CRDs exist (replace the
+  1-minute poll).
+- [ ] relatedObjects in status + must-gather script for support/insights.
+- [ ] TailoredProfile support (enable/disable individual rules; would also
+  allow an NSA/CISA K8s hardening mapping onto existing rules).
+- [ ] Node remediation apply with MachineConfigPool pause awareness.
+- [ ] Scheduled-scan next-run time in status.
+
+### Packaging / delivery
+- [ ] Push versioned images + bundle/catalog to quay.io; community-operators.
+- [ ] Helm chart for non-OLM installs.

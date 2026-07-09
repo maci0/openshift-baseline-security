@@ -17,3 +17,4 @@ COPY --from=build /usr/src/app/dist /opt/app-root/src
 COPY nginx.conf /etc/nginx/nginx.conf
 USER 1001
 # Image entrypoint: nginx -g "daemon off;"
+CMD ["nginx", "-g", "daemon off;"]

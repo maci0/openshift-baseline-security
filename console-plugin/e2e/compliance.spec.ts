@@ -15,9 +15,10 @@ const goto = async (page: Page, subpath: string) => {
 test.describe('Baseline Security console plugin', () => {
   test('Overview shows the compliance score and profile breakdown', async ({ page }) => {
     await goto(page, '');
-    // "Compliance score" appears both as the card title and the donut aria
-    // title; the score denominator label is unambiguous.
-    await expect(page.getByText('of 100')).toBeVisible();
+    // Composition donut center label + legend; the legend proves the
+    // non-compliant slices render (not an all-green gauge).
+    await expect(page.getByText('score / 100')).toBeVisible();
+    await expect(page.getByText(/^Fail \(\d+\)$/)).toBeVisible();
     await expect(page.getByText('Details')).toBeVisible();
     // Compliance Operator version surfaced in the details card. exact: the
     // page subtitle also contains the phrase "Compliance Operator".
@@ -43,8 +44,15 @@ test.describe('Baseline Security console plugin', () => {
     await page.goto('/baseline-security/results?rowFilter-result-status=FAIL', {
       waitUntil: 'networkidle',
     });
-    // The applied filter chip is shown.
-    await expect(page.getByText('FAIL', { exact: false }).first()).toBeVisible();
+    // The applied-filter chip proves the filter took effect (a bare "FAIL" text
+    // check would pass on an unfiltered table via the status column labels).
+    const chipGroup = page.locator('.pf-v6-c-label-group, .pf-v6-c-chip-group').filter({
+      hasText: 'FAIL',
+    });
+    await expect(chipGroup.first()).toBeVisible();
+    await expect(page.getByRole('button', { name: /Clear all filters/i })).toBeVisible();
+    // And no PASS rows survive the filter.
+    await expect(page.getByText('PASS', { exact: true })).toHaveCount(0);
     await shot(page, 'results-fail-filter');
   });
 

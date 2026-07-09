@@ -132,6 +132,7 @@ func (r *ClusterBaselineReconciler) reconcileOwned(ctx context.Context, cb *base
 	if err := r.aggregateStatus(ctx, cb); err != nil {
 		return fmt.Errorf("aggregating status: %w", err)
 	}
+	publishMetrics(cb)
 	if err := r.checkScanStorage(ctx, cb); err != nil {
 		return fmt.Errorf("checking scan storage: %w", err)
 	}
@@ -481,6 +482,11 @@ func (r *ClusterBaselineReconciler) deregisterConsolePlugin(ctx context.Context)
 	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		console := u(consoleGVK)
 		if err := r.Get(ctx, types.NamespacedName{Name: "cluster"}, console); err != nil {
+			// Console capability disabled (CRD absent) or config gone: nothing to
+			// deregister. Must tolerate NoMatch so CR deletion is not wedged.
+			if meta.IsNoMatchError(err) {
+				return nil
+			}
 			return client.IgnoreNotFound(err)
 		}
 		plugins, _, _ := unstructured.NestedStringSlice(console.Object, "spec", "plugins")
@@ -497,7 +503,9 @@ func (r *ClusterBaselineReconciler) deregisterConsolePlugin(ctx context.Context)
 func (r *ClusterBaselineReconciler) removeConsolePlugin(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline) error {
 	cp := u(consolePluginGVK)
 	cp.SetName(pluginName)
-	if err := client.IgnoreNotFound(r.Delete(ctx, cp)); err != nil {
+	// NoMatch: the ConsolePlugin CRD is absent (Console capability disabled),
+	// so there is nothing to remove; do not wedge on a permanent Degraded.
+	if err := r.Delete(ctx, cp); err != nil && !apierrors.IsNotFound(err) && !meta.IsNoMatchError(err) {
 		return err
 	}
 	for _, obj := range []client.Object{

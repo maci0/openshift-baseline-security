@@ -11,10 +11,13 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/utils/ptr"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	baselinev1alpha1 "github.com/maci0/baseline-security-operator/api/v1alpha1"
 )
@@ -312,5 +315,47 @@ func TestDeregisterConsolePluginMissingConsole(t *testing.T) {
 	}
 	if err := r.deregisterConsolePlugin(context.Background()); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// When the Console capability is disabled the console CRDs are absent; the
+// teardown paths must tolerate NoKindMatch so the CR is not wedged. The fake
+// client fabricates unknown kinds, so interceptors inject the real
+// NoKindMatchError a live RESTMapper produces for a missing CRD.
+func TestConsoleTeardownToleratesMissingCRDs(t *testing.T) {
+	scheme := testScheme(t)
+	noMatch := func(gvk schema.GroupVersionKind) error {
+		if gvk.Group == "console.openshift.io" || gvk.Group == "operator.openshift.io" {
+			return &meta.NoKindMatchError{GroupKind: gvk.GroupKind()}
+		}
+		return nil
+	}
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).
+			WithInterceptorFuncs(interceptor.Funcs{
+				Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+					if err := noMatch(obj.GetObjectKind().GroupVersionKind()); err != nil {
+						return err
+					}
+					return c.Get(ctx, key, obj, opts...)
+				},
+				Delete: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {
+					if err := noMatch(obj.GetObjectKind().GroupVersionKind()); err != nil {
+						return err
+					}
+					return c.Delete(ctx, obj, opts...)
+				},
+			}).Build(),
+		Scheme: scheme,
+	}
+	if err := r.deregisterConsolePlugin(context.Background()); err != nil {
+		t.Fatalf("deregisterConsolePlugin should tolerate missing Console CRD: %v", err)
+	}
+	cb := &baselinev1alpha1.ClusterBaseline{}
+	if err := r.removeConsolePlugin(context.Background(), cb); err != nil {
+		t.Fatalf("removeConsolePlugin should tolerate missing ConsolePlugin CRD: %v", err)
+	}
+	if c := meta.FindStatusCondition(cb.Status.Conditions, "ConsolePluginReady"); c == nil || c.Reason != "Disabled" {
+		t.Fatalf("ConsolePluginReady = %+v, want Disabled", c)
 	}
 }
