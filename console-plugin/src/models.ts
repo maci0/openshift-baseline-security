@@ -80,6 +80,7 @@ export type ResultCounts = {
   pass: number;
   fail: number;
   manual: number;
+  info: number;
   error: number;
   inconsistent: number;
   notApplicable: number;

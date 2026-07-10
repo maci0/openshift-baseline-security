@@ -12,7 +12,7 @@ import {
   Switch,
 } from '@patternfly/react-core';
 import { ClusterBaseline, ClusterBaselineModel } from '../models';
-import { toggledProfiles } from '../utils';
+import { errorMessage, toggledProfiles } from '../utils';
 
 const PROFILE_INFO: Record<string, { title: string; description: string }> = {
   cis: { title: 'CIS', description: 'CIS Red Hat OpenShift Container Platform Benchmark' },
@@ -62,7 +62,7 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => 
         ],
       });
     } catch (e) {
-      setError(e instanceof Error ? e.message : t('Failed to update profiles.'));
+      setError(errorMessage(e) ?? t('Failed to update profiles.'));
     } finally {
       setPending(false);
     }

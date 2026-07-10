@@ -39,7 +39,11 @@ const (
 	pluginNS            = "openshift-baseline-security"
 	suiteLabel          = "compliance.openshift.io/suite"
 	historyMax          = 30
-	pluginReplicas      = int32(2)
+	// Desired HA for the console plugin Deployment.
+	pluginReplicas = int32(2)
+	// Ready threshold for ConsolePluginReady=True: one ready pod is enough for
+	// the plugin to serve; partial (1/2) must not Progress forever as WaitingForPods.
+	pluginReadyMin = int32(1)
 )
 
 // Foreign CRs are unstructured so we do not import their Go API modules.
@@ -248,7 +252,8 @@ func conditionProgressing(c *metav1.Condition) bool {
 		return false
 	}
 	switch c.Reason {
-	case "Installing", "CSVNotReady", "ImageMissing", "WaitingForPods", "CRDsMissing", "ConsoleMissing":
+	// ImageMissing is a permanent deployment misconfig, not install progress.
+	case "Installing", "CSVNotReady", "WaitingForPods", "CRDsMissing", "ConsoleMissing":
 		return true
 	default:
 		return false
@@ -505,19 +510,20 @@ func setComplianceOperatorReadyFromCSV(cb *baselinev1alpha1.ClusterBaseline, csv
 }
 
 func (r *ClusterBaselineReconciler) ensureScanConfig(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline) error {
-	schedule, err := normalizedSchedule(cb.Spec.Schedule)
-	if err != nil {
-		setCond(cb, "ScanConfigured", metav1.ConditionFalse, "InvalidSchedule",
-			fmt.Sprintf("spec.schedule %q is not a valid standard cron schedule: %v", cb.Spec.Schedule, err))
-		return nil
-	}
+	// Validate schedule first, but still reconcile ScanSetting fields other than
+	// schedule and all bindings so a bad cron does not freeze profile/tp or
+	// auto-apply changes. Invalid schedule is reported as Degraded at the end.
+	schedule, schedErr := normalizedSchedule(cb.Spec.Schedule)
 
 	ss := u(scanSettingGVK)
 	ss.SetName(scanSettingName)
 	ss.SetNamespace(complianceNamespace)
-	_, err = controllerutil.CreateOrUpdate(ctx, r.Client, ss, func() error {
+	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, ss, func() error {
 		autoApply := cb.Spec.Remediation.Apply == baselinev1alpha1.RemediationApplyAutomatic
-		ss.Object["schedule"] = schedule
+		// Only write a validated schedule; keep the last-good cron if invalid.
+		if schedErr == nil {
+			ss.Object["schedule"] = schedule
+		}
 		ss.Object["roles"] = []any{"worker", "master"}
 		ss.Object["rawResultStorage"] = map[string]any{"size": "1Gi", "rotation": int64(3)}
 		ss.Object["autoApplyRemediations"] = autoApply
@@ -593,6 +599,11 @@ func (r *ClusterBaselineReconciler) ensureScanConfig(ctx context.Context, cb *ba
 			return err
 		}
 	}
+	if schedErr != nil {
+		setCond(cb, "ScanConfigured", metav1.ConditionFalse, "InvalidSchedule",
+			fmt.Sprintf("spec.schedule %q is not a valid standard cron schedule: %v", cb.Spec.Schedule, schedErr))
+		return nil
+	}
 	setCond(cb, "ScanConfigured", metav1.ConditionTrue, "BindingsCreated", "")
 	return nil
 }
@@ -616,20 +627,23 @@ func (r *ClusterBaselineReconciler) checkScanStorage(ctx context.Context, cb *ba
 	if err := r.List(ctx, pvcs, client.InNamespace(complianceNamespace)); err != nil {
 		return err
 	}
+	// Built-in CO profile names: allow role-suffixed PVC names (ocp4-cis-node-master).
 	profiles := map[string]bool{}
 	for _, key := range cb.Spec.Profiles {
 		for _, p := range key.ProfileNames() {
 			profiles[p] = true
 		}
 	}
-	// Tailored scans (and their PVCs) are named after the TailoredProfile, so
-	// include those names or their Pending PVCs would go undetected.
+	// Tailored PVCs are named after the TailoredProfile. Match exact names only:
+	// short tailored labels must not prefix-match foreign PVCs in the namespace.
+	tailoredExact := map[string]bool{}
 	for _, name := range cb.Spec.TailoredProfiles {
-		profiles[name] = true
+		tailoredExact[name] = true
 	}
 	var pending []string
 	for _, pvc := range pvcs.Items {
-		if matchesAnyProfile(pvc.Name, profiles) &&
+		owned := matchesAnyProfile(pvc.Name, profiles) || tailoredExact[pvc.Name]
+		if owned &&
 			pvc.Status.Phase == corev1.ClaimPending &&
 			time.Since(pvc.CreationTimestamp.Time) > 2*time.Minute {
 			pending = append(pending, pvc.Name)
@@ -719,6 +733,7 @@ func (r *ClusterBaselineReconciler) aggregateStatus(ctx context.Context, cb *bas
 
 	var pass, fail int32
 	// tally routes one check result's status into the counts and the score.
+	// INFO is counted (excluded from score) so Overview totals match Results.
 	tally := func(c *baselinev1alpha1.ResultCounts, status string) {
 		switch status {
 		case "PASS":
@@ -729,6 +744,8 @@ func (r *ClusterBaselineReconciler) aggregateStatus(ctx context.Context, cb *bas
 			fail++
 		case "MANUAL":
 			c.Manual++
+		case "INFO":
+			c.Info++
 		case "ERROR":
 			c.Error++
 		case "INCONSISTENT":
@@ -827,7 +844,15 @@ func (r *ClusterBaselineReconciler) recordHistory(ctx context.Context, cb *basel
 		return
 	}
 	last := metav1.NewTime(latest)
-	if cb.Status.LastScanTime != nil && cb.Status.LastScanTime.Equal(&last) {
+	if cb.Status.LastScanTime != nil && !last.After(cb.Status.LastScanTime.Time) {
+		// Never rewind LastScanTime when the suite with the newest endTimestamp
+		// is dropped (profile/tp removed). On equal, refresh the latest history
+		// score so late results for the same scan still update the trend point.
+		if last.Equal(cb.Status.LastScanTime) && s != nil {
+			if n := len(cb.Status.History); n > 0 && cb.Status.History[n-1].Time.Equal(cb.Status.LastScanTime) {
+				cb.Status.History[n-1].Score = *s
+			}
+		}
 		return
 	}
 	cb.Status.LastScanTime = &last
@@ -939,14 +964,15 @@ func (r *ClusterBaselineReconciler) ensureConsolePlugin(ctx context.Context, cb 
 	}
 
 	// Re-read Deployment status so Ready is not claimed before pods are up.
-	// Use the managed replica count (not cached Spec.Replicas) to avoid a
-	// false Deployed when the informer has not observed our CreateOrUpdate yet.
+	// Use pluginReadyMin (not full pluginReplicas) so a partial HA outage still
+	// reports Deployed once the plugin can serve traffic.
 	if err := r.Get(ctx, types.NamespacedName{Namespace: pluginNS, Name: pluginName}, dep); err != nil {
 		return err
 	}
-	if dep.Status.ReadyReplicas < pluginReplicas {
+	if dep.Status.ReadyReplicas < pluginReadyMin {
 		reason, msg := "WaitingForPods",
-			fmt.Sprintf("Deployment %s/%s has %d/%d ready replicas", pluginNS, pluginName, dep.Status.ReadyReplicas, pluginReplicas)
+			fmt.Sprintf("Deployment %s/%s has %d ready replicas (want >= %d of %d)",
+				pluginNS, pluginName, dep.Status.ReadyReplicas, pluginReadyMin, pluginReplicas)
 		if pluginDeploymentUnavailable(dep) {
 			reason = "Unavailable"
 			msg = fmt.Sprintf("Deployment %s/%s has no ready pods for >5m", pluginNS, pluginName)

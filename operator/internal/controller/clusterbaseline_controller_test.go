@@ -232,6 +232,10 @@ func TestRecordHistoryRing(t *testing.T) {
 	if len(cb.Status.History) != before {
 		t.Fatalf("duplicate history append: len %d", len(cb.Status.History))
 	}
+	// Same endTimestamp: refresh the last snapshot score (late results).
+	if cb.Status.History[29].Score != 88 {
+		t.Fatalf("equal-scan score refresh = %d, want 88", cb.Status.History[29].Score)
+	}
 }
 
 func TestRecordHistoryNoOwnedScans(t *testing.T) {
@@ -246,6 +250,40 @@ func TestRecordHistoryNoOwnedScans(t *testing.T) {
 	r.recordHistory(context.Background(), cb, ptr.To(int32(50)))
 	if cb.Status.LastScanTime != nil || len(cb.Status.History) != 0 {
 		t.Fatalf("expected no history, got last=%v hist=%v", cb.Status.LastScanTime, cb.Status.History)
+	}
+}
+
+func TestRecordHistoryDoesNotRewind(t *testing.T) {
+	scheme := testScheme(t)
+	// Only an older owned scan remains after the newer suite was removed.
+	older := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	scan := &unstructured.Unstructured{}
+	scan.SetGroupVersionKind(scanGVK)
+	scan.SetName("ocp4-cis")
+	scan.SetNamespace(complianceNamespace)
+	scan.SetLabels(map[string]string{suiteLabel: "baseline-cis"})
+	_ = unstructured.SetNestedField(scan.Object, older.Format(time.RFC3339), "status", "endTimestamp")
+
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(scan).Build(),
+		Scheme: scheme,
+	}
+	newer := metav1.NewTime(time.Date(2026, 7, 9, 1, 0, 0, 0, time.UTC))
+	cb := &baselinev1alpha1.ClusterBaseline{
+		Spec: baselinev1alpha1.ClusterBaselineSpec{Profiles: []baselinev1alpha1.ProfileKey{"cis"}},
+		Status: baselinev1alpha1.ClusterBaselineStatus{
+			LastScanTime: &newer,
+			History: []baselinev1alpha1.ScoreSnapshot{
+				{Time: newer, Score: 90},
+			},
+		},
+	}
+	r.recordHistory(context.Background(), cb, ptr.To(int32(10)))
+	if !cb.Status.LastScanTime.Equal(&newer) {
+		t.Fatalf("LastScanTime rewound to %v", cb.Status.LastScanTime)
+	}
+	if len(cb.Status.History) != 1 || cb.Status.History[0].Score != 90 {
+		t.Fatalf("history mutated on rewind path: %+v", cb.Status.History)
 	}
 }
 

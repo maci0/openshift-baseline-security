@@ -240,12 +240,24 @@ func TestEnsureScanConfigCreatesAndPrunes(t *testing.T) {
 	}
 
 	cb.Spec.Schedule = "not a cron"
+	// Bad cron must Degrade but still apply profile changes.
+	cb.Spec.Profiles = []baselinev1alpha1.ProfileKey{"cis"}
 	if err := r.ensureScanConfig(context.Background(), cb); err != nil {
 		t.Fatal(err)
 	}
 	c := meta.FindStatusCondition(cb.Status.Conditions, "ScanConfigured")
 	if c == nil || c.Status != metav1.ConditionFalse || c.Reason != "InvalidSchedule" {
 		t.Fatalf("ScanConfigured = %+v, want False/InvalidSchedule", c)
+	}
+	if err := r.Get(context.Background(), types.NamespacedName{Namespace: complianceNamespace, Name: "baseline-cis"}, binding); err != nil {
+		t.Fatal("invalid schedule must still create bindings:", err)
+	}
+	// Last-good schedule on ScanSetting is preserved (not overwritten with garbage).
+	if err := r.Get(context.Background(), types.NamespacedName{Namespace: complianceNamespace, Name: scanSettingName}, ss); err != nil {
+		t.Fatal(err)
+	}
+	if got, _, _ := unstructured.NestedString(ss.Object, "schedule"); got != "0 1 * * *" {
+		t.Fatalf("schedule overwritten on invalid cron: %q", got)
 	}
 }
 
@@ -320,22 +332,11 @@ func TestEnsureConsolePlugin(t *testing.T) {
 	if c == nil || c.Status != metav1.ConditionFalse || c.Reason != "WaitingForPods" {
 		t.Fatalf("condition = %+v, want WaitingForPods", c)
 	}
-	// Simulate full readiness (replicas=2 + Available) via status subresource.
+	// Partial HA (1 of 2 ready) is enough to serve; require Available=True.
 	if err := r.Get(context.Background(), types.NamespacedName{Namespace: pluginNS, Name: pluginName}, dep); err != nil {
 		t.Fatal(err)
 	}
-	dep.Status.ReadyReplicas = 1
-	if err := r.Status().Update(context.Background(), dep); err != nil {
-		t.Fatal(err)
-	}
-	if err := r.ensureConsolePlugin(context.Background(), cb); err != nil {
-		t.Fatal(err)
-	}
-	c = meta.FindStatusCondition(cb.Status.Conditions, "ConsolePluginReady")
-	if c == nil || c.Status != metav1.ConditionFalse || c.Reason != "WaitingForPods" {
-		t.Fatalf("partial ready = %+v, want WaitingForPods", c)
-	}
-	dep.Status.ReadyReplicas = pluginReplicas
+	dep.Status.ReadyReplicas = pluginReadyMin
 	dep.Status.Conditions = []appsv1.DeploymentCondition{{
 		Type:   appsv1.DeploymentAvailable,
 		Status: corev1.ConditionTrue,
@@ -348,7 +349,7 @@ func TestEnsureConsolePlugin(t *testing.T) {
 	}
 	c = meta.FindStatusCondition(cb.Status.Conditions, "ConsolePluginReady")
 	if c == nil || c.Status != metav1.ConditionTrue || c.Reason != "Deployed" {
-		t.Fatalf("condition = %+v, want Deployed", c)
+		t.Fatalf("partial ready with Available must be Deployed, got %+v", c)
 	}
 }
 

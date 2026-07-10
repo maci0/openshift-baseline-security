@@ -84,7 +84,8 @@ const RemediationsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline })
       await fn();
       return true;
     } catch (e) {
-      setError(e instanceof Error ? e.message : failMsg);
+      // k8sPatch often rejects with { message } Status objects, not Error.
+      setError(errorMessage(e) ?? failMsg);
       return false;
     } finally {
       setBusy(false);

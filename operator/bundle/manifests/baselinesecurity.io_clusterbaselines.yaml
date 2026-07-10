@@ -234,6 +234,12 @@ spec:
                     fail:
                       format: int32
                       type: integer
+                    info:
+                      description: |-
+                        Info counts informational checks (CO status INFO). Excluded from the
+                        score like Manual; still reported so Overview totals match Results.
+                      format: int32
+                      type: integer
                     inconsistent:
                       description: |-
                         Inconsistent counts checks whose per-node results disagree across a
@@ -271,6 +277,7 @@ spec:
                   required:
                   - error
                   - fail
+                  - info
                   - inconsistent
                   - key
                   - manual
@@ -301,8 +308,9 @@ spec:
                 type: array
               score:
                 description: |-
-                  score is pass/(pass+fail) across all profiles, 0-100. MANUAL and
-                  NOT-APPLICABLE results are excluded; their counts are reported per profile.
+                  score is pass/(pass+fail) across all profiles, 0-100. MANUAL, INFO,
+                  ERROR, INCONSISTENT, and NOT-APPLICABLE are excluded from the score;
+                  their counts are still reported per profile.
                 format: int32
                 type: integer
               tailoredProfiles:
@@ -315,6 +323,12 @@ spec:
                       format: int32
                       type: integer
                     fail:
+                      format: int32
+                      type: integer
+                    info:
+                      description: |-
+                        Info counts informational checks (CO status INFO). Excluded from the
+                        score like Manual; still reported so Overview totals match Results.
                       format: int32
                       type: integer
                     inconsistent:
@@ -338,6 +352,7 @@ spec:
                   required:
                   - error
                   - fail
+                  - info
                   - inconsistent
                   - manual
                   - name

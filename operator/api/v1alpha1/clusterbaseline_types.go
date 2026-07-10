@@ -111,7 +111,10 @@ type ResultCounts struct {
 	Pass   int32 `json:"pass"`
 	Fail   int32 `json:"fail"`
 	Manual int32 `json:"manual"`
-	Error  int32 `json:"error"`
+	// Info counts informational checks (CO status INFO). Excluded from the
+	// score like Manual; still reported so Overview totals match Results.
+	Info  int32 `json:"info"`
+	Error int32 `json:"error"`
 	// Inconsistent counts checks whose per-node results disagree across a
 	// MachineConfigPool (compliance operator status INCONSISTENT). Excluded from
 	// the score like Manual/Error; it flags a discrepancy that needs review.
@@ -151,8 +154,9 @@ type ScoreSnapshot struct {
 type ClusterBaselineStatus struct {
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
-	// score is pass/(pass+fail) across all profiles, 0-100. MANUAL and
-	// NOT-APPLICABLE results are excluded; their counts are reported per profile.
+	// score is pass/(pass+fail) across all profiles, 0-100. MANUAL, INFO,
+	// ERROR, INCONSISTENT, and NOT-APPLICABLE are excluded from the score;
+	// their counts are still reported per profile.
 	// +optional
 	Score *int32 `json:"score,omitempty"`
 	// +optional

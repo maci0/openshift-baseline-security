@@ -298,6 +298,7 @@ describe('aggregateCounts', () => {
     pass: number,
     fail: number,
     manual = 0,
+    info = 0,
     error = 0,
     inconsistent = 0,
     notApplicable = 0,
@@ -305,15 +306,16 @@ describe('aggregateCounts', () => {
     pass,
     fail,
     manual,
+    info,
     error,
     inconsistent,
     notApplicable,
   });
   it('sums profiles and tailored profiles together', () => {
-    expect(aggregateCounts(c(10, 2, 1, 0, 5), c(40, 8, 3, 0, 6))).toEqual(c(50, 10, 4, 0, 11));
+    expect(aggregateCounts(c(10, 2, 1, 4, 0, 5), c(40, 8, 3, 1, 0, 6))).toEqual(c(50, 10, 4, 5, 0, 11));
   });
   it('returns zeros for no groups', () => {
-    expect(aggregateCounts()).toEqual(c(0, 0, 0, 0, 0, 0));
+    expect(aggregateCounts()).toEqual(c(0, 0, 0, 0, 0, 0, 0));
   });
   it('score composition matches: tailored-only results still populate totals', () => {
     // regular profile empty, tailored has results -> totals non-zero
@@ -322,7 +324,7 @@ describe('aggregateCounts', () => {
   });
   it('treats missing count fields from older persisted status as zero', () => {
     const totals = aggregateCounts({ pass: 1, fail: 2 } as ResultCounts);
-    expect(totals).toEqual(c(1, 2, 0, 0, 0, 0));
+    expect(totals).toEqual(c(1, 2, 0, 0, 0, 0, 0));
   });
 });
 

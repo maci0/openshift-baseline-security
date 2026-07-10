@@ -117,10 +117,12 @@ const Overview: React.FC<{ baseline?: ClusterBaseline; loaded: boolean }> = ({
   const orange = 'var(--pf-t--global--icon--color--status--warning--default)';
   const purple = 'var(--pf-t--global--icon--color--status--custom--default)';
   const grey = 'var(--pf-t--global--icon--color--disabled)';
+  const blue = 'var(--pf-t--global--icon--color--status--info--default)';
   const segments = [
     { label: t('Pass'), value: totals.pass, color: green },
     { label: t('Fail'), value: totals.fail, color: red },
     { label: t('Manual'), value: totals.manual, color: orange },
+    { label: t('Info'), value: totals.info, color: blue },
     { label: t('Inconsistent'), value: totals.inconsistent, color: purple },
     { label: t('Error'), value: totals.error, color: red },
     { label: t('Not applicable'), value: totals.notApplicable, color: grey },
@@ -231,7 +233,8 @@ const Overview: React.FC<{ baseline?: ClusterBaseline; loaded: boolean }> = ({
               <DescriptionListGroup>
                 <DescriptionListTerm>{t('Schedule')}</DescriptionListTerm>
                 <DescriptionListDescription>
-                  <code>{baseline.spec.schedule ?? '—'}</code>
+                  {/* Empty schedule is defaulted by the operator to 0 1 * * *. */}
+                  <code>{baseline.spec.schedule || '0 1 * * *'}</code>
                 </DescriptionListDescription>
               </DescriptionListGroup>
               <DescriptionListGroup>
@@ -275,11 +278,12 @@ const Overview: React.FC<{ baseline?: ClusterBaseline; loaded: boolean }> = ({
         )}
         {(baseline.status?.profiles ?? []).map((p) => {
           // Zero-fill missing fields from older status so scores never go NaN.
+          // Floor to match the operator's integer score (pass*100/(pass+fail)).
           const pass = p.pass ?? 0;
           const fail = p.fail ?? 0;
           const manual = p.manual ?? 0;
           const denom = pass + fail;
-          const pScore = denom > 0 ? Math.round((pass * 100) / denom) : null;
+          const pScore = denom > 0 ? Math.floor((pass * 100) / denom) : null;
           return (
             <Card key={p.key}>
               <CardHeader
@@ -326,7 +330,7 @@ const Overview: React.FC<{ baseline?: ClusterBaseline; loaded: boolean }> = ({
           const fail = tp.fail ?? 0;
           const manual = tp.manual ?? 0;
           const denom = pass + fail;
-          const pScore = denom > 0 ? Math.round((pass * 100) / denom) : null;
+          const pScore = denom > 0 ? Math.floor((pass * 100) / denom) : null;
           return (
             <Card key={`tp-${tp.name}`}>
               <CardHeader

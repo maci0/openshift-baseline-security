@@ -116,14 +116,23 @@ func TestCheckScanStorageTailoredPVC(t *testing.T) {
 		},
 		Status: corev1.PersistentVolumeClaimStatus{Phase: corev1.ClaimPending},
 	}
+	// Short tailored name "a" must not prefix-match foreign PVC "anything".
+	foreign := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "anything",
+			Namespace:         complianceNamespace,
+			CreationTimestamp: metav1.NewTime(time.Now().Add(-10 * time.Minute)),
+		},
+		Status: corev1.PersistentVolumeClaimStatus{Phase: corev1.ClaimPending},
+	}
 	r := &ClusterBaselineReconciler{
-		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(pvc).Build(),
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(pvc, foreign).Build(),
 		Scheme: scheme,
 	}
 	cb := &baselinev1alpha1.ClusterBaseline{
 		Spec: baselinev1alpha1.ClusterBaselineSpec{
 			Profiles:         []baselinev1alpha1.ProfileKey{"cis"},
-			TailoredProfiles: []string{"custom"},
+			TailoredProfiles: []string{"custom", "a"},
 		},
 	}
 	if err := r.checkScanStorage(context.Background(), cb); err != nil {
@@ -132,5 +141,8 @@ func TestCheckScanStorageTailoredPVC(t *testing.T) {
 	c := meta.FindStatusCondition(cb.Status.Conditions, "ScanStorageReady")
 	if c == nil || c.Status != metav1.ConditionFalse {
 		t.Fatalf("tailored Pending PVC should flag ScanStorageReady=False, got %+v", c)
+	}
+	if strings.Contains(c.Message, "anything") {
+		t.Fatalf("short tailored name must not match foreign PVC: %q", c.Message)
 	}
 }

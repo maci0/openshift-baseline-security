@@ -175,7 +175,9 @@ func FuzzProfileKeyFromSuite(f *testing.F) {
 	}
 	f.Fuzz(func(t *testing.T, suite string) {
 		key, ok := profileKeyFromSuite(suite)
-		wantOK := strings.HasPrefix(suite, "baseline-") && len(suite) > len("baseline-")
+		// Must match production: reject empty remainder and tailored "tp-" prefix.
+		rest, has := strings.CutPrefix(suite, "baseline-")
+		wantOK := has && rest != "" && !strings.HasPrefix(rest, "tp-")
 		if ok != wantOK {
 			t.Fatalf("ok = %v want %v for %q", ok, wantOK, suite)
 		}
