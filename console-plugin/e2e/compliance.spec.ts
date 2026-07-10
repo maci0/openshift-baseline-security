@@ -1,16 +1,5 @@
-import { test, expect, Page } from '@playwright/test';
-import * as path from 'path';
-
-// Screenshots double as the docs assets; SCREENSHOT_DIR points at docs/screenshots.
-const SHOT_DIR = process.env.SCREENSHOT_DIR ?? path.resolve(__dirname, '../../docs/screenshots');
-const shot = (page: Page, name: string) =>
-  page.screenshot({ path: path.join(SHOT_DIR, `${name}.png`) });
-
-const goto = async (page: Page, subpath: string) => {
-  await page.goto(`/baseline-security${subpath}`, { waitUntil: 'networkidle' });
-  // The compliance page header is present on every tab.
-  await expect(page.getByRole('heading', { name: 'Compliance', exact: true })).toBeVisible();
-};
+import { test, expect } from '@playwright/test';
+import { gotoTab as goto, shot } from './helpers';
 
 test.describe('Baseline Security console plugin', () => {
   test('Overview shows the compliance score and profile breakdown', async ({ page }) => {

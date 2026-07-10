@@ -1,10 +1,7 @@
-import { test, expect, Page } from '@playwright/test';
-import * as path from 'path';
+import { test, expect } from '@playwright/test';
+import { shot } from './helpers';
 
 // Extra screenshots of modals / states not covered by the assertion suite.
-const SHOT_DIR = process.env.SCREENSHOT_DIR ?? path.resolve(__dirname, '../../docs/screenshots');
-const shot = (page: Page, name: string) =>
-  page.screenshot({ path: path.join(SHOT_DIR, `${name}.png`) });
 
 test.describe('Baseline Security screenshots', () => {
   test('check result detail modal', async ({ page }) => {

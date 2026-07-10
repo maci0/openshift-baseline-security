@@ -12,6 +12,7 @@ import (
 	"time"
 
 	baselinev1alpha1 "github.com/maci0/baseline-security-operator/api/v1alpha1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -22,6 +23,7 @@ const (
 	complianceNamespace = "openshift-compliance"
 	pluginNS            = "openshift-baseline-security"
 	pluginName          = "baseline-security-console-plugin"
+	suiteLabel          = "compliance.openshift.io/suite"
 )
 
 var (
@@ -30,7 +32,44 @@ var (
 	bindingGVK       = schema.GroupVersionKind{Group: "compliance.openshift.io", Version: "v1alpha1", Kind: "ScanSettingBinding"}
 	scanSettingGVK   = schema.GroupVersionKind{Group: "compliance.openshift.io", Version: "v1alpha1", Kind: "ScanSetting"}
 	scanGVK          = schema.GroupVersionKind{Group: "compliance.openshift.io", Version: "v1alpha1", Kind: "ComplianceScan"}
+	checkResultGVK   = schema.GroupVersionKind{Group: "compliance.openshift.io", Version: "v1alpha1", Kind: "ComplianceCheckResult"}
+	remediationGVK   = schema.GroupVersionKind{Group: "compliance.openshift.io", Version: "v1alpha1", Kind: "ComplianceRemediation"}
+	tailoredGVK      = schema.GroupVersionKind{Group: "compliance.openshift.io", Version: "v1alpha1", Kind: "TailoredProfile"}
 )
+
+// ownedSuites returns the suite labels this baseline owns: "baseline-<profile>"
+// for built-ins and "baseline-tp-<name>" for tailored profiles.
+func ownedSuites(cb *baselinev1alpha1.ClusterBaseline) map[string]bool {
+	s := map[string]bool{}
+	for _, k := range cb.Spec.Profiles {
+		s["baseline-"+string(k)] = true
+	}
+	for _, n := range cb.Spec.TailoredProfiles {
+		s["baseline-tp-"+n] = true
+	}
+	return s
+}
+
+// countOwnedResults tallies live ComplianceCheckResults by status across every
+// suite this baseline owns: the ground truth the operator's status should match.
+func countOwnedResults(ctx context.Context, c client.Client, cb *baselinev1alpha1.ClusterBaseline) (map[string]int, error) {
+	list := &unstructured.UnstructuredList{}
+	list.SetGroupVersionKind(checkResultGVK.GroupVersion().WithKind(checkResultGVK.Kind + "List"))
+	if err := c.List(ctx, list, client.InNamespace(complianceNamespace)); err != nil {
+		return nil, err
+	}
+	owned := ownedSuites(cb)
+	counts := map[string]int{}
+	for i := range list.Items {
+		suite := list.Items[i].GetLabels()[suiteLabel]
+		if !owned[suite] {
+			continue
+		}
+		status, _, _ := unstructured.NestedString(list.Items[i].Object, "status")
+		counts[status]++
+	}
+	return counts, nil
+}
 
 // newClient builds a controller-runtime client from the ambient kubeconfig with
 // the core + ClusterBaseline schemes registered.
