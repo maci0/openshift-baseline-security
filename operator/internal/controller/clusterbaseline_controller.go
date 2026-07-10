@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -180,9 +181,11 @@ func matchesAnyProfile(name string, profiles map[string]bool) bool {
 
 // profileKeyFromSuite inverts bindingName ("baseline-<key>").
 // Requires a non-empty key after the prefix so "baseline-" alone is rejected.
+// Tailored suites ("baseline-tp-<name>") are excluded so they are only handled
+// by tailoredNameFromSuite.
 func profileKeyFromSuite(suite string) (baselinev1alpha1.ProfileKey, bool) {
 	p, ok := strings.CutPrefix(suite, "baseline-")
-	if !ok || p == "" {
+	if !ok || p == "" || strings.HasPrefix(p, "tp-") {
 		return "", false
 	}
 	return baselinev1alpha1.ProfileKey(p), true
@@ -275,8 +278,11 @@ func setRollupConditions(cb *baselinev1alpha1.ClusterBaseline) {
 		setCond(cb, "Available", metav1.ConditionFalse, "NotReady", "waiting for compliance operator and scan configuration")
 	}
 	// Degraded: persistent failures that are not mere installation progress:
-	// scan result storage wedged, or the plugin down past its grace period.
+	// invalid schedule, scan result storage wedged, or the plugin down past
+	// its grace period.
 	switch {
+	case scan != nil && scan.Status == metav1.ConditionFalse && scan.Reason == "InvalidSchedule":
+		setCond(cb, "Degraded", metav1.ConditionTrue, scan.Reason, scan.Message)
 	case storage != nil && storage.Status == metav1.ConditionFalse:
 		setCond(cb, "Degraded", metav1.ConditionTrue, storage.Reason, storage.Message)
 	case plugin != nil && plugin.Status == metav1.ConditionFalse && plugin.Reason == "Unavailable":
@@ -377,6 +383,7 @@ func (r *ClusterBaselineReconciler) findComplianceOperatorCSV(ctx context.Contex
 		return nil, err
 	}
 	var fallback *unstructured.Unstructured
+	var succeeded *unstructured.Unstructured
 	for i := range csvs.Items {
 		csv := &csvs.Items[i]
 		if !strings.HasPrefix(csv.GetName(), "compliance-operator.v") {
@@ -384,13 +391,76 @@ func (r *ClusterBaselineReconciler) findComplianceOperatorCSV(ctx context.Contex
 		}
 		phase, _, _ := unstructured.NestedString(csv.Object, "status", "phase")
 		if phase == "Succeeded" {
-			return csv.DeepCopy(), nil
+			if succeeded == nil || compareComplianceCSVVersion(csv.GetName(), succeeded.GetName()) > 0 {
+				succeeded = csv.DeepCopy()
+			}
+			continue
 		}
-		if fallback == nil {
+		if fallback == nil || compareComplianceCSVVersion(csv.GetName(), fallback.GetName()) > 0 {
 			fallback = csv.DeepCopy()
 		}
 	}
+	if succeeded != nil {
+		return succeeded, nil
+	}
 	return fallback, nil
+}
+
+func compareComplianceCSVVersion(a, b string) int {
+	av, aok := complianceCSVVersion(a)
+	bv, bok := complianceCSVVersion(b)
+	switch {
+	case aok && bok:
+		return compareVersionParts(av, bv)
+	case aok:
+		return 1
+	case bok:
+		return -1
+	default:
+		return strings.Compare(a, b)
+	}
+}
+
+func complianceCSVVersion(name string) ([]int, bool) {
+	v, ok := strings.CutPrefix(name, "compliance-operator.v")
+	if !ok || v == "" {
+		return nil, false
+	}
+	core, _, _ := strings.Cut(v, "-")
+	core, _, _ = strings.Cut(core, "+")
+	parts := strings.Split(core, ".")
+	out := make([]int, len(parts))
+	for i, p := range parts {
+		if p == "" {
+			return nil, false
+		}
+		n, err := strconv.Atoi(p)
+		if err != nil {
+			return nil, false
+		}
+		out[i] = n
+	}
+	return out, true
+}
+
+func compareVersionParts(a, b []int) int {
+	n := max(len(a), len(b))
+	for i := range n {
+		var av, bv int
+		if i < len(a) {
+			av = a[i]
+		}
+		if i < len(b) {
+			bv = b[i]
+		}
+		if av > bv {
+			return 1
+		}
+		if av < bv {
+			return -1
+		}
+	}
+	return 0
 }
 
 func (r *ClusterBaselineReconciler) setComplianceOperatorReady(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline, sub *unstructured.Unstructured) error {
@@ -716,8 +786,9 @@ func relatedObjects(cb *baselinev1alpha1.ClusterBaseline) []baselinev1alpha1.Obj
 		{Group: "apps", Resource: "deployments", Name: pluginName, Namespace: pluginNS},
 		{Group: "console.openshift.io", Resource: "consoleplugins", Name: pluginName},
 	}
-	names := make([]string, 0, len(ownedSuites(cb)))
-	for name := range ownedSuites(cb) {
+	suites := ownedSuites(cb)
+	names := make([]string, 0, len(suites))
+	for name := range suites {
 		names = append(names, name)
 	}
 	slices.Sort(names) // deterministic order so status does not flap

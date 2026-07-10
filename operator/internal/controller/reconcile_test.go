@@ -466,6 +466,63 @@ func TestEnsureComplianceOperatorAdoptsExistingCSV(t *testing.T) {
 	}
 }
 
+func TestFindComplianceOperatorCSVChoosesNewestSucceeded(t *testing.T) {
+	scheme := testScheme(t)
+	oldSucceeded := u(csvGVK)
+	oldSucceeded.SetName("compliance-operator.v1.9.0")
+	oldSucceeded.SetNamespace("openshift-operators")
+	_ = unstructured.SetNestedField(oldSucceeded.Object, "Succeeded", "status", "phase")
+	newSucceeded := u(csvGVK)
+	newSucceeded.SetName("compliance-operator.v1.10.0")
+	newSucceeded.SetNamespace("openshift-operators")
+	_ = unstructured.SetNestedField(newSucceeded.Object, "Succeeded", "status", "phase")
+	newerInstalling := u(csvGVK)
+	newerInstalling.SetName("compliance-operator.v1.11.0")
+	newerInstalling.SetNamespace("openshift-operators")
+	_ = unstructured.SetNestedField(newerInstalling.Object, "Installing", "status", "phase")
+	foreign := u(csvGVK)
+	foreign.SetName("other-operator.v9.9.9")
+	foreign.SetNamespace("openshift-operators")
+	_ = unstructured.SetNestedField(foreign.Object, "Succeeded", "status", "phase")
+
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).
+			WithObjects(oldSucceeded, newerInstalling, foreign, newSucceeded).
+			Build(),
+		Scheme: scheme,
+	}
+	got, err := r.findComplianceOperatorCSV(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil || got.GetName() != "compliance-operator.v1.10.0" {
+		t.Fatalf("selected CSV = %v, want compliance-operator.v1.10.0", got)
+	}
+}
+
+func TestFindComplianceOperatorCSVFallsBackToNewestNonSucceeded(t *testing.T) {
+	scheme := testScheme(t)
+	older := u(csvGVK)
+	older.SetName("compliance-operator.v1.9.0")
+	older.SetNamespace("openshift-operators")
+	_ = unstructured.SetNestedField(older.Object, "Installing", "status", "phase")
+	newer := u(csvGVK)
+	newer.SetName("compliance-operator.v1.10.0")
+	newer.SetNamespace("openshift-operators")
+	_ = unstructured.SetNestedField(newer.Object, "Pending", "status", "phase")
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(older, newer).Build(),
+		Scheme: scheme,
+	}
+	got, err := r.findComplianceOperatorCSV(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil || got.GetName() != "compliance-operator.v1.10.0" {
+		t.Fatalf("selected CSV = %v, want compliance-operator.v1.10.0", got)
+	}
+}
+
 // Full happy path: finalizer present, CO subscription installed with a
 // Succeeded CSV, console present, plugin image set. Reconcile must persist
 // status (score, conditions incl. rollups) and schedule a requeue.

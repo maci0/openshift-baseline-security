@@ -107,6 +107,16 @@ func TestSetRollupConditions(t *testing.T) {
 	if c := meta.FindStatusCondition(cb.Status.Conditions, "Degraded"); c == nil || c.Status != metav1.ConditionFalse {
 		t.Fatalf("Degraded must clear: %+v", c)
 	}
+
+	// Invalid cron leaves Available=False and Degraded=True so operators notice.
+	setCond(cb, "ScanConfigured", metav1.ConditionFalse, "InvalidSchedule", "bad cron")
+	setRollupConditions(cb)
+	if c := meta.FindStatusCondition(cb.Status.Conditions, "Degraded"); c == nil || c.Status != metav1.ConditionTrue || c.Reason != "InvalidSchedule" {
+		t.Fatalf("Degraded for invalid schedule: %+v", c)
+	}
+	if c := meta.FindStatusCondition(cb.Status.Conditions, "Available"); c == nil || c.Status != metav1.ConditionFalse {
+		t.Fatalf("Available must be False for invalid schedule: %+v", c)
+	}
 }
 
 func TestConditionProgressing(t *testing.T) {

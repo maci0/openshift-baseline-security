@@ -15,15 +15,15 @@ silently turn it into a mean.
 - [x] Single profile: pass/fail ratio correct (`TestScore`, `FuzzScore`).
 - [x] Multi-group pooling: built-in + tailored counted together
       (`TestAggregateStatusWithTailored`, jest `aggregateCounts` composition).
-- [ ] **Two built-in benchmarks pooled**: enable CIS + STIG, assert
+- [x] **Two built-in benchmarks pooled**: enable CIS + STIG, assert
       `Status.Score` equals combined `PASS/(PASS+FAIL)`, not the mean of the
-      two per-profile scores. (The exact question that prompted this plan.)
+      two per-profile scores (`TestAggregateStatusPoolsMultipleBenchmarks`).
 - [ ] **Large-benchmark dominance**: a profile with many checks outweighs a
       small one in the pooled score; assert per-profile cards still show each
       profile's own ratio independently.
 - [x] MANUAL/ERROR/NOT-APPLICABLE excluded from denominator (`TestScore`).
-- [ ] **All-MANUAL scan**: `pass+fail==0` → `Status.Score==nil`, but
-      `LastScanTime` is still set and the Overview item shows "Not scanned".
+- [x] **All-MANUAL scan**: `pass+fail==0` → `Status.Score==nil`, with
+      per-profile counts preserved (`TestAggregateStatusAllManualNilScore`).
 - [ ] **Zero owned results** (scans exist but none match a baseline suite) →
       score nil, no panic.
 - [x] Stale score cleared when CRDs vanish (`TestAggregateStatusClearsStaleScore`,
@@ -45,10 +45,9 @@ per-node annotation) when nodes disagree.
 - [x] **INCONSISTENT counted, not silently dropped** — the original tally had no
       case, hiding 86 checks from the score (`TestAggregateStatus` now asserts
       the Inconsistent bucket; donut has an Inconsistent slice).
-- [ ] **Inconsistent excluded from the score denominator** (like Manual): score
+- [x] **Inconsistent excluded from the score denominator** (like Manual): score
       unchanged by discrepancies, but the count surfaces for review. Add an
-      assertion that `score` ignores INCONSISTENT (currently only counts are
-      asserted).
+      assertion that `score` ignores INCONSISTENT (`TestAggregateStatus`).
 - [ ] **All-nodes-agree case**: same rule PASS on every node → status PASS, not
       INCONSISTENT (guards against mislabeling uniform results).
 - [ ] **Master-only vs worker MCP**: control-plane-file rules are INCONSISTENT
@@ -100,8 +99,9 @@ per-node annotation) when nodes disagree.
       `TestEnsureComplianceOperatorAdoptsExistingCSV`).
 - [ ] **CSV present but not yet Succeeded** (Installing/Pending): condition
       Progressing, version empty, no scan config attempted yet.
-- [ ] **Two CSV versions present** (upgrade in flight): newest Succeeded wins,
-      else newest overall (matches `findComplianceOperatorCSV` fallback).
+- [x] **Two CSV versions present** (upgrade in flight): newest Succeeded wins,
+      else newest overall (`TestFindComplianceOperatorCSVChoosesNewestSucceeded`,
+      `TestFindComplianceOperatorCSVFallsBackToNewestNonSucceeded`).
 - [ ] **Subscription exists but CSV never appears** (stuck install): surfaces a
       bounded Progressing/Degraded, no infinite fast requeue.
 
@@ -193,9 +193,9 @@ per-node annotation) when nodes disagree.
       the manifest. Rolling `deploy/console` forces a refresh (hit live; the new
       donut slice only appeared after `oc rollout restart deploy/console`).
       Document in the install guide; not a code bug.
-- [ ] **CRD field added across versions**: upgrading the operator applies the
-      new CRD (adds `inconsistent`); existing ClusterBaseline status without the
-      field defaults to 0, no reconcile error.
+- [x] **CRD field added across versions**: the console treats an older
+      ClusterBaseline status without `inconsistent` as zero
+      (`aggregateCounts` missing-field regression).
 - [ ] **OLM `replaces` chain**: 0.2.1 replaces 0.2.0 cleanly; bundle CRD is not
       stale vs `config/crd` (CI `make manifests && git diff --exit-code`).
 - [ ] **Image digest pinning**: `RELATED_IMAGE_CONSOLE_PLUGIN` @sha256 change

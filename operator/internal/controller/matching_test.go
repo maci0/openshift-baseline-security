@@ -43,7 +43,8 @@ func TestProfileKeyFromSuite(t *testing.T) {
 	}{
 		{"baseline-cis", "cis", true},
 		{"baseline-pci-dss", "pci-dss", true},
-		{"baseline-", "", false}, // prefix alone is not a key
+		{"baseline-", "", false},          // prefix alone is not a key
+		{"baseline-tp-custom", "", false}, // tailored suites are not profile keys
 		{"other-suite", "", false},
 		{"", "", false},
 		{"Baseline-cis", "", false}, // case-sensitive

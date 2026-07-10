@@ -35,15 +35,17 @@ export const errorMessage = (err: unknown): string | null => {
 
 // Sum result counts across profiles (built-in + tailored) for the composition
 // donut, so its slices match the score, which includes all of them.
+const count = (n: number | undefined): number => n ?? 0;
+
 export const aggregateCounts = (...groups: ResultCounts[]): ResultCounts =>
   groups.reduce(
     (a, g) => ({
-      pass: a.pass + g.pass,
-      fail: a.fail + g.fail,
-      manual: a.manual + g.manual,
-      error: a.error + g.error,
-      inconsistent: a.inconsistent + g.inconsistent,
-      notApplicable: a.notApplicable + g.notApplicable,
+      pass: a.pass + count(g.pass),
+      fail: a.fail + count(g.fail),
+      manual: a.manual + count(g.manual),
+      error: a.error + count(g.error),
+      inconsistent: a.inconsistent + count(g.inconsistent),
+      notApplicable: a.notApplicable + count(g.notApplicable),
     }),
     { pass: 0, fail: 0, manual: 0, error: 0, inconsistent: 0, notApplicable: 0 },
   );

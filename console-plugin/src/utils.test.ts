@@ -14,7 +14,7 @@ import {
   scoreColor,
   toggledProfiles,
 } from './utils';
-import { ClusterBaseline, ComplianceCheckResult, ComplianceRemediation } from './models';
+import { ClusterBaseline, ComplianceCheckResult, ComplianceRemediation, ResultCounts } from './models';
 
 const result = (name: string, description?: string): ComplianceCheckResult =>
   ({ metadata: { name, namespace: 'ns' }, description }) as ComplianceCheckResult;
@@ -319,6 +319,10 @@ describe('aggregateCounts', () => {
     // regular profile empty, tailored has results -> totals non-zero
     const totals = aggregateCounts(c(0, 0), c(2, 1));
     expect(totals.pass + totals.fail).toBe(3);
+  });
+  it('treats missing count fields from older persisted status as zero', () => {
+    const totals = aggregateCounts({ pass: 1, fail: 2 } as ResultCounts);
+    expect(totals).toEqual(c(1, 2, 0, 0, 0, 0));
   });
 });
 

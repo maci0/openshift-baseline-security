@@ -115,15 +115,20 @@ export type ClusterBaseline = {
 };
 
 /**
- * Display key encoded in a CO object's suite label. Built-in profiles use
- * "baseline-<key>"; tailored profiles use "baseline-tp-<name>" (mirroring the
- * operator's binding names). Returns undefined when the label is not ours.
+ * Display key encoded in a CO object's suite label for built-in profiles
+ * ("baseline-<key>"). Tailored suites ("baseline-tp-<name>") are excluded so
+ * callers use suiteTailoredName instead. Returns undefined when not a built-in
+ * baseline suite.
  */
 export const suiteProfileKey = (
   labels: Record<string, string> | undefined,
 ): string | undefined => {
   const suite = labels?.['compliance.openshift.io/suite'];
-  return suite?.startsWith('baseline-') ? suite.slice('baseline-'.length) : undefined;
+  if (!suite?.startsWith('baseline-') || suite.startsWith('baseline-tp-')) {
+    return undefined;
+  }
+  const key = suite.slice('baseline-'.length);
+  return key || undefined;
 };
 
 /** TailoredProfile name for a "baseline-tp-<name>" suite, else undefined. */

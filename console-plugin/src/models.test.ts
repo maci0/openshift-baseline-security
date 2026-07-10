@@ -1,4 +1,4 @@
-import { isOwnedByBaseline, suiteTailoredName } from './models';
+import { isOwnedByBaseline, suiteProfileKey, suiteTailoredName } from './models';
 
 describe('isOwnedByBaseline', () => {
   it('matches suite label to selected profiles', () => {
@@ -50,11 +50,19 @@ describe('tailored suite ownership', () => {
     expect(suiteTailoredName(lbl('baseline-cis'))).toBeUndefined();
     expect(suiteTailoredName(undefined)).toBeUndefined();
   });
+  it('suiteProfileKey ignores tailored suites', () => {
+    expect(suiteProfileKey(lbl('baseline-cis'))).toBe('cis');
+    expect(suiteProfileKey(lbl('baseline-tp-custom'))).toBeUndefined();
+    expect(suiteProfileKey(lbl('baseline-'))).toBeUndefined();
+    expect(suiteProfileKey(undefined)).toBeUndefined();
+  });
   it('isOwnedByBaseline recognizes bound tailored profiles', () => {
     expect(isOwnedByBaseline(lbl('baseline-tp-custom'), ['cis'], ['custom'])).toBe(true);
     expect(isOwnedByBaseline(lbl('baseline-tp-custom'), ['cis'], [])).toBe(false);
     expect(isOwnedByBaseline(lbl('baseline-tp-custom'), ['cis'], undefined)).toBe(false);
     // built-in still works, and a tailored suite is not matched as a profile
     expect(isOwnedByBaseline(lbl('baseline-cis'), ['cis'], ['custom'])).toBe(true);
+    // tailored suite must not match via profiles even if profiles contains "tp-custom"
+    expect(isOwnedByBaseline(lbl('baseline-tp-custom'), ['tp-custom'], undefined)).toBe(false);
   });
 });
