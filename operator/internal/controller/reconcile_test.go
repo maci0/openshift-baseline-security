@@ -167,6 +167,93 @@ func TestEnsureComplianceOperatorManualStillChecksExisting(t *testing.T) {
 	}
 }
 
+// TestEnsureComplianceOperatorSyncsCatalogSource: createIfMissing only writes
+// the Subscription once; a later change to spec.complianceCatalogSource must
+// still update spec.source (OKD / disconnected catalog moves).
+func TestEnsureComplianceOperatorSyncsCatalogSource(t *testing.T) {
+	scheme := testScheme(t)
+	sub := u(subscriptionGVK)
+	sub.SetName("compliance-operator")
+	sub.SetNamespace(complianceNamespace)
+	sub.Object["spec"] = map[string]any{
+		"name": "compliance-operator", "channel": "stable",
+		"source": "redhat-operators", "sourceNamespace": "openshift-marketplace",
+	}
+	_ = unstructured.SetNestedField(sub.Object, "compliance-operator.v1.0.0", "status", "installedCSV")
+	csv := u(csvGVK)
+	csv.SetName("compliance-operator.v1.0.0")
+	csv.SetNamespace(complianceNamespace)
+	_ = unstructured.SetNestedField(csv.Object, "Succeeded", "status", "phase")
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(sub, csv).Build(),
+		Scheme: scheme,
+	}
+	cb := newCB("cis")
+	cb.Spec.ComplianceCatalogSource = "community-operators"
+	if err := r.ensureComplianceOperator(context.Background(), cb); err != nil {
+		t.Fatal(err)
+	}
+	got := u(subscriptionGVK)
+	if err := r.Get(context.Background(), types.NamespacedName{
+		Namespace: complianceNamespace, Name: "compliance-operator",
+	}, got); err != nil {
+		t.Fatal(err)
+	}
+	source, _, _ := unstructured.NestedString(got.Object, "spec", "source")
+	if source != "community-operators" {
+		t.Fatalf("subscription source = %q, want community-operators", source)
+	}
+}
+
+// Manual install must not rewrite a pre-existing Subscription's catalog source.
+func TestEnsureComplianceOperatorManualDoesNotRewriteSource(t *testing.T) {
+	scheme := testScheme(t)
+	sub := u(subscriptionGVK)
+	sub.SetName("compliance-operator")
+	sub.SetNamespace(complianceNamespace)
+	sub.Object["spec"] = map[string]any{
+		"name": "compliance-operator", "channel": "stable",
+		"source": "my-private-catalog", "sourceNamespace": "openshift-marketplace",
+	}
+	_ = unstructured.SetNestedField(sub.Object, "compliance-operator.v1.0.0", "status", "installedCSV")
+	csv := u(csvGVK)
+	csv.SetName("compliance-operator.v1.0.0")
+	csv.SetNamespace(complianceNamespace)
+	_ = unstructured.SetNestedField(csv.Object, "Succeeded", "status", "phase")
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(sub, csv).Build(),
+		Scheme: scheme,
+	}
+	cb := newCB("cis")
+	cb.Spec.InstallComplianceOperator = baselinev1alpha1.InstallManual
+	cb.Spec.ComplianceCatalogSource = "community-operators"
+	if err := r.ensureComplianceOperator(context.Background(), cb); err != nil {
+		t.Fatal(err)
+	}
+	got := u(subscriptionGVK)
+	if err := r.Get(context.Background(), types.NamespacedName{
+		Namespace: complianceNamespace, Name: "compliance-operator",
+	}, got); err != nil {
+		t.Fatal(err)
+	}
+	source, _, _ := unstructured.NestedString(got.Object, "spec", "source")
+	if source != "my-private-catalog" {
+		t.Fatalf("Manual must leave source alone, got %q", source)
+	}
+}
+
+func TestDesiredComplianceCatalogSource(t *testing.T) {
+	if got := desiredComplianceCatalogSource(&baselinev1alpha1.ClusterBaseline{}); got != "redhat-operators" {
+		t.Fatalf("default = %q", got)
+	}
+	cb := &baselinev1alpha1.ClusterBaseline{
+		Spec: baselinev1alpha1.ClusterBaselineSpec{ComplianceCatalogSource: "okd-operators"},
+	}
+	if got := desiredComplianceCatalogSource(cb); got != "okd-operators" {
+		t.Fatalf("override = %q", got)
+	}
+}
+
 func TestEnsureScanConfigCreatesAndPrunes(t *testing.T) {
 	scheme := testScheme(t)
 	scheme.AddKnownTypeWithName(scanSettingGVK, &unstructured.Unstructured{})

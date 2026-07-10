@@ -15,6 +15,21 @@ import (
 	baselinev1alpha1 "github.com/maci0/baseline-security-operator/api/v1alpha1"
 )
 
+func TestSetCondEmptyReasonDefaults(t *testing.T) {
+	cb := &baselinev1alpha1.ClusterBaseline{}
+	setCond(cb, "ScanStorageReady", metav1.ConditionFalse, "", "pending")
+	c := meta.FindStatusCondition(cb.Status.Conditions, "ScanStorageReady")
+	if c == nil || c.Reason != "Unknown" {
+		t.Fatalf("empty reason must become Unknown, got %+v", c)
+	}
+	// Rollup must not copy an empty storage reason into Degraded (admission).
+	setRollupConditions(cb)
+	d := meta.FindStatusCondition(cb.Status.Conditions, "Degraded")
+	if d == nil || d.Status != metav1.ConditionTrue || d.Reason == "" {
+		t.Fatalf("Degraded must have non-empty reason, got %+v", d)
+	}
+}
+
 func TestSetCond(t *testing.T) {
 	cb := &baselinev1alpha1.ClusterBaseline{}
 	cb.Generation = 7

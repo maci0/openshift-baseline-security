@@ -107,7 +107,7 @@ func (r *ClusterBaselineReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	if err := r.reconcileOwned(ctx, cb); err != nil {
 		// Persist a Degraded condition (best-effort) so a persistently failing
 		// reconcile is visible on the CR instead of leaving stale healthy status.
-		cb.Status.History = clampHistory(cb.Status.History, historyMax)
+		sanitizeStatusForUpdate(cb)
 		setRollupConditions(cb)
 		setCond(cb, "Degraded", metav1.ConditionTrue, "ReconcileError", err.Error())
 		if serr := r.Status().Update(ctx, cb); serr != nil {
@@ -116,7 +116,7 @@ func (r *ClusterBaselineReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return ctrl.Result{}, err
 	}
 	// OpenShift-style rollup conditions (Available / Progressing / Degraded).
-	cb.Status.History = clampHistory(cb.Status.History, historyMax)
+	sanitizeStatusForUpdate(cb)
 	setRollupConditions(cb)
 	if err := r.Status().Update(ctx, cb); err != nil {
 		return ctrl.Result{}, err
@@ -265,14 +265,47 @@ func appendHistoryRing(hist []baselinev1alpha1.ScoreSnapshot, t metav1.Time, s i
 	return clampHistory(hist, max)
 }
 
-// clampHistory trims history to the CRD MaxItems bound. Without this, a status
-// already over the limit (hand-edit, old bug) makes every Status().Update fail
+// clampHistory trims history to the CRD MaxItems bound and clamps each score
+// into [0,100]. Without this, a status already over the limit or with an
+// out-of-range score (hand-edit, old bug) makes every Status().Update fail
 // admission and freezes reconciliation feedback.
 func clampHistory(hist []baselinev1alpha1.ScoreSnapshot, max int) []baselinev1alpha1.ScoreSnapshot {
-	if max <= 0 || len(hist) <= max {
-		return hist
+	if max > 0 && len(hist) > max {
+		hist = append([]baselinev1alpha1.ScoreSnapshot(nil), hist[len(hist)-max:]...)
 	}
-	return append([]baselinev1alpha1.ScoreSnapshot(nil), hist[len(hist)-max:]...)
+	for i := range hist {
+		if hist[i].Score < 0 {
+			hist[i].Score = 0
+		} else if hist[i].Score > 100 {
+			hist[i].Score = 100
+		}
+	}
+	return hist
+}
+
+// clampScore keeps status.score inside the CRD [0,100] bounds so a hand-edited
+// out-of-range value cannot lock out Status().Update admission.
+func clampScore(s *int32) *int32 {
+	if s == nil {
+		return nil
+	}
+	switch {
+	case *s < 0:
+		z := int32(0)
+		return &z
+	case *s > 100:
+		z := int32(100)
+		return &z
+	default:
+		return s
+	}
+}
+
+// sanitizeStatusForUpdate applies admission-safe bounds to status fields the
+// reconciler writes so a hostile or stale status cannot brick updates.
+func sanitizeStatusForUpdate(cb *baselinev1alpha1.ClusterBaseline) {
+	cb.Status.History = clampHistory(cb.Status.History, historyMax)
+	cb.Status.Score = clampScore(cb.Status.Score)
 }
 
 // condMessage caps condition messages so a huge wrapped error, invalid cron,
@@ -313,10 +346,16 @@ func parseScanEndTimestamp(ts string, now time.Time) (time.Time, bool) {
 }
 
 func setCond(cb *baselinev1alpha1.ClusterBaseline, typ string, status metav1.ConditionStatus, reason, msg string) {
+	// Reason is required (minLength 1) and pattern-constrained on the CRD.
+	// Never write empty: a hand-edited detail condition with Reason "" would
+	// otherwise brick Status().Update when rolled up into Degraded.
+	if reason == "" {
+		reason = "Unknown"
+	}
 	meta.SetStatusCondition(&cb.Status.Conditions, metav1.Condition{
-		Type:               typ,
-		Status:             status,
-		Reason:             reason,
+		Type:   typ,
+		Status: status,
+		Reason: reason,
 		// Cap every message: InvalidSchedule embeds user cron text; storage
 		// embeds PVC names; wrap errors can be huge. One path keeps status
 		// updates from failing admission on an oversized message.
@@ -379,9 +418,11 @@ func setRollupConditions(cb *baselinev1alpha1.ClusterBaseline) {
 	// Degraded: persistent failures that are not mere installation progress:
 	// failed Compliance Operator CSV, invalid schedule, scan result storage
 	// wedged, or the plugin down past its grace period.
+	// Use fixed CamelCase reasons (never copy a possibly empty/hostile detail
+	// Reason) so status admission cannot fail on Reason pattern/minLength.
 	switch {
 	case co != nil && co.Status == metav1.ConditionFalse && co.Reason == "CSVFailed":
-		setCond(cb, "Degraded", metav1.ConditionTrue, co.Reason, co.Message)
+		setCond(cb, "Degraded", metav1.ConditionTrue, "CSVFailed", co.Message)
 	case coStuck:
 		// Prefer the detail message; fall back to reason so we never end with a
 		// trailing empty ": ".
@@ -392,9 +433,13 @@ func setRollupConditions(cb *baselinev1alpha1.ClusterBaseline) {
 		setCond(cb, "Degraded", metav1.ConditionTrue, "InstallStalled",
 			fmt.Sprintf("Compliance Operator not ready after %s: %s", coInstallGrace, detail))
 	case scan != nil && scan.Status == metav1.ConditionFalse && scan.Reason == "InvalidSchedule":
-		setCond(cb, "Degraded", metav1.ConditionTrue, scan.Reason, scan.Message)
+		setCond(cb, "Degraded", metav1.ConditionTrue, "InvalidSchedule", scan.Message)
 	case storage != nil && storage.Status == metav1.ConditionFalse:
-		setCond(cb, "Degraded", metav1.ConditionTrue, storage.Reason, storage.Message)
+		reason := storage.Reason
+		if reason == "" {
+			reason = "ScanStorageNotReady"
+		}
+		setCond(cb, "Degraded", metav1.ConditionTrue, reason, storage.Message)
 	case plugin != nil && plugin.Status == metav1.ConditionFalse && plugin.Reason == "Unavailable":
 		setCond(cb, "Degraded", metav1.ConditionTrue, "ConsolePluginUnavailable", plugin.Message)
 	default:
@@ -425,6 +470,14 @@ func (r *ClusterBaselineReconciler) ensureComplianceOperator(ctx context.Context
 	sub := u(subscriptionGVK)
 	err := r.Get(ctx, types.NamespacedName{Namespace: complianceNamespace, Name: "compliance-operator"}, sub)
 	if err == nil {
+		// Keep catalog source in sync when we manage install. createIfMissing only
+		// writes the Subscription once; without this, changing
+		// spec.complianceCatalogSource (OKD / disconnected) is a silent no-op.
+		if cb.Spec.InstallComplianceOperator != baselinev1alpha1.InstallManual {
+			if err := r.syncComplianceSubscriptionSource(ctx, cb, sub); err != nil {
+				return err
+			}
+		}
 		// Always evaluate readiness, including InstallManual, so Available cannot
 		// stay True after CO is removed.
 		return r.setComplianceOperatorReady(ctx, cb, sub)
@@ -466,22 +519,43 @@ func (r *ClusterBaselineReconciler) ensureComplianceOperator(ctx context.Context
 		return err
 	}
 
-	source := cb.Spec.ComplianceCatalogSource
-	if source == "" {
-		source = "redhat-operators"
-	}
 	sub = u(subscriptionGVK)
 	sub.SetName("compliance-operator")
 	sub.SetNamespace(complianceNamespace)
 	sub.Object["spec"] = map[string]any{
 		"name": "compliance-operator", "channel": "stable",
-		"source": source, "sourceNamespace": "openshift-marketplace",
+		"source": desiredComplianceCatalogSource(cb), "sourceNamespace": "openshift-marketplace",
 	}
 	if err := createIfMissing(ctx, r.Client, sub); err != nil {
 		return err
 	}
 	setCond(cb, "ComplianceOperatorReady", metav1.ConditionFalse, "Installing", "waiting for CSV")
 	return nil
+}
+
+// desiredComplianceCatalogSource is the OLM CatalogSource name for the CO
+// Subscription (default redhat-operators).
+func desiredComplianceCatalogSource(cb *baselinev1alpha1.ClusterBaseline) string {
+	if s := cb.Spec.ComplianceCatalogSource; s != "" {
+		return s
+	}
+	return "redhat-operators"
+}
+
+// syncComplianceSubscriptionSource updates an existing Subscription's
+// spec.source when it diverges from the CR. No-op when already matched.
+func (r *ClusterBaselineReconciler) syncComplianceSubscriptionSource(
+	ctx context.Context, cb *baselinev1alpha1.ClusterBaseline, sub *unstructured.Unstructured,
+) error {
+	desired := desiredComplianceCatalogSource(cb)
+	current, _, _ := unstructured.NestedString(sub.Object, "spec", "source")
+	if current == desired {
+		return nil
+	}
+	if err := unstructured.SetNestedField(sub.Object, desired, "spec", "source"); err != nil {
+		return err
+	}
+	return r.Update(ctx, sub)
 }
 
 func (r *ClusterBaselineReconciler) findComplianceOperatorCSV(ctx context.Context) (*unstructured.Unstructured, error) {

@@ -56,6 +56,7 @@ import {
   machineConfigPoolHref,
   nodeScanPool,
   removeWaiverPatch,
+  resultFilterStatus,
   resultsCsv,
 } from '../utils';
 
@@ -189,9 +190,23 @@ const ResultsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => {
       {
         filterGroupName: t('Status'),
         type: 'result-status',
-        reducer: (r) => r.status,
-        filter: (input, r) => !input.selected?.length || input.selected.includes(r.status),
-        items: ['PASS', 'FAIL', 'MANUAL', 'ERROR', 'INFO', 'INCONSISTENT', 'SKIP', 'NOT-APPLICABLE'].map((s) => ({
+        // FAIL+waiver -> WAIVED so FAIL chips/deep-links match Overview fail
+        // counts (operator excludes waived fails from the Fail bucket).
+        reducer: (r) => resultFilterStatus(r, waivers),
+        filter: (input, r) =>
+          !input.selected?.length ||
+          input.selected.includes(resultFilterStatus(r, waivers)),
+        items: [
+          'PASS',
+          'FAIL',
+          'WAIVED',
+          'MANUAL',
+          'ERROR',
+          'INFO',
+          'INCONSISTENT',
+          'SKIP',
+          'NOT-APPLICABLE',
+        ].map((s) => ({
           id: s,
           title: s,
         })),
@@ -213,7 +228,7 @@ const ResultsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => {
         items: profileItems,
       },
     ],
-    [t, profileItems],
+    [t, profileItems, waivers],
   );
 
   const [data, filteredData, onFilterChange] = useListPageFilter(ownedResults, rowFilters);

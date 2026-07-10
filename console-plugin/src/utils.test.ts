@@ -2,6 +2,7 @@ import {
   checkResultHref,
   addWaiverPatch,
   isWaived,
+  resultFilterStatus,
   removeWaiverPatch,
   aggregateCounts,
   clusterScore,
@@ -494,6 +495,22 @@ describe('waivers', () => {
     // Empty names never match (corrupt waiver entry).
     expect(isWaived('', [{ name: '' }])).toBe(false);
     expect(isWaived('', w)).toBe(false);
+  });
+  it('resultFilterStatus maps FAIL+waiver to WAIVED for Overview drill-down fidelity', () => {
+    const w = [{ name: 'f1' }];
+    expect(resultFilterStatus({ metadata: { name: 'f1' }, status: 'FAIL' }, w)).toBe('WAIVED');
+    expect(resultFilterStatus({ metadata: { name: 'f2' }, status: 'FAIL' }, w)).toBe('FAIL');
+    // Waived PASS still scores as PASS (self-healing); filter stays PASS.
+    expect(resultFilterStatus({ metadata: { name: 'f1' }, status: 'PASS' }, w)).toBe('PASS');
+    expect(resultFilterStatus({ metadata: { name: 'x' }, status: 'MANUAL' }, w)).toBe('MANUAL');
+    expect(resultFilterStatus({ metadata: { name: 'f1' }, status: 'FAIL' }, undefined)).toBe(
+      'FAIL',
+    );
+  });
+  it('resultsHref FAIL deep-link is distinct from WAIVED', () => {
+    expect(resultsHref('FAIL')).toContain('rowFilter-result-status=FAIL');
+    expect(resultsHref('WAIVED')).toContain('rowFilter-result-status=WAIVED');
+    expect(resultsHref('FAIL')).not.toContain('WAIVED');
   });
   it('addWaiverPatch creates the array when absent, appends when present', () => {
     expect(addWaiverPatch(undefined, 'chk', 'risk')).toEqual([

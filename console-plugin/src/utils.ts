@@ -184,6 +184,15 @@ export const remediationApplyPatch = (hasRemediation: boolean, automatic: boolea
 export const isWaived = (name: string, waivers?: Waiver[]): boolean =>
   !!name && !!waivers?.some((w) => w.name === name && !!w.name);
 
+// Filter-chip / deep-link status for a result. FAIL+waiver is "WAIVED" so the
+// Results FAIL filter matches Overview fail counts (operator score math excludes
+// waived fails from the Fail bucket). A waived PASS stays PASS (still scored).
+export const resultFilterStatus = (
+  r: Pick<ComplianceCheckResult, 'status'> & { metadata: { name: string } },
+  waivers?: Waiver[],
+): string =>
+  r.status === 'FAIL' && isWaived(r.metadata.name, waivers) ? 'WAIVED' : r.status;
+
 // JSON patch adding a waiver for a check. When the array is absent, create it;
 // when it exists (including empty after the last remove), append with "/-".
 // If the name is already waived, replace that entry (updates reason, avoids
@@ -246,6 +255,8 @@ export const scoreColor = (score?: number): string =>
       : 'var(--pf-t--global--icon--color--status--success--default)';
 
 // Deep-link into Results with a status (and optional profile) row filter.
+// Use "WAIVED" (not FAIL) for score-excluded checks so the link matches
+// Overview fail/waived counts; see resultFilterStatus.
 export const resultsHref = (status: string, profile?: string): string => {
   const params = new URLSearchParams();
   params.set('rowFilter-result-status', stripSurrogates(status));

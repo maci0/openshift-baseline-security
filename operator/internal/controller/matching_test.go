@@ -149,6 +149,61 @@ func TestClampHistory(t *testing.T) {
 	if len(clampHistory(hist[:5], 30)) != 5 {
 		t.Fatal("short history should be unchanged")
 	}
+	// Out-of-range scores must be clamped so CRD Maximum/Minimum cannot lock
+	// out Status().Update (same class of bug as over-length history).
+	bad := []baselinev1alpha1.ScoreSnapshot{
+		{Score: -5}, {Score: 150}, {Score: 50},
+	}
+	fixed := clampHistory(bad, 30)
+	if fixed[0].Score != 0 || fixed[1].Score != 100 || fixed[2].Score != 50 {
+		t.Fatalf("score sanitize = %v,%v,%v", fixed[0].Score, fixed[1].Score, fixed[2].Score)
+	}
+}
+
+func TestClampScore(t *testing.T) {
+	if clampScore(nil) != nil {
+		t.Fatal("nil stays nil")
+	}
+	neg := int32(-1)
+	if s := clampScore(&neg); s == nil || *s != 0 {
+		t.Fatalf("neg = %v", s)
+	}
+	hi := int32(101)
+	if s := clampScore(&hi); s == nil || *s != 100 {
+		t.Fatalf("hi = %v", s)
+	}
+	ok := int32(77)
+	if s := clampScore(&ok); s == nil || *s != 77 {
+		t.Fatalf("ok = %v", s)
+	}
+}
+
+func TestSanitizeStatusForUpdate(t *testing.T) {
+	badScore := int32(200)
+	cb := &baselinev1alpha1.ClusterBaseline{
+		Status: baselinev1alpha1.ClusterBaselineStatus{
+			Score: &badScore,
+			History: []baselinev1alpha1.ScoreSnapshot{
+				{Score: -1}, {Score: 999},
+			},
+		},
+	}
+	// Pad history past MaxItems.
+	for i := 0; i < 40; i++ {
+		cb.Status.History = append(cb.Status.History, baselinev1alpha1.ScoreSnapshot{Score: int32(i % 50)})
+	}
+	sanitizeStatusForUpdate(cb)
+	if cb.Status.Score == nil || *cb.Status.Score != 100 {
+		t.Fatalf("score = %v, want 100", cb.Status.Score)
+	}
+	if len(cb.Status.History) != historyMax {
+		t.Fatalf("history len = %d, want %d", len(cb.Status.History), historyMax)
+	}
+	for _, h := range cb.Status.History {
+		if h.Score < 0 || h.Score > 100 {
+			t.Fatalf("history score out of range: %d", h.Score)
+		}
+	}
 }
 
 func TestParseScanEndTimestamp(t *testing.T) {
