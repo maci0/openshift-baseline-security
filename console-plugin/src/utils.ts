@@ -1,4 +1,17 @@
-import { ComplianceCheckResult, ComplianceRemediation, ResultCounts } from './models';
+import {
+  ClusterBaseline,
+  ComplianceCheckResult,
+  ComplianceRemediation,
+  ResultCounts,
+} from './models';
+
+// Pick the singleton ClusterBaseline (named "cluster", else the first) and
+// return its score, or null when there is none / it has not scored yet. Shared
+// by the cluster Overview detail item.
+export const clusterScore = (baselines?: ClusterBaseline[]): number | null => {
+  const b = baselines?.find((x) => x.metadata.name === 'cluster') ?? baselines?.[0];
+  return b?.status?.score ?? null;
+};
 
 // Normalize k8s watch / fetch errors (string | Error | { message }) for Alerts.
 export const errorMessage = (err: unknown): string | null => {

@@ -2,7 +2,7 @@ import * as React from 'react';
 import { useTranslation } from 'react-i18next';
 import { useK8sWatchResource } from '@openshift-console/dynamic-plugin-sdk';
 import { ClusterBaseline, ClusterBaselineGVK } from '../models';
-import { scoreColor } from '../utils';
+import { clusterScore, scoreColor } from '../utils';
 
 /**
  * Value for the "Compliance score" item added to the cluster Overview Details
@@ -19,8 +19,7 @@ const ClusterScoreItem: React.FC = () => {
   if (!loaded || error) {
     return <>—</>;
   }
-  const baseline = baselines?.find((b) => b.metadata.name === 'cluster') ?? baselines?.[0];
-  const score = baseline?.status?.score;
+  const score = clusterScore(baselines);
   return (
     <a href="/baseline-security">
       {score != null ? (

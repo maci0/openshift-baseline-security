@@ -95,6 +95,73 @@ func TestAggregateStatus(t *testing.T) {
 	}
 }
 
+// TestAggregateStatusPoolsMultipleBenchmarks pins the score as a pooled ratio
+// over every enabled benchmark, not a mean of per-profile scores. cis is 3/4
+// (75%) and stig is 1/2 (50%); the pooled score is 4/6 = 66%, distinct from
+// their mean (62%). Per-profile counts stay independent.
+func TestAggregateStatusPoolsMultipleBenchmarks(t *testing.T) {
+	scheme := testScheme(t)
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(
+			checkResult("c1", "baseline-cis", "PASS"),
+			checkResult("c2", "baseline-cis", "PASS"),
+			checkResult("c3", "baseline-cis", "PASS"),
+			checkResult("c4", "baseline-cis", "FAIL"),
+			checkResult("s1", "baseline-stig", "PASS"),
+			checkResult("s2", "baseline-stig", "FAIL"),
+		).Build(),
+		Scheme: scheme,
+	}
+	cb := &baselinev1alpha1.ClusterBaseline{
+		Spec: baselinev1alpha1.ClusterBaselineSpec{
+			Profiles: []baselinev1alpha1.ProfileKey{"cis", "stig"},
+		},
+	}
+	if err := r.aggregateStatus(context.Background(), cb); err != nil {
+		t.Fatal(err)
+	}
+	if cb.Status.Score == nil || *cb.Status.Score != 66 {
+		t.Fatalf("pooled score = %v, want 66", cb.Status.Score)
+	}
+	byKey := map[baselinev1alpha1.ProfileKey]baselinev1alpha1.ProfileStatus{}
+	for _, p := range cb.Status.Profiles {
+		byKey[p.Key] = p
+	}
+	if p := byKey["cis"]; p.Pass != 3 || p.Fail != 1 {
+		t.Fatalf("cis counts = %+v, want 3/1", p)
+	}
+	if p := byKey["stig"]; p.Pass != 1 || p.Fail != 1 {
+		t.Fatalf("stig counts = %+v, want 1/1", p)
+	}
+}
+
+// TestAggregateStatusAllManualNilScore covers a completed scan whose checks are
+// all MANUAL/NOT-APPLICABLE: pass+fail is zero so the score is nil (the Overview
+// item reads "Not scanned"), yet the per-profile counts still record the checks.
+func TestAggregateStatusAllManualNilScore(t *testing.T) {
+	scheme := testScheme(t)
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(
+			checkResult("m1", "baseline-cis", "MANUAL"),
+			checkResult("m2", "baseline-cis", "MANUAL"),
+			checkResult("na", "baseline-cis", "NOT-APPLICABLE"),
+		).Build(),
+		Scheme: scheme,
+	}
+	cb := &baselinev1alpha1.ClusterBaseline{
+		Spec: baselinev1alpha1.ClusterBaselineSpec{Profiles: []baselinev1alpha1.ProfileKey{"cis"}},
+	}
+	if err := r.aggregateStatus(context.Background(), cb); err != nil {
+		t.Fatal(err)
+	}
+	if cb.Status.Score != nil {
+		t.Fatalf("score = %v, want nil for an all-MANUAL scan", *cb.Status.Score)
+	}
+	if p := cb.Status.Profiles[0]; p.Manual != 2 || p.NotApplicable != 1 {
+		t.Fatalf("profile counts = %+v, want 2 manual / 1 n-a", p)
+	}
+}
+
 func TestAggregateStatusClearsStaleScore(t *testing.T) {
 	scheme := testScheme(t)
 	r := &ClusterBaselineReconciler{

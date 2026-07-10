@@ -1,6 +1,7 @@
 import {
   checkResultHref,
   aggregateCounts,
+  clusterScore,
   isNodeRemediation,
   remediationObjectText,
   resultsCsv,
@@ -13,7 +14,7 @@ import {
   scoreColor,
   toggledProfiles,
 } from './utils';
-import { ComplianceCheckResult, ComplianceRemediation } from './models';
+import { ClusterBaseline, ComplianceCheckResult, ComplianceRemediation } from './models';
 
 const result = (name: string, description?: string): ComplianceCheckResult =>
   ({ metadata: { name, namespace: 'ns' }, description }) as ComplianceCheckResult;
@@ -310,5 +311,27 @@ describe('aggregateCounts', () => {
     // regular profile empty, tailored has results -> totals non-zero
     const totals = aggregateCounts(c(0, 0), c(2, 1));
     expect(totals.pass + totals.fail).toBe(3);
+  });
+});
+
+describe('clusterScore', () => {
+  const cb = (name: string, score?: number): ClusterBaseline =>
+    ({ metadata: { name }, status: score == null ? {} : { score } }) as ClusterBaseline;
+
+  it('returns null when there is no baseline', () => {
+    expect(clusterScore(undefined)).toBeNull();
+    expect(clusterScore([])).toBeNull();
+  });
+  it('prefers the singleton named "cluster"', () => {
+    expect(clusterScore([cb('other', 10), cb('cluster', 95)])).toBe(95);
+  });
+  it('falls back to the first when none is named "cluster"', () => {
+    expect(clusterScore([cb('a', 42), cb('b', 7)])).toBe(42);
+  });
+  it('returns null when the baseline exists but has not scored', () => {
+    expect(clusterScore([cb('cluster')])).toBeNull();
+  });
+  it('treats a zero score as a value, not absent', () => {
+    expect(clusterScore([cb('cluster', 0)])).toBe(0);
   });
 });
