@@ -657,7 +657,15 @@ func (r *ClusterBaselineReconciler) ensureScanConfig(ctx context.Context, cb *ba
 			ss.Object["schedule"] = "0 1 * * *"
 		}
 		ss.Object["roles"] = []any{"worker", "master"}
-		ss.Object["rawResultStorage"] = map[string]any{"size": "1Gi", "rotation": int64(3)}
+		// Set only the storage leaves we own; preserve server-defaulted siblings
+		// (e.g. pvAccessModes) so this does not diff on every reconcile.
+		storage, _, _ := unstructured.NestedMap(ss.Object, "rawResultStorage")
+		if storage == nil {
+			storage = map[string]any{}
+		}
+		storage["size"] = "1Gi"
+		storage["rotation"] = int64(3)
+		ss.Object["rawResultStorage"] = storage
 		ss.Object["autoApplyRemediations"] = autoApply
 		ss.Object["autoUpdateRemediations"] = autoApply
 		return controllerutil.SetControllerReference(cb, ss, r.Scheme)

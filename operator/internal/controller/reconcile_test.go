@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"testing"
+	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -258,6 +259,36 @@ func TestEnsureScanConfigCreatesAndPrunes(t *testing.T) {
 	}
 	if got, _, _ := unstructured.NestedString(ss.Object, "schedule"); got != "0 1 * * *" {
 		t.Fatalf("schedule overwritten on invalid cron: %q", got)
+	}
+}
+
+// TestEnsureScanConfigInvalidCronFirstCreate covers the first-create path: with
+// no pre-existing ScanSetting there is no last-good schedule, so an invalid cron
+// must fall back to the operator default rather than leave CO with an empty one.
+func TestEnsureScanConfigInvalidCronFirstCreate(t *testing.T) {
+	scheme := testScheme(t)
+	scheme.AddKnownTypeWithName(scanSettingGVK, &unstructured.Unstructured{})
+	bindingList := &unstructured.UnstructuredList{}
+	bindingList.SetGroupVersionKind(bindingGVK.GroupVersion().WithKind(bindingGVK.Kind + "List"))
+	scheme.AddKnownTypeWithName(bindingGVK, &unstructured.Unstructured{})
+	scheme.AddKnownTypeWithName(bindingList.GroupVersionKind(), bindingList)
+
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).Build(),
+		Scheme: scheme,
+	}
+	cb := newCB("cis")
+	cb.Spec.Schedule = "not a cron"
+	if err := r.ensureScanConfig(context.Background(), cb); err != nil {
+		t.Fatal(err)
+	}
+	ss := &unstructured.Unstructured{}
+	ss.SetGroupVersionKind(scanSettingGVK)
+	if err := r.Get(context.Background(), types.NamespacedName{Namespace: complianceNamespace, Name: scanSettingName}, ss); err != nil {
+		t.Fatal(err)
+	}
+	if got, _, _ := unstructured.NestedString(ss.Object, "schedule"); got != "0 1 * * *" {
+		t.Fatalf("first-create invalid cron schedule = %q, want the default fallback", got)
 	}
 }
 
@@ -748,5 +779,73 @@ func TestReconcileWithoutComplianceCRDs(t *testing.T) {
 	}
 	if p := meta.FindStatusCondition(got.Status.Conditions, "Progressing"); p == nil || p.Status != metav1.ConditionTrue {
 		t.Fatalf("Progressing = %+v, want True while CRDs missing", p)
+	}
+}
+
+// TestReconcileManualNoComplianceCRDs is the genuine steady state a Console- and
+// CO-less cluster settles into with InstallComplianceOperator=Manual: nothing is
+// installing, so Progressing must be False (no 15s poll storm), Available False,
+// and Degraded False (a not-yet-installed dependency is not a failure).
+func TestReconcileManualNoComplianceCRDs(t *testing.T) {
+	scheme := testScheme(t)
+	cb := newCB("cis")
+	cb.Spec.InstallComplianceOperator = baselinev1alpha1.InstallManual
+	cb.Finalizers = []string{finalizerName}
+	noMatch := func(gvk schema.GroupVersionKind) error {
+		// Both the compliance CRDs and the Console capability are absent.
+		if gvk.Group == "compliance.openshift.io" || gvk.Group == "console.openshift.io" ||
+			gvk.Group == "operator.openshift.io" {
+			return &meta.NoKindMatchError{GroupKind: gvk.GroupKind()}
+		}
+		return nil
+	}
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).
+			WithObjects(cb).
+			WithStatusSubresource(&baselinev1alpha1.ClusterBaseline{}).
+			WithInterceptorFuncs(interceptor.Funcs{
+				Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+					if err := noMatch(obj.GetObjectKind().GroupVersionKind()); err != nil {
+						return err
+					}
+					return c.Get(ctx, key, obj, opts...)
+				},
+				List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+					if err := noMatch(list.GetObjectKind().GroupVersionKind()); err != nil {
+						return err
+					}
+					return c.List(ctx, list, opts...)
+				},
+			}).Build(),
+		Scheme: scheme,
+	}
+	t.Setenv("RELATED_IMAGE_CONSOLE_PLUGIN", "example.test/plugin:1")
+
+	res, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: "cluster"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := &baselinev1alpha1.ClusterBaseline{}
+	if err := r.Get(context.Background(), types.NamespacedName{Name: "cluster"}, got); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []struct {
+		typ    string
+		status metav1.ConditionStatus
+	}{
+		{"Progressing", metav1.ConditionFalse},
+		{"Available", metav1.ConditionFalse},
+		{"Degraded", metav1.ConditionFalse},
+	} {
+		c := meta.FindStatusCondition(got.Status.Conditions, want.typ)
+		if c == nil || c.Status != want.status {
+			t.Fatalf("%s = %+v, want %s", want.typ, c, want.status)
+		}
+	}
+	// Steady state must poll at the slow cadence, not 15s.
+	if res.RequeueAfter < time.Minute {
+		t.Fatalf("RequeueAfter = %v, want the 1m steady cadence (no poll storm)", res.RequeueAfter)
 	}
 }

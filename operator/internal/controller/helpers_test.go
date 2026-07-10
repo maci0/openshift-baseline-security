@@ -54,11 +54,20 @@ func TestSetRollupConditions(t *testing.T) {
 		t.Fatalf("Progressing while CSVNotReady: %+v", c)
 	}
 
+	// Manual install, CO absent: the reasons production actually emits
+	// (ComplianceOperatorReady=NotInstalled, ScanConfigured=CRDsMissing). Neither
+	// is progress, so this steady state must settle Progressing=False.
 	setCond(cb, "ComplianceOperatorReady", metav1.ConditionFalse, "NotInstalled", "manual")
-	setCond(cb, "ScanConfigured", metav1.ConditionFalse, "NotInstalled", "no CRDs")
+	setCond(cb, "ScanConfigured", metav1.ConditionFalse, "CRDsMissing", "no CRDs")
 	setRollupConditions(cb)
 	if c := meta.FindStatusCondition(cb.Status.Conditions, "Progressing"); c == nil || c.Status != metav1.ConditionFalse {
 		t.Fatalf("Progressing must be False for permanent NotInstalled: %+v", c)
+	}
+	if c := meta.FindStatusCondition(cb.Status.Conditions, "Available"); c == nil || c.Status != metav1.ConditionFalse {
+		t.Fatalf("Available must be False when CO not installed: %+v", c)
+	}
+	if c := meta.FindStatusCondition(cb.Status.Conditions, "Degraded"); c == nil || c.Status != metav1.ConditionFalse {
+		t.Fatalf("Manual-not-installed steady state must not Degrade: %+v", c)
 	}
 
 	setCond(cb, "ComplianceOperatorReady", metav1.ConditionTrue, "CSVSucceeded", "")
