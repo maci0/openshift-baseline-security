@@ -139,6 +139,35 @@ func TestSetRollupConditions(t *testing.T) {
 	}
 }
 
+// TestStuckInstallDegrades: a CO install that has been Installing/CSVNotReady
+// past the grace window rolls up to Degraded and stops Progressing (no eternal
+// 15s hot-poll), while a fresh Installing still Progresses.
+func TestStuckInstallDegrades(t *testing.T) {
+	cb := &baselinev1alpha1.ClusterBaseline{}
+	setCond(cb, "ScanConfigured", metav1.ConditionTrue, "BindingsCreated", "")
+
+	// Fresh install: Progressing, not Degraded.
+	setCond(cb, "ComplianceOperatorReady", metav1.ConditionFalse, "Installing", "installing")
+	setRollupConditions(cb)
+	if c := meta.FindStatusCondition(cb.Status.Conditions, "Progressing"); c == nil || c.Status != metav1.ConditionTrue {
+		t.Fatalf("fresh install must Progress: %+v", c)
+	}
+	if c := meta.FindStatusCondition(cb.Status.Conditions, "Degraded"); c == nil || c.Status != metav1.ConditionFalse {
+		t.Fatalf("fresh install must not Degrade: %+v", c)
+	}
+
+	// Backdate the CO condition past the grace window.
+	co := meta.FindStatusCondition(cb.Status.Conditions, "ComplianceOperatorReady")
+	co.LastTransitionTime = metav1.NewTime(time.Now().Add(-coInstallGrace - time.Minute))
+	setRollupConditions(cb)
+	if c := meta.FindStatusCondition(cb.Status.Conditions, "Degraded"); c == nil || c.Status != metav1.ConditionTrue || c.Reason != "InstallStalled" {
+		t.Fatalf("stuck install must Degrade/InstallStalled: %+v", c)
+	}
+	if c := meta.FindStatusCondition(cb.Status.Conditions, "Progressing"); c == nil || c.Status != metav1.ConditionFalse {
+		t.Fatalf("stuck install must not Progress: %+v", c)
+	}
+}
+
 func TestConditionProgressing(t *testing.T) {
 	if conditionProgressing(nil) {
 		t.Fatal("nil")

@@ -203,6 +203,9 @@ describe('errorMessage', () => {
       { toString() {
         throw new Error('boom');
       } },
+      { get message() {
+        throw new Error('getter boom');
+      } },
       { message: 42 },
       { message: null },
       [1, 2, 3],

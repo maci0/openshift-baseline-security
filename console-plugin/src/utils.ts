@@ -25,15 +25,16 @@ export const errorMessage = (err: unknown): string | null => {
   if (err instanceof Error) {
     return err.message || err.name;
   }
-  if (typeof err === 'object' && 'message' in err) {
-    const m = (err as { message: unknown }).message;
-    if (typeof m === 'string' && m) {
-      return m;
-    }
-  }
-  // String() throws on a null-prototype object or a throwing toString; an error
-  // normalizer must never throw, so fall back rather than propagate.
+  // A message-bearing object, a null-prototype object, a throwing toString, or a
+  // throwing `message` getter must all be tolerated: an error normalizer must
+  // never throw. Guard the whole property access + String() fallback.
   try {
+    if (typeof err === 'object' && 'message' in err) {
+      const m = (err as { message: unknown }).message;
+      if (typeof m === 'string' && m) {
+        return m;
+      }
+    }
     return String(err);
   } catch {
     return 'Unknown error';

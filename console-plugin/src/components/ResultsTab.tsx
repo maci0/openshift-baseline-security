@@ -299,8 +299,9 @@ const ResultsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => {
                           </Tr>
                         </Thead>
                         <Tbody>
-                          {sources.map((s) => (
-                            <Tr key={s.node}>
+                          {sources.map((s, i) => (
+                            // Index in the key: hostile data could repeat a node name.
+                            <Tr key={`${s.node}-${i}`}>
                               <Td>{s.node}</Td>
                               <Td>
                                 <Label isCompact color={statusLabel[s.status as CheckStatus]?.color ?? 'grey'}>
@@ -338,8 +339,8 @@ const ResultsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => {
                 </a>
               </Content>
               {/* Waivers: accept a failing check as risk so it leaves the score.
-                  Waiving a passing check is pointless, so only offer it for
-                  non-PASS/NOT-APPLICABLE results. */}
+                  Only FAIL affects the score, so waiving is offered for FAIL (and
+                  any already-waived check, so a stale waiver stays removable). */}
               {showWaiver(selected) &&
                 (() => {
                   const waived = isWaived(selected.metadata.name, waivers);

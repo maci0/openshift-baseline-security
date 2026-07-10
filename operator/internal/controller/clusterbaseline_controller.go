@@ -39,6 +39,9 @@ const (
 	pluginNS            = "openshift-baseline-security"
 	suiteLabel          = "compliance.openshift.io/suite"
 	historyMax          = 30
+	// Grace before a not-ready Compliance Operator install rolls up to Degraded
+	// (OLM resolve + CSV install + pods can take several minutes on a slow cluster).
+	coInstallGrace = 15 * time.Minute
 	// Desired HA for the console plugin Deployment.
 	pluginReplicas = int32(2)
 	// Ready threshold for ConsolePluginReady=True: one ready pod is enough for
@@ -302,7 +305,16 @@ func setRollupConditions(cb *baselinev1alpha1.ClusterBaseline) {
 
 	coReady := co != nil && co.Status == metav1.ConditionTrue
 	scanOK := scan != nil && scan.Status == metav1.ConditionTrue
-	progressing := conditionProgressing(co) || conditionProgressing(scan) || conditionProgressing(plugin)
+	// A Compliance Operator install that never becomes ready (bad catalog source,
+	// unresolvable Subscription) would otherwise Progress + fast-poll forever. Past
+	// a grace window, stop treating it as progress so it rolls up to Degraded and
+	// the poll backs off, mirroring the console plugin's Unavailable-past-grace.
+	coStuck := co != nil && co.Status == metav1.ConditionFalse &&
+		(co.Reason == "Installing" || co.Reason == "CSVNotReady") &&
+		!co.LastTransitionTime.IsZero() &&
+		time.Since(co.LastTransitionTime.Time) > coInstallGrace
+	progressing := (conditionProgressing(co) && !coStuck) ||
+		conditionProgressing(scan) || conditionProgressing(plugin)
 
 	if progressing {
 		setCond(cb, "Progressing", metav1.ConditionTrue, "Reconciling", "installing or configuring dependencies")
@@ -320,6 +332,9 @@ func setRollupConditions(cb *baselinev1alpha1.ClusterBaseline) {
 	switch {
 	case co != nil && co.Status == metav1.ConditionFalse && co.Reason == "CSVFailed":
 		setCond(cb, "Degraded", metav1.ConditionTrue, co.Reason, co.Message)
+	case coStuck:
+		setCond(cb, "Degraded", metav1.ConditionTrue, "InstallStalled",
+			fmt.Sprintf("Compliance Operator not ready after %s: %s", coInstallGrace, co.Message))
 	case scan != nil && scan.Status == metav1.ConditionFalse && scan.Reason == "InvalidSchedule":
 		setCond(cb, "Degraded", metav1.ConditionTrue, scan.Reason, scan.Message)
 	case storage != nil && storage.Status == metav1.ConditionFalse:
