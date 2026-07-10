@@ -37,6 +37,7 @@ jobs:
       - run: npm i -g corepack && corepack enable
       - run: yarn install --immutable
       - run: yarn lint
+      - run: yarn typecheck
       - run: yarn test
       - run: yarn build
 

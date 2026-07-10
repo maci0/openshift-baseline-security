@@ -117,7 +117,7 @@ will serve the stale content.
 cd operator && make test && make lint && make install && make run
 
 # console plugin
-cd console-plugin && yarn install && yarn lint && yarn test && yarn build
+cd console-plugin && yarn install && yarn lint && yarn typecheck && yarn test && yarn build
 # against a live console: yarn start (serves on :9001)
 ```
 

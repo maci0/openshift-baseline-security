@@ -47,13 +47,18 @@ type ClusterBaselineSpec struct {
 	// profiles selects which benchmark profile sets to scan with.
 	// +kubebuilder:default={cis}
 	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:UniqueItems=true
 	Profiles []ProfileKey `json:"profiles"`
 
 	// tailoredProfiles names TailoredProfiles in the openshift-compliance
 	// namespace to also scan with. Create the TailoredProfile with the
 	// Compliance Operator first; this binds it into the baseline scan and
-	// includes its results in the score.
+	// includes its results in the score. Names are capped so the generated
+	// baseline-tp-<name> suite label remains a valid Kubernetes label value.
 	// +optional
+	// +kubebuilder:validation:UniqueItems=true
+	// +kubebuilder:validation:items:MaxLength=51
+	// +kubebuilder:validation:items:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`
 	TailoredProfiles []string `json:"tailoredProfiles,omitempty"`
 
 	// schedule is the scan cron schedule, applied to the owned ScanSetting.

@@ -8,6 +8,7 @@ import {
 } from '@openshift-console/dynamic-plugin-sdk';
 import {
   Alert,
+  AlertActionCloseButton,
   Button,
   PageSection,
   Content,
@@ -154,7 +155,12 @@ const CompliancePage: React.FC = () => {
             isInline
             title={rescanError}
             style={{ marginTop: 'var(--pf-t--global--spacer--md)' }}
-            onClose={() => setRescanError(null)}
+            actionClose={
+              <AlertActionCloseButton
+                aria-label={t('Close')}
+                onClose={() => setRescanError(null)}
+              />
+            }
           />
         )}
       </PageSection>

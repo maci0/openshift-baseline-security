@@ -98,6 +98,7 @@ spec:
                   type: string
                 minItems: 1
                 type: array
+                uniqueItems: true
               remediation:
                 description: remediation configures how ComplianceRemediations are
                   handled.
@@ -123,10 +124,14 @@ spec:
                   tailoredProfiles names TailoredProfiles in the openshift-compliance
                   namespace to also scan with. Create the TailoredProfile with the
                   Compliance Operator first; this binds it into the baseline scan and
-                  includes its results in the score.
+                  includes its results in the score. Names are capped so the generated
+                  baseline-tp-<name> suite label remains a valid Kubernetes label value.
                 items:
+                  maxLength: 51
+                  pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
                   type: string
                 type: array
+                uniqueItems: true
             required:
             - profiles
             type: object
