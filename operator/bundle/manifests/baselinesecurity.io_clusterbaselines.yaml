@@ -54,6 +54,7 @@ spec:
                 description: |-
                   complianceCatalogSource is the OLM CatalogSource providing the
                   compliance-operator package (override for OKD or disconnected clusters).
+                maxLength: 253
                 type: string
               console:
                 description: console configures the console plugin deployment.
@@ -116,8 +117,11 @@ spec:
                 type: object
               schedule:
                 default: 0 1 * * *
-                description: schedule is the scan cron schedule, applied to the owned
-                  ScanSetting.
+                description: |-
+                  schedule is the scan cron schedule, applied to the owned ScanSetting.
+                  Bounded so a hostile or accidental multi-megabyte string cannot bloat the
+                  CR or inflate condition messages that embed the value.
+                maxLength: 128
                 type: string
               tailoredProfiles:
                 description: |-
@@ -130,6 +134,7 @@ spec:
                   maxLength: 51
                   pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
                   type: string
+                maxItems: 32
                 type: array
                 x-kubernetes-list-type: set
               waivers:
@@ -139,6 +144,7 @@ spec:
                   waived check is removed from the pass/fail denominator and reported in the
                   Waived bucket instead, so an accepted risk neither inflates nor tanks the
                   score. Waivers are keyed by result name, which is stable across rescans.
+                  Capped so a hostile list cannot bloat the CR past practical audit size.
                 items:
                   description: WaiverEntry marks one ComplianceCheckResult as accepted
                     risk.
@@ -157,6 +163,7 @@ spec:
                   required:
                   - name
                   type: object
+                maxItems: 256
                 type: array
                 x-kubernetes-list-map-keys:
                 - name

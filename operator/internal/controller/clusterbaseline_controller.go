@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/robfig/cron/v3"
 	appsv1 "k8s.io/api/apps/v1"
@@ -106,6 +107,7 @@ func (r *ClusterBaselineReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	if err := r.reconcileOwned(ctx, cb); err != nil {
 		// Persist a Degraded condition (best-effort) so a persistently failing
 		// reconcile is visible on the CR instead of leaving stale healthy status.
+		cb.Status.History = clampHistory(cb.Status.History, historyMax)
 		setRollupConditions(cb)
 		setCond(cb, "Degraded", metav1.ConditionTrue, "ReconcileError", err.Error())
 		if serr := r.Status().Update(ctx, cb); serr != nil {
@@ -114,6 +116,7 @@ func (r *ClusterBaselineReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return ctrl.Result{}, err
 	}
 	// OpenShift-style rollup conditions (Available / Progressing / Degraded).
+	cb.Status.History = clampHistory(cb.Status.History, historyMax)
 	setRollupConditions(cb)
 	if err := r.Status().Update(ctx, cb); err != nil {
 		return ctrl.Result{}, err
@@ -259,10 +262,54 @@ func preferredHostnameAntiAffinity(labels map[string]string) *corev1.Affinity {
 // The returned slice does not alias the input backing array after truncation.
 func appendHistoryRing(hist []baselinev1alpha1.ScoreSnapshot, t metav1.Time, s int32, max int) []baselinev1alpha1.ScoreSnapshot {
 	hist = append(hist, baselinev1alpha1.ScoreSnapshot{Time: t, Score: s})
-	if max > 0 && len(hist) > max {
-		hist = append([]baselinev1alpha1.ScoreSnapshot(nil), hist[len(hist)-max:]...)
+	return clampHistory(hist, max)
+}
+
+// clampHistory trims history to the CRD MaxItems bound. Without this, a status
+// already over the limit (hand-edit, old bug) makes every Status().Update fail
+// admission and freezes reconciliation feedback.
+func clampHistory(hist []baselinev1alpha1.ScoreSnapshot, max int) []baselinev1alpha1.ScoreSnapshot {
+	if max <= 0 || len(hist) <= max {
+		return hist
 	}
-	return hist
+	return append([]baselinev1alpha1.ScoreSnapshot(nil), hist[len(hist)-max:]...)
+}
+
+// condMessage caps condition messages so a huge wrapped error, invalid cron,
+// or long PVC list cannot exceed the Condition message budget or fail status
+// admission. Truncates on a UTF-8 boundary so the CR JSON stays valid.
+func condMessage(s string) string {
+	const max = 1024
+	if len(s) <= max {
+		return s
+	}
+	// Drop incomplete trailing rune; leave room for "...".
+	end := max - 3
+	for end > 0 && !utf8.ValidString(s[:end]) {
+		end--
+	}
+	return s[:end] + "..."
+}
+
+// parseScanEndTimestamp parses a ComplianceScan status.endTimestamp. Accepts
+// RFC3339 with optional fractional seconds. Far-future values are rejected so
+// clock skew / corrupt data cannot pin LastScanTime ahead of real scans.
+func parseScanEndTimestamp(ts string, now time.Time) (time.Time, bool) {
+	if ts == "" {
+		return time.Time{}, false
+	}
+	t, err := time.Parse(time.RFC3339Nano, ts)
+	if err != nil {
+		t, err = time.Parse(time.RFC3339, ts)
+		if err != nil {
+			return time.Time{}, false
+		}
+	}
+	// Allow modest clock skew; anything further ahead is treated as garbage.
+	if t.After(now.Add(time.Hour)) {
+		return time.Time{}, false
+	}
+	return t, true
 }
 
 func setCond(cb *baselinev1alpha1.ClusterBaseline, typ string, status metav1.ConditionStatus, reason, msg string) {
@@ -270,7 +317,10 @@ func setCond(cb *baselinev1alpha1.ClusterBaseline, typ string, status metav1.Con
 		Type:               typ,
 		Status:             status,
 		Reason:             reason,
-		Message:            msg,
+		// Cap every message: InvalidSchedule embeds user cron text; storage
+		// embeds PVC names; wrap errors can be huge. One path keeps status
+		// updates from failing admission on an oversized message.
+		Message:            condMessage(msg),
 		ObservedGeneration: cb.Generation,
 	})
 }
@@ -1025,13 +1075,14 @@ func (r *ClusterBaselineReconciler) recordHistory(ctx context.Context, cb *basel
 		return err
 	}
 	suites := ownedSuites(cb)
+	now := time.Now()
 	var latest time.Time
 	for _, item := range scans.Items {
 		if suite := item.GetLabels()[suiteLabel]; suite == "" || !suites[suite] {
 			continue
 		}
 		ts, _, _ := unstructured.NestedString(item.Object, "status", "endTimestamp")
-		if t, err := time.Parse(time.RFC3339, ts); err == nil && t.After(latest) {
+		if t, ok := parseScanEndTimestamp(ts, now); ok && t.After(latest) {
 			latest = t
 		}
 	}

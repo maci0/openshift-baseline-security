@@ -1,10 +1,13 @@
 package controller
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	baselinev1alpha1 "github.com/maci0/baseline-security-operator/api/v1alpha1"
@@ -129,6 +132,90 @@ func TestAppendHistoryRing(t *testing.T) {
 	h := appendHistoryRing(nil, metav1.Now(), 1, 0)
 	if len(h) != 1 {
 		t.Fatal(h)
+	}
+}
+
+func TestClampHistory(t *testing.T) {
+	var hist []baselinev1alpha1.ScoreSnapshot
+	for i := 0; i < 40; i++ {
+		hist = append(hist, baselinev1alpha1.ScoreSnapshot{
+			Time: metav1.NewTime(time.Unix(int64(i), 0)), Score: int32(i),
+		})
+	}
+	got := clampHistory(hist, 30)
+	if len(got) != 30 || got[0].Score != 10 || got[29].Score != 39 {
+		t.Fatalf("clampHistory = len %d first=%d last=%d", len(got), got[0].Score, got[29].Score)
+	}
+	if len(clampHistory(hist[:5], 30)) != 5 {
+		t.Fatal("short history should be unchanged")
+	}
+}
+
+func TestParseScanEndTimestamp(t *testing.T) {
+	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
+	ok, valid := parseScanEndTimestamp("2026-07-09T01:00:00Z", now)
+	if !valid || !ok.Equal(time.Date(2026, 7, 9, 1, 0, 0, 0, time.UTC)) {
+		t.Fatalf("basic RFC3339: %v %v", ok, valid)
+	}
+	ok, valid = parseScanEndTimestamp("2026-07-09T01:00:00.123456789Z", now)
+	if !valid {
+		t.Fatal("fractional seconds should parse")
+	}
+	if _, valid = parseScanEndTimestamp("", now); valid {
+		t.Fatal("empty should fail")
+	}
+	if _, valid = parseScanEndTimestamp("not-a-time", now); valid {
+		t.Fatal("garbage should fail")
+	}
+	// Far future must not pin LastScanTime.
+	far := now.Add(48 * time.Hour).UTC().Format(time.RFC3339)
+	if _, valid = parseScanEndTimestamp(far, now); valid {
+		t.Fatal("far-future endTimestamp must be rejected")
+	}
+	// Modest skew still accepted.
+	skew := now.Add(30 * time.Minute).UTC().Format(time.RFC3339)
+	if _, valid = parseScanEndTimestamp(skew, now); !valid {
+		t.Fatal("near-future within 1h should be accepted")
+	}
+}
+
+func TestCondMessage(t *testing.T) {
+	if condMessage("short") != "short" {
+		t.Fatal("short message unchanged")
+	}
+	long := strings.Repeat("x", 2000)
+	got := condMessage(long)
+	if len(got) != 1024 || !strings.HasSuffix(got, "...") {
+		t.Fatalf("condMessage len=%d suffix=%q", len(got), got[len(got)-3:])
+	}
+	// Multi-byte runes near the cut must not produce invalid UTF-8.
+	// "界" is 3 bytes; pad so a naive byte cut would split it.
+	multi := strings.Repeat("a", 1020) + "世界世界"
+	got = condMessage(multi)
+	if !utf8.ValidString(got) {
+		t.Fatal("condMessage produced invalid UTF-8")
+	}
+	if !strings.HasSuffix(got, "...") {
+		t.Fatalf("expected ellipsis suffix, got %q", got[len(got)-10:])
+	}
+	if len(got) > 1024 {
+		t.Fatalf("condMessage longer than cap: %d", len(got))
+	}
+}
+
+func TestSetCondCapsMessage(t *testing.T) {
+	cb := &baselinev1alpha1.ClusterBaseline{}
+	// InvalidSchedule embeds the user schedule; a huge cron must not land
+	// unbounded on the condition (status admission / etcd size).
+	huge := strings.Repeat("0 ", 2000)
+	setCond(cb, "ScanConfigured", metav1.ConditionFalse, "InvalidSchedule",
+		fmt.Sprintf("spec.schedule %q is not a valid standard cron schedule: bad", huge))
+	c := meta.FindStatusCondition(cb.Status.Conditions, "ScanConfigured")
+	if c == nil || len(c.Message) > 1024 {
+		t.Fatalf("setCond must cap message, got len=%d", len(c.Message))
+	}
+	if !strings.HasSuffix(c.Message, "...") {
+		t.Fatalf("expected truncated message, got %q", c.Message[len(c.Message)-20:])
 	}
 }
 

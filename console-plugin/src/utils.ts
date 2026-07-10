@@ -77,12 +77,25 @@ const csvCell = (v: string): string => {
   return /[",\t\r\n]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
 };
 
-// resultsCsv serializes check results to a CSV report (name,title,status,
-// severity). Deterministic column order; one header row.
-export const resultsCsv = (results: ComplianceCheckResult[]): string => {
-  const header = ['name', 'title', 'status', 'severity'];
+// resultsCsv serializes check results to a CSV report. Deterministic column
+// order; one header row. When waivers are provided, a waived column marks
+// checks excluded from the score (FAIL + waiver only; a waived PASS still
+// counts toward the score) so exports match Overview score math.
+export const resultsCsv = (
+  results: ComplianceCheckResult[],
+  waivers?: Waiver[],
+): string => {
+  const header = ['name', 'title', 'status', 'severity', 'waived'];
   const rows = results.map((r) =>
-    [r.metadata.name, checkTitle(r), r.status, r.severity].map((c) => csvCell(String(c ?? ''))).join(','),
+    [
+      r.metadata.name,
+      checkTitle(r),
+      r.status,
+      r.severity,
+      r.status === 'FAIL' && isWaived(r.metadata.name, waivers) ? 'true' : 'false',
+    ]
+      .map((c) => csvCell(String(c ?? '')))
+      .join(','),
   );
   return [header.join(','), ...rows].join('\r\n');
 };

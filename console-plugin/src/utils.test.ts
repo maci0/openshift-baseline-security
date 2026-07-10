@@ -270,14 +270,24 @@ describe('resultsCsv', () => {
   it('emits a header and one row per result', () => {
     const csv = resultsCsv([r('a', 'PASS', 'low', 'Title A'), r('b', 'FAIL', 'high', 'Title B')]);
     const lines = csv.split('\r\n');
-    expect(lines[0]).toBe('name,title,status,severity');
-    expect(lines[1]).toBe('a,Title A,PASS,low');
-    expect(lines[2]).toBe('b,Title B,FAIL,high');
+    expect(lines[0]).toBe('name,title,status,severity,waived');
+    expect(lines[1]).toBe('a,Title A,PASS,low,false');
+    expect(lines[2]).toBe('b,Title B,FAIL,high,false');
+  });
+  it('marks waived checks so export matches score exclusions', () => {
+    const csv = resultsCsv([r('b', 'FAIL', 'high', 'Fail B')], [{ name: 'b', reason: 'risk' }]);
+    expect(csv.split('\r\n')[1]).toBe('b,Fail B,FAIL,high,true');
+  });
+  it('does not mark a waived PASS as score-excluded (self-healing)', () => {
+    // Operator only excludes FAIL+waiver; a waived check that now PASSes
+    // still counts toward the score, so the CSV must not claim waived=true.
+    const csv = resultsCsv([r('b', 'PASS', 'high', 'Pass B')], [{ name: 'b', reason: 'stale' }]);
+    expect(csv.split('\r\n')[1]).toBe('b,Pass B,PASS,high,false');
   });
   it('quotes and escapes cells containing comma, quote, or newline', () => {
     const csv = resultsCsv([r('x,y', 'FAIL', 'high', 'He said "hi"\nline2')]);
     const row = csv.split('\r\n')[1];
-    expect(row).toBe('"x,y","He said ""hi""",FAIL,high');
+    expect(row).toBe('"x,y","He said ""hi""",FAIL,high,false');
   });
   it('neutralizes spreadsheet formula-looking cells from untrusted CR data', () => {
     const csv = resultsCsv([
@@ -287,15 +297,15 @@ describe('resultsCsv', () => {
       r(' =cmd', 'PASS', 'low'), // leading space then formula
     ]);
     const lines = csv.split('\r\n');
-    expect(lines[1]).toBe(`'=cmd,"'+SUM(1,1)",'-1,'@import`);
-    expect(csv).toContain(`"'\tTabbed","'\tTabbed","'\nNewline",low`);
-    expect(csv).toContain(`"'\rCarriage","'\rCarriage",PASS,low`);
+    expect(lines[1]).toBe(`'=cmd,"'+SUM(1,1)",'-1,'@import,false`);
+    expect(csv).toContain(`"'\tTabbed","'\tTabbed","'\nNewline",low,false`);
+    expect(csv).toContain(`"'\rCarriage","'\rCarriage",PASS,low,false`);
     expect(csv).toContain(`' =cmd`);
   });
   it('handles empty input (header only)', () => {
-    expect(resultsCsv([])).toBe('name,title,status,severity');
+    expect(resultsCsv([])).toBe('name,title,status,severity,waived');
   });
-  it('fuzz: valid CSV (each row has 4 cells; quotes balanced) for arbitrary CR text', () => {
+  it('fuzz: valid CSV (quotes balanced) for arbitrary CR text', () => {
     const rand = () =>
       Array.from({ length: Math.floor(Math.random() * 40) }, () =>
         String.fromCharCode(Math.floor(Math.random() * 128)),

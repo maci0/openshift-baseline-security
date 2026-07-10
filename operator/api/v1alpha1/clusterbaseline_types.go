@@ -57,12 +57,16 @@ type ClusterBaselineSpec struct {
 	// baseline-tp-<name> suite label remains a valid Kubernetes label value.
 	// +optional
 	// +listType=set
+	// +kubebuilder:validation:MaxItems=32
 	// +kubebuilder:validation:items:MaxLength=51
 	// +kubebuilder:validation:items:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`
 	TailoredProfiles []string `json:"tailoredProfiles,omitempty"`
 
 	// schedule is the scan cron schedule, applied to the owned ScanSetting.
+	// Bounded so a hostile or accidental multi-megabyte string cannot bloat the
+	// CR or inflate condition messages that embed the value.
 	// +kubebuilder:default="0 1 * * *"
+	// +kubebuilder:validation:MaxLength=128
 	// +optional
 	Schedule string `json:"schedule,omitempty"`
 
@@ -75,6 +79,7 @@ type ClusterBaselineSpec struct {
 	// complianceCatalogSource is the OLM CatalogSource providing the
 	// compliance-operator package (override for OKD or disconnected clusters).
 	// +kubebuilder:default="redhat-operators"
+	// +kubebuilder:validation:MaxLength=253
 	// +optional
 	ComplianceCatalogSource string `json:"complianceCatalogSource,omitempty"`
 
@@ -91,9 +96,11 @@ type ClusterBaselineSpec struct {
 	// waived check is removed from the pass/fail denominator and reported in the
 	// Waived bucket instead, so an accepted risk neither inflates nor tanks the
 	// score. Waivers are keyed by result name, which is stable across rescans.
+	// Capped so a hostile list cannot bloat the CR past practical audit size.
 	// +optional
 	// +listType=map
 	// +listMapKey=name
+	// +kubebuilder:validation:MaxItems=256
 	Waivers []WaiverEntry `json:"waivers,omitempty"`
 }
 

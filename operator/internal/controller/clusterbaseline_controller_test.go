@@ -377,6 +377,32 @@ func TestRecordHistoryDoesNotRewind(t *testing.T) {
 	}
 }
 
+func TestRecordHistoryIgnoresFarFutureEndTimestamp(t *testing.T) {
+	scheme := testScheme(t)
+	future := time.Now().UTC().Add(48 * time.Hour).Format(time.RFC3339)
+	scan := &unstructured.Unstructured{}
+	scan.SetGroupVersionKind(scanGVK)
+	scan.SetName("ocp4-cis")
+	scan.SetNamespace(complianceNamespace)
+	scan.SetLabels(map[string]string{suiteLabel: "baseline-cis"})
+	_ = unstructured.SetNestedField(scan.Object, future, "status", "endTimestamp")
+
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(scan).Build(),
+		Scheme: scheme,
+	}
+	cb := &baselinev1alpha1.ClusterBaseline{
+		Spec: baselinev1alpha1.ClusterBaselineSpec{Profiles: []baselinev1alpha1.ProfileKey{"cis"}},
+	}
+	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(50))); err != nil {
+		t.Fatal(err)
+	}
+	if cb.Status.LastScanTime != nil || len(cb.Status.History) != 0 {
+		t.Fatalf("far-future endTimestamp must not set history: last=%v hist=%v",
+			cb.Status.LastScanTime, cb.Status.History)
+	}
+}
+
 func TestRecordHistoryAppendsWhenScoreAppearsLater(t *testing.T) {
 	scheme := testScheme(t)
 	end := time.Date(2026, 7, 9, 1, 0, 0, 0, time.UTC)

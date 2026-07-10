@@ -220,7 +220,10 @@ const ResultsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => {
 
   const downloadCsv = React.useCallback(() => {
     // Export the currently filtered rows so the download matches the view.
-    const blob = new Blob([resultsCsv(filteredData)], { type: 'text/csv;charset=utf-8' });
+    // Pass waivers so the waived column matches score exclusions.
+    const blob = new Blob([resultsCsv(filteredData, waivers)], {
+      type: 'text/csv;charset=utf-8',
+    });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -230,7 +233,7 @@ const ResultsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => {
     a.click();
     a.remove();
     window.setTimeout(() => URL.revokeObjectURL(url), 0);
-  }, [filteredData]);
+  }, [filteredData, waivers]);
 
   return (
     <ListPageBody>
