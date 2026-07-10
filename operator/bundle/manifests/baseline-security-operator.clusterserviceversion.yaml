@@ -203,5 +203,7 @@ spec:
                       secretName: baseline-security-operator-metrics-cert
                       optional: true
   relatedImages:
+    - name: manager
+      image: quay.io/openshift-baseline-security/baseline-security-operator:0.2.1
     - name: console-plugin
       image: quay.io/openshift-baseline-security/baseline-security-console-plugin:0.2.1
