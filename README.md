@@ -77,10 +77,10 @@ EOF
 ```
 
 Then install "Baseline Security" from OperatorHub into the
-`openshift-baseline-security` namespace (OwnNamespace). The operator
-default-creates a `ClusterBaseline/cluster` with the CIS profile and starts
-scanning; opt out with `BASELINE_SECURITY_SKIP_DEFAULT_CR=true` on the CSV
-deployment.
+`openshift-baseline-security` namespace using the cluster-wide
+`AllNamespaces` install mode. The operator default-creates a
+`ClusterBaseline/cluster` with the CIS profile and starts scanning; opt out
+with `BASELINE_SECURITY_SKIP_DEFAULT_CR=true` on the CSV deployment.
 
 Optional metrics scrape: apply `operator/config/prometheus/servicemonitor.yaml`
 when user-workload monitoring is enabled, and bind the scrape ServiceAccount

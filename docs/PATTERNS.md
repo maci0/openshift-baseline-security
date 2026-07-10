@@ -120,8 +120,10 @@ compatibility via `com.redhat.openshift.versions`. Catalogs are file-based
 `operator-sdk bundle validate` (run via container, the CLI is deprecated on
 hosts).
 
-**Here**: OwnNamespace install into `openshift-baseline-security` (metrics
-Service and RBAC subjects are fixed to that namespace). `make bundle`
+**Here**: install the operator deployment into
+`openshift-baseline-security` with the cluster-wide `AllNamespaces` install
+mode (the metrics Service and RBAC subjects are fixed to that namespace,
+while the controller watches cluster-scoped resources). `make bundle`
 validates in the operator-sdk container; `make
 bundle-build/bundle-push/catalog-build` produce bundle + FBC catalog images.
 

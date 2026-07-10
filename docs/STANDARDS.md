@@ -78,8 +78,10 @@ replicas with preferred pod anti-affinity and leader election on the
 manager. Resource requests only (no limits). Metrics over HTTPS with
 authn/authz (`filters.WithAuthenticationAndAuthorization` on `:8443`),
 service-ca serving cert when present, and optional ServiceMonitor sample
-under `operator/config/prometheus/`. OLM install mode is OwnNamespace into
-`openshift-baseline-security` so metrics Service and RBAC subjects match.
+under `operator/config/prometheus/`. OLM installs the deployment into
+`openshift-baseline-security` with cluster-wide `AllNamespaces` scope so the
+cluster-scoped controller, metrics Service, and RBAC subjects all match their
+intended namespaces and watch scope.
 
 ## Console / frontend
 

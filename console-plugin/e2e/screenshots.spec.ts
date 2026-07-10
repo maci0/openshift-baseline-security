@@ -43,4 +43,19 @@ test.describe('Baseline Security screenshots', () => {
       await shot(page, 'remediation-apply');
     }
   });
+
+  test('overview with a tailored profile card', async ({ page }) => {
+    await page.goto('/baseline-security', { waitUntil: 'networkidle' });
+    await expect(page.getByText('cis-custom')).toBeVisible();
+    await expect(page.getByText('Tailored')).toBeVisible();
+    await shot(page, 'overview-tailored');
+  });
+
+  test('results filtered to a tailored profile', async ({ page }) => {
+    await page.goto('/baseline-security/results?rowFilter-result-profile=tp-cis-custom', {
+      waitUntil: 'networkidle',
+    });
+    await expect(page.getByRole('button', { name: /Clear all filters/i })).toBeVisible();
+    await shot(page, 'results-tailored');
+  });
 });
