@@ -36,6 +36,38 @@ Rules:
 - Do not promote a live-only manual verification to `[x]` unless the exact
   command and expected output are recorded in the bullet or the e2e test.
 
+## Run ledger
+
+Where "was this run, and when" lives. Do **not** add a per-item last-run column
+to the hundreds of checkboxes below: automated tiers are re-run every PR, so
+their real last-run is the latest CI job, and a hand-maintained column would rot
+within a day. Track it at two useful granularities instead.
+
+### Tier last-run summary
+
+Update the row for a tier when you run it. Automated tiers point at CI rather
+than a copied date.
+
+| Tier | How it's tracked | Last run | Result |
+|---|---|---|---|
+| 0 Fast local correctness | CI `ci.yml`, every PR/push | see latest Actions run on `main` | gating |
+| 1 Generated/build artifacts | CI `ci.yml` (`make bundle`, `yarn build`) | see latest Actions run | gating |
+| 2 Hardening (`-race`, fuzz) | manual / nightly (not yet automated) | not yet run | — |
+| 3 API admission (envtest) | manual (not yet automated) | not yet run | — |
+| 4 Live OpenShift (Go e2e + Playwright) | manual, logged below | 2026-07-10 | pass |
+| 5 Release / supply chain | manual (pre-release) | not yet run | — |
+
+### Live verification log (Tiers 4–5)
+
+Append one row per live run; never edit past rows (it is history, so it does not
+rot). Record topology, versions, and the concrete result.
+
+| Date | Tier | Scope | Cluster topology | OCP / CO | Result |
+|---|---|---|---|---|---|
+| 2026-07-09 | 4 | First zero-config CIS scan; Overview donut, Results, Remediations, nav placement | SNO (1 master+worker) | 4.22 / CO 1.9.1 | pass — score ~95, Available=True, Degraded=False |
+| 2026-07-10 | 4 | Multi-node + multi-benchmark: CIS+PCI-DSS on 3 nodes; INCONSISTENT surfaced; dashboard item; donut legend | SNO + 2 day-2 workers | 4.22 / CO 1.9.1 | pass — score 94 pooled, 86 INCONSISTENT counted, node scan fans out 3 pods |
+| 2026-07-10 | 1 | OLM bundle validation | n/a (local) | operator-sdk bundle validate | pass — "All validation tests completed successfully" |
+
 ## Fixture and harness strategy
 
 Prefer small deterministic fixtures over ad hoc live-cluster assertions.
@@ -58,13 +90,14 @@ ready even if nearby unit tests pass.
 
 | Product promise | Primary sections | Must-have automated evidence |
 |---|---|---|
-| Zero-config onboarding creates useful scans | B, D, O, X | default CR creation, Subscription/ScanSettingBinding creation, install-guide smoke |
-| Compliance score is trustworthy | A, A2, K, R, S | pooled score tests, status-value exclusions, history/LastScanTime tests, malformed input tests |
-| Console is safe for read-only admins | F, G, H, Q, U, AE | RBAC disabled states, no-baseline/error branches, keyboard/modal checks |
-| Remediation UX is explicit about blast radius | G, U, AE | node-remediation warning, unapply/no-warning path, auto-apply patch round trip |
-| Operator behaves like an OpenShift component | D, J, M, O, R, T | condition matrix, HA/leader paths, finalizer cleanup, dependency-CRD absence |
-| Release artifacts install and upgrade cleanly | L, N, P, W, AJ | CRD drift/admission checks, bundle validation, image smoke, OLM upgrade ladder |
-| Admins can troubleshoot failures | E, I, T, X | PVC degraded path, promtool rules, runbook smoke, must-gather smoke |
+| Zero-config onboarding creates useful scans | B, D, O, X, AU | default CR creation, Subscription/ScanSettingBinding creation, install-guide smoke, kill-switch matrix |
+| Compliance score is trustworthy | A, A2, K, R, S, AT, AW, AF | pooled score tests, boundaries table, goldens, ownership exclusivity, history tests |
+| Console is safe for read-only admins | F, G, H, Q, U, AE, AO | RBAC disabled states, dark-UX banners, keyboard/modal checks |
+| Remediation UX is explicit about blast radius | G, U, AE, AZ | node-remediation warning, unapply/no-warning path, forced confirm |
+| Operator behaves like an OpenShift component | D, J, M, O, R, T, AR, AN | condition matrix, negative-space suite, multi-admin races, finalizer cleanup |
+| Release artifacts install and upgrade cleanly | L, N, P, W, AJ, AQ | CRD drift/admission, OLM upgrade ladder, disaster restore notes |
+| Admins can troubleshoot failures | E, I, T, X, AS, AA | PVC degraded path, promtool rules, log/audit quality, alert boundaries |
+| Content bumps do not invent health | AP, V, AY | missing Profile, prune/re-add, unknown status strings |
 
 ## Test evidence contract
 
@@ -1010,34 +1043,297 @@ Release-blocker severity:
 Regression test name:
 ```
 
+## AN. Concurrent humans (multi-actor races)
+
+Two operators, one cluster, no coordination. These catch optimistic-lock and
+UI-stale-state bugs that single-actor tests never see.
+
+- [ ] **Admin A toggles STIG on while Admin B toggles STIG off**: one patch
+      loses on `test` of `spec.profiles`; loser sees a clear conflict message,
+      winner's set is the source of truth after refresh.
+- [ ] **Admin A sets schedule invalid while Admin B sets auto-apply Automatic**:
+      both writes apply or one conflicts; ScanSetting never ends with garbage
+      cron; auto-apply still matches the surviving CR.
+- [ ] **Admin A applies remediation while Admin B unapplies the same one**:
+      final `spec.apply` is one of the two; no double-modal stuck open; CO
+      remediations stay consistent.
+- [ ] **Admin A deletes ClusterBaseline while Admin B clicks Rescan**: rescan
+      fails gracefully (NotFound/Forbidden); delete still removes finalizer;
+      no orphan rescan storm.
+- [ ] **Admin A sets console Removed while Admin B has the Compliance page
+      open**: page degrades to missing plugin / blank route; no infinite
+      console error loop; re-enable restores without browser restart.
+- [ ] **Two browsers, different users, same profile switch**: watch updates both
+      UIs; neither shows a switch state that disagrees with the live CR for
+      more than one watch tick after settle.
+- [ ] **CLI `oc patch` races console Profiles tab**: console does not silently
+      overwrite CLI changes without the `test` op failing.
+- [ ] **must-gather while reconcile is hot**: gather completes; operator does
+      not deadlock on shared locks (there should be none beyond API).
+
+## AO. Dark UX & "helpful" footguns
+
+Cases where the UI is "working" but trains admins to do the wrong thing.
+
+- [ ] **Score 100 with hundreds of MANUAL**: Overview looks perfect; Manual
+      slice or profile cards still force the human to notice residual work.
+- [ ] **Score high, Degraded True (storage)**: green-ish score does not hide
+      the Degraded banner; severity of banner ≥ score color optimism.
+- [ ] **Next scan "—" with InvalidSchedule**: user is not told "scans stopped"
+      if last-good cron is still firing; copy should say schedule invalid /
+      using last good, not "no schedule".
+- [ ] **Rescan succeeds, score unchanged for hours**: UI does not imply rescan
+      failed; optional "last rescan requested at" is future work; at least no
+      false error toast.
+- [ ] **Filter URL shared with colleague without access**: they see empty or
+      forbidden, not a crash; no leak of check titles in the error path.
+- [ ] **Deep link to `tp-missing` filter**: empty table, not "all results".
+- [ ] **Donut with a single tiny FAIL slice**: slice remains clickable/visible
+      (not sub-pixel invisible); legend still lists Fail (n).
+- [ ] **History trend with two points equal score**: chart still renders (not
+      "need variance"); axis labels do not collapse into one unreadable tick.
+- [ ] **Remediation Apply on something already Applied**: button shows Unapply;
+      no second Apply that no-ops confusingly.
+- [ ] **Profiles tab all switches on**: still can turn one off; cannot turn
+      last one off (disabled, not silent no-op).
+
+## AP. Compliance content & OpenSCAP surprises
+
+The content image is not under our control; our product must not lie when
+content is weird.
+
+- [ ] **Profile renamed upstream** (`ocp4-cis` → something else): binding
+      references missing Profile; score empty or CO error; condition/message
+      not "healthy 100".
+- [ ] **Rule ID stable, title text changes**: Results sort/filter by status
+      still work; CSV gets new title; no key-by-title assumptions.
+- [ ] **Duplicate check names across profiles**: table keys by object name +
+      suite; no React key collision wiping rows.
+- [ ] **Result status string with unexpected casing** (`pass` vs `PASS`): tally
+      ignores or normalizes; document which; UI shows raw label.
+- [ ] **Severity value outside enum** (`critical`, empty, `CRITICAL`): filter
+      still lists known severities; row still visible under "unknown" or raw.
+- [ ] **Instructions field multi-megabyte**: modal scroll works; export may
+      omit instructions today (only name/title/status/severity); document.
+- [ ] **NOT-APPLICABLE storm** (entire node profile N/A on non-RHCOS): score
+      from platform profile only; donut not empty-looking "success".
+- [ ] **TailoredProfile that disables every rule**: suite completes with zero
+      countable results; score nil for that bucket; global score may still
+      compute from other profiles.
+- [ ] **Content image pull failure**: scans ERROR; we do not keep last score
+      forever without showing scan failure somewhere (UI and/or conditions).
+
+## AQ. Disaster recovery & backup
+
+- [ ] **Restore etcd from backup taken mid-scan**: ClusterBaseline generation
+      and conditions converge; no permanent Progressing from stale observed
+      generation confusion.
+- [ ] **Restore CR without status**: operator rebuilds status on next
+      reconcile; score may be nil until results listed.
+- [ ] **Restore CR with future LastScanTime** (clock was wrong at backup):
+      history no-rewind / future endTimestamp rules prevent permanent freeze;
+      document recovery (`oc patch --subresource=status` or wait).
+- [ ] **Backup tool excludes status**: same as empty status rebuild.
+- [ ] **Disaster: delete openshift-compliance NS**: CRDs/results gone; we clear
+      stale score; Available False; CO reinstall path (Automatic) recovers.
+- [ ] **Disaster: delete openshift-baseline-security NS with finalizers**:
+      namespace terminating stuck? Plugin NS delete vs cluster-scoped CR;
+      document order (delete CR first).
+- [ ] **Velero / OADP restore of only plugin Deployment**: operator re-owns
+      and rewrites image/env from RELATED_IMAGE_*.
+
+## AR. Negative-space testing ("prove it does not…")
+
+Every bullet is a forbidden behavior. Easier to review than positive lists.
+
+- [ ] Does **not** uninstall the Compliance Operator on ClusterBaseline delete.
+- [ ] Does **not** prune ScanSettingBindings it does not own.
+- [ ] Does **not** count foreign suite CheckResults in score.
+- [ ] Does **not** show foreign remediations in the Remediations tab.
+- [ ] Does **not** set Available=True when ComplianceOperatorReady is False.
+- [ ] Does **not** set Progressing=True for NotInstalled / ConsoleMissing /
+      ImageMissing / CRDsMissing / CSVFailed / InvalidSchedule / Unavailable.
+- [ ] Does **not** rewind LastScanTime when a profile is removed.
+- [ ] Does **not** write an invalid cron string into ScanSetting.schedule.
+- [ ] Does **not** serve plugin metrics or API tokens from the nginx pod.
+- [ ] Does **not** put plaintext HTTP on the plugin Service (9443 TLS only).
+- [ ] Does **not** expose insecure metrics on non-loopback without auth.
+- [ ] Does **not** render check descriptions as HTML.
+- [ ] Does **not** use client-side global score math that disagrees with status.
+- [ ] Does **not** require cluster-admin to *view* compliance if viewer role
+      is bound (document exact verbs).
+- [ ] Does **not** leave our name in `consoles…/cluster.spec.plugins` after
+      successful finalizer cleanup.
+
+## AS. Event, log & audit signal quality
+
+- [ ] **Reconcile error** logs include namespace/name and error cause; no
+      secret values from serving-cert files.
+- [ ] **No spam**: steady-state happy path does not log every minute at Info
+      for "reconciled" (V(1) is fine); warn on persistent Degraded transitions.
+- [ ] **Kubernetes events** (if any are emitted later): reason strings stable
+      for alert routing; until then document "status conditions are the API".
+- [ ] **API audit**: profile toggle and remediation apply appear as patches from
+      the user, not the operator SA impersonating.
+- [ ] **Operator SA** does not get unexpected cluster-admin; impersonation not
+      used.
+- [ ] **Correlation**: must-gather output enough to pair a Degraded reason with
+      a log line timestamp within 1 minute.
+
+## AT. Empty, zero, max, and "boring" boundaries
+
+Classic boundary table. Automate as table-driven unit tests where possible.
+
+| Input | Expected |
+|---|---|
+| 0 profiles (admission) | reject |
+| 1 profile | ok; cannot toggle off in UI |
+| 8 profiles | ok; score pools all |
+| 0 tailored | status.tailoredProfiles empty/nil |
+| 1 tailored, 0 built-in fails admission? | profiles min 1 still required |
+| history 0 points | no trend card |
+| history 1 point | no trend card (need >1) |
+| history 30 points | cap; 31st drops oldest |
+| history 31st with same timestamp refresh | no growth past 30 |
+| pass=0,fail=0 | score nil |
+| pass=0,fail=1 | score 0 |
+| pass=1,fail=0 | score 100 |
+| pass=2,fail=1 | score 66 (floor) |
+| schedule `""` | default daily 01:00 |
+| schedule invalid | Degraded; last-good cron kept |
+| plugin replicas ready 0 | Waiting / Unavailable by grace |
+| plugin replicas ready 1 of 2 | Deployed (ReadyMin) |
+| plugin replicas ready 2 of 2 | Deployed |
+
+- [ ] Encode this table as `TestBoundaries_*` unit tests with one assertion
+      per row (or subtests).
+
+## AU. Feature-flag & kill-switch matrix
+
+| Knob | On | Off / unset | Test |
+|---|---|---|---|
+| `installComplianceOperator=Automatic` | creates Sub | — | [x] unit |
+| `installComplianceOperator=Manual` | never creates Sub | — | [x] unit |
+| `BASELINE_SECURITY_SKIP_DEFAULT_CR=true` | no default CR | creates default | [ ] |
+| `console.managementState=Removed` | teardown plugin | Managed deploy | [x] partial |
+| `remediation.apply=Automatic` | ScanSetting auto flags | Manual false | [x] unit |
+| `RELATED_IMAGE_CONSOLE_PLUGIN` empty | ImageMissing | deploy image | [x] unit |
+| `complianceCatalogSource` custom | Sub.source override | redhat-operators | [x] unit |
+| metrics `--metrics-bind-address=0` | metrics off | :8443 | [ ] |
+| metrics insecure + non-loopback | forced secure | — | [x] addr class |
+
+- [ ] One integration test file that walks every knob and asserts the primary
+      side effect (table-driven).
+
+## AV. "Time travel" operator scenarios
+
+- [ ] **Reconcile delayed 24h** (leader stuck): NextScanTime in the past is
+      acceptable; score still from last results; no crash on negative
+      duration math.
+- [ ] **Scan endTimestamp older than CR creation**: still counts if suite
+      owned; history may append once.
+- [ ] **Multiple scans same suite, different endTimestamps**: latest wins for
+      LastScanTime; older does not append after newer.
+- [ ] **Results from suite deleted hours ago still in etcd**: if suite no
+      longer in ownedSuites, results ignored even if endTimestamp is newest.
+- [ ] **PVC CreationTimestamp after "now"** (clock skew): age check does not
+      Degrade (negative age); when clock catches up, normal rules apply.
+
+## AW. Comparison contracts (golden snapshots)
+
+- [ ] **Golden status JSON** for a fixed set of CheckResults (cis only,
+      known pass/fail/manual/info/skip/inconsistent mix): compare
+      `status.profiles`, score, and conditions reasons (not timestamps).
+- [ ] **Golden ScanSetting** after reconcile with Automatic remediation:
+      autoApply/autoUpdate true, roles worker+master, rotation 3.
+- [ ] **Golden relatedObjects** for profiles [cis,e8] + tailored [custom]:
+      sorted binding names exactly `baseline-cis`, `baseline-e8`,
+      `baseline-tp-custom`.
+- [ ] **Golden CSV export** for a fixture of 3 results including formula-like
+      title: file bytes match (modulo `\r\n` policy).
+- [ ] Refresh goldens only with explicit `UPDATE_GOLDEN=1` and PR review.
+
+## AX. Composability with the OpenShift platform
+
+- [ ] **Console dynamic plugin SDK upgrade**: plugin builds against the
+      supported SDK range; HorizontalNav / useK8sWatchResource still work.
+- [ ] **PatternFly major bump**: visual regression on Overview cards and
+      modals (screenshot diff optional).
+- [ ] **Cluster with Monitoring disabled**: no PrometheusRule install; operator
+      still healthy; metrics endpoint still scrapable manually.
+- [ ] **Cluster with user-workload monitoring only**: ServiceMonitor in our NS
+      scraped when labeled correctly; document required labels.
+- [ ] **Hosted control plane / HyperShift**: operator in management vs guest
+      (document support boundary; skip if unsupported).
+- [ ] **ROSA / managed offering constraints**: if SCCs or webhooks block
+      operator, document unsupported rather than silent fail.
+
+## AY. Data integrity under prune & re-add
+
+- [ ] **Remove cis, wait, re-add cis**: new binding created; old results may
+      still exist with same suite label; score includes them again (CO may
+      also rescan); no duplicate bindings.
+- [ ] **Rename tailored in spec** (remove old name, add new): old suite
+      results excluded; new suite empty until scan; history LastScanTime not
+      rewound solely due to rename.
+- [ ] **Switch install Manual → Automatic with CO already present**: no second
+      Subscription fight; Ready stays True.
+- [ ] **Switch Automatic → Manual**: existing Subscription not deleted (we
+      never delete CO Sub); document.
+- [ ] **Remediation Manual → Automatic → Manual**: ScanSetting flags follow;
+      applied remediations not bulk-unapplied by the toggle alone.
+
+## AZ. Humorless "could a smart intern break it?" checklist
+
+Ten minutes, no mercy. If any pass, file AM tickets.
+
+- [ ] Paste a 10k-character string into a TailoredProfile name via raw YAML
+      (should fail admission at 51).
+- [ ] Set `profiles: [cis, cis]` (duplicate; should fail UniqueItems).
+- [ ] Set `metadata.name: Cluster` (wrong case; should fail CEL).
+- [ ] Point `complianceCatalogSource` at a name that does not exist; install
+      stuck with readable condition, not CrashLoop.
+- [ ] `oc delete csv -n openshift-compliance --all` while Automatic; recover or
+      Degrade clearly.
+- [ ] Fill Results search/filter with only spaces / emoji; no exception.
+- [ ] Export CSV, open in spreadsheet, confirm formula cells are text.
+- [ ] Apply node remediation without reading modal; modal still forced a
+      confirm click (no single-click Apply on node type).
+- [ ] Scale plugin deploy to 0 replicas manually; operator heals to 2 or
+      reports Unavailable after grace.
+- [ ] Annotate ConsolePlugin with random junk; CreateOrUpdate still converges
+      owned spec fields.
+
 ---
 
 ## Priority gaps
 
 Rough order: high value / low cost first.
 
-1. **R**: table-driven rollup matrix (locks Available/Progressing/Degraded).
+1. **R / AT**: table-driven rollup + boundary tables (locks conditions & score).
 2. **N**: API admission dry-run for singleton name, profile uniqueness,
    tailored name constraints.
 3. **I / AA**: promtool tests for score sentinel, score=80 boundary, fail
    clear, HA-safe exprs.
-4. **H/F / AH**: `ClusterScoreItem` branches including **score 0 vs not scanned**.
-5. **K / AF**: garbage suite labels/statuses + ownership exclusivity property.
+4. **H/F / AH / AO**: `ClusterScoreItem` branches, score 0 vs not scanned,
+      Degraded+high score banner dominance.
+5. **K / AF / AR**: garbage suite labels + ownership exclusivity + negative-space
+   suite as unit asserts.
 6. **D**: stuck Subscription / deleted installedCSV bounded conditions.
-7. **Y**: rescan double-click + nil annotations patch against API.
+7. **Y / AN**: rescan double-click + multi-admin profile toggle conflict.
 8. **Q**: axe + keyboard smoke on the four tabs and two modals.
 9. **U**: XSS/SSRF href tests + metrics 401 without token.
-10. **AE**: day-0 admin + view-only auditor Playwright journeys.
-11. **C**: tailored + built-in same base coexistence e2e.
-12. **AC**: reconcile benchmark budget for 1k/10k check results.
-13. **AD**: faulty-client injection for Status conflict and NoKindMatch.
-14. **W**: generated drift gate + Playwright artifact policy in CI.
-15. **X**: install/uninstall guide smoke and alert runbooks.
-16. **A2**: node-added-mid-cycle + NotReady multi-node paths.
-17. **S**: DST/UTC NextScanTime documentation test.
-18. **AK**: first-hour admin and skeptical auditor exploratory charters.
-19. **AL/AM**: waiver and regression intake templates in release checklist.
-20. **T / AB**: foreign binding survival + orphan GC documentation tests.
+10. **AE / AK**: day-0 admin + view-only auditor journeys / charters.
+11. **AW**: golden status + relatedObjects snapshots (cheap, high regression value).
+12. **C**: tailored + built-in same base coexistence e2e.
+13. **AC**: reconcile benchmark budget for 1k/10k check results.
+14. **AD / AV**: faulty-client injection + time-travel endTimestamps.
+15. **AU**: kill-switch matrix one-file integration test.
+16. **W**: generated drift gate + Playwright artifact policy in CI.
+17. **X**: install/uninstall guide smoke and alert runbooks.
+18. **A2 / AP**: multi-node NotReady + content-image surprises.
+19. **AQ**: delete openshift-compliance NS recovery path.
+20. **AZ**: smart-intern checklist as a release-candidate script.
 
 ---
 
@@ -1049,15 +1345,19 @@ Rough order: high value / low cost first.
   artifacts, Dockerfiles, manifests, or frontend code changed.
 - **After a bugfix**: add a regression case here with `[x]` and the test
   name, even if the scenario feels "too specific". Prefer a row under K, R,
-  Y, AA, AB, AD, or AH when the bug was environmental or adversarial.
-- **Adversarial review rounds**: invent in K, R, T, U, Y, AA–AJ first; only
+  Y, AA–AZ when the bug was environmental, multi-actor, or adversarial.
+- **Adversarial review rounds**: invent in K, R, T, U, Y, AA–AZ first; only
   re-open A/D when the score formula or CSV selection actually changed.
+- **Negative-space day**: once a month run AR as a checklist against main;
+  any violation is a release-blocker candidate under AL.
 - **Coverage myth-busting**: Playwright screenshots are not assertions; promote
   them to `[x]` only when a hard expect exists.
 - **Persona days**: once per quarter run AE journeys on a live cluster and
   refresh screenshots + known-issue ledger.
-- **Exploratory runs**: use AK charters when behavior changes; convert any
-  surprising result into an AM regression entry before patching.
+- **Exploratory runs**: use AK and AZ charters when behavior changes; convert
+  any surprising result into an AM regression entry before patching.
+- **Golden updates**: AW snapshots change only with `UPDATE_GOLDEN=1` and
+  explicit PR justification.
 - **Release candidates**: Tier 2, Tier 4, and Tier 5 failures block release
   unless an AL waiver states exact user impact and follow-up owner.
 - **Budget negotiation**: if AC budgets fail, either fix the regression or
