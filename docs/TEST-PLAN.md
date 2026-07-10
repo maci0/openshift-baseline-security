@@ -194,6 +194,12 @@ per-node annotation) when nodes disagree.
       Inconsistent bucket; donut has an Inconsistent slice).
 - [x] **Inconsistent excluded from the score denominator** (like Manual)
       (`TestAggregateStatus`).
+- [x] **Per-node drill-down**: the Results detail modal parses the
+      `inconsistent-source` annotation into a node/status table plus the
+      most-common status (jest `inconsistentSources` incl. fuzz; Playwright
+      asserts the "Per-node results" table names a node).
+- [x] **Node scan fan-out verified live** across 3 worker nodes
+      (`TestNodeScanCoversAllNodes`, e2e).
 - [ ] **All-nodes-agree case**: same rule PASS on every node → status PASS, not
       INCONSISTENT (guards against mislabeling uniform results).
 - [ ] **Master-only vs worker MCP**: control-plane-file rules are INCONSISTENT
@@ -383,6 +389,35 @@ per-node annotation) when nodes disagree.
 - [ ] **Apply when CO auto-apply is already Automatic**: UI toggle and CO
       ScanSetting stay consistent after reconcile.
 
+## G2. Waivers (risk acceptance)
+
+`spec.waivers []{name, reason}` marks a ComplianceCheckResult as accepted risk.
+The controller pulls waived results out of the pass/fail denominator into the
+Waived bucket, so an accepted risk neither inflates nor tanks the score.
+
+- [x] **Waived FAIL leaves the denominator** into the Waived bucket, raising the
+      score (`TestAggregateStatusWaivers`).
+- [x] **Live waiver round-trip**: waive a real FAIL → Waived bucket +1, fail -1,
+      remove → reverts; built-in and tailored buckets both summed
+      (`TestWaiverExcludesCheck`, e2e).
+- [x] **JSON-patch helpers**: add-array when absent vs append when present;
+      remove test-guards the name by index (jest `addWaiverPatch`,
+      `removeWaiverPatch`, `isWaived`, incl. fuzz).
+- [x] **Waive UI gated + present**: modal offers Waive/Remove on non-PASS checks,
+      enabled only with `clusterbaselines:patch` (Playwright asserts enabled for
+      kubeadmin; jest/gating in ResultsTab).
+- [x] **Waived donut slice + metric** (`aggregateCounts` waived; `setCheckCounts`
+      waived series in `TestPublishMetrics`).
+- [ ] **Waive every FAIL** → score 100 (pass/(pass+0)); **waive all results** →
+      pass+fail==0 → score nil. Add explicit unit boundary cases.
+- [ ] **Waiver for a non-owned / stale result name**: harmless, never affects the
+      score (only owned suites are tallied); add a negative unit case.
+- [ ] **Duplicate waiver name** rejected by `+listType=map`+`listMapKey=name`
+      admission; **RBAC read-only user** cannot see the enabled Waive button.
+- [ ] **Cross-profile rule**: a rule scanned by both cis and pci-dss has distinct
+      result names; waiving one does not waive the other (document the by-name
+      contract; add an assertion).
+
 ## H. Overview dashboard item (cluster Overview)
 
 - [x] Renders `<n> / 100` deep-link when scored (Playwright `dashboard-score`).
@@ -398,12 +433,14 @@ per-node annotation) when nodes disagree.
 
 - [x] Sentinel `-1` before first score, gauge set after
       (`TestComplianceScoreSeededSentinel`, `TestPublishMetrics`).
-- [x] **Per-status series including info/inconsistent** and tailored `tp:`
+- [x] **Per-status series including info/inconsistent/waived** and tailored `tp:`
       prefix (`TestPublishMetrics`).
 - [x] **Alert expressions are HA-safe**: `max()` / `max by (profile,status)` in
-      `config/prometheus/prometheusrule.yaml` (review; add promtool).
-- [ ] **PrometheusRule** `ComplianceScoreLow` / `ComplianceChecksFailing` fire
-      against synthetic metric values (promtool rule test, no cluster needed).
+      `config/prometheus/prometheusrule.yaml`, pinned by promtool HA-dedup case.
+- [x] **PrometheusRule** `ComplianceScoreLow` / `ComplianceChecksFailing` fire
+      against synthetic metric values (`make test-alerts`, promtool, no cluster):
+      score 79 fires, 80 does not, `-1` sentinel never fires, HA dup pods dedup
+      to value 5, fail=0 no alert (`config/prometheus/testdata/alerts_test.yaml`).
 - [ ] **Profile removed from spec**: old `{profile,status}` series do not linger
       after `publishMetrics` Reset (unit assert CollectAndCount / label set).
 - [ ] **ServiceMonitor scrape**: with UWM + scraper SA token, metrics endpoint
@@ -804,10 +841,11 @@ page.
 
 ## AA. Alert storms, silence & observability false friends
 
-- [ ] **Score exactly 80**: `ComplianceScoreLow` does not fire (`< 80`, not
-      `<=`); promtool case.
-- [ ] **Score sentinel -1**: never fires ComplianceScoreLow even when scraped
-      from multiple pods.
+- [x] **Score exactly 80**: `ComplianceScoreLow` does not fire (`< 80`, not
+      `<=`); promtool case (`alerts_test.yaml`).
+- [x] **Score sentinel -1**: never fires ComplianceScoreLow (promtool `-1` case).
+- [x] **HA duplicate pods**: two pods reporting fail=5 for one profile dedup via
+      `max by` to value 5, not 10 (promtool HA case).
 - [ ] **Flapping score 79↔81**: `for: 30m` prevents page storms; document how
       to validate with promtool `eval_time` steps.
 - [ ] **Fail count goes 5→0**: ComplianceChecksFailing clears after `for: 1h`
