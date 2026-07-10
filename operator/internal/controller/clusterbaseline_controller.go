@@ -172,11 +172,34 @@ func ownedSuites(cb *baselinev1alpha1.ClusterBaseline) map[string]bool {
 	return s
 }
 
-// matchesAnyProfile: name equals a profile or is a role-suffixed variant
-// (ocp4-cis-node -> ocp4-cis-node-master). name is untrusted cluster data.
+// matchesAnyProfile: name equals a profile/tailored base or a role-suffixed
+// variant (ocp4-cis-node -> ocp4-cis-node-master, custom -> custom-worker).
+// Only known ScanSetting roles are accepted after the "<base>-" boundary so a
+// short or ambiguous base (e.g. tailored "ocp4") cannot prefix-match foreign
+// PVCs like "ocp4-cis". name is untrusted cluster data.
 func matchesAnyProfile(name string, profiles map[string]bool) bool {
 	for p := range profiles {
-		if name == p || strings.HasPrefix(name, p+"-") {
+		if name == p {
+			return true
+		}
+		if rest, ok := strings.CutPrefix(name, p+"-"); ok && scanRoleSuffix(rest) {
+			return true
+		}
+	}
+	return false
+}
+
+// scanRoleSuffix is true for the role path we may append after a scan/profile
+// base name. Matches ScanSetting roles we set (worker/master) and common extras,
+// including the "node-<role>" form used by CO node profiles.
+func scanRoleSuffix(rest string) bool {
+	switch rest {
+	case "worker", "master", "control-plane", "infra", "node":
+		return true
+	}
+	if role, ok := strings.CutPrefix(rest, "node-"); ok {
+		switch role {
+		case "worker", "master", "control-plane", "infra":
 			return true
 		}
 	}
@@ -256,10 +279,13 @@ func conditionProgressing(c *metav1.Condition) bool {
 		return false
 	}
 	switch c.Reason {
-	// ImageMissing is a permanent deployment misconfig, not install progress.
-	// ConsoleMissing is a steady state (Console capability disabled), not progress,
-	// so it must not hold Progressing=True and poll at the fast cadence forever.
-	case "Installing", "CSVNotReady", "WaitingForPods", "CRDsMissing":
+	// Steady states (must not Progress / 15s-poll forever):
+	// - ImageMissing: permanent deployment misconfig
+	// - ConsoleMissing: Console capability disabled
+	// - CRDsMissing: no compliance CRDs (common with installComplianceOperator=Manual
+	//   until the admin installs CO; Automatic install is already Progressing via
+	//   Installing/CSVNotReady on ComplianceOperatorReady)
+	case "Installing", "CSVNotReady", "WaitingForPods":
 		return true
 	default:
 		return false
@@ -733,10 +759,8 @@ func (r *ClusterBaselineReconciler) checkScanStorage(ctx context.Context, cb *ba
 	if err := r.List(ctx, pvcs, client.InNamespace(complianceNamespace)); err != nil {
 		return err
 	}
-	// Owned scan PVC names: the built-in CO profile names and the TailoredProfile
-	// names, both allowing role suffixes (ocp4-cis-node-master, myhardening-worker)
-	// via the "<name>-" boundary in matchesAnyProfile so a node-type scan's per-role
-	// PVCs are caught without prefix-matching unrelated PVCs in the namespace.
+	// Owned scan PVC names: built-in CO profile names and TailoredProfile names,
+	// plus known role suffixes only (see matchesAnyProfile / scanRoleSuffix).
 	names := map[string]bool{}
 	for _, key := range cb.Spec.Profiles {
 		for _, p := range key.ProfileNames() {

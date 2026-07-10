@@ -136,14 +136,24 @@ func TestCheckScanStorageTailoredPVC(t *testing.T) {
 		},
 		Status: corev1.PersistentVolumeClaimStatus{Phase: corev1.ClaimPending},
 	}
+	// Ambiguous tailored base "ocp4" must not match foreign built-in PVC ocp4-cis.
+	foreignCIS := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "ocp4-cis",
+			Namespace:         complianceNamespace,
+			CreationTimestamp: metav1.NewTime(time.Now().Add(-10 * time.Minute)),
+		},
+		Status: corev1.PersistentVolumeClaimStatus{Phase: corev1.ClaimPending},
+	}
 	r := &ClusterBaselineReconciler{
-		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(pvc, nodePVC, foreign).Build(),
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(pvc, nodePVC, foreign, foreignCIS).Build(),
 		Scheme: scheme,
 	}
 	cb := &baselinev1alpha1.ClusterBaseline{
 		Spec: baselinev1alpha1.ClusterBaselineSpec{
-			Profiles:         []baselinev1alpha1.ProfileKey{"cis"},
-			TailoredProfiles: []string{"custom", "a"},
+			// No built-in cis: only tailored profiles, so ocp4-cis is foreign.
+			Profiles:         []baselinev1alpha1.ProfileKey{"e8"},
+			TailoredProfiles: []string{"custom", "a", "ocp4"},
 		},
 	}
 	if err := r.checkScanStorage(context.Background(), cb); err != nil {
@@ -158,5 +168,8 @@ func TestCheckScanStorageTailoredPVC(t *testing.T) {
 	}
 	if strings.Contains(c.Message, "anything") {
 		t.Fatalf("short tailored name must not match foreign PVC: %q", c.Message)
+	}
+	if strings.Contains(c.Message, "ocp4-cis") {
+		t.Fatalf("ambiguous tailored base must not match foreign ocp4-cis: %q", c.Message)
 	}
 }

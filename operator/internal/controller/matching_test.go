@@ -58,13 +58,19 @@ func TestProfileKeyFromSuite(t *testing.T) {
 }
 
 func TestMatchesAnyProfile(t *testing.T) {
-	profiles := map[string]bool{"ocp4-cis": true, "ocp4-cis-node": true}
+	profiles := map[string]bool{"ocp4-cis": true, "ocp4-cis-node": true, "custom": true, "ocp4": true}
 	for name, want := range map[string]bool{
 		"ocp4-cis":             true,
 		"ocp4-cis-node-worker": true,
-		"ocp4-cisx":            false,
-		"ocp4-pci-dss":         false,
-		"":                     false,
+		"ocp4-cis-node-master": true,
+		"custom-worker":        true,
+		"ocp4-worker":          true,
+		// Ambiguous base must not swallow foreign profile PVCs.
+		"ocp4-cis-extra": false,
+		"ocp4-pci-dss":   false,
+		"ocp4-cisx":      false,
+		"custom-extra":   false,
+		"":               false,
 	} {
 		if got := matchesAnyProfile(name, profiles); got != want {
 			t.Errorf("matchesAnyProfile(%q) = %v, want %v", name, got, want)
@@ -192,15 +198,20 @@ func FuzzProfileKeyFromSuite(f *testing.F) {
 
 func FuzzMatchesAnyProfile(f *testing.F) {
 	profiles := map[string]bool{"ocp4-cis": true, "ocp4-cis-node": true, "rhcos4-e8": true}
-	for _, seed := range []string{"ocp4-cis", "ocp4-cis-node-master", "ocp4-cisx", "", "-", "ocp4-cis-"} {
+	for _, seed := range []string{"ocp4-cis", "ocp4-cis-node-master", "ocp4-cisx", "", "-", "ocp4-cis-", "ocp4-cis-extra"} {
 		f.Add(seed)
 	}
 	f.Fuzz(func(t *testing.T, name string) {
 		got := matchesAnyProfile(name, profiles)
 		want := false
 		for p := range profiles {
-			if name == p || strings.HasPrefix(name, p+"-") {
+			if name == p {
 				want = true
+				break
+			}
+			if rest, ok := strings.CutPrefix(name, p+"-"); ok && scanRoleSuffix(rest) {
+				want = true
+				break
 			}
 		}
 		if got != want {
