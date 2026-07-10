@@ -211,6 +211,29 @@ func TestDeploymentAvailable(t *testing.T) {
 	}
 }
 
+func TestDeploymentAvailableFalsePastGrace(t *testing.T) {
+	now := metav1.Now()
+	old := metav1.NewTime(now.Add(-10 * time.Minute))
+	dep := &appsv1.Deployment{}
+	if deploymentAvailableFalsePastGrace(dep) {
+		t.Fatal("missing condition")
+	}
+	dep.Status.Conditions = []appsv1.DeploymentCondition{{
+		Type: appsv1.DeploymentAvailable, Status: corev1.ConditionFalse, LastTransitionTime: now,
+	}}
+	if deploymentAvailableFalsePastGrace(dep) {
+		t.Fatal("recent False must wait")
+	}
+	dep.Status.Conditions[0].LastTransitionTime = old
+	if !deploymentAvailableFalsePastGrace(dep) {
+		t.Fatal("old False should be past grace")
+	}
+	dep.Status.Conditions[0].Status = corev1.ConditionTrue
+	if deploymentAvailableFalsePastGrace(dep) {
+		t.Fatal("True is not False-past-grace")
+	}
+}
+
 func TestCreateIfMissing(t *testing.T) {
 	scheme := testScheme(t)
 	c := fake.NewClientBuilder().WithScheme(scheme).Build()

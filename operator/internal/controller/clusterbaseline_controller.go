@@ -393,20 +393,31 @@ func (r *ClusterBaselineReconciler) findComplianceOperatorCSV(ctx context.Contex
 		}
 		return nil, err
 	}
-	// Prefer CSVs in openshift-compliance (where we install / Get installedCSV).
-	// A leftover Succeeded CSV in another namespace must not outrank the live one.
-	if csv := pickComplianceOperatorCSV(csvs.Items, complianceNamespace); csv != nil {
+	// Priority (newest version within each tier):
+	//  1. Succeeded in openshift-compliance (where we install / Get installedCSV)
+	//  2. Succeeded anywhere (manual install in another NS)
+	//  3. Non-Succeeded in openshift-compliance
+	//  4. Non-Succeeded anywhere
+	// Tiering avoids two attacks: (a) stale high-version Succeeded leftovers in a
+	// foreign NS beating the live local CSV; (b) a local Failed/Installing remnant
+	// hiding a healthy Succeeded CSV elsewhere.
+	if csv := pickComplianceOperatorCSV(csvs.Items, complianceNamespace, true); csv != nil {
 		return csv, nil
 	}
-	return pickComplianceOperatorCSV(csvs.Items, ""), nil
+	if csv := pickComplianceOperatorCSV(csvs.Items, "", true); csv != nil {
+		return csv, nil
+	}
+	if csv := pickComplianceOperatorCSV(csvs.Items, complianceNamespace, false); csv != nil {
+		return csv, nil
+	}
+	return pickComplianceOperatorCSV(csvs.Items, "", false), nil
 }
 
-// pickComplianceOperatorCSV chooses the newest Succeeded compliance-operator CSV
-// among items, or the newest non-Succeeded as fallback. If ns is non-empty, only
-// that namespace is considered.
-func pickComplianceOperatorCSV(items []unstructured.Unstructured, ns string) *unstructured.Unstructured {
-	var fallback *unstructured.Unstructured
-	var succeeded *unstructured.Unstructured
+// pickComplianceOperatorCSV chooses the newest compliance-operator CSV among items.
+// If ns is non-empty, only that namespace is considered. If succeededOnly, only
+// phase=Succeeded CSVs are candidates; otherwise only non-Succeeded.
+func pickComplianceOperatorCSV(items []unstructured.Unstructured, ns string, succeededOnly bool) *unstructured.Unstructured {
+	var best *unstructured.Unstructured
 	for i := range items {
 		csv := &items[i]
 		if ns != "" && csv.GetNamespace() != ns {
@@ -416,20 +427,15 @@ func pickComplianceOperatorCSV(items []unstructured.Unstructured, ns string) *un
 			continue
 		}
 		phase, _, _ := unstructured.NestedString(csv.Object, "status", "phase")
-		if phase == "Succeeded" {
-			if succeeded == nil || compareComplianceCSVVersion(csv.GetName(), succeeded.GetName()) > 0 {
-				succeeded = csv.DeepCopy()
-			}
+		isSucceeded := phase == "Succeeded"
+		if succeededOnly != isSucceeded {
 			continue
 		}
-		if fallback == nil || compareComplianceCSVVersion(csv.GetName(), fallback.GetName()) > 0 {
-			fallback = csv.DeepCopy()
+		if best == nil || compareComplianceCSVVersion(csv.GetName(), best.GetName()) > 0 {
+			best = csv.DeepCopy()
 		}
 	}
-	if succeeded != nil {
-		return succeeded
-	}
-	return fallback
+	return best
 }
 
 type complianceVersion struct {
@@ -741,8 +747,11 @@ func (r *ClusterBaselineReconciler) checkScanStorage(ctx context.Context, cb *ba
 	var pending []string
 	for _, pvc := range pvcs.Items {
 		owned := matchesAnyProfile(pvc.Name, profiles) || tailoredExact[pvc.Name]
+		// Require a real CreationTimestamp: a zero time makes time.Since huge and
+		// would false-Degrade brand-new objects in some test/API edge paths.
 		if owned &&
 			pvc.Status.Phase == corev1.ClaimPending &&
+			!pvc.CreationTimestamp.IsZero() &&
 			time.Since(pvc.CreationTimestamp.Time) > 2*time.Minute {
 			pending = append(pending, pvc.Name)
 		}
@@ -1086,8 +1095,15 @@ func (r *ClusterBaselineReconciler) ensureConsolePlugin(ctx context.Context, cb 
 		return nil
 	}
 	if !deploymentAvailable(dep) {
-		setCond(cb, "ConsolePluginReady", metav1.ConditionFalse, "WaitingForPods",
-			fmt.Sprintf("Deployment %s/%s ready pods present but Available is not True", pluginNS, pluginName))
+		reason, msg := "WaitingForPods",
+			fmt.Sprintf("Deployment %s/%s ready pods present but Available is not True", pluginNS, pluginName)
+		// Ready pods with Available=False past grace (e.g. progress deadline)
+		// must not Progress forever.
+		if deploymentAvailableFalsePastGrace(dep) {
+			reason = "Unavailable"
+			msg = fmt.Sprintf("Deployment %s/%s Available=False for >5m", pluginNS, pluginName)
+		}
+		setCond(cb, "ConsolePluginReady", metav1.ConditionFalse, reason, msg)
 		return nil
 	}
 	setCond(cb, "ConsolePluginReady", metav1.ConditionTrue, "Deployed", "")
@@ -1101,6 +1117,18 @@ func deploymentAvailable(dep *appsv1.Deployment) bool {
 		if c.Type == appsv1.DeploymentAvailable {
 			return c.Status == corev1.ConditionTrue
 		}
+	}
+	return false
+}
+
+// deploymentAvailableFalsePastGrace is true when Available has been False longer
+// than pluginUnavailableGrace (distinct from zero-ready; ready pods may exist).
+func deploymentAvailableFalsePastGrace(dep *appsv1.Deployment) bool {
+	for _, c := range dep.Status.Conditions {
+		if c.Type != appsv1.DeploymentAvailable || c.Status != corev1.ConditionFalse {
+			continue
+		}
+		return !c.LastTransitionTime.IsZero() && time.Since(c.LastTransitionTime.Time) > pluginUnavailableGrace
 	}
 	return false
 }

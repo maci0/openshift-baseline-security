@@ -550,6 +550,32 @@ func TestFindComplianceOperatorCSVFallsBackOutsideComplianceNS(t *testing.T) {
 	}
 }
 
+func TestFindComplianceOperatorCSVRemoteSucceededBeatsLocalFailed(t *testing.T) {
+	scheme := testScheme(t)
+	// Local remnant Failed must not hide a healthy Succeeded CSV elsewhere
+	// (previous "prefer local NS for any phase" ranking caused this).
+	localFailed := u(csvGVK)
+	localFailed.SetName("compliance-operator.v1.9.0")
+	localFailed.SetNamespace(complianceNamespace)
+	_ = unstructured.SetNestedField(localFailed.Object, "Failed", "status", "phase")
+	remoteOK := u(csvGVK)
+	remoteOK.SetName("compliance-operator.v1.10.0")
+	remoteOK.SetNamespace("openshift-operators")
+	_ = unstructured.SetNestedField(remoteOK.Object, "Succeeded", "status", "phase")
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(localFailed, remoteOK).Build(),
+		Scheme: scheme,
+	}
+	got, err := r.findComplianceOperatorCSV(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil || got.GetName() != "compliance-operator.v1.10.0" || got.GetNamespace() != "openshift-operators" {
+		t.Fatalf("selected CSV = %v/%v, want openshift-operators/compliance-operator.v1.10.0",
+			got.GetNamespace(), got.GetName())
+	}
+}
+
 func TestCompareComplianceCSVVersion(t *testing.T) {
 	cases := []struct {
 		a    string

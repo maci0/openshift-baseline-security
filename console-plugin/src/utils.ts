@@ -61,9 +61,10 @@ export const checkBody = (r: ComplianceCheckResult): string =>
 
 // RFC 4180 CSV cell with spreadsheet-formula hardening. Values come from CR
 // data, i.e. untrusted input. Prefix formula-looking cells with an apostrophe
-// before quoting so spreadsheet apps import them as literal text.
+// before quoting so spreadsheet apps import them as literal text. Also catch
+// leading whitespace before a formula sigil (Excel often trims then evaluates).
 const csvCell = (v: string): string => {
-  const safe = /^[=+\-@\t\r\n]/.test(v) ? `'${v}` : v;
+  const safe = /^\s*[=+\-@\t\r\n]/.test(v) ? `'${v}` : v;
   return /[",\t\r\n]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
 };
 

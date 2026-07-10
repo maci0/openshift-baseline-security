@@ -239,11 +239,13 @@ describe('resultsCsv', () => {
       r('=cmd', '-1', '@import', '+SUM(1,1)'),
       r('\tTabbed', '\nNewline', 'low'),
       r('\rCarriage', 'PASS', 'low'),
+      r(' =cmd', 'PASS', 'low'), // leading space then formula
     ]);
     const lines = csv.split('\r\n');
     expect(lines[1]).toBe(`'=cmd,"'+SUM(1,1)",'-1,'@import`);
     expect(csv).toContain(`"'\tTabbed","'\tTabbed","'\nNewline",low`);
     expect(csv).toContain(`"'\rCarriage","'\rCarriage",PASS,low`);
+    expect(csv).toContain(`' =cmd`);
   });
   it('handles empty input (header only)', () => {
     expect(resultsCsv([])).toBe('name,title,status,severity');
