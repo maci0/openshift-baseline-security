@@ -26,25 +26,37 @@ func TestPublishMetrics(t *testing.T) {
 		{
 			Key: "cis",
 			ResultCounts: baselinev1alpha1.ResultCounts{
-				Pass: 10, Fail: 2, Manual: 3, Error: 0, NotApplicable: 1,
+				Pass: 10, Fail: 2, Manual: 3, Info: 4, Error: 0, Inconsistent: 5, NotApplicable: 1,
 			},
 		},
+	}
+	cb.Status.TailoredProfiles = []baselinev1alpha1.TailoredProfileStatus{
+		{Name: "custom", ResultCounts: baselinev1alpha1.ResultCounts{Pass: 7, Fail: 1}},
 	}
 	publishMetrics(cb)
 
 	if got := testutil.ToFloat64(complianceScore); got != 87 {
 		t.Fatalf("score gauge = %v, want 87", got)
 	}
-	if got := testutil.ToFloat64(complianceChecks.WithLabelValues("cis", "fail")); got != 2 {
-		t.Fatalf("cis/fail = %v, want 2", got)
-	}
-	if got := testutil.ToFloat64(complianceChecks.WithLabelValues("cis", "pass")); got != 10 {
-		t.Fatalf("cis/pass = %v, want 10", got)
+	// Every published status series, including the ones alerting/dashboards read
+	// (inconsistent, info) and the tailored tp:<name> label path.
+	for _, tc := range []struct {
+		profile, status string
+		want            float64
+	}{
+		{"cis", "pass", 10}, {"cis", "fail", 2}, {"cis", "manual", 3},
+		{"cis", "info", 4}, {"cis", "error", 0}, {"cis", "inconsistent", 5},
+		{"cis", "notApplicable", 1}, {"tp:custom", "pass", 7}, {"tp:custom", "fail", 1},
+	} {
+		if got := testutil.ToFloat64(complianceChecks.WithLabelValues(tc.profile, tc.status)); got != tc.want {
+			t.Fatalf("%s/%s = %v, want %v", tc.profile, tc.status, got, tc.want)
+		}
 	}
 
 	// No score -> -1 sentinel; profiles cleared.
 	cb.Status.Score = nil
 	cb.Status.Profiles = nil
+	cb.Status.TailoredProfiles = nil
 	publishMetrics(cb)
 	if got := testutil.ToFloat64(complianceScore); got != -1 {
 		t.Fatalf("score gauge = %v, want -1", got)

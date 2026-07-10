@@ -300,6 +300,12 @@ func TestEnsureConsolePlugin(t *testing.T) {
 	if img := dep.Spec.Template.Spec.Containers[0].Image; img != "example.test/plugin:1" {
 		t.Fatalf("image = %q", img)
 	}
+	// maxUnavailable=1 keeps DeploymentAvailable True at 1/2 so a single drained
+	// node does not false-Degrade the plugin (matches pluginReadyMin=1).
+	ru := dep.Spec.Strategy.RollingUpdate
+	if ru == nil || ru.MaxUnavailable == nil || ru.MaxUnavailable.IntValue() != 1 {
+		t.Fatalf("rolling update MaxUnavailable = %v, want 1", ru)
+	}
 	if sc := dep.Spec.Template.Spec.SecurityContext; sc == nil || sc.RunAsNonRoot == nil || !*sc.RunAsNonRoot {
 		t.Fatal("pod SecurityContext.RunAsNonRoot required")
 	}

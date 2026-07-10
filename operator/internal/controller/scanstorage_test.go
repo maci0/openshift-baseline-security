@@ -116,6 +116,17 @@ func TestCheckScanStorageTailoredPVC(t *testing.T) {
 		},
 		Status: corev1.PersistentVolumeClaimStatus{Phase: corev1.ClaimPending},
 	}
+	// A node-type TailoredProfile scans per role, producing role-suffixed PVCs
+	// (custom-worker); a Pending one must also flag, matched by the "<name>-"
+	// boundary, not just the exact name.
+	nodePVC := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "custom-worker",
+			Namespace:         complianceNamespace,
+			CreationTimestamp: metav1.NewTime(time.Now().Add(-5 * time.Minute)),
+		},
+		Status: corev1.PersistentVolumeClaimStatus{Phase: corev1.ClaimPending},
+	}
 	// Short tailored name "a" must not prefix-match foreign PVC "anything".
 	foreign := &corev1.PersistentVolumeClaim{
 		ObjectMeta: metav1.ObjectMeta{
@@ -126,7 +137,7 @@ func TestCheckScanStorageTailoredPVC(t *testing.T) {
 		Status: corev1.PersistentVolumeClaimStatus{Phase: corev1.ClaimPending},
 	}
 	r := &ClusterBaselineReconciler{
-		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(pvc, foreign).Build(),
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(pvc, nodePVC, foreign).Build(),
 		Scheme: scheme,
 	}
 	cb := &baselinev1alpha1.ClusterBaseline{
@@ -141,6 +152,9 @@ func TestCheckScanStorageTailoredPVC(t *testing.T) {
 	c := meta.FindStatusCondition(cb.Status.Conditions, "ScanStorageReady")
 	if c == nil || c.Status != metav1.ConditionFalse {
 		t.Fatalf("tailored Pending PVC should flag ScanStorageReady=False, got %+v", c)
+	}
+	if !strings.Contains(c.Message, "custom-worker") {
+		t.Fatalf("node-role tailored PVC should be flagged: %q", c.Message)
 	}
 	if strings.Contains(c.Message, "anything") {
 		t.Fatalf("short tailored name must not match foreign PVC: %q", c.Message)

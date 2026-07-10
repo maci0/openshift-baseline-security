@@ -137,7 +137,7 @@ func TestConditionProgressing(t *testing.T) {
 	if conditionProgressing(&metav1.Condition{Status: metav1.ConditionTrue, Reason: "Installing"}) {
 		t.Fatal("True status is not progressing")
 	}
-	for _, reason := range []string{"Installing", "CSVNotReady", "WaitingForPods", "CRDsMissing", "ConsoleMissing"} {
+	for _, reason := range []string{"Installing", "CSVNotReady", "WaitingForPods", "CRDsMissing"} {
 		c := &metav1.Condition{Status: metav1.ConditionFalse, Reason: reason}
 		if !conditionProgressing(c) {
 			t.Fatalf("%s should progress", reason)
@@ -145,6 +145,10 @@ func TestConditionProgressing(t *testing.T) {
 	}
 	if conditionProgressing(&metav1.Condition{Status: metav1.ConditionFalse, Reason: "NotInstalled"}) {
 		t.Fatal("NotInstalled should not progress")
+	}
+	// ConsoleMissing is a steady state (Console capability off), not progress.
+	if conditionProgressing(&metav1.Condition{Status: metav1.ConditionFalse, Reason: "ConsoleMissing"}) {
+		t.Fatal("ConsoleMissing is steady state, not progress")
 	}
 	if conditionProgressing(&metav1.Condition{Status: metav1.ConditionFalse, Reason: "ImageMissing"}) {
 		t.Fatal("ImageMissing is permanent misconfig, not progress")

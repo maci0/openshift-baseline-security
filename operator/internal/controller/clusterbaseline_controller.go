@@ -257,7 +257,9 @@ func conditionProgressing(c *metav1.Condition) bool {
 	}
 	switch c.Reason {
 	// ImageMissing is a permanent deployment misconfig, not install progress.
-	case "Installing", "CSVNotReady", "WaitingForPods", "CRDsMissing", "ConsoleMissing":
+	// ConsoleMissing is a steady state (Console capability disabled), not progress,
+	// so it must not hold Progressing=True and poll at the fast cadence forever.
+	case "Installing", "CSVNotReady", "WaitingForPods", "CRDsMissing":
 		return true
 	default:
 		return false
@@ -731,22 +733,22 @@ func (r *ClusterBaselineReconciler) checkScanStorage(ctx context.Context, cb *ba
 	if err := r.List(ctx, pvcs, client.InNamespace(complianceNamespace)); err != nil {
 		return err
 	}
-	// Built-in CO profile names: allow role-suffixed PVC names (ocp4-cis-node-master).
-	profiles := map[string]bool{}
+	// Owned scan PVC names: the built-in CO profile names and the TailoredProfile
+	// names, both allowing role suffixes (ocp4-cis-node-master, myhardening-worker)
+	// via the "<name>-" boundary in matchesAnyProfile so a node-type scan's per-role
+	// PVCs are caught without prefix-matching unrelated PVCs in the namespace.
+	names := map[string]bool{}
 	for _, key := range cb.Spec.Profiles {
 		for _, p := range key.ProfileNames() {
-			profiles[p] = true
+			names[p] = true
 		}
 	}
-	// Tailored PVCs are named after the TailoredProfile. Match exact names only:
-	// short tailored labels must not prefix-match foreign PVCs in the namespace.
-	tailoredExact := map[string]bool{}
 	for _, name := range cb.Spec.TailoredProfiles {
-		tailoredExact[name] = true
+		names[name] = true
 	}
 	var pending []string
 	for _, pvc := range pvcs.Items {
-		owned := matchesAnyProfile(pvc.Name, profiles) || tailoredExact[pvc.Name]
+		owned := matchesAnyProfile(pvc.Name, names)
 		// Require a real CreationTimestamp: a zero time makes time.Since huge and
 		// would false-Degrade brand-new objects in some test/API edge paths.
 		if owned &&
@@ -1014,6 +1016,15 @@ func (r *ClusterBaselineReconciler) ensureConsolePlugin(ctx context.Context, cb 
 			dep.Spec.Selector = &metav1.LabelSelector{MatchLabels: labels}
 		}
 		dep.Spec.Replicas = ptr.To(pluginReplicas)
+		// maxUnavailable=1 makes DeploymentAvailable True at 1/2 ready, matching
+		// pluginReadyMin=1: a single drained node must not false-Degrade the plugin.
+		dep.Spec.Strategy = appsv1.DeploymentStrategy{
+			Type: appsv1.RollingUpdateDeploymentStrategyType,
+			RollingUpdate: &appsv1.RollingUpdateDeployment{
+				MaxUnavailable: ptr.To(intstr.FromInt32(1)),
+				MaxSurge:       ptr.To(intstr.FromInt32(1)),
+			},
+		}
 		if dep.Spec.Template.Labels == nil {
 			dep.Spec.Template.Labels = map[string]string{}
 		}

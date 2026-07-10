@@ -205,6 +205,8 @@ spec:
                   properties:
                     score:
                       format: int32
+                      maximum: 100
+                      minimum: 0
                       type: integer
                     time:
                       format: date-time
@@ -312,6 +314,8 @@ spec:
                   ERROR, INCONSISTENT, and NOT-APPLICABLE are excluded from the score;
                   their counts are still reported per profile.
                 format: int32
+                maximum: 100
+                minimum: 0
                 type: integer
               tailoredProfiles:
                 description: tailoredProfiles reports results for bound TailoredProfiles.

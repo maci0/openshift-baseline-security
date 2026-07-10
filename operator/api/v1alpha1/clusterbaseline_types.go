@@ -146,8 +146,10 @@ type ObjectRef struct {
 
 // ScoreSnapshot is one point of score history, recorded when a scan completes.
 type ScoreSnapshot struct {
-	Time  metav1.Time `json:"time"`
-	Score int32       `json:"score"`
+	Time metav1.Time `json:"time"`
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=100
+	Score int32 `json:"score"`
 }
 
 // ClusterBaselineStatus is the observed state.
@@ -158,6 +160,8 @@ type ClusterBaselineStatus struct {
 	// ERROR, INCONSISTENT, and NOT-APPLICABLE are excluded from the score;
 	// their counts are still reported per profile.
 	// +optional
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=100
 	Score *int32 `json:"score,omitempty"`
 	// +optional
 	LastScanTime *metav1.Time `json:"lastScanTime,omitempty"`
