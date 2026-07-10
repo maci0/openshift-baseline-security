@@ -47,6 +47,7 @@ export type CheckStatus =
   | 'MANUAL'
   | 'ERROR'
   | 'INCONSISTENT'
+  | 'SKIP'
   | 'NOT-APPLICABLE';
 
 export type ComplianceCheckResult = {

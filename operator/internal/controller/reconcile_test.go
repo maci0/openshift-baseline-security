@@ -471,24 +471,29 @@ func TestFindComplianceOperatorCSVChoosesNewestSucceeded(t *testing.T) {
 	scheme := testScheme(t)
 	oldSucceeded := u(csvGVK)
 	oldSucceeded.SetName("compliance-operator.v1.9.0")
-	oldSucceeded.SetNamespace("openshift-operators")
+	oldSucceeded.SetNamespace(complianceNamespace)
 	_ = unstructured.SetNestedField(oldSucceeded.Object, "Succeeded", "status", "phase")
 	newSucceeded := u(csvGVK)
 	newSucceeded.SetName("compliance-operator.v1.10.0")
-	newSucceeded.SetNamespace("openshift-operators")
+	newSucceeded.SetNamespace(complianceNamespace)
 	_ = unstructured.SetNestedField(newSucceeded.Object, "Succeeded", "status", "phase")
 	newerInstalling := u(csvGVK)
 	newerInstalling.SetName("compliance-operator.v1.11.0")
-	newerInstalling.SetNamespace("openshift-operators")
+	newerInstalling.SetNamespace(complianceNamespace)
 	_ = unstructured.SetNestedField(newerInstalling.Object, "Installing", "status", "phase")
+	// Stale higher Succeeded in another namespace must not win over live NS.
+	staleOtherNS := u(csvGVK)
+	staleOtherNS.SetName("compliance-operator.v1.99.0")
+	staleOtherNS.SetNamespace("openshift-operators")
+	_ = unstructured.SetNestedField(staleOtherNS.Object, "Succeeded", "status", "phase")
 	foreign := u(csvGVK)
 	foreign.SetName("other-operator.v9.9.9")
-	foreign.SetNamespace("openshift-operators")
+	foreign.SetNamespace(complianceNamespace)
 	_ = unstructured.SetNestedField(foreign.Object, "Succeeded", "status", "phase")
 
 	r := &ClusterBaselineReconciler{
 		Client: fake.NewClientBuilder().WithScheme(scheme).
-			WithObjects(oldSucceeded, newerInstalling, foreign, newSucceeded).
+			WithObjects(oldSucceeded, newerInstalling, foreign, newSucceeded, staleOtherNS).
 			Build(),
 		Scheme: scheme,
 	}
@@ -496,8 +501,9 @@ func TestFindComplianceOperatorCSVChoosesNewestSucceeded(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got == nil || got.GetName() != "compliance-operator.v1.10.0" {
-		t.Fatalf("selected CSV = %v, want compliance-operator.v1.10.0", got)
+	if got == nil || got.GetName() != "compliance-operator.v1.10.0" || got.GetNamespace() != complianceNamespace {
+		t.Fatalf("selected CSV = %v/%v, want %s/compliance-operator.v1.10.0",
+			got.GetNamespace(), got.GetName(), complianceNamespace)
 	}
 }
 
@@ -505,11 +511,11 @@ func TestFindComplianceOperatorCSVFallsBackToNewestNonSucceeded(t *testing.T) {
 	scheme := testScheme(t)
 	older := u(csvGVK)
 	older.SetName("compliance-operator.v1.9.0")
-	older.SetNamespace("openshift-operators")
+	older.SetNamespace(complianceNamespace)
 	_ = unstructured.SetNestedField(older.Object, "Installing", "status", "phase")
 	newer := u(csvGVK)
 	newer.SetName("compliance-operator.v1.10.0")
-	newer.SetNamespace("openshift-operators")
+	newer.SetNamespace(complianceNamespace)
 	_ = unstructured.SetNestedField(newer.Object, "Pending", "status", "phase")
 	r := &ClusterBaselineReconciler{
 		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(older, newer).Build(),
@@ -521,6 +527,26 @@ func TestFindComplianceOperatorCSVFallsBackToNewestNonSucceeded(t *testing.T) {
 	}
 	if got == nil || got.GetName() != "compliance-operator.v1.10.0" {
 		t.Fatalf("selected CSV = %v, want compliance-operator.v1.10.0", got)
+	}
+}
+
+func TestFindComplianceOperatorCSVFallsBackOutsideComplianceNS(t *testing.T) {
+	scheme := testScheme(t)
+	// Manual install only in openshift-operators (no CSV in openshift-compliance).
+	csv := u(csvGVK)
+	csv.SetName("compliance-operator.v1.10.0")
+	csv.SetNamespace("openshift-operators")
+	_ = unstructured.SetNestedField(csv.Object, "Succeeded", "status", "phase")
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(csv).Build(),
+		Scheme: scheme,
+	}
+	got, err := r.findComplianceOperatorCSV(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil || got.GetName() != "compliance-operator.v1.10.0" {
+		t.Fatalf("selected CSV = %v, want openshift-operators fallback", got)
 	}
 }
 
@@ -555,11 +581,11 @@ func TestFindComplianceOperatorCSVPrefersReleaseOverPrerelease(t *testing.T) {
 	scheme := testScheme(t)
 	release := u(csvGVK)
 	release.SetName("compliance-operator.v1.10.0")
-	release.SetNamespace("openshift-operators")
+	release.SetNamespace(complianceNamespace)
 	_ = unstructured.SetNestedField(release.Object, "Succeeded", "status", "phase")
 	rc := u(csvGVK)
 	rc.SetName("compliance-operator.v1.10.0-rc.1")
-	rc.SetNamespace("openshift-operators")
+	rc.SetNamespace(complianceNamespace)
 	_ = unstructured.SetNestedField(rc.Object, "Succeeded", "status", "phase")
 
 	r := &ClusterBaselineReconciler{

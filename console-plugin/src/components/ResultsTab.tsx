@@ -51,6 +51,7 @@ const statusLabel: Record<
   INFO: { color: 'blue', icon: <InfoCircleIcon /> },
   // Distinct from MANUAL (orange): multi-node result disagreement.
   INCONSISTENT: { color: 'purple', icon: <ExclamationTriangleIcon /> },
+  SKIP: { color: 'grey', icon: <MinusCircleIcon /> },
   'NOT-APPLICABLE': { color: 'grey', icon: <MinusCircleIcon /> },
 };
 
@@ -129,7 +130,7 @@ const ResultsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => {
         type: 'result-status',
         reducer: (r) => r.status,
         filter: (input, r) => !input.selected?.length || input.selected.includes(r.status),
-        items: ['PASS', 'FAIL', 'MANUAL', 'ERROR', 'INFO', 'INCONSISTENT', 'NOT-APPLICABLE'].map((s) => ({
+        items: ['PASS', 'FAIL', 'MANUAL', 'ERROR', 'INFO', 'INCONSISTENT', 'SKIP', 'NOT-APPLICABLE'].map((s) => ({
           id: s,
           title: s,
         })),

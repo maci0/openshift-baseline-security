@@ -196,12 +196,16 @@ func profileKeyFromSuite(suite string) (baselinev1alpha1.ProfileKey, bool) {
 }
 
 // score is pass/(pass+fail)*100, or nil when there are no countable results.
-// Widened to int64 so pass*100 cannot overflow int32.
+// All arithmetic is int64 so pass+fail and pass*100 cannot overflow int32.
 func score(pass, fail int32) *int32 {
-	if pass < 0 || fail < 0 || pass+fail == 0 {
+	if pass < 0 || fail < 0 {
 		return nil
 	}
-	s := int32(int64(pass) * 100 / (int64(pass) + int64(fail)))
+	total := int64(pass) + int64(fail)
+	if total == 0 {
+		return nil
+	}
+	s := int32(int64(pass) * 100 / total)
 	return &s
 }
 
@@ -389,10 +393,25 @@ func (r *ClusterBaselineReconciler) findComplianceOperatorCSV(ctx context.Contex
 		}
 		return nil, err
 	}
+	// Prefer CSVs in openshift-compliance (where we install / Get installedCSV).
+	// A leftover Succeeded CSV in another namespace must not outrank the live one.
+	if csv := pickComplianceOperatorCSV(csvs.Items, complianceNamespace); csv != nil {
+		return csv, nil
+	}
+	return pickComplianceOperatorCSV(csvs.Items, ""), nil
+}
+
+// pickComplianceOperatorCSV chooses the newest Succeeded compliance-operator CSV
+// among items, or the newest non-Succeeded as fallback. If ns is non-empty, only
+// that namespace is considered.
+func pickComplianceOperatorCSV(items []unstructured.Unstructured, ns string) *unstructured.Unstructured {
 	var fallback *unstructured.Unstructured
 	var succeeded *unstructured.Unstructured
-	for i := range csvs.Items {
-		csv := &csvs.Items[i]
+	for i := range items {
+		csv := &items[i]
+		if ns != "" && csv.GetNamespace() != ns {
+			continue
+		}
 		if !strings.HasPrefix(csv.GetName(), "compliance-operator.v") {
 			continue
 		}
@@ -408,9 +427,9 @@ func (r *ClusterBaselineReconciler) findComplianceOperatorCSV(ctx context.Contex
 		}
 	}
 	if succeeded != nil {
-		return succeeded, nil
+		return succeeded
 	}
-	return fallback, nil
+	return fallback
 }
 
 type complianceVersion struct {
@@ -596,8 +615,12 @@ func (r *ClusterBaselineReconciler) ensureScanConfig(ctx context.Context, cb *ba
 	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, ss, func() error {
 		autoApply := cb.Spec.Remediation.Apply == baselinev1alpha1.RemediationApplyAutomatic
 		// Only write a validated schedule; keep the last-good cron if invalid.
+		// On first create with a bad cron there is no last-good value: fall back
+		// to the operator default so CO is not left with an empty schedule.
 		if schedErr == nil {
 			ss.Object["schedule"] = schedule
+		} else if existing, found, _ := unstructured.NestedString(ss.Object, "schedule"); !found || existing == "" {
+			ss.Object["schedule"] = "0 1 * * *"
 		}
 		ss.Object["roles"] = []any{"worker", "master"}
 		ss.Object["rawResultStorage"] = map[string]any{"size": "1Gi", "rotation": int64(3)}
@@ -792,6 +815,8 @@ func (r *ClusterBaselineReconciler) aggregateStatus(ctx context.Context, cb *bas
 			cb.Status.LastScanTime = nil
 			cb.Status.NextScanTime = nil
 			cb.Status.History = nil
+			// Keep relatedObjects in sync with desired ownership even when CO is absent.
+			cb.Status.RelatedObjects = relatedObjects(cb)
 			return nil
 		}
 		return err
@@ -809,6 +834,7 @@ func (r *ClusterBaselineReconciler) aggregateStatus(ctx context.Context, cb *bas
 	var pass, fail int32
 	// tally routes one check result's status into the counts and the score.
 	// INFO is counted (excluded from score) so Overview totals match Results.
+	// SKIP is folded into NotApplicable (CO: check skipped for this system).
 	tally := func(c *baselinev1alpha1.ResultCounts, status string) {
 		switch status {
 		case "PASS":
@@ -825,7 +851,7 @@ func (r *ClusterBaselineReconciler) aggregateStatus(ctx context.Context, cb *bas
 			c.Error++
 		case "INCONSISTENT":
 			c.Inconsistent++
-		case "NOT-APPLICABLE":
+		case "SKIP", "NOT-APPLICABLE":
 			c.NotApplicable++
 		}
 	}
@@ -921,11 +947,15 @@ func (r *ClusterBaselineReconciler) recordHistory(ctx context.Context, cb *basel
 	last := metav1.NewTime(latest)
 	if cb.Status.LastScanTime != nil && !last.After(cb.Status.LastScanTime.Time) {
 		// Never rewind LastScanTime when the suite with the newest endTimestamp
-		// is dropped (profile/tp removed). On equal, refresh the latest history
-		// score so late results for the same scan still update the trend point.
+		// is dropped (profile/tp removed). On equal end time:
+		// - refresh the latest history score when late results change the rollup
+		// - append a first history point when an earlier pass had score=nil
+		//   (all MANUAL/INFO) and a countable score appears for the same scan
 		if last.Equal(cb.Status.LastScanTime) && s != nil {
 			if n := len(cb.Status.History); n > 0 && cb.Status.History[n-1].Time.Equal(cb.Status.LastScanTime) {
 				cb.Status.History[n-1].Score = *s
+			} else {
+				cb.Status.History = appendHistoryRing(cb.Status.History, last, *s, historyMax)
 			}
 		}
 		return
@@ -1080,20 +1110,25 @@ func deploymentAvailable(dep *appsv1.Deployment) bool {
 const pluginUnavailableGrace = 5 * time.Minute
 
 // pluginDeploymentUnavailable is true when the Deployment has been continuously
-// unavailable longer than pluginUnavailableGrace. Prefer the Available condition's
-// LastTransitionTime so a brief ReadyReplicas dip on an old Deployment is not
-// treated as a permanent failure.
+// below pluginReadyMin ready replicas longer than pluginUnavailableGrace.
+// Prefer the Available condition's LastTransitionTime so a brief ReadyReplicas
+// dip on an old Deployment is not treated as a permanent failure.
 func pluginDeploymentUnavailable(dep *appsv1.Deployment) bool {
+	if dep.Status.ReadyReplicas >= pluginReadyMin {
+		return false
+	}
 	timeout := pluginUnavailableGrace
 	for _, c := range dep.Status.Conditions {
 		if c.Type != appsv1.DeploymentAvailable {
 			continue
 		}
-		if c.Status == corev1.ConditionFalse {
-			return !c.LastTransitionTime.IsZero() && time.Since(c.LastTransitionTime.Time) > timeout
+		if c.LastTransitionTime.IsZero() {
+			break
 		}
-		// Available True/Unknown with ReadyReplicas==0 is transient; not a failure.
-		return false
+		// Available False: time since it went down. Available True with zero
+		// ready pods is pathological; still time-box from the last transition
+		// so we do not Progress forever.
+		return time.Since(c.LastTransitionTime.Time) > timeout
 	}
 	// No Available condition yet (brand-new object): use creation time.
 	return !dep.CreationTimestamp.IsZero() && time.Since(dep.CreationTimestamp.Time) > timeout

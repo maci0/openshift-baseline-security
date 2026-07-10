@@ -218,7 +218,8 @@ func FuzzScore(f *testing.F) {
 	f.Add(int32(2147483647), int32(0)) // int32-overflow regression seed
 	f.Fuzz(func(t *testing.T, pass, fail int32) {
 		s := score(pass, fail)
-		if pass < 0 || fail < 0 || pass+fail == 0 {
+		// Oracle must use int64 sums (same as score) so int32 overflow is not expected nil.
+		if pass < 0 || fail < 0 || int64(pass)+int64(fail) == 0 {
 			if s != nil {
 				t.Fatalf("expected nil for pass=%d fail=%d", pass, fail)
 			}

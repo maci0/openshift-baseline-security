@@ -38,6 +38,7 @@ func TestAggregateStatusWithTailored(t *testing.T) {
 			checkResult("c", "baseline-tp-custom", "PASS"),
 			checkResult("d", "baseline-tp-custom", "PASS"),
 			checkResult("e", "baseline-cis", "INFO"),
+			checkResult("f", "baseline-cis", "SKIP"),
 		).Build(),
 		Scheme: scheme,
 	}
@@ -55,8 +56,8 @@ func TestAggregateStatusWithTailored(t *testing.T) {
 	if cb.Status.Score == nil || *cb.Status.Score != 75 {
 		t.Fatalf("score = %v, want 75", cb.Status.Score)
 	}
-	if len(cb.Status.Profiles) != 1 || cb.Status.Profiles[0].Info != 1 {
-		t.Fatalf("cis info count = %+v, want Info=1", cb.Status.Profiles)
+	if len(cb.Status.Profiles) != 1 || cb.Status.Profiles[0].Info != 1 || cb.Status.Profiles[0].NotApplicable != 1 {
+		t.Fatalf("cis counts = %+v, want Info=1 NotApplicable=1 (SKIP)", cb.Status.Profiles)
 	}
 	if len(cb.Status.TailoredProfiles) != 1 || cb.Status.TailoredProfiles[0].Name != "custom" ||
 		cb.Status.TailoredProfiles[0].Pass != 2 {

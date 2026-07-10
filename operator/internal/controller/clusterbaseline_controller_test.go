@@ -287,6 +287,37 @@ func TestRecordHistoryDoesNotRewind(t *testing.T) {
 	}
 }
 
+func TestRecordHistoryAppendsWhenScoreAppearsLater(t *testing.T) {
+	scheme := testScheme(t)
+	end := time.Date(2026, 7, 9, 1, 0, 0, 0, time.UTC)
+	scan := &unstructured.Unstructured{}
+	scan.SetGroupVersionKind(scanGVK)
+	scan.SetName("ocp4-cis")
+	scan.SetNamespace(complianceNamespace)
+	scan.SetLabels(map[string]string{suiteLabel: "baseline-cis"})
+	_ = unstructured.SetNestedField(scan.Object, end.Format(time.RFC3339), "status", "endTimestamp")
+
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(scan).Build(),
+		Scheme: scheme,
+	}
+	last := metav1.NewTime(end)
+	cb := &baselinev1alpha1.ClusterBaseline{
+		Spec: baselinev1alpha1.ClusterBaselineSpec{Profiles: []baselinev1alpha1.ProfileKey{"cis"}},
+		Status: baselinev1alpha1.ClusterBaselineStatus{
+			// Prior reconcile saw the scan complete but score was nil (all MANUAL).
+			LastScanTime: &last,
+		},
+	}
+	r.recordHistory(context.Background(), cb, ptr.To(int32(80)))
+	if len(cb.Status.History) != 1 || cb.Status.History[0].Score != 80 {
+		t.Fatalf("expected first history point for equal endTimestamp, got %+v", cb.Status.History)
+	}
+	if !cb.Status.LastScanTime.Equal(&last) {
+		t.Fatalf("LastScanTime changed: %v", cb.Status.LastScanTime)
+	}
+}
+
 func TestSetComplianceOperatorReady(t *testing.T) {
 	scheme := testScheme(t)
 	csv := &unstructured.Unstructured{}

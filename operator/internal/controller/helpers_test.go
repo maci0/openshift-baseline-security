@@ -180,11 +180,17 @@ func TestPluginDeploymentUnavailable(t *testing.T) {
 	if !pluginDeploymentUnavailable(dep) {
 		t.Fatal("Available=False for >timeout should be unavailable")
 	}
-	// Available=True must never flip to Unavailable even if ReadyReplicas is 0.
+	// Enough ready replicas: never Unavailable regardless of Available condition age.
+	dep.Status.ReadyReplicas = pluginReadyMin
 	dep.Status.Conditions[0].Status = corev1.ConditionTrue
 	dep.Status.Conditions[0].LastTransitionTime = old
 	if pluginDeploymentUnavailable(dep) {
-		t.Fatal("Available=True must not count as Unavailable")
+		t.Fatal("ReadyReplicas >= min must not count as Unavailable")
+	}
+	// Available=True but zero ready past grace is pathological (stuck HA).
+	dep.Status.ReadyReplicas = 0
+	if !pluginDeploymentUnavailable(dep) {
+		t.Fatal("Available=True with 0 ready past grace should be Unavailable")
 	}
 }
 
