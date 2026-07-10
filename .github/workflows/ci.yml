@@ -3,6 +3,9 @@ on:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
 
 jobs:
   operator:
@@ -42,6 +45,22 @@ jobs:
       - run: yarn typecheck
       - run: yarn test
       - run: yarn build
+
+  # Extended fuzzing is nightly/on-demand only: per-PR runs already execute the
+  # saved seed corpus via `make test`, so found crashers are permanent regressions.
+  fuzz:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: operator
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: operator/go.mod
+          cache-dependency-path: operator/go.sum
+      - run: make fuzz
 
   images:
     runs-on: ubuntu-latest
