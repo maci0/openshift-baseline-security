@@ -6,7 +6,6 @@ import {
   ChartArea,
   ChartAxis,
   ChartDonut,
-  ChartLegend,
 } from '@patternfly/react-charts/victory';
 import {
   Alert,
@@ -116,12 +115,13 @@ const Overview: React.FC<{ baseline?: ClusterBaseline; loaded: boolean }> = ({
   const green = 'var(--pf-t--global--icon--color--status--success--default)';
   const red = 'var(--pf-t--global--icon--color--status--danger--default)';
   const orange = 'var(--pf-t--global--icon--color--status--warning--default)';
+  const purple = 'var(--pf-t--global--icon--color--status--custom--default)';
   const grey = 'var(--pf-t--global--icon--color--disabled)';
   const segments = [
     { label: t('Pass'), value: totals.pass, color: green },
     { label: t('Fail'), value: totals.fail, color: red },
     { label: t('Manual'), value: totals.manual, color: orange },
-    { label: t('Inconsistent'), value: totals.inconsistent, color: orange },
+    { label: t('Inconsistent'), value: totals.inconsistent, color: purple },
     { label: t('Error'), value: totals.error, color: red },
     { label: t('Not applicable'), value: totals.notApplicable, color: grey },
   ].filter((s) => s.value > 0);
@@ -164,23 +164,43 @@ const Overview: React.FC<{ baseline?: ClusterBaseline; loaded: boolean }> = ({
                 width={300}
               />
             ) : (
-              <ChartDonut
-                ariaTitle={t('Check results')}
-                ariaDesc={t('Composition of compliance check results')}
-                constrainToVisibleArea
-                data={segments.map((s) => ({ x: s.label, y: s.value }))}
-                colorScale={segments.map((s) => s.color)}
-                labels={({ datum }) => `${datum.x}: ${datum.y}`}
-                title={score != null ? `${score}` : '—'}
-                subTitle={t('score / 100')}
-                height={200}
-                width={300}
-                legendData={segments.map((s) => ({ name: `${s.label} (${s.value})` }))}
-                legendOrientation="vertical"
-                legendPosition="right"
-                legendComponent={<ChartLegend gutter={8} />}
-                padding={{ top: 10, bottom: 10, left: 10, right: 140 }}
-              />
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <ChartDonut
+                  ariaTitle={t('Check results')}
+                  ariaDesc={t('Composition of compliance check results')}
+                  constrainToVisibleArea
+                  data={segments.map((s) => ({ x: s.label, y: s.value }))}
+                  colorScale={segments.map((s) => s.color)}
+                  labels={({ datum }) => `${datum.x}: ${datum.y}`}
+                  title={score != null ? `${score}` : '—'}
+                  subTitle={t('score / 100')}
+                  height={200}
+                  width={200}
+                  padding={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                />
+                {/* HTML legend: Victory's built-in legend clips long labels and
+                    caps at a fixed width; a plain list wraps and never truncates. */}
+                <ul style={{ listStyle: 'none', margin: 0, padding: 0, minWidth: 0 }}>
+                  {segments.map((s) => (
+                    <li
+                      key={s.label}
+                      style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 0' }}
+                    >
+                      <span
+                        aria-hidden
+                        style={{
+                          width: 12,
+                          height: 12,
+                          flex: '0 0 auto',
+                          borderRadius: 2,
+                          backgroundColor: s.color,
+                        }}
+                      />
+                      <span>{`${s.label} (${s.value})`}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
             )}
           </CardBody>
         </Card>
