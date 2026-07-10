@@ -234,17 +234,17 @@ spec:
                     fail:
                       format: int32
                       type: integer
-                    info:
-                      description: |-
-                        Info counts informational checks (CO status INFO). Excluded from the
-                        score like Manual; still reported so Overview totals match Results.
-                      format: int32
-                      type: integer
                     inconsistent:
                       description: |-
                         Inconsistent counts checks whose per-node results disagree across a
                         MachineConfigPool (compliance operator status INCONSISTENT). Excluded from
                         the score like Manual/Error; it flags a discrepancy that needs review.
+                      format: int32
+                      type: integer
+                    info:
+                      description: |-
+                        Info counts informational checks (CO status INFO). Excluded from the
+                        score like Manual; still reported so Overview totals match Results.
                       format: int32
                       type: integer
                     key:
@@ -277,8 +277,8 @@ spec:
                   required:
                   - error
                   - fail
-                  - info
                   - inconsistent
+                  - info
                   - key
                   - manual
                   - notApplicable
@@ -325,17 +325,17 @@ spec:
                     fail:
                       format: int32
                       type: integer
-                    info:
-                      description: |-
-                        Info counts informational checks (CO status INFO). Excluded from the
-                        score like Manual; still reported so Overview totals match Results.
-                      format: int32
-                      type: integer
                     inconsistent:
                       description: |-
                         Inconsistent counts checks whose per-node results disagree across a
                         MachineConfigPool (compliance operator status INCONSISTENT). Excluded from
                         the score like Manual/Error; it flags a discrepancy that needs review.
+                      format: int32
+                      type: integer
+                    info:
+                      description: |-
+                        Info counts informational checks (CO status INFO). Excluded from the
+                        score like Manual; still reported so Overview totals match Results.
                       format: int32
                       type: integer
                     manual:
@@ -352,8 +352,8 @@ spec:
                   required:
                   - error
                   - fail
-                  - info
                   - inconsistent
+                  - info
                   - manual
                   - name
                   - notApplicable

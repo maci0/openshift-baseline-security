@@ -413,12 +413,20 @@ func (r *ClusterBaselineReconciler) findComplianceOperatorCSV(ctx context.Contex
 	return fallback, nil
 }
 
+type complianceVersion struct {
+	parts      []int
+	prerelease string
+}
+
 func compareComplianceCSVVersion(a, b string) int {
 	av, aok := complianceCSVVersion(a)
 	bv, bok := complianceCSVVersion(b)
 	switch {
 	case aok && bok:
-		return compareVersionParts(av, bv)
+		if cmp := compareComplianceVersions(av, bv); cmp != 0 {
+			return cmp
+		}
+		return strings.Compare(a, b)
 	case aok:
 		return 1
 	case bok:
@@ -428,26 +436,43 @@ func compareComplianceCSVVersion(a, b string) int {
 	}
 }
 
-func complianceCSVVersion(name string) ([]int, bool) {
+func complianceCSVVersion(name string) (complianceVersion, bool) {
 	v, ok := strings.CutPrefix(name, "compliance-operator.v")
 	if !ok || v == "" {
-		return nil, false
+		return complianceVersion{}, false
 	}
+	v, _, _ = strings.Cut(v, "+")
 	core, _, _ := strings.Cut(v, "-")
-	core, _, _ = strings.Cut(core, "+")
+	_, prerelease, _ := strings.Cut(v, "-")
 	parts := strings.Split(core, ".")
 	out := make([]int, len(parts))
 	for i, p := range parts {
 		if p == "" {
-			return nil, false
+			return complianceVersion{}, false
 		}
 		n, err := strconv.Atoi(p)
 		if err != nil {
-			return nil, false
+			return complianceVersion{}, false
 		}
 		out[i] = n
 	}
-	return out, true
+	return complianceVersion{parts: out, prerelease: prerelease}, true
+}
+
+func compareComplianceVersions(a, b complianceVersion) int {
+	if cmp := compareVersionParts(a.parts, b.parts); cmp != 0 {
+		return cmp
+	}
+	switch {
+	case a.prerelease == "" && b.prerelease != "":
+		return 1
+	case a.prerelease != "" && b.prerelease == "":
+		return -1
+	case a.prerelease != "" && b.prerelease != "":
+		return comparePrerelease(a.prerelease, b.prerelease)
+	default:
+		return 0
+	}
 }
 
 func compareVersionParts(a, b []int) int {
@@ -468,6 +493,52 @@ func compareVersionParts(a, b []int) int {
 		}
 	}
 	return 0
+}
+
+func comparePrerelease(a, b string) int {
+	ap := strings.Split(a, ".")
+	bp := strings.Split(b, ".")
+	n := min(len(ap), len(bp))
+	for i := range n {
+		ai, aNum := parsePrereleaseNumber(ap[i])
+		bi, bNum := parsePrereleaseNumber(bp[i])
+		switch {
+		case aNum && bNum && ai != bi:
+			if ai > bi {
+				return 1
+			}
+			return -1
+		case aNum && !bNum:
+			return -1
+		case !aNum && bNum:
+			return 1
+		case !aNum && !bNum:
+			if cmp := strings.Compare(ap[i], bp[i]); cmp != 0 {
+				return cmp
+			}
+		}
+	}
+	switch {
+	case len(ap) > len(bp):
+		return 1
+	case len(ap) < len(bp):
+		return -1
+	default:
+		return 0
+	}
+}
+
+func parsePrereleaseNumber(s string) (int, bool) {
+	if s == "" {
+		return 0, false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return 0, false
+		}
+	}
+	n, err := strconv.Atoi(s)
+	return n, err == nil
 }
 
 func (r *ClusterBaselineReconciler) setComplianceOperatorReady(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline, sub *unstructured.Unstructured) error {
@@ -514,6 +585,10 @@ func (r *ClusterBaselineReconciler) ensureScanConfig(ctx context.Context, cb *ba
 	// schedule and all bindings so a bad cron does not freeze profile/tp or
 	// auto-apply changes. Invalid schedule is reported as Degraded at the end.
 	schedule, schedErr := normalizedSchedule(cb.Spec.Schedule)
+	invalidScheduleMessage := ""
+	if schedErr != nil {
+		invalidScheduleMessage = schedErr.Error()
+	}
 
 	ss := u(scanSettingGVK)
 	ss.SetName(scanSettingName)
@@ -599,9 +674,9 @@ func (r *ClusterBaselineReconciler) ensureScanConfig(ctx context.Context, cb *ba
 			return err
 		}
 	}
-	if schedErr != nil {
+	if invalidScheduleMessage != "" {
 		setCond(cb, "ScanConfigured", metav1.ConditionFalse, "InvalidSchedule",
-			fmt.Sprintf("spec.schedule %q is not a valid standard cron schedule: %v", cb.Spec.Schedule, schedErr))
+			fmt.Sprintf("spec.schedule %q is not a valid standard cron schedule: %s", cb.Spec.Schedule, invalidScheduleMessage))
 		return nil
 	}
 	setCond(cb, "ScanConfigured", metav1.ConditionTrue, "BindingsCreated", "")

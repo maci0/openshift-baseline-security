@@ -524,6 +524,57 @@ func TestFindComplianceOperatorCSVFallsBackToNewestNonSucceeded(t *testing.T) {
 	}
 }
 
+func TestCompareComplianceCSVVersion(t *testing.T) {
+	cases := []struct {
+		a    string
+		b    string
+		want int
+	}{
+		{"compliance-operator.v1.10.0", "compliance-operator.v1.9.9", 1},
+		{"compliance-operator.v1.10.0", "compliance-operator.v1.10.0-rc.1", 1},
+		{"compliance-operator.v1.10.0-rc.2", "compliance-operator.v1.10.0-rc.1", 1},
+		{"compliance-operator.v1.10.0-alpha", "compliance-operator.v1.10.0-beta", -1},
+		{"compliance-operator.v1.10.0-alpha.10", "compliance-operator.v1.10.0-alpha.2", 1},
+		{"compliance-operator.v1.10.0+build.2", "compliance-operator.v1.10.0+build.1", 1},
+		{"not-compliance.v9.9.9", "compliance-operator.v1.0.0", -1},
+	}
+	for _, tc := range cases {
+		got := compareComplianceCSVVersion(tc.a, tc.b)
+		switch {
+		case tc.want > 0 && got <= 0:
+			t.Fatalf("compareComplianceCSVVersion(%q, %q) = %d, want >0", tc.a, tc.b, got)
+		case tc.want < 0 && got >= 0:
+			t.Fatalf("compareComplianceCSVVersion(%q, %q) = %d, want <0", tc.a, tc.b, got)
+		case tc.want == 0 && got != 0:
+			t.Fatalf("compareComplianceCSVVersion(%q, %q) = %d, want 0", tc.a, tc.b, got)
+		}
+	}
+}
+
+func TestFindComplianceOperatorCSVPrefersReleaseOverPrerelease(t *testing.T) {
+	scheme := testScheme(t)
+	release := u(csvGVK)
+	release.SetName("compliance-operator.v1.10.0")
+	release.SetNamespace("openshift-operators")
+	_ = unstructured.SetNestedField(release.Object, "Succeeded", "status", "phase")
+	rc := u(csvGVK)
+	rc.SetName("compliance-operator.v1.10.0-rc.1")
+	rc.SetNamespace("openshift-operators")
+	_ = unstructured.SetNestedField(rc.Object, "Succeeded", "status", "phase")
+
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(rc, release).Build(),
+		Scheme: scheme,
+	}
+	got, err := r.findComplianceOperatorCSV(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil || got.GetName() != "compliance-operator.v1.10.0" {
+		t.Fatalf("selected CSV = %v, want compliance-operator.v1.10.0", got)
+	}
+}
+
 // Full happy path: finalizer present, CO subscription installed with a
 // Succeeded CSV, console present, plugin image set. Reconcile must persist
 // status (score, conditions incl. rollups) and schedule a requeue.

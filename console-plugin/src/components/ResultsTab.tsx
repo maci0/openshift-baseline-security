@@ -163,8 +163,11 @@ const ResultsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => {
     const a = document.createElement('a');
     a.href = url;
     a.download = 'compliance-results.csv';
+    a.style.display = 'none';
+    document.body.appendChild(a);
     a.click();
-    URL.revokeObjectURL(url);
+    a.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 0);
   }, [filteredData]);
 
   return (
