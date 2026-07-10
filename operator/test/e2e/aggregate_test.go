@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	baselinev1alpha1 "github.com/maci0/baseline-security-operator/api/v1alpha1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -210,6 +211,79 @@ func TestTailoredProfileScored(t *testing.T) {
 	if !found {
 		t.Errorf("bound tailored %s missing from status.tailoredProfiles", name)
 	}
+}
+
+// TestWaiverExcludesCheck adds a waiver for a live failing check and verifies
+// the operator moves it out of the fail count into the Waived bucket, then
+// removes the waiver and confirms it reverts. Self-cleaning.
+func TestWaiverExcludesCheck(t *testing.T) {
+	ctx := context.Background()
+	c := newClient(t)
+	cb, err := getBaseline(ctx, c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cb.Spec.Waivers) > 0 {
+		t.Skip("a waiver already exists; test needs a clean slate")
+	}
+
+	// Find a live FAIL result owned by a built-in profile suite.
+	list := &unstructured.UnstructuredList{}
+	list.SetGroupVersionKind(checkResultGVK.GroupVersion().WithKind(checkResultGVK.Kind + "List"))
+	if err := c.List(ctx, list, client.InNamespace(complianceNamespace)); err != nil {
+		t.Fatal(err)
+	}
+	owned := ownedSuites(cb)
+	var failName string
+	for i := range list.Items {
+		status, _, _ := unstructured.NestedString(list.Items[i].Object, "status")
+		if status == "FAIL" && owned[list.Items[i].GetLabels()[suiteLabel]] {
+			failName = list.Items[i].GetName()
+			break
+		}
+	}
+	if failName == "" {
+		t.Skip("no owned FAIL result to waive")
+	}
+
+	before, _ := countOwnedResults(ctx, c, cb)
+	cb.Spec.Waivers = []baselinev1alpha1.WaiverEntry{{Name: failName, Reason: "e2e"}}
+	if err := c.Update(ctx, cb); err != nil {
+		t.Fatalf("add waiver: %v", err)
+	}
+	after, _ := getBaseline(ctx, c)
+	t.Logf("waived %q; spec.waivers now has %d entries", failName, len(after.Spec.Waivers))
+	t.Cleanup(func() {
+		restore, _ := getBaseline(ctx, c)
+		restore.Spec.Waivers = nil
+		_ = c.Update(ctx, restore)
+	})
+
+	eventually(t, 2*time.Minute, "waived count reflected in status", func() error {
+		cur, err := getBaseline(ctx, c)
+		if err != nil {
+			return err
+		}
+		// Sum both built-in and tailored buckets: the waived check may belong to
+		// either kind of suite.
+		var waived, fail int32
+		for _, p := range cur.Status.Profiles {
+			waived += p.Waived
+			fail += p.Fail
+		}
+		for _, p := range cur.Status.TailoredProfiles {
+			waived += p.Waived
+			fail += p.Fail
+		}
+		if waived < 1 {
+			return errf("waived=%d, want >=1", waived)
+		}
+		// The waived check left the fail bucket.
+		if int(fail) != before["FAIL"]-1 {
+			return errf("fail=%d, want %d (one waived out)", fail, before["FAIL"]-1)
+		}
+		return nil
+	})
 }
 
 // TestRemediationsQueryable asserts the operator's ownership boundary holds for

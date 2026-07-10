@@ -66,6 +66,32 @@ test.describe('Baseline Security multi-node / multi-benchmark', () => {
     await expect(dialog.getByText(/ComplianceCheckResult resource/i)).toBeVisible();
   });
 
+  test('INCONSISTENT check modal shows the per-node breakdown', async ({ page }) => {
+    await page.goto('/baseline-security/results?rowFilter-result-status=INCONSISTENT', {
+      waitUntil: 'networkidle',
+    });
+    // Open the first inconsistent check.
+    await page.getByRole('button', { name: /file|etcd|kubelet|owner|permission/i }).first().click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByText('Per-node results')).toBeVisible();
+    // The per-node table names at least one node.
+    await expect(dialog.getByText(/cluster0-/).first()).toBeVisible();
+  });
+
+  test('a failing check offers a Waive action (with patch permission)', async ({ page }) => {
+    await page.goto('/baseline-security/results?rowFilter-result-status=FAIL', {
+      waitUntil: 'networkidle',
+    });
+    await page.getByRole('button', { name: /file|etcd|kubelet|api|audit|owner/i }).first().click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByText('Waiver')).toBeVisible();
+    // kubeadmin can patch clusterbaselines, so the action is enabled (not clicked
+    // to avoid mutating shared cluster state).
+    await expect(dialog.getByRole('button', { name: 'Waive check' })).toBeEnabled();
+  });
+
   test('Export CSV downloads a file of the filtered results', async ({ page }) => {
     await page.goto('/baseline-security/results?rowFilter-result-status=FAIL', {
       waitUntil: 'networkidle',

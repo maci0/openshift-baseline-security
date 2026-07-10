@@ -68,6 +68,7 @@ rot). Record topology, versions, and the concrete result.
 | 2026-07-10 | 4 | Multi-node + multi-benchmark: CIS+PCI-DSS on 3 nodes; INCONSISTENT surfaced; dashboard item; donut legend | SNO + 2 day-2 workers | 4.22 / CO 1.9.1 | pass — score 94 pooled, 86 INCONSISTENT counted, node scan fans out 3 pods |
 | 2026-07-10 | 1 | OLM bundle validation | n/a (local) | operator-sdk bundle validate | pass — "All validation tests completed successfully" |
 | 2026-07-10 | 4 | Full automated e2e after round-3 deploy: Go 11 tests (incl. score-vs-live-results ground truth, per-profile+INCONSISTENT match, nextScanTime future, node-scan fan-out, tailored scored) + Playwright 20 (incl. Inconsistent slice, PCI-DSS cards, dashboard link, INCONSISTENT filter, CSV download) | SNO + 2 day-2 workers | 4.22 / CO 1.9.1 | pass — Go 11/11, Playwright 20/20; score 94 = 514 PASS/(514+31 FAIL) verified against live CheckResults |
+| 2026-07-10 | 2+4 | Waivers + INCONSISTENT drill-down round. Battery: Go e2e 12 (added live waiver round-trip: waive a FAIL → moves to Waived bucket, out of denominator) + Playwright 22 (added per-node drill-down table, Waive action) + promtool alerts + operator -race + all 11 fuzz targets + bundle validate | SNO + 2 day-2 workers | 4.22 / CO 1.9.1 | pass — Go 12/12, Playwright 22/22, jest 68, promtool SUCCESS, fuzz 11/11; live waive dropped cis.fail 7→6, waived 0→1 |
 
 ## Fixture and harness strategy
 
