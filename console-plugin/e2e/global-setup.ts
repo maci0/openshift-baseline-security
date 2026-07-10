@@ -1,4 +1,5 @@
 import { chromium, FullConfig } from '@playwright/test';
+import { mkdir } from 'fs/promises';
 
 // Logs into the OpenShift console once and saves the authenticated storage
 // state so each spec starts already logged in.
@@ -31,6 +32,7 @@ export default async function globalSetup(_config: FullConfig) {
     // no tour
   }
 
+  await mkdir('e2e/.auth', { recursive: true });
   await page.context().storageState({ path: 'e2e/.auth/state.json' });
   await browser.close();
 }
