@@ -74,7 +74,10 @@ type ClusterBaselineReconciler struct {
 // +kubebuilder:rbac:groups=baselinesecurity.io,resources=clusterbaselines/finalizers,verbs=update
 // +kubebuilder:rbac:groups=compliance.openshift.io,resources=scansettings;scansettingbindings,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=compliance.openshift.io,resources=compliancecheckresults;compliancescans,verbs=get;list;watch
-// +kubebuilder:rbac:groups=operators.coreos.com,resources=subscriptions;operatorgroups,verbs=get;list;watch;create
+// Subscriptions need update/patch so complianceCatalogSource can be synced after
+// the initial createIfMissing (OKD / disconnected catalog moves).
+// +kubebuilder:rbac:groups=operators.coreos.com,resources=subscriptions,verbs=get;list;watch;create;update;patch
+// +kubebuilder:rbac:groups=operators.coreos.com,resources=operatorgroups,verbs=get;list;watch;create
 // +kubebuilder:rbac:groups=operators.coreos.com,resources=clusterserviceversions,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch;create
 // +kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create;update;patch;delete
@@ -435,11 +438,9 @@ func setRollupConditions(cb *baselinev1alpha1.ClusterBaseline) {
 	case scan != nil && scan.Status == metav1.ConditionFalse && scan.Reason == "InvalidSchedule":
 		setCond(cb, "Degraded", metav1.ConditionTrue, "InvalidSchedule", scan.Message)
 	case storage != nil && storage.Status == metav1.ConditionFalse:
-		reason := storage.Reason
-		if reason == "" {
-			reason = "ScanStorageNotReady"
-		}
-		setCond(cb, "Degraded", metav1.ConditionTrue, reason, storage.Message)
+		// Fixed reason only: never copy storage.Reason (hand-edit can violate
+		// Condition Reason pattern and brick Status().Update admission).
+		setCond(cb, "Degraded", metav1.ConditionTrue, "ScanStorageNotReady", storage.Message)
 	case plugin != nil && plugin.Status == metav1.ConditionFalse && plugin.Reason == "Unavailable":
 		setCond(cb, "Degraded", metav1.ConditionTrue, "ConsolePluginUnavailable", plugin.Message)
 	default:

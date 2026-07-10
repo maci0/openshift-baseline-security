@@ -126,9 +126,19 @@ rules:
   - operators.coreos.com
   resources:
   - operatorgroups
+  verbs:
+  - create
+  - get
+  - list
+  - watch
+- apiGroups:
+  - operators.coreos.com
+  resources:
   - subscriptions
   verbs:
   - create
   - get
   - list
+  - patch
+  - update
   - watch

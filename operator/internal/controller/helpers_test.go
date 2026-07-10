@@ -22,11 +22,11 @@ func TestSetCondEmptyReasonDefaults(t *testing.T) {
 	if c == nil || c.Reason != "Unknown" {
 		t.Fatalf("empty reason must become Unknown, got %+v", c)
 	}
-	// Rollup must not copy an empty storage reason into Degraded (admission).
+	// Rollup must use a fixed CamelCase reason, never the detail Reason.
 	setRollupConditions(cb)
 	d := meta.FindStatusCondition(cb.Status.Conditions, "Degraded")
-	if d == nil || d.Status != metav1.ConditionTrue || d.Reason == "" {
-		t.Fatalf("Degraded must have non-empty reason, got %+v", d)
+	if d == nil || d.Status != metav1.ConditionTrue || d.Reason != "ScanStorageNotReady" {
+		t.Fatalf("Degraded must be ScanStorageNotReady, got %+v", d)
 	}
 }
 
@@ -119,12 +119,19 @@ func TestSetRollupConditions(t *testing.T) {
 		t.Fatalf("Degraded for unavailable plugin: %+v", c)
 	}
 
-	// Pending scan storage rolls into Degraded with its own reason/message.
+	// Pending scan storage rolls into Degraded with a fixed rollup reason
+	// (never copies a possibly hostile detail Reason).
 	setCond(cb, "ConsolePluginReady", metav1.ConditionTrue, "Deployed", "")
 	setCond(cb, "ScanStorageReady", metav1.ConditionFalse, "ScanStoragePending", "PVC pending")
 	setRollupConditions(cb)
-	if c := meta.FindStatusCondition(cb.Status.Conditions, "Degraded"); c == nil || c.Status != metav1.ConditionTrue || c.Reason != "ScanStoragePending" {
+	if c := meta.FindStatusCondition(cb.Status.Conditions, "Degraded"); c == nil || c.Status != metav1.ConditionTrue || c.Reason != "ScanStorageNotReady" {
 		t.Fatalf("Degraded for pending storage: %+v", c)
+	}
+	// Hostile detail Reason must not land on Degraded (CRD Reason pattern).
+	setCond(cb, "ScanStorageReady", metav1.ConditionFalse, "not a valid reason!!!", "still pending")
+	setRollupConditions(cb)
+	if c := meta.FindStatusCondition(cb.Status.Conditions, "Degraded"); c == nil || c.Reason != "ScanStorageNotReady" {
+		t.Fatalf("Degraded must use fixed ScanStorageNotReady, got %+v", c)
 	}
 	setCond(cb, "ScanStorageReady", metav1.ConditionTrue, "AsExpected", "")
 	setRollupConditions(cb)

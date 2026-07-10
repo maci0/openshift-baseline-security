@@ -103,12 +103,16 @@ test-alerts:
 	./hack/test-alerts.sh
 
 # CSV clusterPermissions are hand-maintained; fail if they drift from role.yaml
-# on verbs we know matter for zero-config (clusterbaselines create).
+# on verbs we know matter for zero-config (clusterbaselines create) and for
+# complianceCatalogSource sync (subscriptions update/patch).
 .PHONY: verify-csv-rbac
 verify-csv-rbac:
 	@grep -A1 'resources: \[clusterbaselines\]' bundle/manifests/baseline-security-operator.clusterserviceversion.yaml \
 		| grep -q 'create' \
 		|| (echo "CSV missing create on clusterbaselines; sync with config/rbac/role.yaml" && exit 1)
+	@grep -A1 'resources: \[subscriptions\]' bundle/manifests/baseline-security-operator.clusterserviceversion.yaml \
+		| grep -E -q 'update|patch' \
+		|| (echo "CSV missing update/patch on subscriptions; catalog source sync needs them" && exit 1)
 
 .PHONY: bundle-build
 bundle-build: bundle
