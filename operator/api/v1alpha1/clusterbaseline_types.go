@@ -85,6 +85,28 @@ type ClusterBaselineSpec struct {
 	// remediation configures how ComplianceRemediations are handled.
 	// +optional
 	Remediation RemediationSpec `json:"remediation,omitempty"`
+
+	// waivers exclude specific failing checks from the score as accepted risk.
+	// Each entry names a ComplianceCheckResult and records why it is waived. A
+	// waived check is removed from the pass/fail denominator and reported in the
+	// Waived bucket instead, so an accepted risk neither inflates nor tanks the
+	// score. Waivers are keyed by result name, which is stable across rescans.
+	// +optional
+	// +listType=map
+	// +listMapKey=name
+	Waivers []WaiverEntry `json:"waivers,omitempty"`
+}
+
+// WaiverEntry marks one ComplianceCheckResult as accepted risk.
+type WaiverEntry struct {
+	// name is the ComplianceCheckResult metadata.name to waive.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
+	Name string `json:"name"`
+	// reason records why this check is accepted (for audit).
+	// +optional
+	// +kubebuilder:validation:MaxLength=1024
+	Reason string `json:"reason,omitempty"`
 }
 
 // RemediationSpec configures remediation handling.
@@ -118,7 +140,10 @@ type ResultCounts struct {
 	// Inconsistent counts checks whose per-node results disagree across a
 	// MachineConfigPool (compliance operator status INCONSISTENT). Excluded from
 	// the score like Manual/Error; it flags a discrepancy that needs review.
-	Inconsistent  int32 `json:"inconsistent"`
+	Inconsistent int32 `json:"inconsistent"`
+	// Waived counts checks excluded from the score by a spec.waivers entry
+	// (accepted risk). Excluded from the pass/fail denominator.
+	Waived        int32 `json:"waived"`
 	NotApplicable int32 `json:"notApplicable"`
 }
 

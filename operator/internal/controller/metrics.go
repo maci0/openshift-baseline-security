@@ -54,5 +54,6 @@ func setCheckCounts(profile string, c baselinev1alpha1.ResultCounts) {
 	complianceChecks.WithLabelValues(profile, "info").Set(float64(c.Info))
 	complianceChecks.WithLabelValues(profile, "error").Set(float64(c.Error))
 	complianceChecks.WithLabelValues(profile, "inconsistent").Set(float64(c.Inconsistent))
+	complianceChecks.WithLabelValues(profile, "waived").Set(float64(c.Waived))
 	complianceChecks.WithLabelValues(profile, "notApplicable").Set(float64(c.NotApplicable))
 }

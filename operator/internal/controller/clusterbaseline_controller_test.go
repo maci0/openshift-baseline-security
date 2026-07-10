@@ -164,6 +164,44 @@ func TestAggregateStatusAllManualNilScore(t *testing.T) {
 	}
 }
 
+// TestAggregateStatusWaivers pins waiver semantics: a waived FAIL leaves the
+// pass/fail denominator (raising the score) and is reported in the Waived bucket
+// instead, so accepted risk is visible but not counted against compliance.
+func TestAggregateStatusWaivers(t *testing.T) {
+	scheme := testScheme(t)
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(
+			checkResult("p1", "baseline-cis", "PASS"),
+			checkResult("f1", "baseline-cis", "FAIL"),
+			checkResult("f2", "baseline-cis", "FAIL"),
+		).Build(),
+		Scheme: scheme,
+	}
+	// Without waivers: 1 pass / 2 fail = 33.
+	cb := &baselinev1alpha1.ClusterBaseline{
+		Spec: baselinev1alpha1.ClusterBaselineSpec{Profiles: []baselinev1alpha1.ProfileKey{"cis"}},
+	}
+	if err := r.aggregateStatus(context.Background(), cb); err != nil {
+		t.Fatal(err)
+	}
+	if cb.Status.Score == nil || *cb.Status.Score != 33 {
+		t.Fatalf("baseline score = %v, want 33", cb.Status.Score)
+	}
+
+	// Waive one FAIL: 1 pass / 1 fail = 50, one Waived, fail drops to 1.
+	cb.Spec.Waivers = []baselinev1alpha1.WaiverEntry{{Name: "f2", Reason: "accepted"}}
+	if err := r.aggregateStatus(context.Background(), cb); err != nil {
+		t.Fatal(err)
+	}
+	if cb.Status.Score == nil || *cb.Status.Score != 50 {
+		t.Fatalf("waived score = %v, want 50", cb.Status.Score)
+	}
+	p := cb.Status.Profiles[0]
+	if p.Fail != 1 || p.Waived != 1 || p.Pass != 1 {
+		t.Fatalf("counts = %+v, want pass=1 fail=1 waived=1", p)
+	}
+}
+
 func TestAggregateStatusClearsStaleScore(t *testing.T) {
 	scheme := testScheme(t)
 	r := &ClusterBaselineReconciler{

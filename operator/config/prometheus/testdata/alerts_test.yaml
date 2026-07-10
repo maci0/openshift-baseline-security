@@ -1,0 +1,81 @@
+# promtool unit tests for the baseline-security alerts. The rules file is
+# generated from prometheusrule.yaml at test time (single source of truth).
+# Run: make test-alerts
+rule_files:
+  - rules.yaml
+
+evaluation_interval: 1m
+
+tests:
+  # ComplianceScoreLow fires only on a real low score, after the 30m window.
+  - interval: 1m
+    input_series:
+      - series: 'baseline_security_compliance_score'
+        values: '79x40'
+    alert_rule_test:
+      - eval_time: 31m
+        alertname: ComplianceScoreLow
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: 'Cluster compliance score is below 80'
+              description: 'The baseline compliance score is 79 (threshold 80). Review failing checks under Administration -> Compliance.'
+
+  # Score exactly at the threshold does not fire (expr is `< 80`).
+  - interval: 1m
+    input_series:
+      - series: 'baseline_security_compliance_score'
+        values: '80x40'
+    alert_rule_test:
+      - eval_time: 31m
+        alertname: ComplianceScoreLow
+        exp_alerts: []
+
+  # The -1 "no score yet" sentinel must never fire (expr guards `>= 0`).
+  - interval: 1m
+    input_series:
+      - series: 'baseline_security_compliance_score'
+        values: '-1x40'
+    alert_rule_test:
+      - eval_time: 31m
+        alertname: ComplianceScoreLow
+        exp_alerts: []
+
+  # A healthy score does not fire.
+  - interval: 1m
+    input_series:
+      - series: 'baseline_security_compliance_score'
+        values: '94x40'
+    alert_rule_test:
+      - eval_time: 31m
+        alertname: ComplianceScoreLow
+        exp_alerts: []
+
+  # ComplianceChecksFailing fires after 1h; two HA pods reporting the same
+  # profile/status must be de-duplicated (max by), so the value is 5, not 10.
+  - interval: 1m
+    input_series:
+      - series: 'baseline_security_checks{profile="cis",status="fail",pod="op-1"}'
+        values: '5x70'
+      - series: 'baseline_security_checks{profile="cis",status="fail",pod="op-2"}'
+        values: '5x70'
+    alert_rule_test:
+      - eval_time: 61m
+        alertname: ComplianceChecksFailing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: 'Compliance checks are failing'
+              description: '5 compliance check(s) are failing across the selected benchmark profiles.'
+
+  # Zero failing checks: no alert.
+  - interval: 1m
+    input_series:
+      - series: 'baseline_security_checks{profile="cis",status="fail",pod="op-1"}'
+        values: '0x70'
+    alert_rule_test:
+      - eval_time: 61m
+        alertname: ComplianceChecksFailing
+        exp_alerts: []

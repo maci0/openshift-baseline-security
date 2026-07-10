@@ -77,5 +77,19 @@
   "It renders into a MachineConfig; applying it reboots the affected nodes one by one. To batch changes, pause the target MachineConfigPool first (Compute -> MachineConfigPools) and resume it when done.": "It renders into a MachineConfig; applying it reboots the affected nodes one by one. To batch changes, pause the target MachineConfigPool first (Compute -> MachineConfigPools) and resume it when done.",
   "{{name}} will be applied to the cluster. A rescan is required afterwards for results to reflect the change.": "{{name}} will be applied to the cluster. A rescan is required afterwards for results to reflect the change.",
   "{{score}} / 100": "{{score}} / 100",
-  "Not scanned": "Not scanned"
+  "Not scanned": "Not scanned",
+  "Per-node results": "Per-node results",
+  "Nodes disagree on this rule; review each before acting.": "Nodes disagree on this rule; review each before acting.",
+  "Node": "Node",
+  "all other nodes": "all other nodes",
+  "Waiver": "Waiver",
+  "Waived": "Waived",
+  "Waive check": "Waive check",
+  "Remove waiver": "Remove waiver",
+  "Waiver reason": "Waiver reason",
+  "Reason (optional)": "Reason (optional)",
+  "This check is waived (excluded from the score).": "This check is waived (excluded from the score).",
+  "Accept this failing check as risk to exclude it from the score.": "Accept this failing check as risk to exclude it from the score.",
+  "Failed to waive check.": "Failed to waive check.",
+  "Failed to remove waiver.": "Failed to remove waiver."
 }

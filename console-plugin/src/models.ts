@@ -51,7 +51,12 @@ export type CheckStatus =
   | 'NOT-APPLICABLE';
 
 export type ComplianceCheckResult = {
-  metadata: { name: string; namespace: string; labels?: Record<string, string> };
+  metadata: {
+    name: string;
+    namespace: string;
+    labels?: Record<string, string>;
+    annotations?: Record<string, string>;
+  };
   status: CheckStatus;
   severity: 'unknown' | 'info' | 'low' | 'medium' | 'high';
   description?: string;
@@ -84,8 +89,11 @@ export type ResultCounts = {
   info: number;
   error: number;
   inconsistent: number;
+  waived: number;
   notApplicable: number;
 };
+
+export type Waiver = { name: string; reason?: string };
 
 export type ProfileStatus = ResultCounts & {
   key: string;
@@ -103,6 +111,7 @@ export type ClusterBaseline = {
     installComplianceOperator?: 'Automatic' | 'Manual';
     console?: { managementState?: 'Managed' | 'Removed' };
     remediation?: { apply?: 'Automatic' | 'Manual' };
+    waivers?: Waiver[];
   };
   status?: {
     score?: number;

@@ -1,8 +1,12 @@
 import {
   checkResultHref,
+  addWaiverPatch,
+  isWaived,
+  removeWaiverPatch,
   aggregateCounts,
   clusterScore,
   isNodeRemediation,
+  inconsistentSources,
   remediationObjectText,
   resultsCsv,
   remediationApplyPatch,
@@ -322,6 +326,46 @@ describe('checkResultHref', () => {
   });
 });
 
+describe('inconsistentSources', () => {
+  const withAnn = (ann?: Record<string, string>): ComplianceCheckResult =>
+    ({ metadata: { name: 'r', namespace: 'ns', annotations: ann }, status: 'INCONSISTENT' }) as ComplianceCheckResult;
+
+  it('parses node:status pairs and the most-common status', () => {
+    const { sources, mostCommon } = inconsistentSources(
+      withAnn({
+        'compliance.openshift.io/inconsistent-source': 'node0:PASS,worker1:FAIL',
+        'compliance.openshift.io/most-common-status': 'NOT-APPLICABLE',
+      }),
+    );
+    expect(sources).toEqual([
+      { node: 'node0', status: 'PASS' },
+      { node: 'worker1', status: 'FAIL' },
+    ]);
+    expect(mostCommon).toBe('NOT-APPLICABLE');
+  });
+  it('returns empty when the annotation is absent', () => {
+    expect(inconsistentSources(withAnn())).toEqual({ sources: [], mostCommon: null });
+    expect(inconsistentSources(withAnn({}))).toEqual({ sources: [], mostCommon: null });
+  });
+  it('tolerates a node name without a status and trims blanks', () => {
+    const { sources } = inconsistentSources(
+      withAnn({ 'compliance.openshift.io/inconsistent-source': ' node0 , , n1:PASS ' }),
+    );
+    expect(sources).toEqual([
+      { node: 'node0', status: '' },
+      { node: 'n1', status: 'PASS' },
+    ]);
+  });
+  it('fuzz: never throws for arbitrary annotation strings', () => {
+    for (let i = 0; i < 1000; i++) {
+      const { sources } = inconsistentSources(
+        withAnn({ 'compliance.openshift.io/inconsistent-source': randomString(i % 40) }),
+      );
+      expect(Array.isArray(sources)).toBe(true);
+    }
+  });
+});
+
 describe('remediation helpers', () => {
   const rem = (kind?: string, obj?: Record<string, unknown>): ComplianceRemediation =>
     ({
@@ -362,6 +406,7 @@ describe('aggregateCounts', () => {
     info = 0,
     error = 0,
     inconsistent = 0,
+    waived = 0,
     notApplicable = 0,
   ) => ({
     pass,
@@ -370,13 +415,16 @@ describe('aggregateCounts', () => {
     info,
     error,
     inconsistent,
+    waived,
     notApplicable,
   });
   it('sums profiles and tailored profiles together', () => {
-    expect(aggregateCounts(c(10, 2, 1, 4, 0, 5), c(40, 8, 3, 1, 0, 6))).toEqual(c(50, 10, 4, 5, 0, 11));
+    expect(aggregateCounts(c(10, 2, 1, 4, 0, 5, 7), c(40, 8, 3, 1, 0, 6, 2))).toEqual(
+      c(50, 10, 4, 5, 0, 11, 9),
+    );
   });
   it('returns zeros for no groups', () => {
-    expect(aggregateCounts()).toEqual(c(0, 0, 0, 0, 0, 0, 0));
+    expect(aggregateCounts()).toEqual(c(0, 0, 0, 0, 0, 0, 0, 0));
   });
   it('score composition matches: tailored-only results still populate totals', () => {
     // regular profile empty, tailored has results -> totals non-zero
@@ -385,7 +433,43 @@ describe('aggregateCounts', () => {
   });
   it('treats missing count fields from older persisted status as zero', () => {
     const totals = aggregateCounts({ pass: 1, fail: 2 } as ResultCounts);
-    expect(totals).toEqual(c(1, 2, 0, 0, 0, 0, 0));
+    expect(totals).toEqual(c(1, 2, 0, 0, 0, 0, 0, 0));
+  });
+});
+
+describe('waivers', () => {
+  it('isWaived matches by name', () => {
+    const w = [{ name: 'a', reason: 'x' }, { name: 'b' }];
+    expect(isWaived('a', w)).toBe(true);
+    expect(isWaived('b', w)).toBe(true);
+    expect(isWaived('c', w)).toBe(false);
+    expect(isWaived('a', undefined)).toBe(false);
+    expect(isWaived('a', [])).toBe(false);
+  });
+  it('addWaiverPatch adds the array when absent, else appends', () => {
+    expect(addWaiverPatch(false, 'chk', 'risk')).toEqual([
+      { op: 'add', path: '/spec/waivers', value: [{ name: 'chk', reason: 'risk' }] },
+    ]);
+    expect(addWaiverPatch(true, 'chk', '')).toEqual([
+      { op: 'add', path: '/spec/waivers/-', value: { name: 'chk' } },
+    ]);
+  });
+  it('removeWaiverPatch test-guards the name before removing', () => {
+    expect(removeWaiverPatch(2, 'chk')).toEqual([
+      { op: 'test', path: '/spec/waivers/2/name', value: 'chk' },
+      { op: 'remove', path: '/spec/waivers/2' },
+    ]);
+  });
+  it('fuzz: addWaiverPatch is always a single add carrying the name', () => {
+    for (let i = 0; i < 500; i++) {
+      const name = randomString(i % 30) || 'n';
+      const patch = addWaiverPatch(i % 2 === 0, name, randomString(i % 10));
+      expect(patch).toHaveLength(1);
+      expect(patch[0].op).toBe('add');
+      const v = patch[0].value as { name: string } | { name: string }[];
+      const entry = Array.isArray(v) ? v[0] : v;
+      expect(entry.name).toBe(name);
+    }
   });
 });
 

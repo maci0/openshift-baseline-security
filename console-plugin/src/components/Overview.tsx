@@ -125,6 +125,7 @@ const Overview: React.FC<{ baseline?: ClusterBaseline; loaded: boolean }> = ({
     { label: t('Info'), value: totals.info, color: blue },
     { label: t('Inconsistent'), value: totals.inconsistent, color: purple },
     { label: t('Error'), value: totals.error, color: red },
+    { label: t('Waived'), value: totals.waived, color: grey },
     { label: t('Not applicable'), value: totals.notApplicable, color: grey },
   ].filter((s) => s.value > 0);
   const totalChecks = segments.reduce((n, s) => n + s.value, 0);

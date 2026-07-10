@@ -3,6 +3,7 @@ import {
   ComplianceCheckResult,
   ComplianceRemediation,
   ResultCounts,
+  Waiver,
 } from './models';
 
 // Pick the singleton ClusterBaseline (named "cluster", else the first) and
@@ -52,9 +53,10 @@ export const aggregateCounts = (...groups: ResultCounts[]): ResultCounts =>
       info: a.info + count(g.info),
       error: a.error + count(g.error),
       inconsistent: a.inconsistent + count(g.inconsistent),
+      waived: a.waived + count(g.waived),
       notApplicable: a.notApplicable + count(g.notApplicable),
     }),
-    { pass: 0, fail: 0, manual: 0, info: 0, error: 0, inconsistent: 0, notApplicable: 0 },
+    { pass: 0, fail: 0, manual: 0, info: 0, error: 0, inconsistent: 0, waived: 0, notApplicable: 0 },
   );
 
 // The description's first line is the rule title; the rest is the rationale.
@@ -105,6 +107,30 @@ export const checkResultHref = (name: string): string =>
     stripSurrogates(name),
   )}`;
 
+export type NodeStatus = { node: string; status: string };
+
+// Per-node breakdown of an INCONSISTENT check. The Compliance Operator records
+// the nodes that diverge from the majority in the inconsistent-source annotation
+// ("node:STATUS,node:STATUS"), and the status the rest share in
+// most-common-status. Untrusted cluster data: never throws on a malformed value.
+export const inconsistentSources = (
+  result: ComplianceCheckResult,
+): { sources: NodeStatus[]; mostCommon: string | null } => {
+  const ann = result.metadata?.annotations ?? {};
+  const raw = ann['compliance.openshift.io/inconsistent-source'] ?? '';
+  const sources = raw
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((s) => {
+      const i = s.indexOf(':');
+      return i < 0
+        ? { node: s, status: '' }
+        : { node: s.slice(0, i), status: s.slice(i + 1) };
+    });
+  return { sources, mostCommon: ann['compliance.openshift.io/most-common-status'] || null };
+};
+
 // New profile list after toggling one key; null when the change is invalid
 // (the CRD requires at least one profile).
 export const toggledProfiles = (
@@ -123,6 +149,26 @@ export const remediationApplyPatch = (hasRemediation: boolean, automatic: boolea
     ? [{ op: 'add' as const, path: '/spec/remediation/apply', value: apply }]
     : [{ op: 'add' as const, path: '/spec/remediation', value: { apply } }];
 };
+
+// True when a check result is waived (accepted risk) by spec.waivers.
+export const isWaived = (name: string, waivers?: Waiver[]): boolean =>
+  !!waivers?.some((w) => w.name === name);
+
+// JSON patch adding a waiver for a check. Adds the whole spec.waivers array when
+// absent (nested add would 404), else appends one entry.
+export const addWaiverPatch = (hasWaivers: boolean, name: string, reason: string) => {
+  const entry = reason ? { name, reason } : { name };
+  return hasWaivers
+    ? [{ op: 'add' as const, path: '/spec/waivers/-', value: entry }]
+    : [{ op: 'add' as const, path: '/spec/waivers', value: [entry] }];
+};
+
+// JSON patch removing the waiver at index i (test-guards the name so a
+// concurrent reorder cannot delete the wrong entry).
+export const removeWaiverPatch = (index: number, name: string) => [
+  { op: 'test' as const, path: `/spec/waivers/${index}/name`, value: name },
+  { op: 'remove' as const, path: `/spec/waivers/${index}` },
+];
 
 // JSON patch to trigger a Compliance Operator rescan. value must change each
 // click so a re-rescan is observed when the annotation already exists.

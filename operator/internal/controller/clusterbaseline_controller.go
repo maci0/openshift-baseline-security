@@ -874,10 +874,18 @@ func (r *ClusterBaselineReconciler) aggregateStatus(ctx context.Context, cb *bas
 		byTailored[name] = &baselinev1alpha1.TailoredProfileStatus{Name: name}
 	}
 
+	// Checks waived as accepted risk are pulled out of the pass/fail denominator
+	// and reported in the Waived bucket, keyed by ComplianceCheckResult name.
+	waived := make(map[string]bool, len(cb.Spec.Waivers))
+	for _, w := range cb.Spec.Waivers {
+		waived[w.Name] = true
+	}
+
 	var pass, fail int32
 	// tally routes one check result's status into the counts and the score.
 	// INFO is counted (excluded from score) so Overview totals match Results.
 	// SKIP is folded into NotApplicable (CO: check skipped for this system).
+	// WAIVED is our synthetic status for accepted-risk checks (excluded from score).
 	tally := func(c *baselinev1alpha1.ResultCounts, status string) {
 		switch status {
 		case "PASS":
@@ -894,6 +902,8 @@ func (r *ClusterBaselineReconciler) aggregateStatus(ctx context.Context, cb *bas
 			c.Error++
 		case "INCONSISTENT":
 			c.Inconsistent++
+		case "WAIVED":
+			c.Waived++
 		case "SKIP", "NOT-APPLICABLE":
 			c.NotApplicable++
 		}
@@ -901,6 +911,10 @@ func (r *ClusterBaselineReconciler) aggregateStatus(ctx context.Context, cb *bas
 	for _, item := range list.Items {
 		suite := item.GetLabels()[suiteLabel]
 		status, _, _ := unstructured.NestedString(item.Object, "status")
+		// A waived check leaves the score denominator regardless of its raw status.
+		if waived[item.GetName()] {
+			status = "WAIVED"
+		}
 		if name, ok := tailoredNameFromSuite(suite); ok {
 			if ts := byTailored[name]; ts != nil {
 				tally(&ts.ResultCounts, status)

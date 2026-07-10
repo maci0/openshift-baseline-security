@@ -26,7 +26,7 @@ func TestPublishMetrics(t *testing.T) {
 		{
 			Key: "cis",
 			ResultCounts: baselinev1alpha1.ResultCounts{
-				Pass: 10, Fail: 2, Manual: 3, Info: 4, Error: 0, Inconsistent: 5, NotApplicable: 1,
+				Pass: 10, Fail: 2, Manual: 3, Info: 4, Error: 0, Inconsistent: 5, Waived: 6, NotApplicable: 1,
 			},
 		},
 	}
@@ -46,7 +46,8 @@ func TestPublishMetrics(t *testing.T) {
 	}{
 		{"cis", "pass", 10}, {"cis", "fail", 2}, {"cis", "manual", 3},
 		{"cis", "info", 4}, {"cis", "error", 0}, {"cis", "inconsistent", 5},
-		{"cis", "notApplicable", 1}, {"tp:custom", "pass", 7}, {"tp:custom", "fail", 1},
+		{"cis", "waived", 6}, {"cis", "notApplicable", 1},
+		{"tp:custom", "pass", 7}, {"tp:custom", "fail", 1},
 	} {
 		if got := testutil.ToFloat64(complianceChecks.WithLabelValues(tc.profile, tc.status)); got != tc.want {
 			t.Fatalf("%s/%s = %v, want %v", tc.profile, tc.status, got, tc.want)

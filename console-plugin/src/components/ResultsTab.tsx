@@ -1,25 +1,30 @@
 import * as React from 'react';
 import { useTranslation } from 'react-i18next';
 import {
+  k8sPatch,
   ListPageBody,
   ListPageFilter,
   RowFilter,
   RowProps,
   TableColumn,
   TableData,
+  useAccessReview,
   useK8sWatchResource,
   useListPageFilter,
   VirtualizedTable,
 } from '@openshift-console/dynamic-plugin-sdk';
 import {
+  Alert,
   Button,
   Content,
   Label,
   Modal,
   ModalBody,
+  ModalFooter,
   ModalHeader,
   Split,
   SplitItem,
+  TextArea,
   Title,
 } from '@patternfly/react-core';
 import {
@@ -33,12 +38,24 @@ import {
 import {
   CheckStatus,
   ClusterBaseline,
+  ClusterBaselineModel,
   ComplianceCheckResult,
   ComplianceCheckResultGVK,
   isOwnedByBaseline,
   suiteFilterKey,
 } from '../models';
-import { checkBody, checkResultHref, checkTitle, resultsCsv } from '../utils';
+import { Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table';
+import {
+  addWaiverPatch,
+  checkBody,
+  checkResultHref,
+  checkTitle,
+  errorMessage,
+  inconsistentSources,
+  isWaived,
+  removeWaiverPatch,
+  resultsCsv,
+} from '../utils';
 
 const statusLabel: Record<
   CheckStatus,
@@ -63,6 +80,38 @@ const ResultsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => {
     namespace: 'openshift-compliance',
   });
   const [selected, setSelected] = React.useState<ComplianceCheckResult | null>(null);
+  const [waiveReason, setWaiveReason] = React.useState('');
+  const [busy, setBusy] = React.useState(false);
+  const [waiveError, setWaiveError] = React.useState<string | null>(null);
+  const [canWaive, canWaiveLoading] = useAccessReview({
+    group: 'baselinesecurity.io',
+    resource: 'clusterbaselines',
+    verb: 'patch',
+  });
+  const waivers = baseline?.spec.waivers;
+
+  const closeModal = () => {
+    setSelected(null);
+    setWaiveReason('');
+    setWaiveError(null);
+  };
+
+  const patchWaivers = async (
+    data: Parameters<typeof k8sPatch>[0]['data'],
+    failMsg: string,
+  ): Promise<void> => {
+    if (!baseline) return;
+    setBusy(true);
+    setWaiveError(null);
+    try {
+      await k8sPatch({ model: ClusterBaselineModel, resource: baseline, data });
+      closeModal();
+    } catch (e) {
+      setWaiveError(errorMessage(e) ?? failMsg);
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const columns: TableColumn<ComplianceCheckResult>[] = React.useMemo(
     () => [
@@ -204,7 +253,7 @@ const ResultsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => {
       <Modal
         variant="medium"
         isOpen={!!selected}
-        onClose={() => setSelected(null)}
+        onClose={closeModal}
         aria-labelledby="check-detail-title"
       >
         <ModalHeader
@@ -218,6 +267,48 @@ const ResultsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => {
               <Content component="p" style={{ whiteSpace: 'pre-wrap' }}>
                 {checkBody(selected) || t('No description provided.')}
               </Content>
+              {selected.status === 'INCONSISTENT' &&
+                (() => {
+                  const { sources, mostCommon } = inconsistentSources(selected);
+                  return (
+                    <>
+                      <Title headingLevel="h3">{t('Per-node results')}</Title>
+                      <Content component="p">
+                        {t('Nodes disagree on this rule; review each before acting.')}
+                      </Content>
+                      <Table variant="compact" style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}>
+                        <Thead>
+                          <Tr>
+                            <Th>{t('Node')}</Th>
+                            <Th>{t('Status')}</Th>
+                          </Tr>
+                        </Thead>
+                        <Tbody>
+                          {sources.map((s) => (
+                            <Tr key={s.node}>
+                              <Td>{s.node}</Td>
+                              <Td>
+                                <Label isCompact color={statusLabel[s.status as CheckStatus]?.color ?? 'grey'}>
+                                  {s.status || '—'}
+                                </Label>
+                              </Td>
+                            </Tr>
+                          ))}
+                          {mostCommon && (
+                            <Tr>
+                              <Td>{t('all other nodes')}</Td>
+                              <Td>
+                                <Label isCompact color={statusLabel[mostCommon as CheckStatus]?.color ?? 'grey'}>
+                                  {mostCommon}
+                                </Label>
+                              </Td>
+                            </Tr>
+                          )}
+                        </Tbody>
+                      </Table>
+                    </>
+                  );
+                })()}
               {selected.instructions && (
                 <>
                   <Title headingLevel="h3">{t('How to verify')}</Title>
@@ -231,9 +322,96 @@ const ResultsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => {
                   {t('View ComplianceCheckResult resource')}
                 </a>
               </Content>
+              {/* Waivers: accept a failing check as risk so it leaves the score.
+                  Waiving a passing check is pointless, so only offer it for
+                  non-PASS/NOT-APPLICABLE results. */}
+              {!['PASS', 'NOT-APPLICABLE'].includes(selected.status) &&
+                (() => {
+                  const waived = isWaived(selected.metadata.name, waivers);
+                  const reason = waivers?.find((w) => w.name === selected.metadata.name)?.reason;
+                  return (
+                    <>
+                      <Title
+                        headingLevel="h3"
+                        style={{ marginTop: 'var(--pf-t--global--spacer--md)' }}
+                      >
+                        {t('Waiver')}
+                      </Title>
+                      {waived ? (
+                        <Content component="p">
+                          {t('This check is waived (excluded from the score).')}
+                          {reason ? ` — ${reason}` : ''}
+                        </Content>
+                      ) : (
+                        <>
+                          <Content component="p">
+                            {t('Accept this failing check as risk to exclude it from the score.')}
+                          </Content>
+                          <TextArea
+                            aria-label={t('Waiver reason')}
+                            placeholder={t('Reason (optional)')}
+                            value={waiveReason}
+                            onChange={(_e, v) => setWaiveReason(v)}
+                            rows={2}
+                          />
+                        </>
+                      )}
+                      {waiveError && (
+                        <Alert
+                          variant="danger"
+                          isInline
+                          title={waiveError}
+                          style={{ marginTop: 'var(--pf-t--global--spacer--sm)' }}
+                        />
+                      )}
+                    </>
+                  );
+                })()}
             </>
           )}
         </ModalBody>
+        {selected &&
+          !['PASS', 'NOT-APPLICABLE'].includes(selected.status) &&
+          (() => {
+            const waived = isWaived(selected.metadata.name, waivers);
+            const idx = waivers?.findIndex((w) => w.name === selected.metadata.name) ?? -1;
+            return (
+              <ModalFooter>
+                {waived ? (
+                  <Button
+                    variant="secondary"
+                    isDisabled={!canWaive || canWaiveLoading || busy}
+                    isLoading={busy}
+                    onClick={() =>
+                      void patchWaivers(
+                        removeWaiverPatch(idx, selected.metadata.name),
+                        t('Failed to remove waiver.'),
+                      )
+                    }
+                  >
+                    {t('Remove waiver')}
+                  </Button>
+                ) : (
+                  <Button
+                    variant="primary"
+                    isDisabled={!canWaive || canWaiveLoading || busy}
+                    isLoading={busy}
+                    onClick={() =>
+                      void patchWaivers(
+                        addWaiverPatch(!!waivers?.length, selected.metadata.name, waiveReason.trim()),
+                        t('Failed to waive check.'),
+                      )
+                    }
+                  >
+                    {t('Waive check')}
+                  </Button>
+                )}
+                <Button variant="link" isDisabled={busy} onClick={closeModal}>
+                  {t('Cancel')}
+                </Button>
+              </ModalFooter>
+            );
+          })()}
       </Modal>
     </ListPageBody>
   );

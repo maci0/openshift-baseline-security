@@ -61,6 +61,36 @@ jobs:
           go-version-file: operator/go.mod
           cache-dependency-path: operator/go.sum
       - run: make fuzz
+      - name: install uv (for promtool alert extractor)
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+      - run: make test-alerts
+
+  # Live-cluster e2e, on demand only. Provide a base64-encoded kubeconfig for a
+  # cluster with the operator already installed as the E2E_KUBECONFIG secret;
+  # without it the job skips instead of failing.
+  e2e:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: operator
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: operator/go.mod
+          cache-dependency-path: operator/go.sum
+      - name: run Go e2e against the live cluster
+        env:
+          E2E_KUBECONFIG: ${{ secrets.E2E_KUBECONFIG }}
+        run: |
+          if [ -z "$E2E_KUBECONFIG" ]; then
+            echo "E2E_KUBECONFIG secret not set; skipping live e2e."
+            exit 0
+          fi
+          echo "$E2E_KUBECONFIG" | base64 -d > "$RUNNER_TEMP/kubeconfig"
+          export KUBECONFIG="$RUNNER_TEMP/kubeconfig"
+          make test-e2e
 
   images:
     runs-on: ubuntu-latest

@@ -97,6 +97,11 @@ verify-crd:
 	@! grep -q 'uniqueItems' config/crd/bases/*.yaml \
 		|| (echo "CRD uses uniqueItems (forbidden by kube); use +listType=set instead" && exit 1)
 
+# Unit-test the PrometheusRule alerts with promtool (containerized).
+.PHONY: test-alerts
+test-alerts:
+	./hack/test-alerts.sh
+
 # CSV clusterPermissions are hand-maintained; fail if they drift from role.yaml
 # on verbs we know matter for zero-config (clusterbaselines create).
 .PHONY: verify-csv-rbac
