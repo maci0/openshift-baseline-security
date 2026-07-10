@@ -7,6 +7,8 @@ import {
   clusterScore,
   isNodeRemediation,
   inconsistentSources,
+  machineConfigPoolHref,
+  nodeScanPool,
   remediationObjectText,
   resultsCsv,
   remediationApplyPatch,
@@ -323,6 +325,37 @@ describe('checkResultHref', () => {
       // The name segment carries no unescaped path separator or whitespace.
       expect(href.slice(prefix.length)).not.toMatch(/[/\s#?]/);
     }
+  });
+});
+
+describe('nodeScanPool', () => {
+  const withScan = (scan?: string): ComplianceCheckResult =>
+    ({
+      metadata: { name: 'r', namespace: 'ns', labels: scan ? { 'compliance.openshift.io/scan-name': scan } : {} },
+      status: 'INCONSISTENT',
+    }) as ComplianceCheckResult;
+
+  it('extracts the MachineConfigPool from a node scan name', () => {
+    expect(nodeScanPool(withScan('ocp4-cis-node-worker'))).toBe('worker');
+    expect(nodeScanPool(withScan('ocp4-cis-node-master'))).toBe('master');
+    expect(nodeScanPool(withScan('ocp4-pci-dss-node-infra'))).toBe('infra');
+  });
+  it('returns null for a platform (non-node) scan or missing label', () => {
+    expect(nodeScanPool(withScan('ocp4-cis'))).toBeNull();
+    expect(nodeScanPool(withScan())).toBeNull();
+    expect(nodeScanPool(withScan('ocp4-cis-node-'))).toBeNull();
+  });
+  it('fuzz: never throws for arbitrary scan names', () => {
+    for (let i = 0; i < 500; i++) {
+      const out = nodeScanPool(withScan(randomString(i % 30)));
+      expect(out === null || typeof out === 'string').toBe(true);
+    }
+  });
+  it('machineConfigPoolHref builds an encoded MCP console path', () => {
+    expect(machineConfigPoolHref('worker')).toBe(
+      '/k8s/cluster/machineconfiguration.openshift.io~v1~MachineConfigPool/worker',
+    );
+    expect(machineConfigPoolHref('a b')).toContain(encodeURIComponent('a b'));
   });
 });
 

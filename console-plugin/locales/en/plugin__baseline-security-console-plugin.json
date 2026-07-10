@@ -91,5 +91,6 @@
   "This check is waived (excluded from the score).": "This check is waived (excluded from the score).",
   "Accept this failing check as risk to exclude it from the score.": "Accept this failing check as risk to exclude it from the score.",
   "Failed to waive check.": "Failed to waive check.",
-  "Failed to remove waiver.": "Failed to remove waiver."
+  "Failed to remove waiver.": "Failed to remove waiver.",
+  "MachineConfigPool:": "MachineConfigPool:"
 }

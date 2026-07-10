@@ -200,6 +200,20 @@ func TestAggregateStatusWaivers(t *testing.T) {
 	if p.Fail != 1 || p.Waived != 1 || p.Pass != 1 {
 		t.Fatalf("counts = %+v, want pass=1 fail=1 waived=1", p)
 	}
+
+	// Self-healing: a waiver on a check that is currently PASS has no effect
+	// (it counts as PASS, not Waived), so a stale waiver never depresses the
+	// score. Waive p1 (a PASS) in addition; score and counts stay 50/pass=1.
+	cb.Spec.Waivers = append(cb.Spec.Waivers, baselinev1alpha1.WaiverEntry{Name: "p1"})
+	if err := r.aggregateStatus(context.Background(), cb); err != nil {
+		t.Fatal(err)
+	}
+	if cb.Status.Score == nil || *cb.Status.Score != 50 {
+		t.Fatalf("score after waiving a PASS = %v, want 50 (no effect)", cb.Status.Score)
+	}
+	if p := cb.Status.Profiles[0]; p.Pass != 1 || p.Waived != 1 {
+		t.Fatalf("waiving a PASS changed counts: %+v", p)
+	}
 }
 
 func TestAggregateStatusClearsStaleScore(t *testing.T) {

@@ -198,6 +198,9 @@ per-node annotation) when nodes disagree.
       `inconsistent-source` annotation into a node/status table plus the
       most-common status (jest `inconsistentSources` incl. fuzz; Playwright
       asserts the "Per-node results" table names a node).
+- [x] **MachineConfigPool surfaced**: node scans run per-MCP; the drill-down
+      shows the pool (parsed from the `<profile>-node-<pool>` scan-name) with a
+      deep-link (jest `nodeScanPool`, `machineConfigPoolHref`, incl. fuzz).
 - [x] **Node scan fan-out verified live** across 3 worker nodes
       (`TestNodeScanCoversAllNodes`, e2e).
 - [ ] **All-nodes-agree case**: same rule PASS on every node → status PASS, not
@@ -397,6 +400,10 @@ Waived bucket, so an accepted risk neither inflates nor tanks the score.
 
 - [x] **Waived FAIL leaves the denominator** into the Waived bucket, raising the
       score (`TestAggregateStatusWaivers`).
+- [x] **FAIL-only, self-healing**: a waiver applies only while the check is FAIL;
+      if it later PASSes it counts as PASS again (no silent score depression),
+      and the UI still shows the Remove control for any waived check
+      (`TestAggregateStatusWaivers` waive-a-PASS case; ResultsTab `showWaiver`).
 - [x] **Live waiver round-trip**: waive a real FAIL → Waived bucket +1, fail -1,
       remove → reverts; built-in and tailored buckets both summed
       (`TestWaiverExcludesCheck`, e2e).

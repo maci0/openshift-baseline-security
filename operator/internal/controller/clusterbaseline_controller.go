@@ -911,8 +911,11 @@ func (r *ClusterBaselineReconciler) aggregateStatus(ctx context.Context, cb *bas
 	for _, item := range list.Items {
 		suite := item.GetLabels()[suiteLabel]
 		status, _, _ := unstructured.NestedString(item.Object, "status")
-		// A waived check leaves the score denominator regardless of its raw status.
-		if waived[item.GetName()] {
+		// Waivers apply to failing checks only: a waived FAIL leaves the score
+		// denominator into the Waived bucket. If a waived check later passes it
+		// counts as PASS again (self-healing), so a stale waiver never silently
+		// depresses the score; the admin can still remove it from the UI.
+		if status == "FAIL" && waived[item.GetName()] {
 			status = "WAIVED"
 		}
 		if name, ok := tailoredNameFromSuite(suite); ok {

@@ -53,6 +53,8 @@ import {
   errorMessage,
   inconsistentSources,
   isWaived,
+  machineConfigPoolHref,
+  nodeScanPool,
   removeWaiverPatch,
   resultsCsv,
 } from '../utils';
@@ -89,6 +91,11 @@ const ResultsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => {
     verb: 'patch',
   });
   const waivers = baseline?.spec.waivers;
+  // Offer the waiver controls for a FAIL (the only score-affecting status), and
+  // for any already-waived check so a stale waiver can always be removed even
+  // after the check starts passing.
+  const showWaiver = (r: ComplianceCheckResult): boolean =>
+    isWaived(r.metadata.name, waivers) || r.status === 'FAIL';
 
   const closeModal = () => {
     setSelected(null);
@@ -270,11 +277,19 @@ const ResultsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => {
               {selected.status === 'INCONSISTENT' &&
                 (() => {
                   const { sources, mostCommon } = inconsistentSources(selected);
+                  const pool = nodeScanPool(selected);
                   return (
                     <>
                       <Title headingLevel="h3">{t('Per-node results')}</Title>
                       <Content component="p">
                         {t('Nodes disagree on this rule; review each before acting.')}
+                        {pool && (
+                          <>
+                            {' '}
+                            {t('MachineConfigPool:')}{' '}
+                            <a href={machineConfigPoolHref(pool)}>{pool}</a>
+                          </>
+                        )}
                       </Content>
                       <Table variant="compact" style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}>
                         <Thead>
@@ -325,7 +340,7 @@ const ResultsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => {
               {/* Waivers: accept a failing check as risk so it leaves the score.
                   Waiving a passing check is pointless, so only offer it for
                   non-PASS/NOT-APPLICABLE results. */}
-              {!['PASS', 'NOT-APPLICABLE'].includes(selected.status) &&
+              {showWaiver(selected) &&
                 (() => {
                   const waived = isWaived(selected.metadata.name, waivers);
                   const reason = waivers?.find((w) => w.name === selected.metadata.name)?.reason;
@@ -371,7 +386,7 @@ const ResultsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => {
           )}
         </ModalBody>
         {selected &&
-          !['PASS', 'NOT-APPLICABLE'].includes(selected.status) &&
+          showWaiver(selected) &&
           (() => {
             const waived = isWaived(selected.metadata.name, waivers);
             const idx = waivers?.findIndex((w) => w.name === selected.metadata.name) ?? -1;

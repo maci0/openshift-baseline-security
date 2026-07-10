@@ -107,6 +107,21 @@ export const checkResultHref = (name: string): string =>
     stripSurrogates(name),
   )}`;
 
+// The MachineConfigPool a node scan targeted, parsed from the scan-name label
+// ("<profile>-node-<pool>"), or null for a platform (non-node) check. Node scans
+// run per-MCP, so this is the pool the per-node results below belong to.
+export const nodeScanPool = (result: ComplianceCheckResult): string | null => {
+  const scan = result.metadata?.labels?.['compliance.openshift.io/scan-name'] ?? '';
+  const i = scan.indexOf('-node-');
+  return i < 0 ? null : scan.slice(i + '-node-'.length) || null;
+};
+
+// Console URL for a MachineConfigPool, so the drill-down can deep-link to it.
+export const machineConfigPoolHref = (name: string): string =>
+  `/k8s/cluster/machineconfiguration.openshift.io~v1~MachineConfigPool/${encodeURIComponent(
+    stripSurrogates(name),
+  )}`;
+
 export type NodeStatus = { node: string; status: string };
 
 // Per-node breakdown of an INCONSISTENT check. The Compliance Operator records
