@@ -44,6 +44,10 @@ fuzz:
 	go test ./internal/controller/ -run=^$$ -fuzz=FuzzWithoutPlugin -fuzztime=3s
 	go test ./internal/controller/ -run=^$$ -fuzz=FuzzAppendHistoryRing -fuzztime=3s
 	go test ./internal/controller/ -run=^$$ -fuzz=FuzzProfileNames -fuzztime=3s
+	go test ./internal/controller/ -run=^$$ -fuzz=FuzzComplianceCSVVersion -fuzztime=3s
+	go test ./internal/controller/ -run=^$$ -fuzz=FuzzCompareComplianceCSVVersion -fuzztime=5s
+	go test ./internal/controller/ -run=^$$ -fuzz=FuzzTailoredNameFromSuite -fuzztime=3s
+	go test ./internal/controller/ -run=^$$ -fuzz=FuzzNextScanTime -fuzztime=5s
 
 GOLANGCI_LINT_VERSION ?= v2.12.2
 .PHONY: lint

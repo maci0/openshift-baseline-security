@@ -323,3 +323,93 @@ func FuzzProfileNames(f *testing.F) {
 		}
 	})
 }
+
+// sign collapses a comparator result to -1/0/1 for property assertions.
+func sign(n int) int {
+	switch {
+	case n > 0:
+		return 1
+	case n < 0:
+		return -1
+	default:
+		return 0
+	}
+}
+
+// FuzzComplianceCSVVersion feeds arbitrary CSV names into the version parser:
+// it must never panic, and a parsed version's parts must all be non-negative.
+func FuzzComplianceCSVVersion(f *testing.F) {
+	for _, seed := range []string{
+		"", "compliance-operator.v1.6.0", "compliance-operator.v1.6.0-rc1",
+		"compliance-operator.v1.6.0+build.9", "compliance-operator.v", "junk",
+		"compliance-operator.v-1", "compliance-operator.v99999999999999999999.0",
+		"compliance-operator.v1.2.3.4.5", "compliance-operator.v1..2",
+	} {
+		f.Add(seed)
+	}
+	f.Fuzz(func(t *testing.T, name string) {
+		v, ok := complianceCSVVersion(name)
+		if !ok {
+			return
+		}
+		for _, p := range v.parts {
+			if p < 0 {
+				t.Fatalf("negative version part %d from %q", p, name)
+			}
+		}
+	})
+}
+
+// FuzzCompareComplianceCSVVersion pins the ordering as a total order: reflexive
+// and antisymmetric for any two arbitrary CSV name strings. A bug in the version
+// or prerelease comparison (non-antisymmetric) fails here.
+func FuzzCompareComplianceCSVVersion(f *testing.F) {
+	f.Add("compliance-operator.v1.6.0", "compliance-operator.v1.6.1")
+	f.Add("compliance-operator.v1.6.0-rc1", "compliance-operator.v1.6.0")
+	f.Add("compliance-operator.v1.6.0", "compliance-operator.v1.6.0+b2")
+	f.Add("junk", "compliance-operator.v1.0.0")
+	f.Add("", "")
+	f.Fuzz(func(t *testing.T, a, b string) {
+		if c := compareComplianceCSVVersion(a, a); c != 0 {
+			t.Fatalf("compare(a,a)=%d for %q, want 0", c, a)
+		}
+		if ab, ba := compareComplianceCSVVersion(a, b), compareComplianceCSVVersion(b, a); sign(ab) != -sign(ba) {
+			t.Fatalf("not antisymmetric: compare(%q,%q)=%d vs compare(b,a)=%d", a, b, ab, ba)
+		}
+	})
+}
+
+// FuzzTailoredNameFromSuite: never panics, and a name it accepts round-trips
+// through tailoredBindingName.
+func FuzzTailoredNameFromSuite(f *testing.F) {
+	for _, seed := range []string{"", "baseline-tp-", "baseline-tp-x", "baseline-cis", "baseline-tp-a-b", "tp-x"} {
+		f.Add(seed)
+	}
+	f.Fuzz(func(t *testing.T, suite string) {
+		name, ok := tailoredNameFromSuite(suite)
+		if !ok {
+			return
+		}
+		if name == "" {
+			t.Fatalf("accepted empty tailored name from %q", suite)
+		}
+		if got := tailoredBindingName(name); got != suite {
+			t.Fatalf("round-trip: tailoredBindingName(%q)=%q, want %q", name, got, suite)
+		}
+	})
+}
+
+// FuzzNextScanTime: an arbitrary (untrusted spec.schedule) string must never
+// panic; it either parses to a future time or returns nil.
+func FuzzNextScanTime(f *testing.F) {
+	for _, seed := range []string{"", "0 1 * * *", "*/5 * * * *", "@daily", "not a cron", "0 1 * * * * *", "61 0 * * *"} {
+		f.Add(seed)
+	}
+	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
+	f.Fuzz(func(t *testing.T, schedule string) {
+		next := nextScanTime(schedule, now)
+		if next != nil && next.Time.Before(now) {
+			t.Fatalf("nextScanTime(%q) returned a past time %v", schedule, next.Time)
+		}
+	})
+}

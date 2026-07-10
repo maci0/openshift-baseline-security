@@ -85,6 +85,11 @@ func TestNextScanTime(t *testing.T) {
 	if nextScanTime("not a cron", now) != nil {
 		t.Fatal("invalid schedule should yield nil")
 	}
+	// Parseable but never-firing schedule (fuzz-found): Next returns the zero
+	// time; must be nil, not a year-0001 timestamp.
+	if got := nextScanTime("*/7 , 1 1 0", now); got != nil {
+		t.Fatalf("degenerate schedule should yield nil, got %v", got.Time)
+	}
 	// Empty falls back to the default daily schedule (non-nil).
 	if nextScanTime("", now) == nil {
 		t.Fatal("empty schedule should use default")

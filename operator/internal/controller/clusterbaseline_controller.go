@@ -942,7 +942,13 @@ func nextScanTime(schedule string, now time.Time) *metav1.Time {
 	if err != nil {
 		return nil
 	}
-	next := metav1.NewTime(sched.Next(now))
+	// A degenerate-but-parseable schedule (e.g. an impossible day/month combo)
+	// yields the zero time from Next; report no next scan rather than year 0001.
+	nextTime := sched.Next(now)
+	if nextTime.IsZero() {
+		return nil
+	}
+	next := metav1.NewTime(nextTime)
 	return &next
 }
 
