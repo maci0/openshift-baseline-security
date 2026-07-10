@@ -243,11 +243,19 @@ const RemediationsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline })
               )}
             </Alert>
           )}
+          {error && (
+            <Alert
+              variant="danger"
+              isInline
+              title={error}
+              style={{ marginTop: 'var(--pf-t--global--spacer--md)' }}
+            />
+          )}
         </ModalBody>
         <ModalFooter>
           <Button
             variant="danger"
-            isDisabled={busy}
+            isDisabled={busy || !canApply || canApplyLoading}
             isLoading={busy}
             onClick={() => {
               if (!confirming) return;
