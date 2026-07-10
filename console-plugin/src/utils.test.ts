@@ -482,11 +482,18 @@ describe('waivers', () => {
     expect(isWaived('a', undefined)).toBe(false);
     expect(isWaived('a', [])).toBe(false);
   });
-  it('addWaiverPatch adds the array when absent, else appends', () => {
-    expect(addWaiverPatch(false, 'chk', 'risk')).toEqual([
+  it('addWaiverPatch creates the array when absent, appends when present', () => {
+    expect(addWaiverPatch(undefined, 'chk', 'risk')).toEqual([
       { op: 'add', path: '/spec/waivers', value: [{ name: 'chk', reason: 'risk' }] },
     ]);
-    expect(addWaiverPatch(true, 'chk', '')).toEqual([
+    expect(addWaiverPatch(null, 'chk', 'risk')).toEqual([
+      { op: 'add', path: '/spec/waivers', value: [{ name: 'chk', reason: 'risk' }] },
+    ]);
+    // Empty array still exists after the last remove: must append with "/-".
+    expect(addWaiverPatch([], 'chk', '')).toEqual([
+      { op: 'add', path: '/spec/waivers/-', value: { name: 'chk' } },
+    ]);
+    expect(addWaiverPatch([{ name: 'other' }], 'chk', '')).toEqual([
       { op: 'add', path: '/spec/waivers/-', value: { name: 'chk' } },
     ]);
   });
@@ -499,7 +506,7 @@ describe('waivers', () => {
   it('fuzz: addWaiverPatch is always a single add carrying the name', () => {
     for (let i = 0; i < 500; i++) {
       const name = randomString(i % 30) || 'n';
-      const patch = addWaiverPatch(i % 2 === 0, name, randomString(i % 10));
+      const patch = addWaiverPatch(i % 2 === 0 ? [] : undefined, name, randomString(i % 10));
       expect(patch).toHaveLength(1);
       expect(patch[0].op).toBe('add');
       const v = patch[0].value as { name: string } | { name: string }[];

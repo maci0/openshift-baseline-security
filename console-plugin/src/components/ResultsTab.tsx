@@ -152,6 +152,11 @@ const ResultsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => {
             <Label isCompact color={s.color} icon={s.icon}>
               {obj.status}
             </Label>
+            {isWaived(obj.metadata.name, waivers) && (
+              <Label isCompact color="grey" style={{ marginLeft: 8 }}>
+                {t('Waived')}
+              </Label>
+            )}
           </TableData>
           <TableData id="severity" activeColumnIDs={activeColumnIDs}>
             {obj.severity}
@@ -159,7 +164,7 @@ const ResultsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => {
         </>
       );
     },
-    [setSelected],
+    [setSelected, waivers, t],
   );
 
   const profileItems = React.useMemo(() => {
@@ -360,7 +365,7 @@ const ResultsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => {
                             : t(
                                 'This check is waived, but it currently passes and counts toward the score. Remove the waiver if it is no longer needed.',
                               )}
-                          {reason ? ` — ${reason}` : ''}
+                          {reason ? `: ${reason}` : ''}
                         </Content>
                       ) : (
                         <>
@@ -400,14 +405,15 @@ const ResultsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => {
                 {waived ? (
                   <Button
                     variant="secondary"
-                    isDisabled={!canWaive || canWaiveLoading || busy}
+                    isDisabled={!canWaive || canWaiveLoading || busy || idx < 0}
                     isLoading={busy}
-                    onClick={() =>
+                    onClick={() => {
+                      if (idx < 0) return;
                       void patchWaivers(
                         removeWaiverPatch(idx, selected.metadata.name),
                         t('Failed to remove waiver.'),
-                      )
-                    }
+                      );
+                    }}
                   >
                     {t('Remove waiver')}
                   </Button>
@@ -418,7 +424,9 @@ const ResultsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => {
                     isLoading={busy}
                     onClick={() =>
                       void patchWaivers(
-                        addWaiverPatch(!!waivers?.length, selected.metadata.name, waiveReason.trim()),
+                        // Pass the array reference (including empty []): after the
+                        // last remove the path still exists, so we must append.
+                        addWaiverPatch(waivers, selected.metadata.name, waiveReason.trim()),
                         t('Failed to waive check.'),
                       )
                     }

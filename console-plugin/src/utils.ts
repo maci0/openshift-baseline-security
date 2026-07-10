@@ -170,11 +170,17 @@ export const remediationApplyPatch = (hasRemediation: boolean, automatic: boolea
 export const isWaived = (name: string, waivers?: Waiver[]): boolean =>
   !!waivers?.some((w) => w.name === name);
 
-// JSON patch adding a waiver for a check. Adds the whole spec.waivers array when
-// absent (nested add would 404), else appends one entry.
-export const addWaiverPatch = (hasWaivers: boolean, name: string, reason: string) => {
+// JSON patch adding a waiver for a check. When the array is absent, create it;
+// when it exists (including empty after the last remove), always append with
+// "/-". Using "array missing" vs "array empty" matters: after remove of the last
+// entry the path still exists as [], so add of the whole array 409s.
+export const addWaiverPatch = (
+  waivers: Waiver[] | undefined | null,
+  name: string,
+  reason: string,
+) => {
   const entry = reason ? { name, reason } : { name };
-  return hasWaivers
+  return waivers != null
     ? [{ op: 'add' as const, path: '/spec/waivers/-', value: entry }]
     : [{ op: 'add' as const, path: '/spec/waivers', value: [entry] }];
 };
