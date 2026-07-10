@@ -238,6 +238,15 @@ func TestEnsureScanConfigCreatesAndPrunes(t *testing.T) {
 	if err := r.Get(context.Background(), types.NamespacedName{Namespace: complianceNamespace, Name: "someone-elses"}, binding); err != nil {
 		t.Fatal("foreign binding must survive pruning:", err)
 	}
+
+	cb.Spec.Schedule = "not a cron"
+	if err := r.ensureScanConfig(context.Background(), cb); err != nil {
+		t.Fatal(err)
+	}
+	c := meta.FindStatusCondition(cb.Status.Conditions, "ScanConfigured")
+	if c == nil || c.Status != metav1.ConditionFalse || c.Reason != "InvalidSchedule" {
+		t.Fatalf("ScanConfigured = %+v, want False/InvalidSchedule", c)
+	}
 }
 
 func TestEnsureConsolePlugin(t *testing.T) {
@@ -425,6 +434,35 @@ func TestEnsureComplianceOperatorAlreadyInstalled(t *testing.T) {
 	c := meta.FindStatusCondition(cb.Status.Conditions, "ComplianceOperatorReady")
 	if c == nil || c.Status != metav1.ConditionTrue {
 		t.Fatalf("%+v", c)
+	}
+}
+
+func TestEnsureComplianceOperatorAdoptsExistingCSV(t *testing.T) {
+	scheme := testScheme(t)
+	csv := &unstructured.Unstructured{}
+	csv.SetGroupVersionKind(csvGVK)
+	csv.SetName("compliance-operator.v2.3.4")
+	csv.SetNamespace("custom-compliance")
+	_ = unstructured.SetNestedField(csv.Object, "Succeeded", "status", "phase")
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(csv).Build(),
+		Scheme: scheme,
+	}
+	cb := newCB("cis")
+	if err := r.ensureComplianceOperator(context.Background(), cb); err != nil {
+		t.Fatal(err)
+	}
+	c := meta.FindStatusCondition(cb.Status.Conditions, "ComplianceOperatorReady")
+	if c == nil || c.Status != metav1.ConditionTrue || c.Reason != "CSVSucceeded" {
+		t.Fatalf("ComplianceOperatorReady = %+v, want True/CSVSucceeded", c)
+	}
+	if cb.Status.ComplianceOperatorVersion != "2.3.4" {
+		t.Fatalf("version = %q, want 2.3.4", cb.Status.ComplianceOperatorVersion)
+	}
+	sub := u(subscriptionGVK)
+	err := r.Get(context.Background(), types.NamespacedName{Namespace: complianceNamespace, Name: "compliance-operator"}, sub)
+	if !apierrors.IsNotFound(err) {
+		t.Fatalf("adopting an existing CSV should not create a Subscription, err=%v", err)
 	}
 }
 

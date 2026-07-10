@@ -323,6 +323,15 @@ func (r *ClusterBaselineReconciler) ensureComplianceOperator(ctx context.Context
 		return err
 	}
 
+	csv, err := r.findComplianceOperatorCSV(ctx)
+	if err != nil {
+		return err
+	}
+	if csv != nil {
+		setComplianceOperatorReadyFromCSV(cb, csv)
+		return nil
+	}
+
 	if cb.Spec.InstallComplianceOperator == baselinev1alpha1.InstallManual {
 		cb.Status.ComplianceOperatorVersion = ""
 		setCond(cb, "ComplianceOperatorReady", metav1.ConditionFalse, "NotInstalled",
@@ -359,6 +368,31 @@ func (r *ClusterBaselineReconciler) ensureComplianceOperator(ctx context.Context
 	return nil
 }
 
+func (r *ClusterBaselineReconciler) findComplianceOperatorCSV(ctx context.Context) (*unstructured.Unstructured, error) {
+	csvs := uList(csvGVK)
+	if err := r.List(ctx, csvs); err != nil {
+		if meta.IsNoMatchError(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var fallback *unstructured.Unstructured
+	for i := range csvs.Items {
+		csv := &csvs.Items[i]
+		if !strings.HasPrefix(csv.GetName(), "compliance-operator.v") {
+			continue
+		}
+		phase, _, _ := unstructured.NestedString(csv.Object, "status", "phase")
+		if phase == "Succeeded" {
+			return csv.DeepCopy(), nil
+		}
+		if fallback == nil {
+			fallback = csv.DeepCopy()
+		}
+	}
+	return fallback, nil
+}
+
 func (r *ClusterBaselineReconciler) setComplianceOperatorReady(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline, sub *unstructured.Unstructured) error {
 	csvName, _, _ := unstructured.NestedString(sub.Object, "status", "installedCSV")
 	if csvName == "" {
@@ -376,29 +410,36 @@ func (r *ClusterBaselineReconciler) setComplianceOperatorReady(ctx context.Conte
 		}
 		return err
 	}
+	setComplianceOperatorReadyFromCSV(cb, csv)
+	return nil
+}
+
+func setComplianceOperatorReadyFromCSV(cb *baselinev1alpha1.ClusterBaseline, csv *unstructured.Unstructured) {
 	phase, _, _ := unstructured.NestedString(csv.Object, "status", "phase")
 	if phase == "Succeeded" {
-		cb.Status.ComplianceOperatorVersion = strings.TrimPrefix(csvName, "compliance-operator.v")
+		cb.Status.ComplianceOperatorVersion = strings.TrimPrefix(csv.GetName(), "compliance-operator.v")
 		setCond(cb, "ComplianceOperatorReady", metav1.ConditionTrue, "CSVSucceeded", "")
-		return nil
+		return
 	}
 	// Keep version empty until Succeeded so the UI does not show a green-looking
 	// version string while the CSV is still Installing/Failed.
 	cb.Status.ComplianceOperatorVersion = ""
 	setCond(cb, "ComplianceOperatorReady", metav1.ConditionFalse, "CSVNotReady", "phase="+phase)
-	return nil
 }
 
 func (r *ClusterBaselineReconciler) ensureScanConfig(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline) error {
+	schedule, err := normalizedSchedule(cb.Spec.Schedule)
+	if err != nil {
+		setCond(cb, "ScanConfigured", metav1.ConditionFalse, "InvalidSchedule",
+			fmt.Sprintf("spec.schedule %q is not a valid standard cron schedule: %v", cb.Spec.Schedule, err))
+		return nil
+	}
+
 	ss := u(scanSettingGVK)
 	ss.SetName(scanSettingName)
 	ss.SetNamespace(complianceNamespace)
-	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, ss, func() error {
+	_, err = controllerutil.CreateOrUpdate(ctx, r.Client, ss, func() error {
 		autoApply := cb.Spec.Remediation.Apply == baselinev1alpha1.RemediationApplyAutomatic
-		schedule := cb.Spec.Schedule
-		if schedule == "" {
-			schedule = "0 1 * * *"
-		}
 		ss.Object["schedule"] = schedule
 		ss.Object["roles"] = []any{"worker", "master"}
 		ss.Object["rawResultStorage"] = map[string]any{"size": "1Gi", "rotation": int64(3)}
@@ -477,6 +518,16 @@ func (r *ClusterBaselineReconciler) ensureScanConfig(ctx context.Context, cb *ba
 	}
 	setCond(cb, "ScanConfigured", metav1.ConditionTrue, "BindingsCreated", "")
 	return nil
+}
+
+func normalizedSchedule(schedule string) (string, error) {
+	if schedule == "" {
+		schedule = "0 1 * * *"
+	}
+	if _, err := cron.ParseStandard(schedule); err != nil {
+		return "", err
+	}
+	return schedule, nil
 }
 
 // checkScanStorage flags Degraded when owned scan PVCs stay Pending (no default SC).
@@ -643,10 +694,11 @@ func (r *ClusterBaselineReconciler) aggregateStatus(ctx context.Context, cb *bas
 // nextScanTime computes the next cron fire after now, or nil on an invalid or
 // empty schedule.
 func nextScanTime(schedule string, now time.Time) *metav1.Time {
-	if schedule == "" {
-		schedule = "0 1 * * *"
+	normalized, err := normalizedSchedule(schedule)
+	if err != nil {
+		return nil
 	}
-	sched, err := cron.ParseStandard(schedule)
+	sched, err := cron.ParseStandard(normalized)
 	if err != nil {
 		return nil
 	}
