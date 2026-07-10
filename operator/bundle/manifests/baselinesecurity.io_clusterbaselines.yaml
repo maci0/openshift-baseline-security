@@ -98,7 +98,7 @@ spec:
                   type: string
                 minItems: 1
                 type: array
-                uniqueItems: true
+                x-kubernetes-list-type: set
               remediation:
                 description: remediation configures how ComplianceRemediations are
                   handled.
@@ -131,7 +131,7 @@ spec:
                   pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
                   type: string
                 type: array
-                uniqueItems: true
+                x-kubernetes-list-type: set
             required:
             - profiles
             type: object

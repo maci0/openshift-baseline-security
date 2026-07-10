@@ -47,7 +47,7 @@ type ClusterBaselineSpec struct {
 	// profiles selects which benchmark profile sets to scan with.
 	// +kubebuilder:default={cis}
 	// +kubebuilder:validation:MinItems=1
-	// +kubebuilder:validation:UniqueItems=true
+	// +listType=set
 	Profiles []ProfileKey `json:"profiles"`
 
 	// tailoredProfiles names TailoredProfiles in the openshift-compliance
@@ -56,7 +56,7 @@ type ClusterBaselineSpec struct {
 	// includes its results in the score. Names are capped so the generated
 	// baseline-tp-<name> suite label remains a valid Kubernetes label value.
 	// +optional
-	// +kubebuilder:validation:UniqueItems=true
+	// +listType=set
 	// +kubebuilder:validation:items:MaxLength=51
 	// +kubebuilder:validation:items:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`
 	TailoredProfiles []string `json:"tailoredProfiles,omitempty"`

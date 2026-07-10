@@ -86,9 +86,16 @@ BUNDLE_IMG ?= quay.io/openshift-baseline-security/baseline-security-operator-bun
 CATALOG_IMG ?= quay.io/openshift-baseline-security/baseline-security-operator-catalog:latest
 
 .PHONY: bundle
-bundle: manifests verify-csv-rbac
+bundle: manifests verify-crd verify-csv-rbac
 	cp config/crd/bases/baselinesecurity.io_clusterbaselines.yaml bundle/manifests/
 	docker run --rm -v $(CURDIR)/bundle:/bundle:Z quay.io/operator-framework/operator-sdk@sha256:d68086836ecc9ddb28f5785815a88f5dcb33beb00e0271e3056dd13d8d352b36 bundle validate /bundle
+
+# uniqueItems is forbidden on CRD OpenAPI schemas (kube rejects it at apply time,
+# but operator-sdk bundle-validate does not); use x-kubernetes-list-type: set.
+.PHONY: verify-crd
+verify-crd:
+	@! grep -q 'uniqueItems' config/crd/bases/*.yaml \
+		|| (echo "CRD uses uniqueItems (forbidden by kube); use +listType=set instead" && exit 1)
 
 # CSV clusterPermissions are hand-maintained; fail if they drift from role.yaml
 # on verbs we know matter for zero-config (clusterbaselines create).
