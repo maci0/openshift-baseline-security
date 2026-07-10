@@ -58,6 +58,10 @@ Remediations: rendered-object view and gated apply:
 ![Remediation object](docs/screenshots/remediation-object.png)
 ![Remediations](docs/screenshots/remediations.png)
 
+Compliance score deep-linked on the cluster Overview Details card:
+
+![Cluster Overview score](docs/screenshots/dashboard-score.png)
+
 ## Prerequisites
 
 - OpenShift 4.22
