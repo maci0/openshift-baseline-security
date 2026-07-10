@@ -191,6 +191,42 @@ describe('errorMessage', () => {
   it('handles message-bearing objects (k8s / HttpError shapes)', () => {
     expect(errorMessage({ message: 'forbidden' })).toBe('forbidden');
   });
+  it('never throws on hostile values (null-proto, throwing toString, symbol)', () => {
+    const hostile: unknown[] = [
+      Object.create(null),
+      { toString() {
+        throw new Error('boom');
+      } },
+      { message: 42 },
+      { message: null },
+      [1, 2, 3],
+      Symbol('s'),
+      123,
+      true,
+      () => 0,
+      new Map(),
+    ];
+    for (const h of hostile) {
+      const out = errorMessage(h);
+      expect(out === null || typeof out === 'string').toBe(true);
+    }
+  });
+  it('fuzz: returns string|null and never throws for arbitrary input', () => {
+    for (let i = 0; i < 2000; i++) {
+      const pool: unknown[] = [
+        randomString(i % 40),
+        i,
+        i % 2 === 0,
+        { message: randomString(i % 20) },
+        { message: i },
+        [randomString(i % 8)],
+        i % 7 === 0 ? Object.create(null) : {},
+        i % 11 === 0 ? new Error(randomString(i % 16)) : null,
+      ];
+      const out = errorMessage(pool[i % pool.length]);
+      expect(out === null || typeof out === 'string').toBe(true);
+    }
+  });
 });
 
 describe('resultsHref', () => {
@@ -273,6 +309,17 @@ describe('checkResultHref', () => {
   it('encodes special characters in the name', () => {
     expect(checkResultHref('a b/c')).toContain(encodeURIComponent('a b/c'));
   });
+  it('fuzz: always under the compliance path, encoded, never throws', () => {
+    const prefix =
+      '/k8s/ns/openshift-compliance/compliance.openshift.io~v1alpha1~ComplianceCheckResult/';
+    for (let i = 0; i < 1000; i++) {
+      const name = randomString(i % 40);
+      const href = checkResultHref(name);
+      expect(href.startsWith(prefix)).toBe(true);
+      // The name segment carries no unescaped path separator or whitespace.
+      expect(href.slice(prefix.length)).not.toMatch(/[/\s#?]/);
+    }
+  });
 });
 
 describe('remediation helpers', () => {
@@ -292,6 +339,18 @@ describe('remediation helpers', () => {
       '"kind": "MachineConfig"',
     );
     expect(remediationObjectText(rem())).toBe('');
+  });
+  it('fuzz: returns a string and never throws for arbitrary rendered objects', () => {
+    for (let i = 0; i < 1000; i++) {
+      const obj: Record<string, unknown> = {
+        kind: randomString(i % 12),
+        [randomString((i % 6) + 1)]: i,
+        nested: { a: [randomString(i % 5)], b: i % 2 === 0 },
+        weird: i % 13 === 0 ? undefined : randomString(i % 10),
+      };
+      const out = remediationObjectText(rem('X', obj));
+      expect(typeof out).toBe('string');
+    }
   });
 });
 
