@@ -117,8 +117,8 @@ export type ClusterBaseline = {
 /**
  * Display key encoded in a CO object's suite label for built-in profiles
  * ("baseline-<key>"). Tailored suites ("baseline-tp-<name>") are excluded so
- * callers use suiteTailoredName instead. Returns undefined when not a built-in
- * baseline suite.
+ * callers use suiteTailoredName / suiteFilterKey instead. Returns undefined
+ * when not a built-in baseline suite.
  */
 export const suiteProfileKey = (
   labels: Record<string, string> | undefined,
@@ -136,7 +136,26 @@ export const suiteTailoredName = (
   labels: Record<string, string> | undefined,
 ): string | undefined => {
   const suite = labels?.['compliance.openshift.io/suite'];
-  return suite?.startsWith('baseline-tp-') ? suite.slice('baseline-tp-'.length) : undefined;
+  if (!suite?.startsWith('baseline-tp-')) {
+    return undefined;
+  }
+  // Reject empty name ("baseline-tp-") to match the operator's tailoredNameFromSuite.
+  const name = suite.slice('baseline-tp-'.length);
+  return name || undefined;
+};
+
+/**
+ * Row-filter / deep-link id for a suite label: built-in profile key, or
+ * "tp-<name>" for tailored (matches Overview resultsHref and e2e filters).
+ */
+export const suiteFilterKey = (
+  labels: Record<string, string> | undefined,
+): string | undefined => {
+  const tailored = suiteTailoredName(labels);
+  if (tailored !== undefined) {
+    return `tp-${tailored}`;
+  }
+  return suiteProfileKey(labels);
 };
 
 /**

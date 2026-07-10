@@ -278,9 +278,11 @@ func setRollupConditions(cb *baselinev1alpha1.ClusterBaseline) {
 		setCond(cb, "Available", metav1.ConditionFalse, "NotReady", "waiting for compliance operator and scan configuration")
 	}
 	// Degraded: persistent failures that are not mere installation progress:
-	// invalid schedule, scan result storage wedged, or the plugin down past
-	// its grace period.
+	// failed Compliance Operator CSV, invalid schedule, scan result storage
+	// wedged, or the plugin down past its grace period.
 	switch {
+	case co != nil && co.Status == metav1.ConditionFalse && co.Reason == "CSVFailed":
+		setCond(cb, "Degraded", metav1.ConditionTrue, co.Reason, co.Message)
 	case scan != nil && scan.Status == metav1.ConditionFalse && scan.Reason == "InvalidSchedule":
 		setCond(cb, "Degraded", metav1.ConditionTrue, scan.Reason, scan.Message)
 	case storage != nil && storage.Status == metav1.ConditionFalse:
@@ -494,6 +496,11 @@ func setComplianceOperatorReadyFromCSV(cb *baselinev1alpha1.ClusterBaseline, csv
 	// Keep version empty until Succeeded so the UI does not show a green-looking
 	// version string while the CSV is still Installing/Failed.
 	cb.Status.ComplianceOperatorVersion = ""
+	// Failed is terminal (not install progress); rollup marks Degraded.
+	if phase == "Failed" {
+		setCond(cb, "ComplianceOperatorReady", metav1.ConditionFalse, "CSVFailed", "phase=Failed")
+		return
+	}
 	setCond(cb, "ComplianceOperatorReady", metav1.ConditionFalse, "CSVNotReady", "phase="+phase)
 }
 

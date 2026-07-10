@@ -36,7 +36,7 @@ import {
   ComplianceCheckResult,
   ComplianceCheckResultGVK,
   isOwnedByBaseline,
-  suiteProfileKey,
+  suiteFilterKey,
 } from '../models';
 import { checkBody, checkResultHref, checkTitle, resultsCsv } from '../utils';
 
@@ -49,7 +49,8 @@ const statusLabel: Record<
   ERROR: { color: 'red', icon: <ExclamationCircleIcon /> },
   MANUAL: { color: 'orange', icon: <ExclamationTriangleIcon /> },
   INFO: { color: 'blue', icon: <InfoCircleIcon /> },
-  INCONSISTENT: { color: 'orange', icon: <ExclamationTriangleIcon /> },
+  // Distinct from MANUAL (orange): multi-node result disagreement.
+  INCONSISTENT: { color: 'purple', icon: <ExclamationTriangleIcon /> },
   'NOT-APPLICABLE': { color: 'grey', icon: <MinusCircleIcon /> },
 };
 
@@ -105,17 +106,21 @@ const ResultsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => {
   );
 
   const profileItems = React.useMemo(() => {
+    // Ids match suiteFilterKey / Overview resultsHref: built-in key or "tp-<name>".
     const keys = new Set(profiles ?? []);
+    for (const name of tailored ?? []) {
+      keys.add(`tp-${name}`);
+    }
     for (const r of ownedResults) {
-      const key = suiteProfileKey(r.metadata.labels);
+      const key = suiteFilterKey(r.metadata.labels);
       if (key !== undefined) {
         keys.add(key);
       }
     }
-    // Keep the id as the suite key (reducer + resultsHref depend on it) but
-    // show tailored profiles by their clean name, not the "tp-" binding prefix.
+    // Keep the id as the filter key (reducer + resultsHref depend on it) but
+    // show tailored profiles by their clean name, not the "tp-" prefix.
     return [...keys].sort().map((k) => ({ id: k, title: k.startsWith('tp-') ? k.slice(3) : k }));
-  }, [profiles, ownedResults]);
+  }, [profiles, tailored, ownedResults]);
 
   const rowFilters: RowFilter<ComplianceCheckResult>[] = React.useMemo(
     () => [
@@ -139,10 +144,10 @@ const ResultsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => {
       {
         filterGroupName: t('Profiles'),
         type: 'result-profile',
-        reducer: (r) => suiteProfileKey(r.metadata.labels) ?? '',
+        reducer: (r) => suiteFilterKey(r.metadata.labels) ?? '',
         filter: (input, r) =>
           !input.selected?.length ||
-          input.selected.includes(suiteProfileKey(r.metadata.labels) ?? ''),
+          input.selected.includes(suiteFilterKey(r.metadata.labels) ?? ''),
         items: profileItems,
       },
     ],

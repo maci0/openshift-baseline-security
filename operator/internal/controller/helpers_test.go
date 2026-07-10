@@ -117,6 +117,17 @@ func TestSetRollupConditions(t *testing.T) {
 	if c := meta.FindStatusCondition(cb.Status.Conditions, "Available"); c == nil || c.Status != metav1.ConditionFalse {
 		t.Fatalf("Available must be False for invalid schedule: %+v", c)
 	}
+
+	// Terminal CSV failure is Degraded (not Progressing forever).
+	setCond(cb, "ScanConfigured", metav1.ConditionTrue, "BindingsCreated", "")
+	setCond(cb, "ComplianceOperatorReady", metav1.ConditionFalse, "CSVFailed", "phase=Failed")
+	setRollupConditions(cb)
+	if c := meta.FindStatusCondition(cb.Status.Conditions, "Degraded"); c == nil || c.Status != metav1.ConditionTrue || c.Reason != "CSVFailed" {
+		t.Fatalf("Degraded for CSVFailed: %+v", c)
+	}
+	if c := meta.FindStatusCondition(cb.Status.Conditions, "Progressing"); c == nil || c.Status != metav1.ConditionFalse {
+		t.Fatalf("CSVFailed must not be Progressing: %+v", c)
+	}
 }
 
 func TestConditionProgressing(t *testing.T) {

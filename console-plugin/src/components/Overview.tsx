@@ -274,8 +274,12 @@ const Overview: React.FC<{ baseline?: ClusterBaseline; loaded: boolean }> = ({
           </Card>
         )}
         {(baseline.status?.profiles ?? []).map((p) => {
-          const denom = p.pass + p.fail;
-          const pScore = denom > 0 ? Math.round((p.pass * 100) / denom) : null;
+          // Zero-fill missing fields from older status so scores never go NaN.
+          const pass = p.pass ?? 0;
+          const fail = p.fail ?? 0;
+          const manual = p.manual ?? 0;
+          const denom = pass + fail;
+          const pScore = denom > 0 ? Math.round((pass * 100) / denom) : null;
           return (
             <Card key={p.key}>
               <CardHeader
@@ -296,21 +300,21 @@ const Overview: React.FC<{ baseline?: ClusterBaseline; loaded: boolean }> = ({
                 icon={<CheckCircleIcon />}
                 status="success"
                 label={t('Pass')}
-                count={p.pass}
+                count={pass}
                 href={resultsHref('PASS', p.key)}
               />
               <CountRow
                 icon={<ExclamationCircleIcon />}
                 status="danger"
                 label={t('Fail')}
-                count={p.fail}
+                count={fail}
                 href={resultsHref('FAIL', p.key)}
               />
               <CountRow
                 icon={<ExclamationTriangleIcon />}
                 status="warning"
                 label={t('Manual')}
-                count={p.manual}
+                count={manual}
                 href={resultsHref('MANUAL', p.key)}
               />
               </CardBody>
@@ -318,8 +322,11 @@ const Overview: React.FC<{ baseline?: ClusterBaseline; loaded: boolean }> = ({
           );
         })}
         {(baseline.status?.tailoredProfiles ?? []).map((tp) => {
-          const denom = tp.pass + tp.fail;
-          const pScore = denom > 0 ? Math.round((tp.pass * 100) / denom) : null;
+          const pass = tp.pass ?? 0;
+          const fail = tp.fail ?? 0;
+          const manual = tp.manual ?? 0;
+          const denom = pass + fail;
+          const pScore = denom > 0 ? Math.round((pass * 100) / denom) : null;
           return (
             <Card key={`tp-${tp.name}`}>
               <CardHeader
@@ -342,21 +349,21 @@ const Overview: React.FC<{ baseline?: ClusterBaseline; loaded: boolean }> = ({
                   icon={<CheckCircleIcon />}
                   status="success"
                   label={t('Pass')}
-                  count={tp.pass}
+                  count={pass}
                   href={resultsHref('PASS', `tp-${tp.name}`)}
                 />
                 <CountRow
                   icon={<ExclamationCircleIcon />}
                   status="danger"
                   label={t('Fail')}
-                  count={tp.fail}
+                  count={fail}
                   href={resultsHref('FAIL', `tp-${tp.name}`)}
                 />
                 <CountRow
                   icon={<ExclamationTriangleIcon />}
                   status="warning"
                   label={t('Manual')}
-                  count={tp.manual}
+                  count={manual}
                   href={resultsHref('MANUAL', `tp-${tp.name}`)}
                 />
               </CardBody>

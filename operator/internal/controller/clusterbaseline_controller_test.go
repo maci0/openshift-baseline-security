@@ -286,8 +286,11 @@ func TestSetComplianceOperatorReady(t *testing.T) {
 		t.Fatal(err)
 	}
 	c = meta.FindStatusCondition(cb.Status.Conditions, "ComplianceOperatorReady")
-	if c == nil || c.Status != metav1.ConditionFalse || c.Reason != "CSVNotReady" {
-		t.Fatalf("condition = %+v, want False/CSVNotReady", c)
+	if c == nil || c.Status != metav1.ConditionFalse || c.Reason != "CSVFailed" {
+		t.Fatalf("condition = %+v, want False/CSVFailed", c)
+	}
+	if cb.Status.ComplianceOperatorVersion != "" {
+		t.Fatalf("version must stay empty on Failed, got %q", cb.Status.ComplianceOperatorVersion)
 	}
 
 	// Empty installedCSV.
