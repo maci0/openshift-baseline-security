@@ -28,9 +28,12 @@
   "No ClusterBaseline resource found. Install the baseline-security operator and create a ClusterBaseline to start scanning.": "No ClusterBaseline resource found. Install the baseline-security operator and create a ClusterBaseline to start scanning.",
   "Status": "Status",
   "Severity": "Severity",
+  "Check results": "Check results",
+  "Composition of compliance check results": "Composition of compliance check results",
   "Score trend": "Score trend",
   "How to verify": "How to verify",
   "No description provided.": "No description provided.",
+  "View ComplianceCheckResult resource": "View ComplianceCheckResult resource",
   "Remediations": "Remediations",
   "Remediation": "Remediation",
   "Manage remediations": "Manage remediations",
@@ -71,5 +74,7 @@
   "No rendered object.": "No rendered object.",
   "Loading compliance data": "Loading compliance data",
   "It renders into a MachineConfig; applying it reboots the affected nodes one by one. To batch changes, pause the target MachineConfigPool first (Compute -> MachineConfigPools) and resume it when done.": "It renders into a MachineConfig; applying it reboots the affected nodes one by one. To batch changes, pause the target MachineConfigPool first (Compute -> MachineConfigPools) and resume it when done.",
-  "{{name}} will be applied to the cluster. A rescan is required afterwards for results to reflect the change.": "{{name}} will be applied to the cluster. A rescan is required afterwards for results to reflect the change."
+  "{{name}} will be applied to the cluster. A rescan is required afterwards for results to reflect the change.": "{{name}} will be applied to the cluster. A rescan is required afterwards for results to reflect the change.",
+  "{{score}} / 100": "{{score}} / 100",
+  "Not scanned": "Not scanned"
 }

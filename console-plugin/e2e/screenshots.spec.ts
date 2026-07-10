@@ -58,4 +58,11 @@ test.describe('Baseline Security screenshots', () => {
     await expect(page.getByRole('button', { name: /Clear all filters/i })).toBeVisible();
     await shot(page, 'results-tailored');
   });
+
+  test('compliance score on the cluster Overview', async ({ page }) => {
+    await page.goto('/dashboards', { waitUntil: 'networkidle' });
+    const score = page.getByRole('link', { name: /\d+ \/ 100/ });
+    await expect(score).toBeVisible();
+    await shot(page, 'dashboard-score');
+  });
 });

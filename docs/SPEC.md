@@ -220,7 +220,7 @@ Extension points (exact SDK types):
 | Results tab | (in-page) | virtualized ComplianceCheckResult table: filter by status/severity; detail modal for description + instructions; suite-scoped to baseline bindings |
 | Profiles tab | (in-page) | catalog of shipped profiles with enable switches writing `ClusterBaseline.spec.profiles` (`useAccessReview`) |
 | Remediations tab | (in-page) | apply/unapply with confirmation; auto-apply toggle |
-| Cluster overview card / health item | future | not in v0.1.0 |
+| Cluster overview details item | `console.dashboards/custom/overview/detail/item` | compliance score deep-link on the cluster Overview |
 
 Behaviors that write to the cluster:
 

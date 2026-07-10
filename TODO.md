@@ -52,6 +52,7 @@ Legend: `[x]` done · `[ ]` planned · **(H/M/L)** rough value.
 - [x] UI: composition donut, per-profile + tailored score cards, CSV export,
       check-resource deep-link, remediation rendered-object view + MCP-aware
       apply, loading skeletons, next-scan time.
+- [x] Console cluster Overview details item surfacing the compliance score.
 
 ### Packaging & quality
 - [x] OLM bundle + FBC catalog (`make bundle` validates); 0.2.1 replaces
@@ -67,10 +68,6 @@ Legend: `[x]` done · `[ ]` planned · **(H/M/L)** rough value.
 ### Next up
 - [ ] **(H)** Push versioned images + bundle + catalog to quay.io; submit to
       community-operators once stable. Needs a quay robot token.
-
-### Observability
-- [ ] **(H)** Console dashboard card surfacing the score on the cluster
-      Overview (`console.dashboards/*` extension; SPEC §4.3).
 
 ### UI / UX
 - [ ] **(L)** Severity-weighted score option.

@@ -49,7 +49,8 @@
     "displayName": "Baseline Security",
     "description": "Cluster compliance baseline dashboard driven by the Compliance Operator.",
     "exposedModules": {
-      "CompliancePage": "./components/CompliancePage"
+      "CompliancePage": "./components/CompliancePage",
+      "ClusterScoreItem": "./components/ClusterScoreItem"
     },
     "dependencies": {
       "@console/pluginAPI": ">=4.22.0-0"
