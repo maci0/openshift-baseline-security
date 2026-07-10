@@ -233,6 +233,15 @@ describe('resultsCsv', () => {
     const row = csv.split('\r\n')[1];
     expect(row).toBe('"x,y","He said ""hi""",FAIL,high');
   });
+  it('neutralizes spreadsheet formula-looking cells from untrusted CR data', () => {
+    const csv = resultsCsv([
+      r('=cmd', '+SUM(1,1)', '-1', '@import'),
+      r('\tTabbed', '\rCarriage', '\nNewline', 'low'),
+    ]);
+    const lines = csv.split('\r\n');
+    expect(lines[1]).toBe(`'=cmd,"'+SUM(1,1)",'-1,'@import`);
+    expect(lines[2]).toBe(`"'\tTabbed","'\rCarriage","'\nNewline",low`);
+  });
   it('handles empty input (header only)', () => {
     expect(resultsCsv([])).toBe('name,title,status,severity');
   });

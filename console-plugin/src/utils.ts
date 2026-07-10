@@ -42,13 +42,24 @@ export const checkTitle = (r: ComplianceCheckResult): string =>
 export const checkBody = (r: ComplianceCheckResult): string =>
   r.description?.split('\n').slice(1).join('\n').trim() ?? '';
 
-// RFC 4180 CSV cell: quote when it contains a comma, quote, CR or LF, and
-// double embedded quotes. Values come from CR data, i.e. untrusted input.
-const csvCell = (v: string): string =>
-  /[",\r\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
+// RFC 4180 CSV cell with spreadsheet-formula hardening. Values come from CR
+// data, i.e. untrusted input. Prefix formula-looking cells with an apostrophe
+// before quoting so spreadsheet apps import them as literal text.
+const csvCell = (v: string): string => {
+  const safe = /^[=+\-@\t\r\n]/.test(v) ? `'${v}` : v;
+  return /[",\t\r\n]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
+};
 
 // resultsCsv serializes check results to a CSV report (name,title,status,
 // severity). Deterministic column order; one header row.
+export const resultsCsv = (results: ComplianceCheckResult[]): string => {
+  const header = ['name', 'title', 'status', 'severity'];
+  const rows = results.map((r) =>
+    [r.metadata.name, checkTitle(r), r.status, r.severity].map((c) => csvCell(String(c ?? ''))).join(','),
+  );
+  return [header.join(','), ...rows].join('\r\n');
+};
+
 // A node remediation renders into a MachineConfig; applying it reboots nodes.
 export const isNodeRemediation = (rem: ComplianceRemediation): boolean =>
   rem.spec.current?.object?.kind === 'MachineConfig';
@@ -65,14 +76,6 @@ export const checkResultHref = (name: string): string =>
   `/k8s/ns/openshift-compliance/compliance.openshift.io~v1alpha1~ComplianceCheckResult/${encodeURIComponent(
     name,
   )}`;
-
-export const resultsCsv = (results: ComplianceCheckResult[]): string => {
-  const header = ['name', 'title', 'status', 'severity'];
-  const rows = results.map((r) =>
-    [r.metadata.name, checkTitle(r), r.status, r.severity].map((c) => csvCell(String(c ?? ''))).join(','),
-  );
-  return [header.join(','), ...rows].join('\r\n');
-};
 
 // New profile list after toggling one key; null when the change is invalid
 // (the CRD requires at least one profile).
