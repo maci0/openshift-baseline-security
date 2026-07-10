@@ -354,7 +354,11 @@ const ResultsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => {
                       </Title>
                       {waived ? (
                         <Content component="p">
-                          {t('This check is waived (excluded from the score).')}
+                          {selected.status === 'FAIL'
+                            ? t('This check is waived (excluded from the score).')
+                            : t(
+                                'This check is waived, but it currently passes and counts toward the score. Remove the waiver if it is no longer needed.',
+                              )}
                           {reason ? ` — ${reason}` : ''}
                         </Content>
                       ) : (
