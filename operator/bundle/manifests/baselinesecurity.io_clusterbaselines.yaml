@@ -229,6 +229,13 @@ spec:
                     fail:
                       format: int32
                       type: integer
+                    inconsistent:
+                      description: |-
+                        Inconsistent counts checks whose per-node results disagree across a
+                        MachineConfigPool (compliance operator status INCONSISTENT). Excluded from
+                        the score like Manual/Error; it flags a discrepancy that needs review.
+                      format: int32
+                      type: integer
                     key:
                       description: |-
                         ProfileKey identifies one of the profile sets shipped by the Compliance
@@ -259,6 +266,7 @@ spec:
                   required:
                   - error
                   - fail
+                  - inconsistent
                   - key
                   - manual
                   - notApplicable
@@ -304,6 +312,13 @@ spec:
                     fail:
                       format: int32
                       type: integer
+                    inconsistent:
+                      description: |-
+                        Inconsistent counts checks whose per-node results disagree across a
+                        MachineConfigPool (compliance operator status INCONSISTENT). Excluded from
+                        the score like Manual/Error; it flags a discrepancy that needs review.
+                      format: int32
+                      type: integer
                     manual:
                       format: int32
                       type: integer
@@ -318,6 +333,7 @@ spec:
                   required:
                   - error
                   - fail
+                  - inconsistent
                   - manual
                   - name
                   - notApplicable

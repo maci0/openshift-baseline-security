@@ -294,18 +294,26 @@ describe('remediation helpers', () => {
 });
 
 describe('aggregateCounts', () => {
-  const c = (pass: number, fail: number, manual = 0, error = 0, notApplicable = 0) => ({
+  const c = (
+    pass: number,
+    fail: number,
+    manual = 0,
+    error = 0,
+    inconsistent = 0,
+    notApplicable = 0,
+  ) => ({
     pass,
     fail,
     manual,
     error,
+    inconsistent,
     notApplicable,
   });
   it('sums profiles and tailored profiles together', () => {
-    expect(aggregateCounts(c(10, 2, 1), c(40, 8, 3))).toEqual(c(50, 10, 4));
+    expect(aggregateCounts(c(10, 2, 1, 0, 5), c(40, 8, 3, 0, 6))).toEqual(c(50, 10, 4, 0, 11));
   });
   it('returns zeros for no groups', () => {
-    expect(aggregateCounts()).toEqual(c(0, 0, 0, 0, 0));
+    expect(aggregateCounts()).toEqual(c(0, 0, 0, 0, 0, 0));
   });
   it('score composition matches: tailored-only results still populate totals', () => {
     // regular profile empty, tailored has results -> totals non-zero

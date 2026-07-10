@@ -654,6 +654,8 @@ func (r *ClusterBaselineReconciler) aggregateStatus(ctx context.Context, cb *bas
 			c.Manual++
 		case "ERROR":
 			c.Error++
+		case "INCONSISTENT":
+			c.Inconsistent++
 		case "NOT-APPLICABLE":
 			c.NotApplicable++
 		}

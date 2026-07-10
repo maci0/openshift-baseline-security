@@ -121,6 +121,7 @@ const Overview: React.FC<{ baseline?: ClusterBaseline; loaded: boolean }> = ({
     { label: t('Pass'), value: totals.pass, color: green },
     { label: t('Fail'), value: totals.fail, color: red },
     { label: t('Manual'), value: totals.manual, color: orange },
+    { label: t('Inconsistent'), value: totals.inconsistent, color: orange },
     { label: t('Error'), value: totals.error, color: red },
     { label: t('Not applicable'), value: totals.notApplicable, color: grey },
   ].filter((s) => s.value > 0);

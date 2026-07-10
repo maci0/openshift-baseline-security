@@ -103,10 +103,14 @@ type ConsoleSpec struct {
 
 // ResultCounts holds check-result tallies shared by profile status types.
 type ResultCounts struct {
-	Pass          int32 `json:"pass"`
-	Fail          int32 `json:"fail"`
-	Manual        int32 `json:"manual"`
-	Error         int32 `json:"error"`
+	Pass   int32 `json:"pass"`
+	Fail   int32 `json:"fail"`
+	Manual int32 `json:"manual"`
+	Error  int32 `json:"error"`
+	// Inconsistent counts checks whose per-node results disagree across a
+	// MachineConfigPool (compliance operator status INCONSISTENT). Excluded from
+	// the score like Manual/Error; it flags a discrepancy that needs review.
+	Inconsistent  int32 `json:"inconsistent"`
 	NotApplicable int32 `json:"notApplicable"`
 }
 

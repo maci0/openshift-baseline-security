@@ -42,9 +42,10 @@ export const aggregateCounts = (...groups: ResultCounts[]): ResultCounts =>
       fail: a.fail + g.fail,
       manual: a.manual + g.manual,
       error: a.error + g.error,
+      inconsistent: a.inconsistent + g.inconsistent,
       notApplicable: a.notApplicable + g.notApplicable,
     }),
-    { pass: 0, fail: 0, manual: 0, error: 0, notApplicable: 0 },
+    { pass: 0, fail: 0, manual: 0, error: 0, inconsistent: 0, notApplicable: 0 },
   );
 
 // The description's first line is the rule title; the rest is the rationale.

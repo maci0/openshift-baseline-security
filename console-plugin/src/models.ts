@@ -81,6 +81,7 @@ export type ResultCounts = {
   fail: number;
   manual: number;
   error: number;
+  inconsistent: number;
   notApplicable: number;
 };
 

@@ -71,6 +71,7 @@ func TestAggregateStatus(t *testing.T) {
 			checkResult("c", "baseline-cis", "FAIL"),
 			checkResult("d", "baseline-cis", "MANUAL"),
 			checkResult("err", "baseline-cis", "ERROR"),
+			checkResult("inc", "baseline-cis", "INCONSISTENT"),
 			checkResult("na", "baseline-cis", "NOT-APPLICABLE"),
 			checkResult("e", "other-suite", "FAIL"),
 			checkResult("f", "baseline-stig", "FAIL"),
@@ -86,11 +87,12 @@ func TestAggregateStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Score is PASS/(PASS+FAIL); MANUAL/ERROR/INCONSISTENT/NOT-APPLICABLE are excluded.
 	if cb.Status.Score == nil || *cb.Status.Score != 66 {
 		t.Fatalf("score = %v, want 66", cb.Status.Score)
 	}
 	p := cb.Status.Profiles[0]
-	if p.Pass != 2 || p.Fail != 1 || p.Manual != 1 || p.Error != 1 || p.NotApplicable != 1 {
+	if p.Pass != 2 || p.Fail != 1 || p.Manual != 1 || p.Error != 1 || p.Inconsistent != 1 || p.NotApplicable != 1 {
 		t.Fatalf("profile counts = %+v", p)
 	}
 }
