@@ -333,8 +333,14 @@ func setRollupConditions(cb *baselinev1alpha1.ClusterBaseline) {
 	case co != nil && co.Status == metav1.ConditionFalse && co.Reason == "CSVFailed":
 		setCond(cb, "Degraded", metav1.ConditionTrue, co.Reason, co.Message)
 	case coStuck:
+		// Prefer the detail message; fall back to reason so we never end with a
+		// trailing empty ": ".
+		detail := co.Message
+		if detail == "" {
+			detail = co.Reason
+		}
 		setCond(cb, "Degraded", metav1.ConditionTrue, "InstallStalled",
-			fmt.Sprintf("Compliance Operator not ready after %s: %s", coInstallGrace, co.Message))
+			fmt.Sprintf("Compliance Operator not ready after %s: %s", coInstallGrace, detail))
 	case scan != nil && scan.Status == metav1.ConditionFalse && scan.Reason == "InvalidSchedule":
 		setCond(cb, "Degraded", metav1.ConditionTrue, scan.Reason, scan.Message)
 	case storage != nil && storage.Status == metav1.ConditionFalse:
@@ -891,9 +897,12 @@ func (r *ClusterBaselineReconciler) aggregateStatus(ctx context.Context, cb *bas
 
 	// Checks waived as accepted risk are pulled out of the pass/fail denominator
 	// and reported in the Waived bucket, keyed by ComplianceCheckResult name.
+	// Skip empty names so a corrupt entry cannot match every empty-named object.
 	waived := make(map[string]bool, len(cb.Spec.Waivers))
 	for _, w := range cb.Spec.Waivers {
-		waived[w.Name] = true
+		if w.Name != "" {
+			waived[w.Name] = true
+		}
 	}
 
 	var pass, fail int32

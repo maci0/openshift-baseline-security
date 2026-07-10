@@ -96,13 +96,19 @@ const Overview: React.FC<{ baseline?: ClusterBaseline; loaded: boolean }> = ({
   );
   const coReady = baseline.status?.conditions?.find((c) => c.type === 'ComplianceOperatorReady');
   const coVersion = baseline.status?.complianceOperatorVersion;
+  // Prefer version when present. Otherwise map terminal/stalled reasons so the
+  // Details card does not say "Installing" after InstallStalled or CSVFailed.
   const coLabel =
     coVersion ||
     (coReady?.reason === 'NotInstalled'
       ? t('Not installed')
-      : coReady?.status === 'True'
-        ? t('Installed')
-        : t('Installing'));
+      : coReady?.reason === 'CSVFailed'
+        ? t('Failed')
+        : degraded?.reason === 'InstallStalled'
+          ? t('Install stalled')
+          : coReady?.status === 'True'
+            ? t('Installed')
+            : t('Installing'));
   const score = baseline.status?.score;
 
   // Aggregate per-status counts across built-in AND tailored profiles for the

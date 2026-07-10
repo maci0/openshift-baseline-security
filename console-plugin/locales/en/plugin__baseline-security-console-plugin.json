@@ -16,6 +16,8 @@
   "Installing": "Installing",
   "Installed": "Installed",
   "Not installed": "Not installed",
+  "Failed": "Failed",
+  "Install stalled": "Install stalled",
   "Pass": "Pass",
   "Fail": "Fail",
   "Manual": "Manual",

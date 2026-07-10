@@ -167,8 +167,9 @@ export const remediationApplyPatch = (hasRemediation: boolean, automatic: boolea
 };
 
 // True when a check result is waived (accepted risk) by spec.waivers.
+// Empty names never match: a malformed waiver entry must not waive everything.
 export const isWaived = (name: string, waivers?: Waiver[]): boolean =>
-  !!waivers?.some((w) => w.name === name);
+  !!name && !!waivers?.some((w) => w.name === name && !!w.name);
 
 // JSON patch adding a waiver for a check. When the array is absent, create it;
 // when it exists (including empty after the last remove), always append with

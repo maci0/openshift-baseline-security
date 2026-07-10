@@ -481,6 +481,9 @@ describe('waivers', () => {
     expect(isWaived('c', w)).toBe(false);
     expect(isWaived('a', undefined)).toBe(false);
     expect(isWaived('a', [])).toBe(false);
+    // Empty names never match (corrupt waiver entry).
+    expect(isWaived('', [{ name: '' }])).toBe(false);
+    expect(isWaived('', w)).toBe(false);
   });
   it('addWaiverPatch creates the array when absent, appends when present', () => {
     expect(addWaiverPatch(undefined, 'chk', 'risk')).toEqual([

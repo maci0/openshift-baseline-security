@@ -166,6 +166,14 @@ func TestStuckInstallDegrades(t *testing.T) {
 	if c := meta.FindStatusCondition(cb.Status.Conditions, "Progressing"); c == nil || c.Status != metav1.ConditionFalse {
 		t.Fatalf("stuck install must not Progress: %+v", c)
 	}
+
+	// Empty detail message still yields a usable Degraded message (no trailing junk).
+	co.Message = ""
+	setRollupConditions(cb)
+	if c := meta.FindStatusCondition(cb.Status.Conditions, "Degraded"); c == nil || c.Message == "" ||
+		c.Message[len(c.Message)-1] == ' ' || c.Message[len(c.Message)-1] == ':' {
+		t.Fatalf("InstallStalled message should use reason fallback, got %q", c)
+	}
 }
 
 func TestConditionProgressing(t *testing.T) {
