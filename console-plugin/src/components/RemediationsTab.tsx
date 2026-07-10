@@ -97,7 +97,7 @@ const RemediationsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline })
         k8sPatch({
           model: ComplianceRemediationModel,
           resource: rem,
-          data: [{ op: 'replace', path: '/spec/apply', value: apply }],
+          data: [{ op: 'add', path: '/spec/apply', value: apply }],
         }),
       t('Failed to update remediation.'),
     );

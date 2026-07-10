@@ -92,12 +92,12 @@ describe('toggledProfiles', () => {
 });
 
 describe('remediationApplyPatch', () => {
-  it('replaces the leaf when spec.remediation exists', () => {
+  it('adds the leaf when spec.remediation exists so absent defaulted fields are tolerated', () => {
     expect(remediationApplyPatch(true, true)).toEqual([
-      { op: 'replace', path: '/spec/remediation/apply', value: 'Automatic' },
+      { op: 'add', path: '/spec/remediation/apply', value: 'Automatic' },
     ]);
     expect(remediationApplyPatch(true, false)).toEqual([
-      { op: 'replace', path: '/spec/remediation/apply', value: 'Manual' },
+      { op: 'add', path: '/spec/remediation/apply', value: 'Manual' },
     ]);
   });
   it('adds the parent object when spec.remediation is absent', () => {

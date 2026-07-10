@@ -92,7 +92,7 @@ export const toggledProfiles = (
 export const remediationApplyPatch = (hasRemediation: boolean, automatic: boolean) => {
   const apply = automatic ? 'Automatic' : 'Manual';
   return hasRemediation
-    ? [{ op: 'replace' as const, path: '/spec/remediation/apply', value: apply }]
+    ? [{ op: 'add' as const, path: '/spec/remediation/apply', value: apply }]
     : [{ op: 'add' as const, path: '/spec/remediation', value: { apply } }];
 };
 
