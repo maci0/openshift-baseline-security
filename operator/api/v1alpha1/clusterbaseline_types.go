@@ -182,8 +182,8 @@ type ClusterBaselineStatus struct {
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 	// score is pass/(pass+fail) across all profiles, 0-100. MANUAL, INFO,
-	// ERROR, INCONSISTENT, and NOT-APPLICABLE are excluded from the score;
-	// their counts are still reported per profile.
+	// ERROR, INCONSISTENT, WAIVED, and NOT-APPLICABLE are excluded from the
+	// score; their counts are still reported per profile.
 	// +optional
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=100

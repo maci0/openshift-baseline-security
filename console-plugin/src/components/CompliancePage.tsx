@@ -96,6 +96,10 @@ const CompliancePage: React.FC = () => {
           }),
         );
       }
+    } catch (e) {
+      setRescanError(
+        errorMessage(e) ?? t('Failed to rescan scans. Check permissions and try again.'),
+      );
     } finally {
       setRescanning(false);
     }

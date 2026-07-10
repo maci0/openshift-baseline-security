@@ -7,6 +7,7 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -235,6 +236,35 @@ func TestAggregateStatusClearsStaleScore(t *testing.T) {
 	}
 }
 
+func TestAggregateStatusPropagatesScanListError(t *testing.T) {
+	scheme := testScheme(t)
+	forbidden := apierrors.NewForbidden(
+		schema.GroupResource{Group: scanGVK.Group, Resource: "compliancescans"},
+		"",
+		nil,
+	)
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).
+			WithObjects(checkResult("p1", "baseline-cis", "PASS")).
+			WithInterceptorFuncs(interceptor.Funcs{
+				List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+					gvk := list.GetObjectKind().GroupVersionKind()
+					if gvk.Group == scanGVK.Group && gvk.Kind == scanGVK.Kind+"List" {
+						return forbidden
+					}
+					return c.List(ctx, list, opts...)
+				},
+			}).Build(),
+		Scheme: scheme,
+	}
+	cb := &baselinev1alpha1.ClusterBaseline{
+		Spec: baselinev1alpha1.ClusterBaselineSpec{Profiles: []baselinev1alpha1.ProfileKey{"cis"}},
+	}
+	if err := r.aggregateStatus(context.Background(), cb); err == nil {
+		t.Fatal("aggregateStatus swallowed ComplianceScan list error")
+	}
+}
+
 func TestRecordHistoryRing(t *testing.T) {
 	scheme := testScheme(t)
 	end := time.Date(2026, 7, 9, 1, 0, 0, 0, time.UTC).Format(time.RFC3339)
@@ -265,7 +295,9 @@ func TestRecordHistoryRing(t *testing.T) {
 			Score: int32(i),
 		})
 	}
-	r.recordHistory(context.Background(), cb, ptr.To(int32(77)))
+	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(77))); err != nil {
+		t.Fatal(err)
+	}
 	if len(cb.Status.History) != 30 {
 		t.Fatalf("history len = %d, want 30", len(cb.Status.History))
 	}
@@ -280,7 +312,9 @@ func TestRecordHistoryRing(t *testing.T) {
 		t.Fatalf("LastScanTime = %v, foreign scan leaked into history", cb.Status.LastScanTime)
 	}
 	before := len(cb.Status.History)
-	r.recordHistory(context.Background(), cb, ptr.To(int32(88)))
+	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(88))); err != nil {
+		t.Fatal(err)
+	}
 	if len(cb.Status.History) != before {
 		t.Fatalf("duplicate history append: len %d", len(cb.Status.History))
 	}
@@ -299,7 +333,9 @@ func TestRecordHistoryNoOwnedScans(t *testing.T) {
 	cb := &baselinev1alpha1.ClusterBaseline{
 		Spec: baselinev1alpha1.ClusterBaselineSpec{Profiles: []baselinev1alpha1.ProfileKey{"cis"}},
 	}
-	r.recordHistory(context.Background(), cb, ptr.To(int32(50)))
+	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(50))); err != nil {
+		t.Fatal(err)
+	}
 	if cb.Status.LastScanTime != nil || len(cb.Status.History) != 0 {
 		t.Fatalf("expected no history, got last=%v hist=%v", cb.Status.LastScanTime, cb.Status.History)
 	}
@@ -330,7 +366,9 @@ func TestRecordHistoryDoesNotRewind(t *testing.T) {
 			},
 		},
 	}
-	r.recordHistory(context.Background(), cb, ptr.To(int32(10)))
+	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(10))); err != nil {
+		t.Fatal(err)
+	}
 	if !cb.Status.LastScanTime.Equal(&newer) {
 		t.Fatalf("LastScanTime rewound to %v", cb.Status.LastScanTime)
 	}
@@ -361,7 +399,9 @@ func TestRecordHistoryAppendsWhenScoreAppearsLater(t *testing.T) {
 			LastScanTime: &last,
 		},
 	}
-	r.recordHistory(context.Background(), cb, ptr.To(int32(80)))
+	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(80))); err != nil {
+		t.Fatal(err)
+	}
 	if len(cb.Status.History) != 1 || cb.Status.History[0].Score != 80 {
 		t.Fatalf("expected first history point for equal endTimestamp, got %+v", cb.Status.History)
 	}

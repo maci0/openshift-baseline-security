@@ -500,19 +500,30 @@ describe('waivers', () => {
       { op: 'add', path: '/spec/waivers/-', value: { name: 'chk' } },
     ]);
   });
+  it('addWaiverPatch replaces an existing entry instead of duplicating', () => {
+    expect(addWaiverPatch([{ name: 'chk', reason: 'old' }], 'chk', 'new')).toEqual([
+      { op: 'test', path: '/spec/waivers/0/name', value: 'chk' },
+      { op: 'replace', path: '/spec/waivers/0', value: { name: 'chk', reason: 'new' } },
+    ]);
+  });
+  it('addWaiverPatch is a no-op for empty names', () => {
+    expect(addWaiverPatch(undefined, '', 'x')).toEqual([]);
+    expect(addWaiverPatch([], '', 'x')).toEqual([]);
+  });
   it('removeWaiverPatch test-guards the name before removing', () => {
     expect(removeWaiverPatch(2, 'chk')).toEqual([
       { op: 'test', path: '/spec/waivers/2/name', value: 'chk' },
       { op: 'remove', path: '/spec/waivers/2' },
     ]);
   });
-  it('fuzz: addWaiverPatch is always a single add carrying the name', () => {
+  it('fuzz: addWaiverPatch carries the name when non-empty', () => {
     for (let i = 0; i < 500; i++) {
       const name = randomString(i % 30) || 'n';
       const patch = addWaiverPatch(i % 2 === 0 ? [] : undefined, name, randomString(i % 10));
-      expect(patch).toHaveLength(1);
-      expect(patch[0].op).toBe('add');
-      const v = patch[0].value as { name: string } | { name: string }[];
+      expect(patch.length).toBeGreaterThan(0);
+      expect(patch[0].op === 'add' || patch[0].op === 'test').toBe(true);
+      const last = patch[patch.length - 1];
+      const v = last.value as { name: string } | { name: string }[];
       const entry = Array.isArray(v) ? v[0] : v;
       expect(entry.name).toBe(name);
     }

@@ -95,7 +95,7 @@ const ResultsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => {
   // for any already-waived check so a stale waiver can always be removed even
   // after the check starts passing.
   const showWaiver = (r: ComplianceCheckResult): boolean =>
-    isWaived(r.metadata.name, waivers) || r.status === 'FAIL';
+    isWaived(r.metadata.name, waivers) || (!!baseline && r.status === 'FAIL');
 
   const closeModal = () => {
     setSelected(null);
@@ -405,7 +405,7 @@ const ResultsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => {
                 {waived ? (
                   <Button
                     variant="secondary"
-                    isDisabled={!canWaive || canWaiveLoading || busy || idx < 0}
+                    isDisabled={!baseline || !canWaive || canWaiveLoading || busy || idx < 0}
                     isLoading={busy}
                     onClick={() => {
                       if (idx < 0) return;
@@ -420,16 +420,17 @@ const ResultsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => {
                 ) : (
                   <Button
                     variant="primary"
-                    isDisabled={!canWaive || canWaiveLoading || busy}
+                    isDisabled={!baseline || !canWaive || canWaiveLoading || busy}
                     isLoading={busy}
-                    onClick={() =>
-                      void patchWaivers(
-                        // Pass the array reference (including empty []): after the
-                        // last remove the path still exists, so we must append.
-                        addWaiverPatch(waivers, selected.metadata.name, waiveReason.trim()),
-                        t('Failed to waive check.'),
-                      )
-                    }
+                    onClick={() => {
+                      const data = addWaiverPatch(
+                        waivers,
+                        selected.metadata.name,
+                        waiveReason.trim(),
+                      );
+                      if (!data.length) return;
+                      void patchWaivers(data, t('Failed to waive check.'));
+                    }}
                   >
                     {t('Waive check')}
                   </Button>

@@ -966,10 +966,11 @@ func (r *ClusterBaselineReconciler) aggregateStatus(ctx context.Context, cb *bas
 	// LastScanTime is tracked even when no score is computable (all MANUAL /
 	// ERROR / NOT-APPLICABLE results) so completed scans stay visible.
 	cb.Status.Score = score(pass, fail)
-	r.recordHistory(ctx, cb, cb.Status.Score)
+	// Fill deterministic status fields before history so a scan-list failure
+	// still leaves a coherent rollup on the error-path status update.
 	cb.Status.NextScanTime = nextScanTime(cb.Spec.Schedule, time.Now())
 	cb.Status.RelatedObjects = relatedObjects(cb)
-	return nil
+	return r.recordHistory(ctx, cb, cb.Status.Score)
 }
 
 // nextScanTime computes the next cron fire after now, or nil on an invalid or
@@ -1015,10 +1016,13 @@ func relatedObjects(cb *baselinev1alpha1.ClusterBaseline) []baselinev1alpha1.Obj
 	return refs
 }
 
-func (r *ClusterBaselineReconciler) recordHistory(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline, s *int32) {
+func (r *ClusterBaselineReconciler) recordHistory(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline, s *int32) error {
 	scans := uList(scanGVK)
 	if err := r.List(ctx, scans, client.InNamespace(complianceNamespace)); err != nil {
-		return
+		if meta.IsNoMatchError(err) {
+			return nil
+		}
+		return err
 	}
 	suites := ownedSuites(cb)
 	var latest time.Time
@@ -1032,7 +1036,7 @@ func (r *ClusterBaselineReconciler) recordHistory(ctx context.Context, cb *basel
 		}
 	}
 	if latest.IsZero() {
-		return
+		return nil
 	}
 	last := metav1.NewTime(latest)
 	if cb.Status.LastScanTime != nil && !last.After(cb.Status.LastScanTime.Time) {
@@ -1048,12 +1052,13 @@ func (r *ClusterBaselineReconciler) recordHistory(ctx context.Context, cb *basel
 				cb.Status.History = appendHistoryRing(cb.Status.History, last, *s, historyMax)
 			}
 		}
-		return
+		return nil
 	}
 	cb.Status.LastScanTime = &last
 	if s != nil {
 		cb.Status.History = appendHistoryRing(cb.Status.History, last, *s, historyMax)
 	}
+	return nil
 }
 
 func (r *ClusterBaselineReconciler) ensureConsolePlugin(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline) error {

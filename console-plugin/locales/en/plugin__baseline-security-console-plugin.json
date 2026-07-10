@@ -49,6 +49,7 @@
   "Auto-apply remediations after each scan": "Auto-apply remediations after each scan",
   "Node remediations render into MachineConfigs. Applying them triggers rolling node reboots.": "Node remediations render into MachineConfigs. Applying them triggers rolling node reboots.",
   "Failed to rescan {{count}} of {{total}} scan(s). Check permissions and try again.": "Failed to rescan {{count}} of {{total}} scan(s). Check permissions and try again.",
+  "Failed to rescan scans. Check permissions and try again.": "Failed to rescan scans. Check permissions and try again.",
   "Failed to update auto-apply setting.": "Failed to update auto-apply setting.",
   "Failed to update profiles.": "Failed to update profiles.",
   "Failed to update remediation.": "Failed to update remediation.",

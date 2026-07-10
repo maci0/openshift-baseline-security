@@ -172,18 +172,29 @@ export const isWaived = (name: string, waivers?: Waiver[]): boolean =>
   !!name && !!waivers?.some((w) => w.name === name && !!w.name);
 
 // JSON patch adding a waiver for a check. When the array is absent, create it;
-// when it exists (including empty after the last remove), always append with
-// "/-". Using "array missing" vs "array empty" matters: after remove of the last
-// entry the path still exists as [], so add of the whole array 409s.
+// when it exists (including empty after the last remove), append with "/-".
+// If the name is already waived, replace that entry (updates reason, avoids
+// duplicate list-map keys from a double-click race). Empty names yield no ops.
 export const addWaiverPatch = (
   waivers: Waiver[] | undefined | null,
   name: string,
   reason: string,
 ) => {
+  if (!name) {
+    return [] as { op: 'add' | 'replace' | 'test'; path: string; value: unknown }[];
+  }
   const entry = reason ? { name, reason } : { name };
-  return waivers != null
-    ? [{ op: 'add' as const, path: '/spec/waivers/-', value: entry }]
-    : [{ op: 'add' as const, path: '/spec/waivers', value: [entry] }];
+  if (waivers != null) {
+    const idx = waivers.findIndex((w) => w.name === name);
+    if (idx >= 0) {
+      return [
+        { op: 'test' as const, path: `/spec/waivers/${idx}/name`, value: name },
+        { op: 'replace' as const, path: `/spec/waivers/${idx}`, value: entry },
+      ];
+    }
+    return [{ op: 'add' as const, path: '/spec/waivers/-', value: entry }];
+  }
+  return [{ op: 'add' as const, path: '/spec/waivers', value: [entry] }];
 };
 
 // JSON patch removing the waiver at index i (test-guards the name so a
