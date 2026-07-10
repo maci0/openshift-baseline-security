@@ -28,6 +28,38 @@ silently turn it into a mean.
       score nil, no panic.
 - [x] Stale score cleared when CRDs vanish (`TestAggregateStatusClearsStaleScore`,
       `TestReconcileWithoutComplianceCRDs`).
+- [x] **Two benchmarks pooled** (cis+pci-dss), verified live: score 94 =
+      453/(453+25), not the per-profile mean (`TestAggregateStatusPoolsMultipleBenchmarks`).
+
+## A2. Multi-node behavior (>1 node in a MachineConfigPool)
+
+Only visible with worker nodes joined. Node scans consolidate one
+ComplianceCheckResult per rule across all nodes in the pool; the operator emits
+status INCONSISTENT (with a `compliance.openshift.io/inconsistent-source`
+per-node annotation) when nodes disagree.
+
+- [x] Node scan fans out one pod per node in the pool (verified live: 3 pods
+      for `ocp4-cis-node-worker` once 2 workers joined).
+- [x] Results are consolidated per rule, not multiplied per node (94 unique =
+      94 total for the worker node scan).
+- [x] **INCONSISTENT counted, not silently dropped** — the original tally had no
+      case, hiding 86 checks from the score (`TestAggregateStatus` now asserts
+      the Inconsistent bucket; donut has an Inconsistent slice).
+- [ ] **Inconsistent excluded from the score denominator** (like Manual): score
+      unchanged by discrepancies, but the count surfaces for review. Add an
+      assertion that `score` ignores INCONSISTENT (currently only counts are
+      asserted).
+- [ ] **All-nodes-agree case**: same rule PASS on every node → status PASS, not
+      INCONSISTENT (guards against mislabeling uniform results).
+- [ ] **Master-only vs worker MCP**: control-plane-file rules are INCONSISTENT
+      on a mixed master+worker node vs pure workers (the exact live scenario);
+      pin which rules land inconsistent so a bump in the profile is noticed.
+- [ ] **Node added mid-cycle**: a new worker joins between scans → next scan
+      includes it; score/counts reflect the larger pool without a restart.
+- [ ] **Node NotReady during scan**: scan pod cannot run on it → result is
+      ERROR/absent for that node, surfaced not hidden.
+- [ ] **Compact 3-master (masters_schedulable)**: node scans cover 3 masters;
+      no worker MCP; aggregate still correct. (Alternate topology to day-2 workers.)
 
 ## B. Profile lifecycle (multi-benchmark)
 
@@ -154,10 +186,39 @@ silently turn it into a mean.
 - [ ] **Huge result set** (thousands of checks): aggregate int math doesn't
       overflow (score already int64-widened; add a boundary test at ~2^31 checks).
 
+## L. Deployment & upgrade
+
+- [ ] **Console bridge caches the plugin manifest**: after a plugin image
+      change the console pod keeps serving the old chunk names until it re-reads
+      the manifest. Rolling `deploy/console` forces a refresh (hit live; the new
+      donut slice only appeared after `oc rollout restart deploy/console`).
+      Document in the install guide; not a code bug.
+- [ ] **CRD field added across versions**: upgrading the operator applies the
+      new CRD (adds `inconsistent`); existing ClusterBaseline status without the
+      field defaults to 0, no reconcile error.
+- [ ] **OLM `replaces` chain**: 0.2.1 replaces 0.2.0 cleanly; bundle CRD is not
+      stale vs `config/crd` (CI `make manifests && git diff --exit-code`).
+- [ ] **Image digest pinning**: `RELATED_IMAGE_CONSOLE_PLUGIN` @sha256 change
+      rolls the plugin deployment (tag reuse would silently keep the old layer).
+
+## M. Concurrency & requeue
+
+- [ ] **Two rapid spec edits**: optimistic-lock conflict on status update is
+      retried, not surfaced as Degraded.
+- [ ] **Reconcile during an in-progress scan**: status shows Progressing, score
+      is the last completed value (not cleared mid-scan).
+- [ ] **Schedule change**: editing `spec.schedule` updates `NextScanTime` on the
+      next reconcile; an invalid cron yields nil NextScanTime, no crash
+      (`TestNextScanTime` covers parsing; add the spec-driven path).
+
 ## Priority gaps
 
-1. A: two-built-in pooling + all-MANUAL nil score (answers the score question).
+1. A2: assert INCONSISTENT is excluded from the score denominator (counts are
+   pinned; the score-impact is not).
 2. F: no-ClusterBaseline + RBAC-disabled UI states.
-3. H: `ClusterScoreItem` unit test (loading/error/scored/not-scanned).
+3. H: `ClusterScoreItem` render test (loading/error/scored/not-scanned) —
+   `clusterScore()` logic is now unit-tested; the three render branches are not.
 4. I: promtool rule test for the two alerts (cheap, no cluster).
-5. D: CSV-not-yet-Succeeded + stuck-install bounded requeue.
+5. A2: node-added-mid-cycle + node-NotReady multi-node paths (need a live or
+   envtest fixture with per-node results).
+6. D: CSV-not-yet-Succeeded + stuck-install bounded requeue.
