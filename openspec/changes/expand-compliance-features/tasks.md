@@ -32,8 +32,8 @@
 
 ## 5. Packaging artifacts
 
-- [x] 5.1 Helm chart: CRD, RBAC, operator Deployment, console plugin, default-CR toggle, configurable images/profiles; `helm template` + `helm lint` in CI; uninstall leaves the Compliance Operator
-- [x] 5.2 Native console dashboard (`console.openshift.io/dashboard` ConfigMap in openshift-config-managed) from baseline_security_compliance_score + checks; renders in Observe -> Dashboards, no Grafana; document the UWM + ServiceMonitor prerequisite
+- [~] 5.1 Helm chart (DROPPED): built then removed. The production path is OLM (bundle/catalog); a second, non-OLM install path was redundant to maintain and is not used.
+- [x] 5.2 Native console dashboard: the operator reconciles a `console.openshift.io/dashboard` ConfigMap in openshift-config-managed (embedded JSON, cross-namespace owner ref) from baseline_security_compliance_score + checks; renders in Observe -> Dashboards, no Grafana; ships identically on OLM and direct installs. Metrics ServiceMonitor + PrometheusRule ship in the bundle; data needs UWM
 - [x] 5.3 NSA/CISA hardening TailoredProfile YAML + a documented rule mapping (note guidance with no rule); apply/bind smoke
 - [x] 5.4 Compliance report export (printable HTML) from watched data: score, per-profile, failing checks, active waivers w/ attribution; untrusted text rendered as text; jest for the report model builder
 

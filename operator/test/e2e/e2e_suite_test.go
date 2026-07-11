@@ -8,6 +8,7 @@ package e2e
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -52,6 +53,8 @@ func ownedSuites(cb *baselinev1alpha1.ClusterBaseline) map[string]bool {
 
 // countOwnedResults tallies live ComplianceCheckResults by status across every
 // suite this baseline owns: the ground truth the operator's status should match.
+// Uses the effective status so a benign INCONSISTENT collapses exactly as the
+// operator does; otherwise the ground truth would disagree by construction.
 func countOwnedResults(ctx context.Context, c client.Client, cb *baselinev1alpha1.ClusterBaseline) (map[string]int, error) {
 	list := &unstructured.UnstructuredList{}
 	list.SetGroupVersionKind(checkResultGVK.GroupVersion().WithKind(checkResultGVK.Kind + "List"))
@@ -65,10 +68,42 @@ func countOwnedResults(ctx context.Context, c client.Client, cb *baselinev1alpha
 		if !owned[suite] {
 			continue
 		}
-		status, _, _ := unstructured.NestedString(list.Items[i].Object, "status")
-		counts[status]++
+		counts[effectiveCheckStatus(&list.Items[i])]++
 	}
 	return counts, nil
+}
+
+// effectiveCheckStatus mirrors the operator: a benign INCONSISTENT (PASS where it
+// applies, NOT-APPLICABLE elsewhere) collapses to PASS / NOT-APPLICABLE, while a
+// genuine PASS-vs-FAIL split stays INCONSISTENT. The e2e ground truth must apply
+// the same rule as the controller or the two disagree by construction.
+func effectiveCheckStatus(item *unstructured.Unstructured) string {
+	status, _, _ := unstructured.NestedString(item.Object, "status")
+	if status != "INCONSISTENT" {
+		return status
+	}
+	ann := item.GetAnnotations()
+	states := map[string]bool{}
+	for _, s := range strings.Split(ann["compliance.openshift.io/inconsistent-source"], ",") {
+		if i := strings.IndexByte(s, ':'); i >= 0 {
+			if st := strings.ToUpper(strings.TrimSpace(s[i+1:])); st != "" {
+				states[st] = true
+			}
+		}
+	}
+	if mc := strings.ToUpper(strings.TrimSpace(ann["compliance.openshift.io/most-common-status"])); mc != "" {
+		states[mc] = true
+	}
+	switch {
+	case states["FAIL"] || states["ERROR"]:
+		return "INCONSISTENT"
+	case states["PASS"]:
+		return "PASS"
+	case states["NOT-APPLICABLE"] || states["SKIP"]:
+		return "NOT-APPLICABLE"
+	default:
+		return "INCONSISTENT"
+	}
 }
 
 // newClient builds a controller-runtime client from the ambient kubeconfig with

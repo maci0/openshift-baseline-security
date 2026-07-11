@@ -24,7 +24,6 @@ layer on top, not a reimplementation of the operator.
 - The scan schedule is editable from the console; score history is tracked and
   trended per profile, not only globally.
 - An opt-in severity-weighted score weights FAILs by check severity.
-- A Helm chart installs the operator without OLM.
 - A compliance report (PDF/HTML) can be exported for a point-in-time snapshot.
 - A score-trend dashboard is shipped as a native console dashboard (Observe -> Dashboards, no Grafana) plus the in-console history chart.
 - A curated NSA/CISA Kubernetes-hardening profile ships as a TailoredProfile.
@@ -45,7 +44,6 @@ layer on top, not a reimplementation of the operator.
 - `schedule-and-trend`: edit the scan schedule from the UI; track and trend
   per-profile score history.
 - `severity-weighted-score`: opt-in scoring mode weighting FAILs by severity.
-- `helm-chart`: non-OLM install of the operator and plugin via Helm.
 - `compliance-report`: export a point-in-time compliance report (PDF/HTML).
 - `score-trend-dashboard`: shipped trend visualization from the score metric.
 - `hardening-profile`: curated NSA/CISA Kubernetes-hardening TailoredProfile.
@@ -67,7 +65,7 @@ layer on top, not a reimplementation of the operator.
 - console plugin: waiver form fields + expiry surfacing, a Regressions view, a
   batch-apply flow, a TailoredProfile editor, a schedule editor, per-profile
   trend, a report export, a trend card.
-- packaging/docs: Helm chart, shipped hardening TailoredProfile manifest,
+- packaging/docs: shipped hardening TailoredProfile manifest, operator-managed
   console dashboard ConfigMap, report assets; metrics may gain a severity-weighted
   score series.
 - tests: unit + fuzz for new parsers/among untrusted input (waiver dates,

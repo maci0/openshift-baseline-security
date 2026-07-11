@@ -12,7 +12,7 @@ results; we never re-run scans ourselves.
 **Goals:**
 - Add governance (waiver expiry/attribution), regression visibility, safer batch
   remediation, TailoredProfile authoring, schedule editing, weighted scoring,
-  Helm install, report export, a shipped trend dashboard, a hardening profile, and
+  report export, a shipped trend dashboard, a hardening profile, and
   informer-driven watches.
 - Keep every addition backward compatible: new spec fields optional, default
   behavior unchanged, older status tolerated.
@@ -50,9 +50,9 @@ results; we never re-run scans ourselves.
   hold. Weights are a small fixed map (high/medium/low/unknown).
 - **Per-profile history** extends the existing history ring to a per-profile
   keyed structure, same 30-cap semantics.
-- **Report/dashboard/helm/hardening are packaging + client artifacts**, not new
+- **Report/dashboard/hardening are packaging + client artifacts**, not new
   controller logic: report is generated in-browser from watched data; the console
-  dashboard is a ConfigMap of Grafana-schema JSON; Helm is a chart mirroring the kustomize/bundle; the hardening
+  dashboard is a ConfigMap of Grafana-schema JSON reconciled by the operator; the hardening
   profile is a shipped TailoredProfile YAML with a documented rule mapping.
 - **Dynamic informer**: register watches for the compliance GVKs once the CRDs are
   present (controller-runtime source with a lazy/dynamic REST mapper, or restart
@@ -85,7 +85,7 @@ results; we never re-run scans ourselves.
      per-profile trend, report export.
   3. Guided remediation (operator MCP pause/resume + UI batch flow).
   4. TailoredProfile authoring.
-  5. Packaging artifacts: Helm chart, native console dashboard ConfigMap, hardening TailoredProfile.
+  5. Packaging artifacts: native console dashboard ConfigMap, hardening TailoredProfile.
   6. Dynamic informer (internal; no user-visible surface).
 - Rollback: new spec fields are optional; reverting the operator image restores
   prior behavior since defaults are unchanged and status additions are ignored by

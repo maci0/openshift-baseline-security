@@ -60,15 +60,15 @@ func TestPerProfileCountsMatchLive(t *testing.T) {
 	if err := c.List(ctx, list, client.InNamespace(complianceNamespace)); err != nil {
 		t.Fatal(err)
 	}
-	// suite label -> status -> count
+	// suite label -> status -> count, using the effective status so a benign
+	// INCONSISTENT collapses exactly as the operator counts it.
 	bySuite := map[string]map[string]int{}
 	for i := range list.Items {
 		suite := list.Items[i].GetLabels()[suiteLabel]
-		status, _, _ := unstructured.NestedString(list.Items[i].Object, "status")
 		if bySuite[suite] == nil {
 			bySuite[suite] = map[string]int{}
 		}
-		bySuite[suite][status]++
+		bySuite[suite][effectiveCheckStatus(&list.Items[i])]++
 	}
 
 	total := 0

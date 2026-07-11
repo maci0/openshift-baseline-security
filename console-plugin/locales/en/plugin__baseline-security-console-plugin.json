@@ -83,6 +83,7 @@
   "Not scanned": "Not scanned",
   "Per-node results": "Per-node results",
   "Nodes disagree on this rule; review each before acting.": "Nodes disagree on this rule; review each before acting.",
+  "This rule applies to only some nodes. It passes where it applies; the others report not-applicable.": "This rule applies to only some nodes. It passes where it applies; the others report not-applicable.",
   "Node": "Node",
   "all other nodes": "all other nodes",
   "Waiver": "Waiver",

@@ -77,8 +77,12 @@ test.describe('Baseline Security multi-node / multi-benchmark', () => {
     await page.goto('/baseline-security/results?rowFilter-result-status=INCONSISTENT', {
       waitUntil: 'networkidle',
     });
-    // Open the first inconsistent check.
-    await page.getByRole('button', { name: /file|etcd|kubelet|owner|permission/i }).first().click();
+    // Only genuine PASS-vs-FAIL node splits stay INCONSISTENT after the operator
+    // collapses benign PASS/NOT-APPLICABLE ones; open the first such check.
+    await page
+      .getByRole('button', { name: /audit|directory|log|access|file|etcd|kubelet/i })
+      .first()
+      .click();
     const dialog = page.getByRole('dialog');
     await expect(dialog).toBeVisible();
     await expect(dialog.getByText('Per-node results')).toBeVisible();

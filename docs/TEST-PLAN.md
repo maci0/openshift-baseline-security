@@ -73,6 +73,7 @@ rot). Record topology, versions, and the concrete result.
 | 2026-07-10 | 4 | Deploy 0.3.0 (r6: stuck-install grace, errorMessage guard) + full e2e re-run | SNO + 2 day-2 workers | 4.22 / CO 1.9.1 | pass — Go 15/15, Playwright 22/22; Available=True, score 94, cluster self-cleaned |
 | 2026-07-11 | 4 | 0.3.1: per-profile cards now show Inconsistent (was donut-only); light+dark screenshots; dark-theme spec | SNO + 2 day-2 workers | 4.22 / CO 1.9.1 | pass — Go e2e 16/16, Playwright 26/26 (incl. dark theme + per-profile Inconsistent), jest 78 |
 | 2026-07-11 | 4 | 0.4.0 compliance-features expansion (waiver governance, regressions, guided remediation/MCP batch, tailored authoring, schedule editor, severity-weighted score, Helm, report, console dashboard, hardening profile). Full battery | SNO + 2 day-2 workers | 4.22 / CO 1.9.1 | pass — operator unit+race+fuzz(15)+promtool, jest 90, Go e2e 16/16, Playwright 26/26, bundle validate, helm lint |
+| 2026-07-11 | 4 | Operator-managed console dashboard (Observe -> Dashboards, no Grafana; verified live with UWM: score singlestat + trend + checks), metrics ServiceMonitor/PrometheusRule in the bundle, benign-INCONSISTENT collapse, Helm dropped. Rebuilt operator + plugin (r10), redeployed | SNO + 2 day-2 workers | 4.22 / CO 1.9.1 | pass — Go e2e 16/16, Playwright 26/26, jest 95; INCONSISTENT 86->3 (only genuine PASS/FAIL splits kept), score 94->95, dashboard renders live |
 
 ## Fixture and harness strategy
 

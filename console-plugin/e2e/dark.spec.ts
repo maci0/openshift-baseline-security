@@ -27,8 +27,10 @@ test.describe('Baseline Security dark theme', () => {
       waitUntil: 'networkidle',
     });
     await forceDark(page);
+    // Only genuine PASS-vs-FAIL node splits stay INCONSISTENT after the operator
+    // collapses benign PASS/NOT-APPLICABLE ones.
     await page
-      .getByRole('button', { name: /file|etcd|kubelet|owner|permission/i })
+      .getByRole('button', { name: /audit|directory|log|access|file|etcd|kubelet/i })
       .first()
       .click();
     const dialog = page.getByRole('dialog');

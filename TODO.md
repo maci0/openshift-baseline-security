@@ -73,12 +73,18 @@ Legend: `[x]` done · `[ ]` planned · **(H/M/L)** rough value.
 - [x] TailoredProfile authoring from the console (create/edit rules, bind).
 - [x] Editable scan schedule from the UI; per-profile score history + trend.
 - [x] Severity-weighted score option (`spec.scoring.mode`).
-- [x] Helm chart for non-OLM installs (`deploy/helm`).
 - [x] Compliance report export (printable HTML).
-- [x] Native console score-trend dashboard: a `console.openshift.io/dashboard`
-      ConfigMap (`config/console-dashboard`) rendered under Observe -> Dashboards,
-      no Grafana. Needs UWM + the metrics ServiceMonitor for data.
+- [x] Native console score-trend dashboard: the operator reconciles a
+      `console.openshift.io/dashboard` ConfigMap in openshift-config-managed
+      (embedded JSON) rendered under Observe -> Dashboards, no Grafana. Metrics
+      ServiceMonitor + PrometheusRule ship in the bundle; data needs UWM.
+- [x] Benign INCONSISTENT collapse: a check the Compliance Operator marks
+      INCONSISTENT only because it applies on some nodes (PASS) and not others
+      (NOT-APPLICABLE) now reads as PASS in the score, counts, metrics, and UI;
+      only a genuine PASS-vs-FAIL split stays INCONSISTENT.
 - [x] NSA/CISA hardening `TailoredProfile` (`config/samples/tailored-nsa-cisa.yaml`).
+- [x] Helm chart dropped: OLM (bundle/catalog) is the only install path; a
+      second non-OLM path was redundant to maintain.
 
 ## Planned
 
