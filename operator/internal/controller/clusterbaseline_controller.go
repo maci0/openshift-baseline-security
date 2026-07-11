@@ -1410,11 +1410,17 @@ func (r *ClusterBaselineReconciler) applyRemediationBatch(ctx context.Context, c
 	}
 
 	// Applying: resume when every listed remediation is Applied, or past grace.
+	// NotFound/NoMatch: remediation or CRDs gone; skip (do not block resume forever).
+	// Any other Get error is transient: return so we do not treat a failed
+	// lookup as Applied and unpause pools early.
 	applied := true
 	for _, name := range batch.Remediations {
 		rem := u(remediationGVK)
 		if err := r.Get(ctx, types.NamespacedName{Namespace: complianceNamespace, Name: name}, rem); err != nil {
-			continue
+			if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) {
+				continue
+			}
+			return err
 		}
 		if s, _, _ := unstructured.NestedString(rem.Object, "status", "applicationState"); s != "Applied" {
 			applied = false
