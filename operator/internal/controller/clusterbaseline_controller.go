@@ -1411,22 +1411,26 @@ func (r *ClusterBaselineReconciler) applyRemediationBatch(ctx context.Context, c
 
 	// Applying: resume when every listed remediation is Applied, or past grace.
 	// NotFound/NoMatch: remediation or CRDs gone; skip (do not block resume forever).
-	// Any other Get error is transient: return so we do not treat a failed
-	// lookup as Applied and unpause pools early.
+	// Transient Get errors must not look like Applied (would unpause early), but
+	// must not bypass batchResumeGrace either (pools must never stay paused forever).
 	applied := true
+	var getErr error
 	for _, name := range batch.Remediations {
 		rem := u(remediationGVK)
 		if err := r.Get(ctx, types.NamespacedName{Namespace: complianceNamespace, Name: name}, rem); err != nil {
 			if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) {
 				continue
 			}
-			return err
+			getErr = err
+			applied = false
+			continue
 		}
 		if s, _, _ := unstructured.NestedString(rem.Object, "status", "applicationState"); s != "Applied" {
 			applied = false
 		}
 	}
-	if applied || time.Since(batch.StartedAt.Time) > batchResumeGrace {
+	pastGrace := !batch.StartedAt.IsZero() && time.Since(batch.StartedAt.Time) > batchResumeGrace
+	if applied || pastGrace {
 		for _, p := range batch.Pools {
 			if err := r.setMCPPaused(ctx, p, false); err != nil {
 				return err
@@ -1443,6 +1447,12 @@ func (r *ClusterBaselineReconciler) applyRemediationBatch(ctx context.Context, c
 			}
 		}
 		cb.Status.RemediationBatch = nil
+		return nil
+	}
+	// Still waiting: surface a transient Get so the controller requeues, but
+	// only before grace expires (after grace we already resumed above).
+	if getErr != nil {
+		return getErr
 	}
 	return nil
 }

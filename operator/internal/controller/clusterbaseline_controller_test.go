@@ -154,7 +154,7 @@ func TestRemediationBatch(t *testing.T) {
 
 // TestRemediationBatchApplyingGetErrorKeepsPaused: a transient Get failure while
 // checking applicationState must not be treated as Applied (would unpause pools
-// and clear the batch before remediations finish).
+// and clear the batch before remediations finish), as long as grace has not elapsed.
 func TestRemediationBatchApplyingGetErrorKeepsPaused(t *testing.T) {
 	scheme := testScheme(t)
 	rem := nodeRemediation("rem1", "worker", "")
@@ -184,18 +184,65 @@ func TestRemediationBatchApplyingGetErrorKeepsPaused(t *testing.T) {
 	}
 	err := r.applyRemediationBatch(context.Background(), cb)
 	if err == nil {
-		t.Fatal("transient Get error must surface")
+		t.Fatal("transient Get error must surface before grace")
 	}
 	if cb.Status.RemediationBatch == nil {
-		t.Fatal("batch must not clear on Get error")
+		t.Fatal("batch must not clear on Get error before grace")
 	}
 	if cb.Annotations[batchApplyAnnotation] == "" {
-		t.Fatal("annotation must not clear on Get error")
+		t.Fatal("annotation must not clear on Get error before grace")
 	}
 	gotPool := machineConfigPool("worker")
 	_ = r.Get(context.Background(), types.NamespacedName{Name: "worker"}, gotPool)
 	if paused, _, _ := unstructured.NestedBool(gotPool.Object, "spec", "paused"); !paused {
-		t.Fatal("pool must stay paused when Get fails (not treat as Applied)")
+		t.Fatal("pool must stay paused when Get fails before grace (not treat as Applied)")
+	}
+}
+
+// TestRemediationBatchGetErrorPastGraceResumes: persistent Get failures must not
+// bypass batchResumeGrace; after grace, pools resume even if status cannot be read.
+func TestRemediationBatchGetErrorPastGraceResumes(t *testing.T) {
+	scheme := testScheme(t)
+	rem := nodeRemediation("rem1", "worker", "")
+	pool := machineConfigPool("worker")
+	_ = unstructured.SetNestedField(pool.Object, true, "spec", "paused")
+	cb := &baselinev1alpha1.ClusterBaseline{}
+	cb.SetName("cluster")
+	cb.SetAnnotations(map[string]string{batchApplyAnnotation: "rem1"})
+	cb.Status.RemediationBatch = &baselinev1alpha1.RemediationBatchStatus{
+		Phase: "Applying", Pools: []string{"worker"}, Remediations: []string{"rem1"},
+		StartedAt: metav1.NewTime(time.Now().Add(-batchResumeGrace - time.Minute)),
+	}
+	boom := apierrors.NewServiceUnavailable("apiserver blip")
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).
+			WithObjects(cb, rem, pool).
+			WithStatusSubresource(&baselinev1alpha1.ClusterBaseline{}).
+			WithInterceptorFuncs(interceptor.Funcs{
+				Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+					if u, ok := obj.(*unstructured.Unstructured); ok && u.GroupVersionKind() == remediationGVK {
+						return boom
+					}
+					return c.Get(ctx, key, obj, opts...)
+				},
+			}).Build(),
+		Scheme: scheme,
+	}
+	if err := r.applyRemediationBatch(context.Background(), cb); err != nil {
+		t.Fatalf("past grace must resume despite Get error, got %v", err)
+	}
+	if cb.Status.RemediationBatch != nil {
+		t.Fatal("batch must clear after grace resume")
+	}
+	gotCB := &baselinev1alpha1.ClusterBaseline{}
+	_ = r.Get(context.Background(), types.NamespacedName{Name: "cluster"}, gotCB)
+	if gotCB.Annotations[batchApplyAnnotation] != "" {
+		t.Fatal("annotation must clear after grace resume")
+	}
+	gotPool := machineConfigPool("worker")
+	_ = r.Get(context.Background(), types.NamespacedName{Name: "worker"}, gotPool)
+	if paused, _, _ := unstructured.NestedBool(gotPool.Object, "spec", "paused"); paused {
+		t.Fatal("pool must resume after grace even when Get fails")
 	}
 }
 
