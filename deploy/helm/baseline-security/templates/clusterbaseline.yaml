@@ -1,0 +1,11 @@
+{{- if .Values.defaultClusterBaseline }}
+apiVersion: baselinesecurity.io/v1alpha1
+kind: ClusterBaseline
+metadata:
+  name: cluster
+  annotations:
+    "helm.sh/resource-policy": keep
+spec:
+  profiles:
+{{ toYaml .Values.profiles | indent 4 }}
+{{- end }}

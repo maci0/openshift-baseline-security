@@ -1,0 +1,11 @@
+apiVersion: v2
+name: baseline-security
+description: Baseline compliance scanning for OpenShift, built on the Red Hat Compliance Operator, with a native console plugin. Non-OLM install.
+type: application
+version: 0.3.1
+appVersion: "0.3.1"
+keywords:
+  - compliance
+  - security
+  - openshift
+home: https://github.com/maci0/baseline-security-operator
