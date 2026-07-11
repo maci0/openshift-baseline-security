@@ -63,26 +63,31 @@ Legend: `[x]` done · `[ ]` planned · **(H/M/L)** rough value.
 - [x] Full OLM install + upgrade verified on the SNO via the internal
       registry (no quay dependency).
 
+## 0.4 additions (openspec: expand-compliance-features)
+- [x] Waiver governance: expiry, requester/approver attribution; expired waivers
+      stop excluding; expiring-soon surfaced.
+- [x] Scan diff: `status.newlyFailed`/`fixed` (regressions since last scan) with
+      an Overview alert.
+- [x] Guided remediation: operator MachineConfigPool-paused batch apply (reboot
+      once) + UI batch flow; blocked (MissingDependencies) surfaced.
+- [x] TailoredProfile authoring from the console (create/edit rules, bind).
+- [x] Editable scan schedule from the UI; per-profile score history + trend.
+- [x] Severity-weighted score option (`spec.scoring.mode`).
+- [x] Helm chart for non-OLM installs (`deploy/helm`).
+- [x] Compliance report export (printable HTML).
+- [x] Grafana trend dashboard (`config/grafana`).
+- [x] NSA/CISA hardening `TailoredProfile` (`config/samples/tailored-nsa-cisa.yaml`).
+
 ## Planned
 
 ### Next up
 - [ ] **(H)** Push versioned images + bundle + catalog to quay.io; submit to
       community-operators once stable. Needs a quay robot token.
 
-### UI / UX
-- [ ] **(L)** Severity-weighted score option.
-
 ### Operator / API
 - [ ] **(M)** Watch compliance CRs via a dynamic informer once the CRDs
-      exist, replacing the 1-minute poll.
-
-### Backlog (later)
-- [ ] Helm chart for non-OLM installs.
-- [ ] PDF compliance report.
-- [ ] Trend dashboard (Grafana / console) from the score metric.
-- [ ] NSA/CISA K8s-hardening profile: ship as a curated `TailoredProfile`
-      mapping the guidance onto existing rules (the Compliance Operator has
-      no dedicated NSA profile; `spec.tailoredProfiles` already binds one).
+      exist, replacing the 1-minute poll (deferred: needs a lazy informer that
+      tolerates CRD-absent startup; polling is sufficient today).
 
 ## Productization
 

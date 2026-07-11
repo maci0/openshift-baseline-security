@@ -1,7 +1,7 @@
 apiVersion: operators.coreos.com/v1alpha1
 kind: ClusterServiceVersion
 metadata:
-  name: baseline-security-operator.v0.3.1
+  name: baseline-security-operator.v0.4.0
   namespace: placeholder
   annotations:
     alm-examples: |-
@@ -15,7 +15,7 @@ metadata:
       ]
     capabilities: Seamless Upgrades
     categories: Security
-    containerImage: quay.io/openshift-baseline-security/baseline-security-operator:0.3.1
+    containerImage: quay.io/openshift-baseline-security/baseline-security-operator:0.4.0
     repository: https://github.com/maci0/baseline-security-operator
     description: Baseline benchmark compliance scanning with a native console UI,
       built on the Red Hat Compliance Operator.
@@ -40,8 +40,8 @@ spec:
 
     Requires a default StorageClass for scan result storage.
   maturity: alpha
-  version: 0.3.1
-  replaces: baseline-security-operator.v0.3.0
+  version: 0.4.0
+  replaces: baseline-security-operator.v0.3.1
   minKubeVersion: 1.35.0
   keywords: [security, compliance, cis, benchmark, openscap]
   maintainers:
@@ -169,7 +169,7 @@ spec:
                           topologyKey: kubernetes.io/hostname
                 containers:
                   - name: manager
-                    image: quay.io/openshift-baseline-security/baseline-security-operator:0.3.1
+                    image: quay.io/openshift-baseline-security/baseline-security-operator:0.4.0
                     args:
                       - --leader-elect
                       - --metrics-bind-address=:8443
@@ -177,7 +177,7 @@ spec:
                       - --metrics-cert-dir=/var/run/metrics-certs
                     env:
                       - name: RELATED_IMAGE_CONSOLE_PLUGIN
-                        value: quay.io/openshift-baseline-security/baseline-security-console-plugin:0.3.1
+                        value: quay.io/openshift-baseline-security/baseline-security-console-plugin:0.4.0
                     ports:
                       - name: https-metrics
                         containerPort: 8443
@@ -212,6 +212,6 @@ spec:
                       optional: true
   relatedImages:
     - name: manager
-      image: quay.io/openshift-baseline-security/baseline-security-operator:0.3.1
+      image: quay.io/openshift-baseline-security/baseline-security-operator:0.4.0
     - name: console-plugin
-      image: quay.io/openshift-baseline-security/baseline-security-console-plugin:0.3.1
+      image: quay.io/openshift-baseline-security/baseline-security-console-plugin:0.4.0
