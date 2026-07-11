@@ -20,6 +20,7 @@ import {
   Split,
   SplitItem,
   Switch,
+  Tooltip,
 } from '@patternfly/react-core';
 import { Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table';
 import {
@@ -202,6 +203,14 @@ const RemediationsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline })
                       >
                         {t('Unapply')}
                       </Button>
+                    ) : state === 'MissingDependencies' ? (
+                      // Blocked: applying now would fail; a prerequisite remediation
+                      // must be applied first. Do not offer a plain Apply.
+                      <Tooltip content={t('Blocked: apply the prerequisite remediation(s) first.')}>
+                        <Button variant="link" isInline isAriaDisabled>
+                          {t('Blocked')}
+                        </Button>
+                      </Tooltip>
                     ) : (
                       <Button
                         variant="link"
