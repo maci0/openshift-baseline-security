@@ -111,7 +111,7 @@ export type ProfileStatus = ResultCounts & {
 export type TailoredProfileStatus = ResultCounts & { name: string; history?: ScoreSnapshot[] };
 
 export type ClusterBaseline = {
-  metadata: { name: string };
+  metadata: { name: string; annotations?: Record<string, string> };
   spec: {
     profiles: string[];
     tailoredProfiles?: string[];

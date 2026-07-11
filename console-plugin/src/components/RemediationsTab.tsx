@@ -32,6 +32,7 @@ import {
   isOwnedByBaseline,
 } from '../models';
 import {
+  batchApplyPatch,
   errorMessage,
   isNodeRemediation,
   remediationApplyPatch,
@@ -54,6 +55,7 @@ const RemediationsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline })
     namespace: 'openshift-compliance',
   });
   const [confirming, setConfirming] = React.useState<ComplianceRemediation | null>(null);
+  const [batchConfirming, setBatchConfirming] = React.useState(false);
   const [viewing, setViewing] = React.useState<ComplianceRemediation | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -91,6 +93,35 @@ const RemediationsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline })
     } finally {
       setBusy(false);
     }
+  };
+
+  // Node remediations that can be batch-applied: owned, not yet applied, not
+  // blocked on dependencies. Batching them pauses the pool so nodes reboot once.
+  const batchable = React.useMemo(
+    () =>
+      owned.filter(
+        (r) =>
+          !r.spec.apply &&
+          r.status?.applicationState !== 'MissingDependencies' &&
+          isNodeRemediation(r),
+      ),
+    [owned],
+  );
+
+  const doBatchApply = () => {
+    if (!baseline) return;
+    void run(
+      () =>
+        k8sPatch({
+          model: ClusterBaselineModel,
+          resource: baseline,
+          data: batchApplyPatch(
+            !!baseline.metadata.annotations,
+            batchable.map((r) => r.metadata.name),
+          ),
+        }),
+      t('Failed to start batch apply.'),
+    ).then((ok) => ok && setBatchConfirming(false));
   };
 
   const setApply = (rem: ComplianceRemediation, apply: boolean) =>
@@ -145,7 +176,17 @@ const RemediationsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline })
         />
       )}
       <Split hasGutter style={{ marginTop: 'var(--pf-t--global--spacer--md)' }}>
-        <SplitItem isFilled />
+        <SplitItem isFilled>
+          {batchable.length > 0 && (
+            <Button
+              variant="secondary"
+              isDisabled={!baseline || !canEditBaseline || canEditBaselineLoading || busy}
+              onClick={() => setBatchConfirming(true)}
+            >
+              {t('Batch apply {{count}} node remediation(s)', { count: batchable.length })}
+            </Button>
+          )}
+        </SplitItem>
         <SplitItem>
           <Switch
             id="auto-apply"
@@ -156,6 +197,28 @@ const RemediationsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline })
           />
         </SplitItem>
       </Split>
+      <Modal
+        variant="small"
+        isOpen={batchConfirming}
+        onClose={() => setBatchConfirming(false)}
+        aria-labelledby="batch-apply-title"
+      >
+        <ModalHeader title={t('Batch apply node remediations?')} labelId="batch-apply-title" />
+        <ModalBody>
+          {t(
+            'The affected MachineConfigPools are paused, all {{count}} node remediations are applied, then the pools resume so nodes reboot once instead of per remediation. A rescan is required afterwards.',
+            { count: batchable.length },
+          )}
+        </ModalBody>
+        <ModalFooter>
+          <Button variant="danger" isDisabled={busy} isLoading={busy} onClick={doBatchApply}>
+            {t('Batch apply')}
+          </Button>
+          <Button variant="link" isDisabled={busy} onClick={() => setBatchConfirming(false)}>
+            {t('Cancel')}
+          </Button>
+        </ModalFooter>
+      </Modal>
       {!loaded ? (
         <Spinner />
       ) : (

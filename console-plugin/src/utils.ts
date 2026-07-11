@@ -185,6 +185,29 @@ export const schedulePatch = (hasSchedule: boolean, cron: string) =>
     ? [{ op: 'replace' as const, path: '/spec/schedule', value: cron }]
     : [{ op: 'add' as const, path: '/spec/schedule', value: cron }];
 
+// JSON patch setting the batch-apply annotation on the ClusterBaseline, which
+// the operator consumes to pause MachineConfigPools, apply the listed
+// remediations, and resume so nodes reboot once. Adds the annotations map when
+// absent (a nested add would 404).
+export const batchApplyPatch = (hasAnnotations: boolean, names: string[]) => {
+  const value = names.join(',');
+  return hasAnnotations
+    ? [
+        {
+          op: 'add' as const,
+          path: '/metadata/annotations/baselinesecurity.io~1batch-apply',
+          value,
+        },
+      ]
+    : [
+        {
+          op: 'add' as const,
+          path: '/metadata/annotations',
+          value: { 'baselinesecurity.io/batch-apply': value },
+        },
+      ];
+};
+
 // JSON patch for spec.remediation.apply (Automatic|Manual).
 export const remediationApplyPatch = (hasRemediation: boolean, automatic: boolean) => {
   const apply = automatic ? 'Automatic' : 'Manual';

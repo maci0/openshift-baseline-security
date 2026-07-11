@@ -110,5 +110,10 @@
   "Enter a 5-field cron schedule.": "Enter a 5-field cron schedule.",
   "Failed to update schedule.": "Failed to update schedule.",
   "Blocked": "Blocked",
-  "Blocked: apply the prerequisite remediation(s) first.": "Blocked: apply the prerequisite remediation(s) first."
+  "Blocked: apply the prerequisite remediation(s) first.": "Blocked: apply the prerequisite remediation(s) first.",
+  "Batch apply {{count}} node remediation(s)": "Batch apply {{count}} node remediation(s)",
+  "Batch apply node remediations?": "Batch apply node remediations?",
+  "Batch apply": "Batch apply",
+  "Failed to start batch apply.": "Failed to start batch apply.",
+  "The affected MachineConfigPools are paused, all {{count}} node remediations are applied, then the pools resume so nodes reboot once instead of per remediation. A rescan is required afterwards.": "The affected MachineConfigPools are paused, all {{count}} node remediations are applied, then the pools resume so nodes reboot once instead of per remediation. A rescan is required afterwards."
 }

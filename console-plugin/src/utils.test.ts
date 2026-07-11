@@ -25,6 +25,7 @@ import {
   toggledProfiles,
   isValidCron,
   schedulePatch,
+  batchApplyPatch,
 } from './utils';
 import { ClusterBaseline, ComplianceCheckResult, ComplianceRemediation, ResultCounts } from './models';
 
@@ -653,6 +654,17 @@ describe('schedule editor helpers', () => {
     ]);
     expect(schedulePatch(false, '0 2 * * *')).toEqual([
       { op: 'add', path: '/spec/schedule', value: '0 2 * * *' },
+    ]);
+  });
+});
+
+describe('batchApplyPatch', () => {
+  it('adds the annotation, creating the map when absent', () => {
+    expect(batchApplyPatch(true, ['a', 'b'])).toEqual([
+      { op: 'add', path: '/metadata/annotations/baselinesecurity.io~1batch-apply', value: 'a,b' },
+    ]);
+    expect(batchApplyPatch(false, ['a'])).toEqual([
+      { op: 'add', path: '/metadata/annotations', value: { 'baselinesecurity.io/batch-apply': 'a' } },
     ]);
   });
 });

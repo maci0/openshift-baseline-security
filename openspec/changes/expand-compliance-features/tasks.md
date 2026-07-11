@@ -19,9 +19,9 @@
 
 ## 3. Guided remediation
 
-- [ ] 3.1 Operator: batch-apply action that pauses target MachineConfigPool(s), sets apply on the selected remediations, resumes (guaranteed resume on failure); RBAC for machineconfigpools patch; unit test pause/apply/resume + resume-on-error
-- [ ] 3.2 Surface MissingDependencies/Outdated as blocked with the missing dependency named; order so prerequisites apply first; jest on state mapping
-- [ ] 3.3 Console: multi-select + Batch apply flow with reboot-once confirmation and MCP-pause explanation; Playwright asserts the confirm + selection
+- [x] 3.1 Operator: batch-apply action that pauses target MachineConfigPool(s), sets apply on the selected remediations, resumes (guaranteed resume on failure); RBAC for machineconfigpools patch; unit test pause/apply/resume + resume-on-error
+- [x] 3.2 Surface MissingDependencies/Outdated as blocked with the missing dependency named; order so prerequisites apply first; jest on state mapping
+- [x] 3.3 Console: multi-select + Batch apply flow with reboot-once confirmation and MCP-pause explanation; Playwright asserts the confirm + selection
 - [ ] 3.4 e2e (Go, live): batch apply pauses then resumes the pool; pool never left paused
 
 ## 4. TailoredProfile authoring (console)
