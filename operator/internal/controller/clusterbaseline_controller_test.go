@@ -158,8 +158,20 @@ func TestBatchPastGrace(t *testing.T) {
 	if !batchPastGrace(metav1.Time{}, now, grace) {
 		t.Fatal("zero StartedAt must be past grace (corrupt status safety valve)")
 	}
+	// Modest future skew (NTP / handoff) must keep the pause live.
+	if batchPastGrace(metav1.NewTime(now.Add(time.Second)), now, grace) {
+		t.Fatal("1s-ahead StartedAt must not force resume")
+	}
+	if batchPastGrace(metav1.NewTime(now.Add(grace)), now, grace) {
+		// Equal to now+grace is not After(now+grace); still within bound.
+		t.Fatal("StartedAt == now+grace must not force resume via far-future path")
+	}
+	// Far future (beyond grace) is corrupt garbage, same class as zero.
+	if !batchPastGrace(metav1.NewTime(now.Add(grace+time.Second)), now, grace) {
+		t.Fatal("far-future StartedAt (beyond grace) must be past grace")
+	}
 	if !batchPastGrace(metav1.NewTime(now.Add(time.Hour)), now, grace) {
-		t.Fatal("future StartedAt must be past grace (corrupt status safety valve)")
+		t.Fatal("hour-future StartedAt must be past grace")
 	}
 	if batchPastGrace(metav1.NewTime(now.Add(-time.Minute)), now, grace) {
 		t.Fatal("fresh start must not be past grace")

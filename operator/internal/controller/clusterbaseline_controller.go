@@ -133,10 +133,16 @@ const batchApplyAnnotation = "baselinesecurity.io/batch-apply"
 const batchResumeGrace = 10 * time.Minute
 
 // batchPastGrace is true when the batch safety timer has elapsed (or is unusable).
-// Zero or far-future StartedAt (hand-edit / corrupt status) must not disable the
-// valve forever: treat those as already past grace so pools always resume.
+// Zero StartedAt (hand-edit / corrupt) must not disable the valve forever.
+// Far-future StartedAt (beyond grace, matching the spirit of parseScanEndTimestamp's
+// clock-skew bound) is also treated as garbage. Modest future skew (NTP / leader
+// handoff of a few seconds) must NOT force an immediate resume of a live pause.
 func batchPastGrace(started metav1.Time, now time.Time, grace time.Duration) bool {
-	if started.IsZero() || started.Time.After(now) {
+	if started.IsZero() {
+		return true
+	}
+	// Started more than `grace` ahead of now is corrupt, not skew.
+	if started.Time.After(now.Add(grace)) {
 		return true
 	}
 	return now.Sub(started.Time) > grace
