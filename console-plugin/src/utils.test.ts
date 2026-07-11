@@ -26,6 +26,7 @@ import {
   isValidCron,
   schedulePatch,
   batchApplyPatch,
+  buildReportHtml,
 } from './utils';
 import { ClusterBaseline, ComplianceCheckResult, ComplianceRemediation, ResultCounts } from './models';
 
@@ -666,5 +667,39 @@ describe('batchApplyPatch', () => {
     expect(batchApplyPatch(false, ['a'])).toEqual([
       { op: 'add', path: '/metadata/annotations', value: { 'baselinesecurity.io/batch-apply': 'a' } },
     ]);
+  });
+});
+
+describe('buildReportHtml', () => {
+  const cb = {
+    metadata: { name: 'cluster' },
+    spec: {
+      profiles: ['cis'],
+      waivers: [
+        { name: 'chk', reason: '<script>x</script>', requestedBy: 'a', expiresAt: '2099-01-01T00:00:00Z' },
+        { name: 'old', reason: 'r', expiresAt: '2000-01-01T00:00:00Z' },
+      ],
+    },
+    status: {
+      score: 94,
+      lastScanTime: '2026-07-11T09:00:00Z',
+      profiles: [{ key: 'cis', profileNames: [], pass: 212, fail: 7, manual: 21, info: 0, error: 0, inconsistent: 37, waived: 0, notApplicable: 0 }],
+    },
+  } as unknown as ClusterBaseline;
+  const now = new Date('2026-07-11T00:00:00Z');
+  const html = buildReportHtml(cb, now);
+  it('includes score and per-profile counts', () => {
+    expect(html).toContain('94 / 100');
+    expect(html).toContain('CIS');
+    expect(html).toContain('212');
+  });
+  it('escapes untrusted waiver text (no raw script tag)', () => {
+    expect(html).toContain('&lt;script&gt;');
+    expect(html).not.toContain('<script>x</script>');
+  });
+  it('lists only active (non-expired) waivers', () => {
+    expect(html).toContain('chk');
+    expect(html).not.toContain('>old<');
+    expect(html).toContain('Active waivers (1)');
   });
 });

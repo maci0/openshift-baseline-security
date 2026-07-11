@@ -171,6 +171,51 @@ export const toggledProfiles = (
   return next.length ? next : null;
 };
 
+// HTML-escape untrusted text (waiver reasons, rule titles) for the report.
+const esc = (s: string): string =>
+  s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string);
+
+// Build a printable, self-contained HTML compliance report from already-watched
+// data: overall score, per-profile breakdown, and active waivers with
+// attribution. All untrusted text is HTML-escaped (never interpreted as markup).
+export const buildReportHtml = (baseline: ClusterBaseline, now: Date = new Date()): string => {
+  const st = baseline.status ?? {};
+  const score = st.score != null ? `${st.score} / 100` : 'Not scanned';
+  const profileRows = [
+    ...(st.profiles ?? []).map((p) => ({ name: (p.key ?? '').toUpperCase(), c: p })),
+    ...(st.tailoredProfiles ?? []).map((p) => ({ name: `${p.name} (tailored)`, c: p })),
+  ]
+    .map(
+      ({ name, c }) =>
+        `<tr><td>${esc(name)}</td><td>${c.pass ?? 0}</td><td>${c.fail ?? 0}</td>` +
+        `<td>${c.manual ?? 0}</td><td>${c.inconsistent ?? 0}</td><td>${c.waived ?? 0}</td></tr>`,
+    )
+    .join('');
+  const activeWaivers = (baseline.spec.waivers ?? []).filter((w) => !waiverExpired(w, now));
+  const waiverRows = activeWaivers
+    .map(
+      (w) =>
+        `<tr><td>${esc(w.name)}</td><td>${esc(w.reason ?? '')}</td>` +
+        `<td>${esc(w.requestedBy ?? '')}</td><td>${esc(w.approvedBy ?? '')}</td>` +
+        `<td>${w.expiresAt ? esc(new Date(w.expiresAt).toLocaleDateString()) : ''}</td></tr>`,
+    )
+    .join('');
+  return `<!doctype html><html><head><meta charset="utf-8"><title>Compliance report</title>
+<style>body{font-family:sans-serif;margin:2rem;color:#151515}h1{margin-bottom:0}
+table{border-collapse:collapse;margin:1rem 0;width:100%}th,td{border:1px solid #ccc;padding:4px 8px;text-align:left}
+.muted{color:#666}</style></head><body>
+<h1>Compliance report</h1>
+<p class="muted">Generated ${esc(now.toISOString())} • last scan ${esc(st.lastScanTime ?? 'n/a')}</p>
+<h2>Score: ${esc(score)}</h2>
+<h3>Profiles</h3>
+<table><thead><tr><th>Profile</th><th>Pass</th><th>Fail</th><th>Manual</th><th>Inconsistent</th><th>Waived</th></tr></thead>
+<tbody>${profileRows || '<tr><td colspan="6" class="muted">No profiles</td></tr>'}</tbody></table>
+<h3>Active waivers (${activeWaivers.length})</h3>
+<table><thead><tr><th>Check</th><th>Reason</th><th>Requested by</th><th>Approved by</th><th>Expires</th></tr></thead>
+<tbody>${waiverRows || '<tr><td colspan="5" class="muted">None</td></tr>'}</tbody></table>
+</body></html>`;
+};
+
 // Loose 5-field cron validation for the schedule editor: five whitespace-
 // separated fields of the allowed character set. The operator does the real
 // parse; this just blocks obvious garbage before patching.

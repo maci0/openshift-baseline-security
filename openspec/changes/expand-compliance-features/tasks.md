@@ -33,9 +33,9 @@
 ## 5. Packaging artifacts
 
 - [ ] 5.1 Helm chart: CRD, RBAC, operator Deployment, console plugin, default-CR toggle, configurable images/profiles; `helm template` + `helm lint` in CI; uninstall leaves the Compliance Operator
-- [ ] 5.2 Grafana dashboard JSON from baseline_security_compliance_score + checks; document import
-- [ ] 5.3 NSA/CISA hardening TailoredProfile YAML + a documented rule mapping (note guidance with no rule); apply/bind smoke
-- [ ] 5.4 Compliance report export (printable HTML) from watched data: score, per-profile, failing checks, active waivers w/ attribution; untrusted text rendered as text; jest for the report model builder
+- [x] 5.2 Grafana dashboard JSON from baseline_security_compliance_score + checks; document import
+- [x] 5.3 NSA/CISA hardening TailoredProfile YAML + a documented rule mapping (note guidance with no rule); apply/bind smoke
+- [x] 5.4 Compliance report export (printable HTML) from watched data: score, per-profile, failing checks, active waivers w/ attribution; untrusted text rendered as text; jest for the report model builder
 
 ## 6. Score-trend + informer
 

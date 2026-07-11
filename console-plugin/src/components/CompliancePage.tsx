@@ -23,7 +23,7 @@ import {
   ComplianceScanModel,
   isOwnedByBaseline,
 } from '../models';
-import { errorMessage, rescanPatch } from '../utils';
+import { buildReportHtml, errorMessage, rescanPatch } from '../utils';
 import {
   BaselineContext,
   OverviewRoute,
@@ -129,6 +129,21 @@ const CompliancePage: React.FC = () => {
             </Content>
           </SplitItem>
           <SplitItem>
+            {baseline && (
+              <Button
+                variant="secondary"
+                style={{ marginRight: 'var(--pf-t--global--spacer--sm)' }}
+                onClick={() => {
+                  const w = window.open('', '_blank');
+                  if (w) {
+                    w.document.write(buildReportHtml(baseline));
+                    w.document.close();
+                  }
+                }}
+              >
+                {t('Export report')}
+              </Button>
+            )}
             <Button
               variant="secondary"
               onClick={() => {

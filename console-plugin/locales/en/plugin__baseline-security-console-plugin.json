@@ -115,5 +115,6 @@
   "Batch apply node remediations?": "Batch apply node remediations?",
   "Batch apply": "Batch apply",
   "Failed to start batch apply.": "Failed to start batch apply.",
-  "The affected MachineConfigPools are paused, all {{count}} node remediations are applied, then the pools resume so nodes reboot once instead of per remediation. A rescan is required afterwards.": "The affected MachineConfigPools are paused, all {{count}} node remediations are applied, then the pools resume so nodes reboot once instead of per remediation. A rescan is required afterwards."
+  "The affected MachineConfigPools are paused, all {{count}} node remediations are applied, then the pools resume so nodes reboot once instead of per remediation. A rescan is required afterwards.": "The affected MachineConfigPools are paused, all {{count}} node remediations are applied, then the pools resume so nodes reboot once instead of per remediation. A rescan is required afterwards.",
+  "Export report": "Export report"
 }

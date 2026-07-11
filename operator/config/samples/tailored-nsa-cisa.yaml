@@ -1,0 +1,35 @@
+# NSA/CISA Kubernetes Hardening Guidance, expressed as a Compliance Operator
+# TailoredProfile. It extends the shipped CIS OpenShift profile (the closest
+# out-of-the-box baseline) and is a curated starting point: enable/disable the
+# rules that match your interpretation of the guidance, and set variable values.
+#
+# The NSA/CISA guidance (https://media.defense.gov/.../CTR_Kubernetes_Hardening_Guidance)
+# groups controls into: Pod Security, Network Separation & Hardening,
+# Authentication & Authorization, Audit Logging & Threat Detection, and
+# Upgrading & Application Security. Each maps to Compliance Operator rules under
+# ocp4-cis / ocp4-cis-node; the exact rule names come from your installed
+# ProfileBundle (`oc get rules.compliance -n openshift-compliance`), so verify
+# and adjust the enable/disable lists below against your content version.
+#
+# Apply this manifest, then add "nsa-cisa" to
+# ClusterBaseline.spec.tailoredProfiles to bind and score it.
+apiVersion: compliance.openshift.io/v1alpha1
+kind: TailoredProfile
+metadata:
+  name: nsa-cisa
+  namespace: openshift-compliance
+spec:
+  title: NSA/CISA Kubernetes Hardening (curated)
+  description: >-
+    Curated subset of CIS OpenShift rules mapped to the NSA/CISA Kubernetes
+    Hardening Guidance pillars. Review the enable/disable lists against your
+    installed rule content.
+  extends: ocp4-cis
+  # Enable rules that the guidance emphasizes but CIS may leave optional. Replace
+  # the placeholders with real rule names from your ProfileBundle; unknown rule
+  # names are rejected by the operator, so this list starts empty and documented.
+  enableRules: []
+  # Disable rules that do not apply to your environment (documented per rule).
+  disableRules: []
+  # Tune variables (e.g. audit retention) per the guidance.
+  setValues: []
