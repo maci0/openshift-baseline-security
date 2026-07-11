@@ -85,14 +85,18 @@ export const resultsCsv = (
   results: ComplianceCheckResult[],
   waivers?: Waiver[],
 ): string => {
+  // name carries the benchmark prefix (ocp4-cis-, ocp4-pci-dss-), so the profile
+  // is already distinguishable without a separate column.
   const header = ['name', 'title', 'status', 'severity', 'waived'];
   const rows = results.map((r) =>
     [
       r.metadata.name,
       checkTitle(r),
-      r.status,
+      // Effective status so the export matches what the table shows (a benign
+      // INCONSISTENT collapses to PASS / NOT-APPLICABLE).
+      effectiveStatus(r),
       r.severity,
-      r.status === 'FAIL' && isWaived(r.metadata.name, waivers) ? 'true' : 'false',
+      effectiveStatus(r) === 'FAIL' && isWaived(r.metadata.name, waivers) ? 'true' : 'false',
     ]
       .map((c) => csvCell(String(c ?? '')))
       .join(','),
@@ -194,6 +198,23 @@ export const effectiveStatus = (
     return 'NOT-APPLICABLE';
   }
   return 'INCONSISTENT';
+};
+
+// Valid Kubernetes resource name (RFC1123 subdomain): lowercase alphanumeric,
+// '-' or '.', starting and ending alphanumeric, at most 253 chars. Used to catch
+// an invalid TailoredProfile name in the form instead of at a raw apiserver 422.
+export const isValidK8sName = (name: string): boolean =>
+  name.length > 0 && name.length <= 253 && /^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$/.test(name);
+
+// True for an apiserver "already exists" (409) rejection, so a create can be
+// retried idempotently after a later step failed.
+export const isAlreadyExists = (e: unknown): boolean => {
+  const o = e as { code?: number; reason?: string; message?: string } | null;
+  return (
+    o?.code === 409 ||
+    o?.reason === 'AlreadyExists' ||
+    (typeof o?.message === 'string' && /already exists/i.test(o.message))
+  );
 };
 
 // New profile list after toggling one key; null when the change is invalid

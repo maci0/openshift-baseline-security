@@ -29,6 +29,8 @@ import {
   batchApplyPatch,
   buildReportHtml,
   tailoredProfileManifest,
+  isValidK8sName,
+  isAlreadyExists,
 } from './utils';
 import { ClusterBaseline, ComplianceCheckResult, ComplianceRemediation, ResultCounts } from './models';
 
@@ -419,6 +421,35 @@ describe('inconsistentSources', () => {
       );
       expect(Array.isArray(sources)).toBe(true);
     }
+  });
+});
+
+describe('isValidK8sName', () => {
+  it('accepts valid RFC1123 subdomain names', () => {
+    expect(isValidK8sName('cis-custom')).toBe(true);
+    expect(isValidK8sName('a')).toBe(true);
+    expect(isValidK8sName('ocp4.cis.1')).toBe(true);
+  });
+  it('rejects invalid names', () => {
+    expect(isValidK8sName('')).toBe(false);
+    expect(isValidK8sName('My Profile')).toBe(false);
+    expect(isValidK8sName('UPPER')).toBe(false);
+    expect(isValidK8sName('-lead')).toBe(false);
+    expect(isValidK8sName('trail-')).toBe(false);
+    expect(isValidK8sName('a'.repeat(254))).toBe(false);
+  });
+});
+
+describe('isAlreadyExists', () => {
+  it('detects a 409 / AlreadyExists apiserver rejection', () => {
+    expect(isAlreadyExists({ code: 409 })).toBe(true);
+    expect(isAlreadyExists({ reason: 'AlreadyExists' })).toBe(true);
+    expect(isAlreadyExists({ message: 'tailoredprofiles "x" already exists' })).toBe(true);
+  });
+  it('is false for other errors', () => {
+    expect(isAlreadyExists({ code: 403 })).toBe(false);
+    expect(isAlreadyExists(new Error('boom'))).toBe(false);
+    expect(isAlreadyExists(null)).toBe(false);
   });
 });
 

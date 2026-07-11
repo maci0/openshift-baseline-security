@@ -17,7 +17,7 @@ test.describe('Baseline Security dark theme', () => {
     const [r, g, b] = bg.match(/\d+/g)!.map(Number);
     expect(r + g + b).toBeLessThan(150);
     // Core content still visible.
-    await expect(page.getByText('score / 100')).toBeVisible();
+    await expect(page.getByText('of 100')).toBeVisible();
     await expect(page.getByText(/^Inconsistent \(\d+\)$/)).toBeVisible();
     await shot(page, 'overview-dark');
   });
@@ -28,9 +28,10 @@ test.describe('Baseline Security dark theme', () => {
     });
     await forceDark(page);
     // Only genuine PASS-vs-FAIL node splits stay INCONSISTENT after the operator
-    // collapses benign PASS/NOT-APPLICABLE ones.
+    // collapses benign PASS/NOT-APPLICABLE ones. Avoid "file": it also matches
+    // the "Profile" column-header button.
     await page
-      .getByRole('button', { name: /audit|directory|log|access|file|etcd|kubelet/i })
+      .getByRole('button', { name: /audit|directory|access|log/i })
       .first()
       .click();
     const dialog = page.getByRole('dialog');

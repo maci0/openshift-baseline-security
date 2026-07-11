@@ -9,7 +9,10 @@ import {
   CardHeader,
   CardTitle,
   FormGroup,
+  FormHelperText,
   Gallery,
+  HelperText,
+  HelperTextItem,
   Modal,
   ModalBody,
   ModalFooter,
@@ -22,7 +25,13 @@ import {
   TextInput,
 } from '@patternfly/react-core';
 import { ClusterBaseline, ClusterBaselineModel, TailoredProfileModel } from '../models';
-import { errorMessage, tailoredProfileManifest, toggledProfiles } from '../utils';
+import {
+  errorMessage,
+  isAlreadyExists,
+  isValidK8sName,
+  tailoredProfileManifest,
+  toggledProfiles,
+} from '../utils';
 
 const PROFILE_INFO: Record<string, { title: string; description: string }> = {
   cis: { title: 'CIS', description: 'CIS Red Hat OpenShift Container Platform Benchmark' },
@@ -65,34 +74,54 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => 
   const [tpDisable, setTpDisable] = React.useState('');
 
   const createTailored = async () => {
-    if (!baseline || !tpName.trim()) return;
+    const name = tpName.trim();
+    if (!baseline || !isValidK8sName(name)) return;
     setPending(true);
     setError(null);
+    // Two steps: create the TailoredProfile, then bind it into spec. Track which
+    // step we reached so a bind failure does not read as "nothing happened" and
+    // an AlreadyExists on retry is treated as the create having succeeded.
+    let created = false;
     try {
       const disable = tpDisable
         .split('\n')
         .map((s) => s.trim())
         .filter(Boolean);
-      await k8sCreate({
-        model: TailoredProfileModel,
-        data: tailoredProfileManifest(tpName.trim(), tpExtends.trim() || 'ocp4-cis', disable),
-      });
+      try {
+        await k8sCreate({
+          model: TailoredProfileModel,
+          data: tailoredProfileManifest(name, tpExtends.trim() || 'ocp4-cis', disable),
+        });
+      } catch (e) {
+        if (!isAlreadyExists(e)) throw e;
+      }
+      created = true;
       await k8sPatch({
         model: ClusterBaselineModel,
         resource: baseline,
         data: baseline.spec.tailoredProfiles
-          ? [{ op: 'add', path: '/spec/tailoredProfiles/-', value: tpName.trim() }]
-          : [{ op: 'add', path: '/spec/tailoredProfiles', value: [tpName.trim()] }],
+          ? [{ op: 'add', path: '/spec/tailoredProfiles/-', value: name }]
+          : [{ op: 'add', path: '/spec/tailoredProfiles', value: [name] }],
       });
       setCreating(false);
       setTpName('');
       setTpDisable('');
     } catch (e) {
-      setError(errorMessage(e) ?? t('Failed to create tailored profile.'));
+      const detail = errorMessage(e);
+      setError(
+        created
+          ? t(
+              'Tailored profile "{{name}}" was created but could not be bound: {{detail}}. Retry to bind it.',
+              { name, detail: detail ?? t('unknown error') },
+            )
+          : detail ?? t('Failed to create tailored profile.'),
+      );
     } finally {
       setPending(false);
     }
   };
+
+  const nameValid = tpName.trim() === '' || isValidK8sName(tpName.trim());
 
   const toggle = async (key: string, checked: boolean) => {
     if (!baseline) return;
@@ -151,7 +180,23 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => 
         <ModalHeader title={t('New tailored profile')} labelId="new-tp-title" />
         <ModalBody>
           <FormGroup label={t('Name')} fieldId="tp-name" isRequired>
-            <TextInput id="tp-name" value={tpName} onChange={(_e, v) => setTpName(v)} />
+            <TextInput
+              id="tp-name"
+              value={tpName}
+              onChange={(_e, v) => setTpName(v)}
+              validated={nameValid ? 'default' : 'error'}
+            />
+            {!nameValid && (
+              <FormHelperText>
+                <HelperText>
+                  <HelperTextItem variant="error">
+                    {t(
+                      'Use lowercase letters, digits, - and .; must start and end with a letter or digit.',
+                    )}
+                  </HelperTextItem>
+                </HelperText>
+              </FormHelperText>
+            )}
           </FormGroup>
           <FormGroup label={t('Extends (base profile)')} fieldId="tp-extends">
             <TextInput id="tp-extends" value={tpExtends} onChange={(_e, v) => setTpExtends(v)} />
@@ -169,7 +214,7 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => 
         <ModalFooter>
           <Button
             variant="primary"
-            isDisabled={!tpName.trim() || pending}
+            isDisabled={!isValidK8sName(tpName.trim()) || pending}
             isLoading={pending}
             onClick={() => void createTailored()}
           >

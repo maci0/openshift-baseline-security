@@ -6,7 +6,7 @@ test.describe('Baseline Security console plugin', () => {
     await goto(page, '');
     // Composition donut center label + legend; the legend proves the
     // non-compliant slices render (not an all-green gauge).
-    await expect(page.getByText('score / 100')).toBeVisible();
+    await expect(page.getByText('of 100')).toBeVisible();
     await expect(page.getByText(/^Fail \(\d+\)$/)).toBeVisible();
     await expect(page.getByText('Details')).toBeVisible();
     // Compliance Operator version surfaced in the details card. exact: the
@@ -20,10 +20,14 @@ test.describe('Baseline Security console plugin', () => {
 
   test('Results table lists checks and supports filtering', async ({ page }) => {
     await goto(page, '/results');
-    // Column headers.
+    // Column headers, including the Profile column that disambiguates the same
+    // rule appearing in several benchmarks.
     await expect(page.getByRole('columnheader', { name: 'Check' })).toBeVisible();
+    await expect(page.getByRole('columnheader', { name: 'Profile' })).toBeVisible();
     await expect(page.getByRole('columnheader', { name: 'Status' })).toBeVisible();
     await expect(page.getByRole('columnheader', { name: 'Severity' })).toBeVisible();
+    // A benchmark label renders in the Profile column (PCI-DSS is distinctive).
+    await expect(page.getByText('PCI-DSS', { exact: true }).first()).toBeVisible();
     // Rows are rendered (link buttons carry the human-readable title).
     await expect(page.getByRole('button', { name: /registries|Identity Provider|etcd|audit/i }).first()).toBeVisible();
     // CSV export button present.
@@ -62,6 +66,29 @@ test.describe('Baseline Security console plugin', () => {
     await expect(page.getByText('PCI-DSS')).toBeVisible();
     await expect(page.getByText('DISA STIG')).toBeVisible();
     await shot(page, 'profiles');
+  });
+
+  test('New tailored profile rejects an invalid name', async ({ page }) => {
+    await goto(page, '/profiles');
+    const newBtn = page.getByRole('button', { name: 'New tailored profile' });
+    // The authoring control is gated on the tailoredprofiles create permission;
+    // kubeadmin has it, so the button is present.
+    await expect(newBtn).toBeVisible();
+    await newBtn.click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toBeVisible();
+    const create = dialog.getByRole('button', { name: 'Create and bind' });
+    // Empty name: Create disabled.
+    await expect(create).toBeDisabled();
+    // Invalid name (spaces/uppercase): inline error + Create stays disabled.
+    await dialog.getByRole('textbox').first().fill('Not Valid');
+    await expect(
+      dialog.getByText(/Use lowercase letters, digits/i),
+    ).toBeVisible();
+    await expect(create).toBeDisabled();
+    // Valid name: Create enabled (not clicked, to avoid mutating the cluster).
+    await dialog.getByRole('textbox').first().fill('e2e-valid-name');
+    await expect(create).toBeEnabled();
   });
 
   test('Compliance is reachable under the Administration nav section', async ({ page }) => {

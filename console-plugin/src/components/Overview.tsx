@@ -157,19 +157,21 @@ const CountRow: React.FC<{
 
 // Compact score sparkline for a profile card from its history (>=2 points).
 const MiniTrend: React.FC<{ history?: ScoreSnapshot[] }> = ({ history }) => {
+  const { t } = useTranslation('plugin__baseline-security-console-plugin');
   if (!history || history.length < 2) {
     return null;
   }
   return (
     <div style={{ height: 40, marginTop: 'var(--pf-t--global--spacer--sm)' }}>
       <Chart
-        ariaTitle="score trend"
+        ariaTitle={t('Score trend')}
         height={40}
         padding={{ top: 4, bottom: 4, left: 0, right: 0 }}
         minDomain={{ y: 0 }}
         maxDomain={{ y: 100 }}
+        scale={{ x: 'time', y: 'linear' }}
       >
-        <ChartArea data={history.map((h) => ({ x: h.time, y: h.score }))} />
+        <ChartArea data={history.map((h) => ({ x: new Date(h.time), y: h.score }))} />
       </Chart>
     </div>
   );
@@ -289,14 +291,17 @@ const Overview: React.FC<{ baseline?: ClusterBaseline; loaded: boolean }> = ({
   const purple = 'var(--pf-t--global--icon--color--status--custom--default)';
   const grey = 'var(--pf-t--global--icon--color--disabled)';
   const blue = 'var(--pf-t--global--icon--color--status--info--default)';
+  // Distinct hues so Error is not confused with Fail, nor Waived with N/A.
+  const orangered = 'var(--pf-t--global--color--nonstatus--orangered--default)';
+  const teal = 'var(--pf-t--global--color--nonstatus--teal--default)';
   const segments = [
     { label: t('Pass'), value: totals.pass, color: green },
     { label: t('Fail'), value: totals.fail, color: red },
     { label: t('Manual'), value: totals.manual, color: orange },
     { label: t('Info'), value: totals.info, color: blue },
     { label: t('Inconsistent'), value: totals.inconsistent, color: purple },
-    { label: t('Error'), value: totals.error, color: red },
-    { label: t('Waived'), value: totals.waived, color: grey },
+    { label: t('Error'), value: totals.error, color: orangered },
+    { label: t('Waived'), value: totals.waived, color: teal },
     { label: t('Not applicable'), value: totals.notApplicable, color: grey },
   ].filter((s) => s.value > 0);
   const totalChecks = segments.reduce((n, s) => n + s.value, 0);
@@ -347,7 +352,12 @@ const Overview: React.FC<{ baseline?: ClusterBaseline; loaded: boolean }> = ({
           isInline
           title={t('{{count}} waiver(s) expiring within two weeks', { count: expiring.length })}
           style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}
-        />
+        >
+          {expiring.map((w) => w.name).join(', ')}
+          <div>
+            <a href={resultsHref('WAIVED')}>{t('Review waived checks')}</a>
+          </div>
+        </Alert>
       )}
       <Gallery hasGutter minWidths={{ default: '300px' }}>
         <Card>
@@ -362,6 +372,7 @@ const Overview: React.FC<{ baseline?: ClusterBaseline; loaded: boolean }> = ({
                 subTitle={t('of 100')}
                 height={200}
                 width={300}
+                constrainToVisibleArea
               />
             ) : (
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -373,7 +384,7 @@ const Overview: React.FC<{ baseline?: ClusterBaseline; loaded: boolean }> = ({
                   colorScale={segments.map((s) => s.color)}
                   labels={({ datum }) => `${datum.x}: ${datum.y}`}
                   title={score != null ? `${score}` : '—'}
-                  subTitle={t('score / 100')}
+                  subTitle={t('of 100')}
                   height={200}
                   width={200}
                   padding={{ top: 10, bottom: 10, left: 10, right: 10 }}
@@ -458,15 +469,18 @@ const Overview: React.FC<{ baseline?: ClusterBaseline; loaded: boolean }> = ({
                 width={300}
                 padding={{ top: 10, bottom: 40, left: 40, right: 20 }}
                 domain={{ y: [0, 100] }}
+                // Time scale so ticks are spaced by date (a few, deduplicated),
+                // not one categorical tick per snapshot with repeated labels.
+                scale={{ x: 'time', y: 'linear' }}
               >
                 <ChartAxis
-                  tickFormat={(x: string) => new Date(x).toLocaleDateString()}
+                  tickFormat={(x: Date) => new Date(x).toLocaleDateString()}
                   fixLabelOverlap
                 />
                 <ChartAxis dependentAxis />
                 <ChartArea
                   data={(baseline.status?.history ?? []).map((h) => ({
-                    x: h.time,
+                    x: new Date(h.time),
                     y: h.score,
                   }))}
                 />

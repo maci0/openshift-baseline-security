@@ -188,6 +188,20 @@ export const suiteFilterKey = (
 };
 
 /**
+ * Human label for a check's owning profile, for the Results Profile column:
+ * built-in benchmark keys uppercased (CIS, PCI-DSS) to match the Overview cards,
+ * a tailored profile by its plain name, and an em dash when unknown.
+ */
+export const checkProfileLabel = (labels: Record<string, string> | undefined): string => {
+  const tailored = suiteTailoredName(labels);
+  if (tailored !== undefined) {
+    return tailored;
+  }
+  const key = suiteProfileKey(labels);
+  return key ? key.toUpperCase() : '—';
+};
+
+/**
  * True when a CO object belongs to this baseline: a built-in profile suite for
  * a selected profile, or a tailored suite for a bound TailoredProfile.
  */

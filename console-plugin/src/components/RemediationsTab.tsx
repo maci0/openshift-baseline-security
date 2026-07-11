@@ -7,9 +7,12 @@ import {
 } from '@openshift-console/dynamic-plugin-sdk';
 import {
   Alert,
+  Bullseye,
   Button,
   CodeBlock,
   CodeBlockCode,
+  EmptyState,
+  EmptyStateBody,
   Label,
   Modal,
   ModalBody,
@@ -167,7 +170,9 @@ const RemediationsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline })
           {watchError}
         </Alert>
       )}
-      {error && (
+      {/* Shown page-top only when no modal is open; the modals render their own
+          copy of this error so a failed apply is not hidden behind the backdrop. */}
+      {error && !confirming && !batchConfirming && (
         <Alert
           variant="danger"
           isInline
@@ -209,6 +214,14 @@ const RemediationsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline })
             'The affected MachineConfigPools are paused, all {{count}} node remediations are applied, then the pools resume so nodes reboot once instead of per remediation. A rescan is required afterwards.',
             { count: batchable.length },
           )}
+          {error && (
+            <Alert
+              variant="danger"
+              isInline
+              title={error}
+              style={{ marginTop: 'var(--pf-t--global--spacer--md)' }}
+            />
+          )}
         </ModalBody>
         <ModalFooter>
           <Button variant="danger" isDisabled={busy} isLoading={busy} onClick={doBatchApply}>
@@ -220,7 +233,19 @@ const RemediationsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline })
         </ModalFooter>
       </Modal>
       {!loaded ? (
-        <Spinner />
+        <Bullseye style={{ padding: 'var(--pf-t--global--spacer--xl)' }}>
+          <Spinner aria-label={t('Loading remediations')} />
+        </Bullseye>
+      ) : owned.length === 0 ? (
+        <EmptyState
+          titleText={t('No remediations')}
+          headingLevel="h4"
+          style={{ marginTop: 'var(--pf-t--global--spacer--md)' }}
+        >
+          <EmptyStateBody>
+            {t('The Compliance Operator generates remediations for failing checks that can be auto-fixed. None are available yet; rescan after new failures appear.')}
+          </EmptyStateBody>
+        </EmptyState>
       ) : (
         <Table variant="compact">
           <Thead>

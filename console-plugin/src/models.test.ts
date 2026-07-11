@@ -1,4 +1,10 @@
-import { isOwnedByBaseline, suiteFilterKey, suiteProfileKey, suiteTailoredName } from './models';
+import {
+  checkProfileLabel,
+  isOwnedByBaseline,
+  suiteFilterKey,
+  suiteProfileKey,
+  suiteTailoredName,
+} from './models';
 
 describe('isOwnedByBaseline', () => {
   it('matches suite label to selected profiles', () => {
@@ -64,6 +70,13 @@ describe('tailored suite ownership', () => {
     expect(suiteFilterKey(lbl('baseline-tp-'))).toBeUndefined();
     expect(suiteFilterKey(lbl('other'))).toBeUndefined();
     expect(suiteFilterKey(undefined)).toBeUndefined();
+  });
+  it('checkProfileLabel uppercases built-ins, keeps tailored names, dashes unknown', () => {
+    expect(checkProfileLabel(lbl('baseline-cis'))).toBe('CIS');
+    expect(checkProfileLabel(lbl('baseline-pci-dss'))).toBe('PCI-DSS');
+    expect(checkProfileLabel(lbl('baseline-tp-cis-custom'))).toBe('cis-custom');
+    expect(checkProfileLabel(lbl('other'))).toBe('—');
+    expect(checkProfileLabel(undefined)).toBe('—');
   });
   it('isOwnedByBaseline recognizes bound tailored profiles', () => {
     expect(isOwnedByBaseline(lbl('baseline-tp-custom'), ['cis'], ['custom'])).toBe(true);

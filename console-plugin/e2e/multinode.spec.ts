@@ -78,9 +78,10 @@ test.describe('Baseline Security multi-node / multi-benchmark', () => {
       waitUntil: 'networkidle',
     });
     // Only genuine PASS-vs-FAIL node splits stay INCONSISTENT after the operator
-    // collapses benign PASS/NOT-APPLICABLE ones; open the first such check.
+    // collapses benign PASS/NOT-APPLICABLE ones; open the first such check. Avoid
+    // "file" in the regex: it also matches the "Profile" column-header button.
     await page
-      .getByRole('button', { name: /audit|directory|log|access|file|etcd|kubelet/i })
+      .getByRole('button', { name: /audit|directory|access|log/i })
       .first()
       .click();
     const dialog = page.getByRole('dialog');
@@ -94,7 +95,11 @@ test.describe('Baseline Security multi-node / multi-benchmark', () => {
     await page.goto('/baseline-security/results?rowFilter-result-status=FAIL', {
       waitUntil: 'networkidle',
     });
-    await page.getByRole('button', { name: /file|etcd|kubelet|api|audit|owner/i }).first().click();
+    // Avoid "file" in the regex: it matches the "Profile" column-header button.
+    await page
+      .getByRole('button', { name: /registr|etcd|kubelet|api|audit|owner/i })
+      .first()
+      .click();
     const dialog = page.getByRole('dialog');
     await expect(dialog).toBeVisible();
     await expect(dialog.getByText('Waiver')).toBeVisible();

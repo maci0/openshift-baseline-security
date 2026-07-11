@@ -43,6 +43,7 @@ import {
 } from '@patternfly/react-icons';
 import {
   CheckStatus,
+  checkProfileLabel,
   ClusterBaseline,
   ClusterBaselineModel,
   ComplianceCheckResult,
@@ -139,6 +140,9 @@ const ResultsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => {
   const columns: TableColumn<ComplianceCheckResult>[] = React.useMemo(
     () => [
       { title: t('Check'), id: 'title', sort: 'description' },
+      // The same rule appears in several benchmarks, so a Check title can repeat;
+      // the Profile column tells otherwise-identical rows apart.
+      { title: t('Profile'), id: 'profile', sort: "metadata.labels['compliance.openshift.io/suite']" },
       { title: t('Status'), id: 'status', sort: 'status' },
       { title: t('Severity'), id: 'severity', sort: 'severity' },
     ],
@@ -166,6 +170,9 @@ const ResultsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => {
             <Button variant="link" isInline onClick={() => setSelected(obj)}>
               {checkTitle(obj)}
             </Button>
+          </TableData>
+          <TableData id="profile" activeColumnIDs={activeColumnIDs}>
+            {checkProfileLabel(obj.metadata.labels)}
           </TableData>
           <TableData id="status" activeColumnIDs={activeColumnIDs}>
             <Label isCompact color={s.color} icon={s.icon}>
