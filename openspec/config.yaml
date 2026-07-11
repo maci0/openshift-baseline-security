@@ -1,0 +1,51 @@
+schema: spec-driven
+
+context: |
+  Project: openshift-baseline-security. An OLM operator + OpenShift admin-console
+  dynamic plugin that wraps the Red Hat Compliance Operator so any cluster gets
+  baseline CIS/PCI-DSS/etc compliance scanning out of the box, rendered natively
+  in the console under Administration -> Compliance.
+
+  Tech stack:
+  - operator/: Go 1.25, kubebuilder go/v4, controller-runtime; reconciles a
+    cluster-scoped singleton CRD ClusterBaseline (baselinesecurity.io/v1alpha1).
+    Talks to Compliance Operator CRDs (compliance.openshift.io/v1alpha1:
+    ProfileBundle, Profile, ScanSetting, ScanSettingBinding, ComplianceSuite,
+    ComplianceScan, ComplianceCheckResult, ComplianceRemediation, TailoredProfile)
+    via unstructured clients. Prometheus metrics + PrometheusRule alerts. OLM
+    bundle + FBC catalog.
+  - console-plugin/: React 18, PatternFly 6, @openshift-console/dynamic-plugin-sdk
+    4.22, TypeScript, jest. Tabs: Overview, Results, Remediations, Profiles.
+
+  Domain facts that constrain design:
+  - The Compliance Operator owns scanning and emits ComplianceCheckResult with
+    status PASS/FAIL/INFO/MANUAL/ERROR/NOT-APPLICABLE/INCONSISTENT. It has NO
+    score and NO waiver/exception concept. Score and waivers are OUR aggregation
+    only (ClusterBaseline.status.score, spec.waivers).
+  - score = pooled ratio SUM(PASS)*100 / (SUM(PASS)+SUM(FAIL)) over all owned
+    built-in + tailored suites. MANUAL/INFO/ERROR/INCONSISTENT/NOT-APPLICABLE and
+    waived FAILs are excluded from the denominator.
+  - Node scans run per MachineConfigPool; results consolidate one
+    ComplianceCheckResult per rule across nodes; disagreement -> INCONSISTENT with
+    a compliance.openshift.io/inconsistent-source annotation.
+  - Ownership boundary is the suite label compliance.openshift.io/suite =
+    "baseline-<profileKey>" or "baseline-tp-<tailoredName>".
+
+  Conventions:
+  - String-enum API fields (no bare booleans), OpenShift-style rollup conditions
+    (Available/Progressing/Degraded + detail conditions), requests-not-limits,
+    secure metrics. No AI attribution in commits. No em dashes.
+  - Every function with non-trivial logic gets a unit test; parsers/serializers of
+    untrusted input get fuzzing. Live e2e (Go build-tag e2e + Playwright).
+  - CRD arrays use x-kubernetes-list-type (never uniqueItems, which kube rejects).
+
+rules:
+  proposal:
+    - State Why, What Changes, and Non-goals.
+    - Note whether the Compliance Operator already provides the capability; only
+      build what it does not.
+  tasks:
+    - Group tasks by component (operator api / controller / metrics, console
+      plugin, packaging, tests, docs).
+    - Every behavior change lands with a unit test; untrusted-input parsers get a
+      fuzz target; user-visible flows get an e2e assertion.
