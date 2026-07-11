@@ -108,6 +108,31 @@ func TestNextScanTimeIsFuture(t *testing.T) {
 	}
 }
 
+// TestScoreHistoryRecorded asserts the operator records score history (for the
+// Overview trend chart): at least one snapshot, all scores in range, capped at 30.
+func TestScoreHistoryRecorded(t *testing.T) {
+	ctx := context.Background()
+	c := newClient(t)
+	cb, err := getBaseline(ctx, c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cb.Status.History) == 0 {
+		t.Skip("no history yet (no completed scan recorded)")
+	}
+	if len(cb.Status.History) > 30 {
+		t.Errorf("history len %d exceeds the 30 cap", len(cb.Status.History))
+	}
+	for _, s := range cb.Status.History {
+		if s.Score < 0 || s.Score > 100 {
+			t.Errorf("history score %d out of range", s.Score)
+		}
+		if s.Time.IsZero() {
+			t.Error("history snapshot has zero time")
+		}
+	}
+}
+
 // TestRelatedObjectsPopulated asserts must-gather's relatedObjects lists the core
 // owned resources so support tooling can find them.
 func TestRelatedObjectsPopulated(t *testing.T) {

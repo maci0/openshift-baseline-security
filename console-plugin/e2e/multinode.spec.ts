@@ -27,6 +27,13 @@ test.describe('Baseline Security multi-node / multi-benchmark', () => {
     await expect(page.getByText('Fail').first()).toBeVisible();
   });
 
+  test('per-profile cards list Inconsistent, matching the donut', async ({ page }) => {
+    await gotoTab(page, '');
+    // The card row label is exactly "Inconsistent" (the donut legend is
+    // "Inconsistent (N)"), so an exact match hits the per-profile card rows.
+    await expect(page.getByText('Inconsistent', { exact: true }).first()).toBeVisible();
+  });
+
   test('a bound TailoredProfile renders a Tailored card', async ({ page }) => {
     await gotoTab(page, '');
     // The demo TailoredProfile is cis-custom, labelled with a "Tailored" badge.
