@@ -11,7 +11,7 @@
 
 ## 2. Console: governance + visibility
 
-- [ ] 2.1 Waiver modal: reason + requester + approver + expiry/review date inputs; patch WaiverEntry with the new fields; jest for the patch shape
+- [x] 2.1 Waiver modal: reason + requester + approver + expiry/review date inputs; patch WaiverEntry with the new fields; jest for the patch shape
 - [ ] 2.2 Surface expired/expiring waivers: Results shows an expired waiver as failing with metadata; Overview shows an expiring-soon count; jest + Playwright
 - [ ] 2.3 Regressions view (new tab or Overview section): list PASS->FAIL and new-FAIL from status, deep-link each; first-scan empty state; jest + Playwright
 - [ ] 2.4 Schedule editor: cron input with validation, gated on clusterbaselines patch, patches spec.schedule; jest for validation + patch
