@@ -15,6 +15,12 @@ test.describe('Baseline Security console plugin', () => {
     // At least one profile summary card (CIS by default); watch-delivered and
     // rendered as a PatternFly CardTitle (not a heading role), so match text.
     await expect(page.getByText('CIS', { exact: true }).first()).toBeVisible();
+    // Recent changes (regressions) card: newly-failing / fixed since the last
+    // scan. On a steady cluster it shows its empty state rather than a list.
+    await expect(page.getByText('Recent changes')).toBeVisible();
+    await expect(
+      page.getByText(/No changes since the last scan|No previous scan to compare yet|Newly failing/),
+    ).toBeVisible();
     await shot(page, 'overview');
   });
 

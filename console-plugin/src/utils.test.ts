@@ -32,6 +32,7 @@ import {
   isValidK8sName,
   isValidTailoredProfileName,
   isAlreadyExists,
+  changedChecks,
 } from './utils';
 import { ClusterBaseline, ComplianceCheckResult, ComplianceRemediation, ResultCounts } from './models';
 
@@ -422,6 +423,28 @@ describe('inconsistentSources', () => {
       );
       expect(Array.isArray(sources)).toBe(true);
     }
+  });
+});
+
+describe('changedChecks', () => {
+  const res = (name: string, description?: string) =>
+    ({ metadata: { name, namespace: 'openshift-compliance' }, description }) as ComplianceCheckResult;
+
+  it('resolves names to title + deep-link, name as title fallback', () => {
+    const results = [res('ocp4-cis-a', 'Audit profile set\nrationale')];
+    const items = changedChecks(['ocp4-cis-a', 'ocp4-cis-missing'], results);
+    expect(items).toHaveLength(2);
+    expect(items[0]).toEqual({
+      name: 'ocp4-cis-a',
+      title: 'Audit profile set',
+      href: expect.stringContaining('ocp4-cis-a'),
+    });
+    // Unknown name falls back to the raw name as its title.
+    expect(items[1].title).toBe('ocp4-cis-missing');
+  });
+  it('filters empty names and tolerates undefined inputs', () => {
+    expect(changedChecks(undefined, undefined)).toEqual([]);
+    expect(changedChecks(['', 'x'], [])).toHaveLength(1);
   });
 });
 

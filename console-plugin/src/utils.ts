@@ -125,6 +125,28 @@ export const checkResultHref = (name: string): string =>
     stripSurrogates(name),
   )}`;
 
+export interface ChangedCheck {
+  name: string;
+  title: string;
+  href: string;
+}
+
+// Resolve status.newlyFailed / status.fixed check names into display items for
+// the Overview "Recent changes" card: a human title (from the watched results,
+// falling back to the raw name) and a deep-link to the ComplianceCheckResult.
+export const changedChecks = (
+  names: string[] | undefined,
+  results: ComplianceCheckResult[] | undefined,
+): ChangedCheck[] => {
+  const byName = new Map((results ?? []).map((r) => [r.metadata.name, r]));
+  return (names ?? [])
+    .filter(Boolean)
+    .map((name) => {
+      const r = byName.get(name);
+      return { name, title: r ? checkTitle(r) : name, href: checkResultHref(name) };
+    });
+};
+
 // The MachineConfigPool a node scan targeted, parsed from the scan-name label
 // ("<profile>-node-<pool>"), or null for a platform (non-node) check. Node scans
 // run per-MCP, so this is the pool the per-node results below belong to.

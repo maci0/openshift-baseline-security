@@ -132,5 +132,10 @@
   "Review waived checks": "Review waived checks",
   "unknown error": "unknown error",
   "Tailored profile \"{{name}}\" was created but could not be bound: {{detail}}. Retry to bind it.": "Tailored profile \"{{name}}\" was created but could not be bound: {{detail}}. Retry to bind it.",
-  "Use lowercase letters, digits, - and .; must start and end with a letter or digit.": "Use lowercase letters, digits, - and .; must start and end with a letter or digit."
+  "Use lowercase letters, digits, - and .; must start and end with a letter or digit.": "Use lowercase letters, digits, - and .; must start and end with a letter or digit.",
+  "Recent changes": "Recent changes",
+  "Newly failing ({{count}})": "Newly failing ({{count}})",
+  "Fixed ({{count}})": "Fixed ({{count}})",
+  "No changes since the last scan": "No changes since the last scan",
+  "No previous scan to compare yet": "No previous scan to compare yet"
 }

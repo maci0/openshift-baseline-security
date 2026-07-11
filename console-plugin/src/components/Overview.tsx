@@ -1,6 +1,11 @@
 import * as React from 'react';
 import { useTranslation } from 'react-i18next';
-import { k8sPatch, Timestamp, useAccessReview } from '@openshift-console/dynamic-plugin-sdk';
+import {
+  k8sPatch,
+  Timestamp,
+  useAccessReview,
+  useK8sWatchResource,
+} from '@openshift-console/dynamic-plugin-sdk';
 import {
   Chart,
   ChartArea,
@@ -40,9 +45,17 @@ import {
   InfoCircleIcon,
   MinusCircleIcon,
 } from '@patternfly/react-icons';
-import { ClusterBaseline, ClusterBaselineModel, ResultCounts, ScoreSnapshot } from '../models';
+import {
+  ClusterBaseline,
+  ClusterBaselineModel,
+  ComplianceCheckResult,
+  ComplianceCheckResultGVK,
+  ResultCounts,
+  ScoreSnapshot,
+} from '../models';
 import {
   aggregateCounts,
+  changedChecks,
   errorMessage,
   expiringWaivers,
   isValidCron,
@@ -225,6 +238,13 @@ const Overview: React.FC<{ baseline?: ClusterBaseline; loaded: boolean }> = ({
   loaded,
 }) => {
   const { t } = useTranslation('plugin__baseline-security-console-plugin');
+  // Watched so the Recent changes card can show human titles for the check
+  // names in status.newlyFailed / status.fixed. Deduped with the Results tab.
+  const [checkResults] = useK8sWatchResource<ComplianceCheckResult[]>({
+    groupVersionKind: ComplianceCheckResultGVK,
+    isList: true,
+    namespace: 'openshift-compliance',
+  });
 
   if (!loaded) {
     return (
@@ -310,6 +330,11 @@ const Overview: React.FC<{ baseline?: ClusterBaseline; loaded: boolean }> = ({
   const expiring = expiringWaivers(baseline.spec.waivers, 2 * WEEK);
   const newlyFailed = baseline.status?.newlyFailed ?? [];
   const fixed = baseline.status?.fixed ?? [];
+  const newlyFailedItems = changedChecks(newlyFailed, checkResults);
+  const fixedItems = changedChecks(fixed, checkResults);
+  // status.history is written each scan; an empty ring means no prior scan to
+  // diff against, so "no changes" reads as "nothing to compare yet".
+  const hasPriorScan = (baseline.status?.history?.length ?? 0) > 1;
 
   return (
     <PageSection>
@@ -488,6 +513,58 @@ const Overview: React.FC<{ baseline?: ClusterBaseline; loaded: boolean }> = ({
             </CardBody>
           </Card>
         )}
+        <Card>
+          <CardTitle>{t('Recent changes')}</CardTitle>
+          <CardBody style={{ maxHeight: 260, overflow: 'auto' }}>
+            {newlyFailedItems.length === 0 && fixedItems.length === 0 ? (
+              <EmptyState
+                titleText={
+                  hasPriorScan
+                    ? t('No changes since the last scan')
+                    : t('No previous scan to compare yet')
+                }
+                headingLevel="h4"
+              />
+            ) : (
+              <DescriptionList isCompact>
+                {newlyFailedItems.length > 0 && (
+                  <DescriptionListGroup>
+                    <DescriptionListTerm>
+                      {t('Newly failing ({{count}})', { count: newlyFailedItems.length })}
+                    </DescriptionListTerm>
+                    <DescriptionListDescription>
+                      {newlyFailedItems.map((c) => (
+                        <div key={c.name}>
+                          <Icon status="danger" isInline>
+                            <ExclamationCircleIcon />
+                          </Icon>{' '}
+                          <a href={c.href}>{c.title}</a>
+                        </div>
+                      ))}
+                    </DescriptionListDescription>
+                  </DescriptionListGroup>
+                )}
+                {fixedItems.length > 0 && (
+                  <DescriptionListGroup>
+                    <DescriptionListTerm>
+                      {t('Fixed ({{count}})', { count: fixedItems.length })}
+                    </DescriptionListTerm>
+                    <DescriptionListDescription>
+                      {fixedItems.map((c) => (
+                        <div key={c.name}>
+                          <Icon status="success" isInline>
+                            <CheckCircleIcon />
+                          </Icon>{' '}
+                          <a href={c.href}>{c.title}</a>
+                        </div>
+                      ))}
+                    </DescriptionListDescription>
+                  </DescriptionListGroup>
+                )}
+              </DescriptionList>
+            )}
+          </CardBody>
+        </Card>
       </Gallery>
       {/* Per-profile score cards in their own row so they stay uniform height
           instead of stretching to match the tall donut/details/trend cards. */}

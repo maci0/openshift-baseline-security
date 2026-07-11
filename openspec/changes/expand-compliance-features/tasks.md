@@ -13,7 +13,7 @@
 
 - [x] 2.1 Waiver modal: reason + requester + approver + expiry/review date inputs; patch WaiverEntry with the new fields; jest for the patch shape
 - [x] 2.2 Surface expired/expiring waivers: Results shows an expired waiver as failing with metadata; Overview shows an expiring-soon count; jest + Playwright
-- [ ] 2.3 Regressions view (new tab or Overview section): list PASS->FAIL and new-FAIL from status, deep-link each; first-scan empty state; jest + Playwright
+- [x] 2.3 Regressions view: Overview "Recent changes" card lists newly-failing (PASS->FAIL / new FAIL) and fixed checks from status.newlyFailed/fixed, each deep-linked to its ComplianceCheckResult; empty state distinguishes "no changes" from "no prior scan"; jest (changedChecks) + Playwright
 - [x] 2.4 Schedule editor: cron input with validation, gated on clusterbaselines patch, patches spec.schedule; jest for validation + patch
 - [x] 2.5 Per-profile trend: render each profile card's own trend line from per-profile history; jest
 
