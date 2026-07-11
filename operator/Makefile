@@ -111,7 +111,9 @@ verify-csv-rbac:
 		| grep -q 'create' \
 		|| (echo "CSV missing create on clusterbaselines; sync with config/rbac/role.yaml" && exit 1)
 	@grep -A1 'resources: \[subscriptions\]' bundle/manifests/baseline-security-operator.clusterserviceversion.yaml \
-		| grep -E -q 'update|patch' \
+		| grep -q 'update' \
+		&& grep -A1 'resources: \[subscriptions\]' bundle/manifests/baseline-security-operator.clusterserviceversion.yaml \
+		| grep -q 'patch' \
 		|| (echo "CSV missing update/patch on subscriptions; catalog source sync needs them" && exit 1)
 
 .PHONY: bundle-build

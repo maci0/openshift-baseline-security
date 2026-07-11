@@ -212,7 +212,7 @@ func TestParseScanEndTimestamp(t *testing.T) {
 	if !valid || !ok.Equal(time.Date(2026, 7, 9, 1, 0, 0, 0, time.UTC)) {
 		t.Fatalf("basic RFC3339: %v %v", ok, valid)
 	}
-	ok, valid = parseScanEndTimestamp("2026-07-09T01:00:00.123456789Z", now)
+	_, valid = parseScanEndTimestamp("2026-07-09T01:00:00.123456789Z", now)
 	if !valid {
 		t.Fatal("fractional seconds should parse")
 	}

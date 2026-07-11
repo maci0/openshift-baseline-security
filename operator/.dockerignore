@@ -1,0 +1,9 @@
+bin/
+*.log
+
+# Not needed by any operator image build context.
+test/
+hack/
+config/
+**/*_test.go
+internal/controller/testdata/
