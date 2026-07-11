@@ -31,8 +31,10 @@ import {
   CheckCircleIcon,
   ExclamationCircleIcon,
   ExclamationTriangleIcon,
+  InfoCircleIcon,
+  MinusCircleIcon,
 } from '@patternfly/react-icons';
-import { ClusterBaseline } from '../models';
+import { ClusterBaseline, ResultCounts } from '../models';
 import { aggregateCounts, resultsHref } from '../utils';
 
 const CountRow: React.FC<{
@@ -52,6 +54,49 @@ const CountRow: React.FC<{
     <FlexItem>{href && count > 0 ? <a href={href}>{count}</a> : count}</FlexItem>
   </Flex>
 );
+
+// Per-profile status rows for a score card. Pass/Fail always show; the rest
+// (Manual, Info, Inconsistent, Error, Waived, N/A) show only when non-zero, so
+// a card's rows match the statuses the composition donut aggregates.
+const ProfileCounts: React.FC<{ counts: ResultCounts; filterKey: string }> = ({
+  counts,
+  filterKey,
+}) => {
+  const { t } = useTranslation('plugin__baseline-security-console-plugin');
+  const rows: Array<{
+    k: keyof ResultCounts;
+    f: string;
+    label: string;
+    icon: React.ReactElement;
+    status: React.ComponentProps<typeof Icon>['status'];
+    always?: boolean;
+  }> = [
+    { k: 'pass', f: 'PASS', label: t('Pass'), icon: <CheckCircleIcon />, status: 'success', always: true },
+    { k: 'fail', f: 'FAIL', label: t('Fail'), icon: <ExclamationCircleIcon />, status: 'danger', always: true },
+    { k: 'manual', f: 'MANUAL', label: t('Manual'), icon: <ExclamationTriangleIcon />, status: 'warning' },
+    { k: 'info', f: 'INFO', label: t('Info'), icon: <InfoCircleIcon />, status: 'info' },
+    { k: 'inconsistent', f: 'INCONSISTENT', label: t('Inconsistent'), icon: <ExclamationTriangleIcon />, status: 'custom' },
+    { k: 'error', f: 'ERROR', label: t('Error'), icon: <ExclamationCircleIcon />, status: 'danger' },
+    { k: 'waived', f: 'WAIVED', label: t('Waived'), icon: <MinusCircleIcon />, status: undefined },
+    { k: 'notApplicable', f: 'NOT-APPLICABLE', label: t('Not applicable'), icon: <MinusCircleIcon />, status: undefined },
+  ];
+  return (
+    <>
+      {rows
+        .filter((r) => r.always || (counts[r.k] ?? 0) > 0)
+        .map((r) => (
+          <CountRow
+            key={r.k}
+            icon={r.icon}
+            status={r.status}
+            label={r.label}
+            count={counts[r.k] ?? 0}
+            href={resultsHref(r.f, filterKey)}
+          />
+        ))}
+    </>
+  );
+};
 
 const Overview: React.FC<{ baseline?: ClusterBaseline; loaded: boolean }> = ({
   baseline,
@@ -283,12 +328,19 @@ const Overview: React.FC<{ baseline?: ClusterBaseline; loaded: boolean }> = ({
             </CardBody>
           </Card>
         )}
+      </Gallery>
+      {/* Per-profile score cards in their own row so they stay uniform height
+          instead of stretching to match the tall donut/details/trend cards. */}
+      <Gallery
+        hasGutter
+        minWidths={{ default: '260px' }}
+        style={{ marginTop: 'var(--pf-t--global--spacer--md)' }}
+      >
         {(baseline.status?.profiles ?? []).map((p) => {
           // Zero-fill missing fields from older status so scores never go NaN.
           // Floor to match the operator's integer score (pass*100/(pass+fail)).
           const pass = p.pass ?? 0;
           const fail = p.fail ?? 0;
-          const manual = p.manual ?? 0;
           const denom = pass + fail;
           const pScore = denom > 0 ? Math.floor((pass * 100) / denom) : null;
           return (
@@ -307,27 +359,7 @@ const Overview: React.FC<{ baseline?: ClusterBaseline; loaded: boolean }> = ({
                 <CardTitle>{p.key.toUpperCase()}</CardTitle>
               </CardHeader>
               <CardBody>
-              <CountRow
-                icon={<CheckCircleIcon />}
-                status="success"
-                label={t('Pass')}
-                count={pass}
-                href={resultsHref('PASS', p.key)}
-              />
-              <CountRow
-                icon={<ExclamationCircleIcon />}
-                status="danger"
-                label={t('Fail')}
-                count={fail}
-                href={resultsHref('FAIL', p.key)}
-              />
-              <CountRow
-                icon={<ExclamationTriangleIcon />}
-                status="warning"
-                label={t('Manual')}
-                count={manual}
-                href={resultsHref('MANUAL', p.key)}
-              />
+                <ProfileCounts counts={p} filterKey={p.key} />
               </CardBody>
             </Card>
           );
@@ -335,7 +367,6 @@ const Overview: React.FC<{ baseline?: ClusterBaseline; loaded: boolean }> = ({
         {(baseline.status?.tailoredProfiles ?? []).map((tp) => {
           const pass = tp.pass ?? 0;
           const fail = tp.fail ?? 0;
-          const manual = tp.manual ?? 0;
           const denom = pass + fail;
           const pScore = denom > 0 ? Math.floor((pass * 100) / denom) : null;
           return (
@@ -356,27 +387,7 @@ const Overview: React.FC<{ baseline?: ClusterBaseline; loaded: boolean }> = ({
                 </CardTitle>
               </CardHeader>
               <CardBody>
-                <CountRow
-                  icon={<CheckCircleIcon />}
-                  status="success"
-                  label={t('Pass')}
-                  count={pass}
-                  href={resultsHref('PASS', `tp-${tp.name}`)}
-                />
-                <CountRow
-                  icon={<ExclamationCircleIcon />}
-                  status="danger"
-                  label={t('Fail')}
-                  count={fail}
-                  href={resultsHref('FAIL', `tp-${tp.name}`)}
-                />
-                <CountRow
-                  icon={<ExclamationTriangleIcon />}
-                  status="warning"
-                  label={t('Manual')}
-                  count={manual}
-                  href={resultsHref('MANUAL', `tp-${tp.name}`)}
-                />
+                <ProfileCounts counts={tp} filterKey={`tp-${tp.name}`} />
               </CardBody>
             </Card>
           );
