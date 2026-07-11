@@ -2,6 +2,9 @@ import {
   checkResultHref,
   addWaiverPatch,
   isWaived,
+  waiverExpired,
+  findWaiver,
+  expiringWaivers,
   resultFilterStatus,
   removeWaiverPatch,
   aggregateCounts,
@@ -513,29 +516,80 @@ describe('waivers', () => {
     expect(resultsHref('FAIL')).not.toContain('WAIVED');
   });
   it('addWaiverPatch creates the array when absent, appends when present', () => {
-    expect(addWaiverPatch(undefined, 'chk', 'risk')).toEqual([
+    expect(addWaiverPatch(undefined, { name: 'chk', reason: 'risk' })).toEqual([
       { op: 'add', path: '/spec/waivers', value: [{ name: 'chk', reason: 'risk' }] },
     ]);
-    expect(addWaiverPatch(null, 'chk', 'risk')).toEqual([
+    expect(addWaiverPatch(null, { name: 'chk', reason: 'risk' })).toEqual([
       { op: 'add', path: '/spec/waivers', value: [{ name: 'chk', reason: 'risk' }] },
     ]);
     // Empty array still exists after the last remove: must append with "/-".
-    expect(addWaiverPatch([], 'chk', '')).toEqual([
+    expect(addWaiverPatch([], { name: 'chk' })).toEqual([
       { op: 'add', path: '/spec/waivers/-', value: { name: 'chk' } },
     ]);
-    expect(addWaiverPatch([{ name: 'other' }], 'chk', '')).toEqual([
+    expect(addWaiverPatch([{ name: 'other' }], { name: 'chk' })).toEqual([
       { op: 'add', path: '/spec/waivers/-', value: { name: 'chk' } },
+    ]);
+  });
+  it('addWaiverPatch carries governance fields, dropping empty ones', () => {
+    expect(
+      addWaiverPatch(undefined, {
+        name: 'chk',
+        reason: 'risk',
+        requestedBy: 'alice',
+        approvedBy: '',
+        expiresAt: '2027-01-01T00:00:00Z',
+      }),
+    ).toEqual([
+      {
+        op: 'add',
+        path: '/spec/waivers',
+        value: [
+          { name: 'chk', reason: 'risk', requestedBy: 'alice', expiresAt: '2027-01-01T00:00:00Z' },
+        ],
+      },
     ]);
   });
   it('addWaiverPatch replaces an existing entry instead of duplicating', () => {
-    expect(addWaiverPatch([{ name: 'chk', reason: 'old' }], 'chk', 'new')).toEqual([
-      { op: 'test', path: '/spec/waivers/0/name', value: 'chk' },
-      { op: 'replace', path: '/spec/waivers/0', value: { name: 'chk', reason: 'new' } },
-    ]);
+    expect(addWaiverPatch([{ name: 'chk', reason: 'old' }], { name: 'chk', reason: 'new' })).toEqual(
+      [
+        { op: 'test', path: '/spec/waivers/0/name', value: 'chk' },
+        { op: 'replace', path: '/spec/waivers/0', value: { name: 'chk', reason: 'new' } },
+      ],
+    );
   });
   it('addWaiverPatch is a no-op for empty names', () => {
-    expect(addWaiverPatch(undefined, '', 'x')).toEqual([]);
-    expect(addWaiverPatch([], '', 'x')).toEqual([]);
+    expect(addWaiverPatch(undefined, { name: '', reason: 'x' })).toEqual([]);
+    expect(addWaiverPatch([], { name: '' })).toEqual([]);
+  });
+  it('waiverExpired / isWaived respect expiry', () => {
+    const now = new Date('2026-07-11T00:00:00Z');
+    const past = { name: 'a', expiresAt: '2026-07-10T00:00:00Z' };
+    const future = { name: 'b', expiresAt: '2026-07-12T00:00:00Z' };
+    const none = { name: 'c' };
+    expect(waiverExpired(past, now)).toBe(true);
+    expect(waiverExpired(future, now)).toBe(false);
+    expect(waiverExpired(none, now)).toBe(false);
+    // isWaived (excluded from score) is false for an expired waiver.
+    expect(isWaived('a', [past], now)).toBe(false);
+    expect(isWaived('b', [future], now)).toBe(true);
+    expect(isWaived('c', [none], now)).toBe(true);
+  });
+  it('findWaiver returns the entry regardless of expiry', () => {
+    const now = new Date('2026-07-11T00:00:00Z');
+    const past = { name: 'a', expiresAt: '2026-07-10T00:00:00Z', reason: 'r' };
+    expect(findWaiver('a', [past])).toEqual(past);
+    expect(findWaiver('x', [past])).toBeUndefined();
+    expect(isWaived('a', [past], now)).toBe(false); // expired: not excluded
+  });
+  it('expiringWaivers lists active waivers within the window only', () => {
+    const now = new Date('2026-07-11T00:00:00Z');
+    const day = 86400000;
+    const soon = { name: 'soon', expiresAt: '2026-07-13T00:00:00Z' }; // in 2 days
+    const later = { name: 'later', expiresAt: '2026-08-01T00:00:00Z' };
+    const gone = { name: 'gone', expiresAt: '2026-07-01T00:00:00Z' }; // expired
+    const perm = { name: 'perm' };
+    const out = expiringWaivers([soon, later, gone, perm], 7 * day, now);
+    expect(out.map((w) => w.name)).toEqual(['soon']);
   });
   it('removeWaiverPatch test-guards the name before removing', () => {
     expect(removeWaiverPatch(2, 'chk')).toEqual([
@@ -546,7 +600,10 @@ describe('waivers', () => {
   it('fuzz: addWaiverPatch carries the name when non-empty', () => {
     for (let i = 0; i < 500; i++) {
       const name = randomString(i % 30) || 'n';
-      const patch = addWaiverPatch(i % 2 === 0 ? [] : undefined, name, randomString(i % 10));
+      const patch = addWaiverPatch(i % 2 === 0 ? [] : undefined, {
+        name,
+        reason: randomString(i % 10),
+      });
       expect(patch.length).toBeGreaterThan(0);
       expect(patch[0].op === 'add' || patch[0].op === 'test').toBe(true);
       const last = patch[patch.length - 1];

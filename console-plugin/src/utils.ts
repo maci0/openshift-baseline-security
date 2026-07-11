@@ -179,10 +179,35 @@ export const remediationApplyPatch = (hasRemediation: boolean, automatic: boolea
     : [{ op: 'add' as const, path: '/spec/remediation', value: { apply } }];
 };
 
-// True when a check result is waived (accepted risk) by spec.waivers.
-// Empty names never match: a malformed waiver entry must not waive everything.
-export const isWaived = (name: string, waivers?: Waiver[]): boolean =>
-  !!name && !!waivers?.some((w) => w.name === name && !!w.name);
+// A waiver is expired once its expiresAt is in the past; an expired waiver no
+// longer excludes its check (matching the operator).
+export const waiverExpired = (w: Waiver, now: Date = new Date()): boolean =>
+  !!w.expiresAt && new Date(w.expiresAt).getTime() <= now.getTime();
+
+// The waiver entry for a check name (regardless of expiry), or undefined.
+export const findWaiver = (name: string, waivers?: Waiver[]): Waiver | undefined =>
+  name ? waivers?.find((w) => w.name === name && !!w.name) : undefined;
+
+// True when a check is actively waived (has a non-expired waiver), i.e. excluded
+// from the score. Empty names never match. Expired waivers do not count.
+export const isWaived = (name: string, waivers?: Waiver[], now: Date = new Date()): boolean => {
+  const w = findWaiver(name, waivers);
+  return !!w && !waiverExpired(w, now);
+};
+
+// Active waivers expiring within `withinMs` (not yet expired), for surfacing.
+export const expiringWaivers = (
+  waivers: Waiver[] | undefined,
+  withinMs: number,
+  now: Date = new Date(),
+): Waiver[] =>
+  (waivers ?? []).filter((w) => {
+    if (!w.expiresAt) {
+      return false;
+    }
+    const t = new Date(w.expiresAt).getTime();
+    return t > now.getTime() && t <= now.getTime() + withinMs;
+  });
 
 // Filter-chip / deep-link status for a result. FAIL+waiver is "WAIVED" so the
 // Results FAIL filter matches Overview fail counts (operator score math excludes
@@ -197,26 +222,29 @@ export const resultFilterStatus = (
 // when it exists (including empty after the last remove), append with "/-".
 // If the name is already waived, replace that entry (updates reason, avoids
 // duplicate list-map keys from a double-click race). Empty names yield no ops.
-export const addWaiverPatch = (
-  waivers: Waiver[] | undefined | null,
-  name: string,
-  reason: string,
-) => {
+export const addWaiverPatch = (waivers: Waiver[] | undefined | null, entry: Waiver) => {
+  const name = entry.name;
   if (!name) {
     return [] as { op: 'add' | 'replace' | 'test'; path: string; value: unknown }[];
   }
-  const entry = reason ? { name, reason } : { name };
+  // Drop empty optional fields so the stored entry stays minimal.
+  const clean: Waiver = { name };
+  if (entry.reason) clean.reason = entry.reason;
+  if (entry.requestedBy) clean.requestedBy = entry.requestedBy;
+  if (entry.approvedBy) clean.approvedBy = entry.approvedBy;
+  if (entry.expiresAt) clean.expiresAt = entry.expiresAt;
+  if (entry.reviewBy) clean.reviewBy = entry.reviewBy;
   if (waivers != null) {
     const idx = waivers.findIndex((w) => w.name === name);
     if (idx >= 0) {
       return [
         { op: 'test' as const, path: `/spec/waivers/${idx}/name`, value: name },
-        { op: 'replace' as const, path: `/spec/waivers/${idx}`, value: entry },
+        { op: 'replace' as const, path: `/spec/waivers/${idx}`, value: clean },
       ];
     }
-    return [{ op: 'add' as const, path: '/spec/waivers/-', value: entry }];
+    return [{ op: 'add' as const, path: '/spec/waivers/-', value: clean }];
   }
-  return [{ op: 'add' as const, path: '/spec/waivers', value: [entry] }];
+  return [{ op: 'add' as const, path: '/spec/waivers', value: [clean] }];
 };
 
 // JSON patch removing the waiver at index i (test-guards the name so a

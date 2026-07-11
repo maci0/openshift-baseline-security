@@ -93,14 +93,22 @@ export type ResultCounts = {
   notApplicable: number;
 };
 
-export type Waiver = { name: string; reason?: string };
+export type Waiver = {
+  name: string;
+  reason?: string;
+  requestedBy?: string;
+  approvedBy?: string;
+  expiresAt?: string;
+  reviewBy?: string;
+};
 
 export type ProfileStatus = ResultCounts & {
   key: string;
   profileNames: string[];
+  history?: ScoreSnapshot[];
 };
 
-export type TailoredProfileStatus = ResultCounts & { name: string };
+export type TailoredProfileStatus = ResultCounts & { name: string; history?: ScoreSnapshot[] };
 
 export type ClusterBaseline = {
   metadata: { name: string };
@@ -111,6 +119,7 @@ export type ClusterBaseline = {
     installComplianceOperator?: 'Automatic' | 'Manual';
     console?: { managementState?: 'Managed' | 'Removed' };
     remediation?: { apply?: 'Automatic' | 'Manual' };
+    scoring?: { mode?: 'Flat' | 'SeverityWeighted' };
     waivers?: Waiver[];
   };
   status?: {
@@ -122,6 +131,8 @@ export type ClusterBaseline = {
     tailoredProfiles?: TailoredProfileStatus[];
     conditions?: { type: string; status: string; reason?: string; message?: string }[];
     history?: ScoreSnapshot[];
+    newlyFailed?: string[];
+    fixed?: string[];
   };
 };
 

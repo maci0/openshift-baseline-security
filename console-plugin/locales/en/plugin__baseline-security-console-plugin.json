@@ -96,5 +96,9 @@
   "Failed to waive check.": "Failed to waive check.",
   "Failed to remove waiver.": "Failed to remove waiver.",
   "MachineConfigPool:": "MachineConfigPool:",
-  "This check is waived, but it currently passes and counts toward the score. Remove the waiver if it is no longer needed.": "This check is waived, but it currently passes and counts toward the score. Remove the waiver if it is no longer needed."
+  "This check is waived, but it currently passes and counts toward the score. Remove the waiver if it is no longer needed.": "This check is waived, but it currently passes and counts toward the score. Remove the waiver if it is no longer needed.",
+  "Requested by": "Requested by",
+  "Approved by": "Approved by",
+  "Expires": "Expires",
+  "This waiver has expired; the check is scored by its status again.": "This waiver has expired; the check is scored by its status again."
 }

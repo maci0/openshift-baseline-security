@@ -17,7 +17,12 @@ import {
   Alert,
   Button,
   Content,
+  DescriptionList,
+  DescriptionListDescription,
+  DescriptionListGroup,
+  DescriptionListTerm,
   Label,
+  FormGroup,
   Modal,
   ModalBody,
   ModalFooter,
@@ -25,6 +30,7 @@ import {
   Split,
   SplitItem,
   TextArea,
+  TextInput,
   Title,
 } from '@patternfly/react-core';
 import {
@@ -51,6 +57,7 @@ import {
   checkResultHref,
   checkTitle,
   errorMessage,
+  findWaiver,
   inconsistentSources,
   isWaived,
   machineConfigPoolHref,
@@ -58,6 +65,7 @@ import {
   removeWaiverPatch,
   resultFilterStatus,
   resultsCsv,
+  waiverExpired,
 } from '../utils';
 
 const statusLabel: Record<
@@ -84,6 +92,9 @@ const ResultsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => {
   });
   const [selected, setSelected] = React.useState<ComplianceCheckResult | null>(null);
   const [waiveReason, setWaiveReason] = React.useState('');
+  const [waiveRequestedBy, setWaiveRequestedBy] = React.useState('');
+  const [waiveApprovedBy, setWaiveApprovedBy] = React.useState('');
+  const [waiveExpiresAt, setWaiveExpiresAt] = React.useState('');
   const [busy, setBusy] = React.useState(false);
   const [waiveError, setWaiveError] = React.useState<string | null>(null);
   const [canWaive, canWaiveLoading] = useAccessReview({
@@ -101,6 +112,9 @@ const ResultsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => {
   const closeModal = () => {
     setSelected(null);
     setWaiveReason('');
+    setWaiveRequestedBy('');
+    setWaiveApprovedBy('');
+    setWaiveExpiresAt('');
     setWaiveError(null);
   };
 
@@ -366,8 +380,8 @@ const ResultsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => {
                   any already-waived check, so a stale waiver stays removable). */}
               {showWaiver(selected) &&
                 (() => {
-                  const waived = isWaived(selected.metadata.name, waivers);
-                  const reason = waivers?.find((w) => w.name === selected.metadata.name)?.reason;
+                  const w = findWaiver(selected.metadata.name, waivers);
+                  const expired = !!w && waiverExpired(w);
                   return (
                     <>
                       <Title
@@ -376,27 +390,91 @@ const ResultsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => {
                       >
                         {t('Waiver')}
                       </Title>
-                      {waived ? (
-                        <Content component="p">
-                          {selected.status === 'FAIL'
-                            ? t('This check is waived (excluded from the score).')
-                            : t(
-                                'This check is waived, but it currently passes and counts toward the score. Remove the waiver if it is no longer needed.',
-                              )}
-                          {reason ? `: ${reason}` : ''}
-                        </Content>
+                      {w ? (
+                        <>
+                          <Content component="p">
+                            {expired
+                              ? t('This waiver has expired; the check is scored by its status again.')
+                              : selected.status === 'FAIL'
+                                ? t('This check is waived (excluded from the score).')
+                                : t(
+                                    'This check is waived, but it currently passes and counts toward the score. Remove the waiver if it is no longer needed.',
+                                  )}
+                          </Content>
+                          <DescriptionList isCompact isHorizontal>
+                            {w.reason && (
+                              <DescriptionListGroup>
+                                <DescriptionListTerm>{t('Reason')}</DescriptionListTerm>
+                                <DescriptionListDescription>{w.reason}</DescriptionListDescription>
+                              </DescriptionListGroup>
+                            )}
+                            {w.requestedBy && (
+                              <DescriptionListGroup>
+                                <DescriptionListTerm>{t('Requested by')}</DescriptionListTerm>
+                                <DescriptionListDescription>{w.requestedBy}</DescriptionListDescription>
+                              </DescriptionListGroup>
+                            )}
+                            {w.approvedBy && (
+                              <DescriptionListGroup>
+                                <DescriptionListTerm>{t('Approved by')}</DescriptionListTerm>
+                                <DescriptionListDescription>{w.approvedBy}</DescriptionListDescription>
+                              </DescriptionListGroup>
+                            )}
+                            {w.expiresAt && (
+                              <DescriptionListGroup>
+                                <DescriptionListTerm>{t('Expires')}</DescriptionListTerm>
+                                <DescriptionListDescription>
+                                  {new Date(w.expiresAt).toLocaleDateString()}
+                                </DescriptionListDescription>
+                              </DescriptionListGroup>
+                            )}
+                          </DescriptionList>
+                        </>
                       ) : (
                         <>
                           <Content component="p">
                             {t('Accept this failing check as risk to exclude it from the score.')}
                           </Content>
-                          <TextArea
-                            aria-label={t('Waiver reason')}
-                            placeholder={t('Reason (optional)')}
-                            value={waiveReason}
-                            onChange={(_e, v) => setWaiveReason(v)}
-                            rows={2}
-                          />
+                          <FormGroup label={t('Reason')} fieldId="waive-reason">
+                            <TextArea
+                              id="waive-reason"
+                              aria-label={t('Waiver reason')}
+                              placeholder={t('Reason (optional)')}
+                              value={waiveReason}
+                              onChange={(_e, v) => setWaiveReason(v)}
+                              rows={2}
+                            />
+                          </FormGroup>
+                          <Split hasGutter>
+                            <SplitItem isFilled>
+                              <FormGroup label={t('Requested by')} fieldId="waive-req">
+                                <TextInput
+                                  id="waive-req"
+                                  value={waiveRequestedBy}
+                                  onChange={(_e, v) => setWaiveRequestedBy(v)}
+                                />
+                              </FormGroup>
+                            </SplitItem>
+                            <SplitItem isFilled>
+                              <FormGroup label={t('Approved by')} fieldId="waive-appr">
+                                <TextInput
+                                  id="waive-appr"
+                                  value={waiveApprovedBy}
+                                  onChange={(_e, v) => setWaiveApprovedBy(v)}
+                                />
+                              </FormGroup>
+                            </SplitItem>
+                            <SplitItem isFilled>
+                              <FormGroup label={t('Expires')} fieldId="waive-exp">
+                                <TextInput
+                                  id="waive-exp"
+                                  type="date"
+                                  value={waiveExpiresAt}
+                                  onChange={(_e, v) => setWaiveExpiresAt(v)}
+                                />
+                              </FormGroup>
+                            </SplitItem>
+                          </Split>
                         </>
                       )}
                       {waiveError && (
@@ -441,11 +519,15 @@ const ResultsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => {
                     isDisabled={!baseline || !canWaive || canWaiveLoading || busy}
                     isLoading={busy}
                     onClick={() => {
-                      const data = addWaiverPatch(
-                        waivers,
-                        selected.metadata.name,
-                        waiveReason.trim(),
-                      );
+                      const data = addWaiverPatch(waivers, {
+                        name: selected.metadata.name,
+                        reason: waiveReason.trim(),
+                        requestedBy: waiveRequestedBy.trim(),
+                        approvedBy: waiveApprovedBy.trim(),
+                        expiresAt: waiveExpiresAt
+                          ? new Date(waiveExpiresAt).toISOString()
+                          : undefined,
+                      });
                       if (!data.length) return;
                       void patchWaivers(data, t('Failed to waive check.'));
                     }}
