@@ -799,6 +799,58 @@ func TestAggregateStatusPropagatesScanListError(t *testing.T) {
 	}
 }
 
+// TestAggregateStatusCRDsMissingClearsRegressionLists: when ComplianceCheckResult
+// CRDs are gone (List NoMatchError), score/history and the regression lists
+// must all clear so Overview does not keep stale NewlyFailed/Fixed chips.
+func TestAggregateStatusCRDsMissingClearsRegressionLists(t *testing.T) {
+	scheme := testScheme(t)
+	noMatch := &meta.NoKindMatchError{
+		GroupKind: schema.GroupKind{Group: checkResultGVK.Group, Kind: checkResultGVK.Kind},
+	}
+	prev := int32(88)
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).
+			WithInterceptorFuncs(interceptor.Funcs{
+				List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+					gvk := list.GetObjectKind().GroupVersionKind()
+					if gvk.Group == checkResultGVK.Group && gvk.Kind == checkResultGVK.Kind+"List" {
+						return noMatch
+					}
+					return c.List(ctx, list, opts...)
+				},
+			}).Build(),
+		Scheme: scheme,
+	}
+	cb := &baselinev1alpha1.ClusterBaseline{
+		Spec: baselinev1alpha1.ClusterBaselineSpec{Profiles: []baselinev1alpha1.ProfileKey{"cis"}},
+		Status: baselinev1alpha1.ClusterBaselineStatus{
+			Score:            &prev,
+			History:          []baselinev1alpha1.ScoreSnapshot{{Score: 88}},
+			PreviousFailures: []string{"old-fail"},
+			NewlyFailed:      []string{"new-fail"},
+			Fixed:            []string{"was-fixed"},
+		},
+	}
+	if err := r.aggregateStatus(context.Background(), cb); err != nil {
+		t.Fatal(err)
+	}
+	if cb.Status.Score != nil {
+		t.Fatalf("score = %v, want nil", *cb.Status.Score)
+	}
+	if len(cb.Status.History) != 0 {
+		t.Fatalf("history = %v, want empty", cb.Status.History)
+	}
+	if cb.Status.PreviousFailures != nil {
+		t.Fatalf("PreviousFailures = %v, want nil", cb.Status.PreviousFailures)
+	}
+	if cb.Status.NewlyFailed != nil {
+		t.Fatalf("NewlyFailed = %v, want nil", cb.Status.NewlyFailed)
+	}
+	if cb.Status.Fixed != nil {
+		t.Fatalf("Fixed = %v, want nil", cb.Status.Fixed)
+	}
+}
+
 func TestRecordHistoryRing(t *testing.T) {
 	scheme := testScheme(t)
 	end := time.Date(2026, 7, 9, 1, 0, 0, 0, time.UTC).Format(time.RFC3339)
