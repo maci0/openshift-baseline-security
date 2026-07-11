@@ -45,6 +45,6 @@
 
 ## 7. Docs + test-plan
 
-- [ ] 7.1 Update SPEC.md/README/TODO with the new features; refresh screenshots (light+dark) for new UI
-- [ ] 7.2 Update docs/TEST-PLAN.md: tick new coverage, add the new capabilities' cases and the run ledger
-- [ ] 7.3 Bump version; validate bundle; full battery (unit+fuzz+jest+promtool+Go e2e+Playwright) green on the live cluster
+- [x] 7.1 Update SPEC.md/README/TODO with the new features; refresh screenshots (light+dark) for new UI
+- [x] 7.2 Update docs/TEST-PLAN.md: tick new coverage, add the new capabilities' cases and the run ledger
+- [x] 7.3 Bump version; validate bundle; full battery (unit+fuzz+jest+promtool+Go e2e+Playwright) green on the live cluster
