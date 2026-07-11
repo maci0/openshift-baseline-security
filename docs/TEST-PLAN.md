@@ -71,6 +71,7 @@ rot). Record topology, versions, and the concrete result.
 | 2026-07-10 | 2+4 | Waivers + INCONSISTENT drill-down round. Battery: Go e2e 12 (added live waiver round-trip: waive a FAIL → moves to Waived bucket, out of denominator) + Playwright 22 (added per-node drill-down table, Waive action) + promtool alerts + operator -race + all 11 fuzz targets + bundle validate | SNO + 2 day-2 workers | 4.22 / CO 1.9.1 | pass — Go 12/12, Playwright 22/22, jest 68, promtool SUCCESS, fuzz 11/11; live waive dropped cis.fail 7→6, waived 0→1 |
 | 2026-07-10 | 4 | Lifecycle scenarios after waiver-self-healing + MCP-drill-down deploy: invalid-schedule Degrade+recover, schedule→NextScanTime advance, console Removed→teardown+deregister→Managed→redeploy. Full battery re-run | SNO + 2 day-2 workers | 4.22 / CO 1.9.1 | pass — Go 15/15, Playwright 22/22, jest 72, -race clean |
 | 2026-07-10 | 4 | Deploy 0.3.0 (r6: stuck-install grace, errorMessage guard) + full e2e re-run | SNO + 2 day-2 workers | 4.22 / CO 1.9.1 | pass — Go 15/15, Playwright 22/22; Available=True, score 94, cluster self-cleaned |
+| 2026-07-11 | 4 | 0.3.1: per-profile cards now show Inconsistent (was donut-only); light+dark screenshots; dark-theme spec | SNO + 2 day-2 workers | 4.22 / CO 1.9.1 | pass — Go e2e 16/16, Playwright 26/26 (incl. dark theme + per-profile Inconsistent), jest 78 |
 
 ## Fixture and harness strategy
 
