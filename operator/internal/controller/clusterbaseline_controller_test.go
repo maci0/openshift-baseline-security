@@ -152,6 +152,109 @@ func TestRemediationBatch(t *testing.T) {
 	}
 }
 
+func TestBatchPastGrace(t *testing.T) {
+	now := time.Date(2026, 7, 11, 12, 0, 0, 0, time.UTC)
+	grace := 10 * time.Minute
+	if !batchPastGrace(metav1.Time{}, now, grace) {
+		t.Fatal("zero StartedAt must be past grace (corrupt status safety valve)")
+	}
+	if !batchPastGrace(metav1.NewTime(now.Add(time.Hour)), now, grace) {
+		t.Fatal("future StartedAt must be past grace (corrupt status safety valve)")
+	}
+	if batchPastGrace(metav1.NewTime(now.Add(-time.Minute)), now, grace) {
+		t.Fatal("fresh start must not be past grace")
+	}
+	if !batchPastGrace(metav1.NewTime(now.Add(-grace-time.Second)), now, grace) {
+		t.Fatal("elapsed grace must be past")
+	}
+}
+
+// TestRemediationBatchZeroStartedAtResumes: hand-edited / corrupt batch with
+// zero StartedAt must not disable the grace valve forever.
+func TestRemediationBatchZeroStartedAtResumes(t *testing.T) {
+	scheme := testScheme(t)
+	rem := nodeRemediation("rem1", "worker", "")
+	pool := machineConfigPool("worker")
+	_ = unstructured.SetNestedField(pool.Object, true, "spec", "paused")
+	cb := &baselinev1alpha1.ClusterBaseline{}
+	cb.SetName("cluster")
+	cb.SetAnnotations(map[string]string{batchApplyAnnotation: "rem1"})
+	cb.Status.RemediationBatch = &baselinev1alpha1.RemediationBatchStatus{
+		Phase: "Applying", Pools: []string{"worker"}, Remediations: []string{"rem1"},
+		// StartedAt zero: old bug would never pastGrace.
+	}
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).
+			WithObjects(cb, rem, pool).
+			WithStatusSubresource(&baselinev1alpha1.ClusterBaseline{}).Build(),
+		Scheme: scheme,
+	}
+	if err := r.applyRemediationBatch(context.Background(), cb); err != nil {
+		t.Fatal(err)
+	}
+	if cb.Status.RemediationBatch != nil {
+		t.Fatal("zero StartedAt must force resume and clear batch")
+	}
+	gotPool := machineConfigPool("worker")
+	_ = r.Get(context.Background(), types.NamespacedName{Name: "worker"}, gotPool)
+	if paused, _, _ := unstructured.NestedBool(gotPool.Object, "spec", "paused"); paused {
+		t.Fatal("pool must resume when StartedAt is zero")
+	}
+}
+
+// TestRemediationBatchPauseFailureRollsBack: if a later pool fails to pause,
+// pools already paused this attempt must be unpaused so nothing is stuck
+// without a status.remediationBatch.
+func TestRemediationBatchPauseFailureRollsBack(t *testing.T) {
+	scheme := testScheme(t)
+	remW := nodeRemediation("rem-w", "worker", "")
+	remM := nodeRemediation("rem-m", "master", "")
+	// Distinct names so both remediations can exist; pools worker then master
+	// (sorted). Fail pause on master after worker succeeds.
+	poolW := machineConfigPool("worker")
+	poolM := machineConfigPool("master")
+	cb := &baselinev1alpha1.ClusterBaseline{}
+	cb.SetName("cluster")
+	cb.SetAnnotations(map[string]string{batchApplyAnnotation: "rem-w,rem-m"})
+	pauseCalls := 0
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).
+			WithObjects(cb, remW, remM, poolW, poolM).
+			WithStatusSubresource(&baselinev1alpha1.ClusterBaseline{}).
+			WithInterceptorFuncs(interceptor.Funcs{
+				Patch: func(ctx context.Context, c client.WithWatch, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
+					u, ok := obj.(*unstructured.Unstructured)
+					if ok && u.GroupVersionKind() == mcpGVK {
+						pauseCalls++
+						// Sorted poolList is master, worker. Fail the second pause
+						// so the first must be rolled back.
+						if u.GetName() == "worker" {
+							return apierrors.NewServiceUnavailable("pause worker failed")
+						}
+					}
+					return c.Patch(ctx, obj, patch, opts...)
+				},
+			}).Build(),
+		Scheme: scheme,
+	}
+	err := r.applyRemediationBatch(context.Background(), cb)
+	if err == nil {
+		t.Fatal("expected pause failure")
+	}
+	if cb.Status.RemediationBatch != nil {
+		t.Fatal("batch must not start when pause fails")
+	}
+	// master is first alphabetically; it was paused then rolled back on worker failure.
+	gotM := machineConfigPool("master")
+	_ = r.Get(context.Background(), types.NamespacedName{Name: "master"}, gotM)
+	if paused, _, _ := unstructured.NestedBool(gotM.Object, "spec", "paused"); paused {
+		t.Fatal("master must be unpaused after rollback")
+	}
+	if pauseCalls < 2 {
+		t.Fatalf("expected pause + rollback patches, got %d", pauseCalls)
+	}
+}
+
 // TestRemediationBatchApplyingGetErrorKeepsPaused: a transient Get failure while
 // checking applicationState must not be treated as Applied (would unpause pools
 // and clear the batch before remediations finish), as long as grace has not elapsed.

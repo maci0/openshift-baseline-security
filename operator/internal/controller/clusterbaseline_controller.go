@@ -132,6 +132,16 @@ const batchApplyAnnotation = "baselinesecurity.io/batch-apply"
 // a MachineConfigPool is never left paused.
 const batchResumeGrace = 10 * time.Minute
 
+// batchPastGrace is true when the batch safety timer has elapsed (or is unusable).
+// Zero or far-future StartedAt (hand-edit / corrupt status) must not disable the
+// valve forever: treat those as already past grace so pools always resume.
+func batchPastGrace(started metav1.Time, now time.Time, grace time.Duration) bool {
+	if started.IsZero() || started.Time.After(now) {
+		return true
+	}
+	return now.Sub(started.Time) > grace
+}
+
 // ClusterBaselineReconciler reconciles the ClusterBaseline singleton.
 type ClusterBaselineReconciler struct {
 	client.Client
@@ -1379,10 +1389,17 @@ func (r *ClusterBaselineReconciler) applyRemediationBatch(ctx context.Context, c
 		}
 		poolList := slices.Sorted(maps.Keys(pools))
 		// Pause first so all apply-triggered MachineConfig renders coalesce.
+		// On a mid-list failure, unpause what we already paused this attempt so
+		// a permanent error cannot leave a subset of pools paused with no batch.
+		var paused []string
 		for _, p := range poolList {
 			if err := r.setMCPPaused(ctx, p, true); err != nil {
+				for _, done := range paused {
+					_ = r.setMCPPaused(ctx, done, false)
+				}
 				return err
 			}
+			paused = append(paused, p)
 		}
 		for _, name := range list {
 			rem := u(remediationGVK)
@@ -1429,7 +1446,7 @@ func (r *ClusterBaselineReconciler) applyRemediationBatch(ctx context.Context, c
 			applied = false
 		}
 	}
-	pastGrace := !batch.StartedAt.IsZero() && time.Since(batch.StartedAt.Time) > batchResumeGrace
+	pastGrace := batchPastGrace(batch.StartedAt, time.Now(), batchResumeGrace)
 	if applied || pastGrace {
 		for _, p := range batch.Pools {
 			if err := r.setMCPPaused(ctx, p, false); err != nil {
