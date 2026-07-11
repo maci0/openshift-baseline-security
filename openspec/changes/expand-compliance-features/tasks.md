@@ -1,13 +1,13 @@
 ## 1. API + scoring (operator)
 
-- [ ] 1.1 Extend WaiverEntry with optional `requestedBy`, `approvedBy`, `reviewBy`, `expiresAt` (RFC3339 date); regen CRD + deepcopy + bundle
-- [ ] 1.2 aggregateStatus: skip expired waivers (expiresAt < now) so the check counts by raw status; unit test expired-vs-active
-- [ ] 1.3 Add `spec.scoring.mode` enum (Flat default | SeverityWeighted); regen CRD
-- [ ] 1.4 Implement severity-weighted score (weight PASS/FAIL by severity); keep Flat path identical; unit tests pin both modes + range 0..100
-- [ ] 1.5 Record last-two status per owned check in status (bounded map); compute regressed (PASS->FAIL) and new-FAIL sets; unit test transitions + bounded size
-- [ ] 1.6 Extend history to per-profile score history (reuse 30-cap ring); unit test
-- [ ] 1.7 Metrics: add severity-weighted score series (or reuse gauge with a mode label); update TestPublishMetrics
-- [ ] 1.8 Fuzz any new untrusted-input parsing (waiver date parse, severity map lookup)
+- [x] 1.1 Extend WaiverEntry with optional `requestedBy`, `approvedBy`, `reviewBy`, `expiresAt` (RFC3339 date); regen CRD + deepcopy + bundle
+- [x] 1.2 aggregateStatus: skip expired waivers (expiresAt < now) so the check counts by raw status; unit test expired-vs-active
+- [x] 1.3 Add `spec.scoring.mode` enum (Flat default | SeverityWeighted); regen CRD
+- [x] 1.4 Implement severity-weighted score (weight PASS/FAIL by severity); keep Flat path identical; unit tests pin both modes + range 0..100
+- [x] 1.5 Record last-two status per owned check in status (bounded map); compute regressed (PASS->FAIL) and new-FAIL sets; unit test transitions + bounded size
+- [x] 1.6 Extend history to per-profile score history (reuse 30-cap ring); unit test
+- [x] 1.7 Metrics: add severity-weighted score series (or reuse gauge with a mode label); update TestPublishMetrics
+- [x] 1.8 Fuzz any new untrusted-input parsing (waiver date parse, severity map lookup)
 
 ## 2. Console: governance + visibility
 

@@ -98,6 +98,79 @@ func TestAggregateStatus(t *testing.T) {
 	}
 }
 
+func checkResultSev(name, suite, status, sev string) *unstructured.Unstructured {
+	u := checkResult(name, suite, status)
+	u.SetLabels(map[string]string{suiteLabel: suite, checkSeverityLabel: sev})
+	return u
+}
+
+// TestAggregateStatusWaiverExpiry: an expired waiver no longer excludes its check
+// (it counts by raw status again); an unexpired one still excludes.
+func TestAggregateStatusWaiverExpiry(t *testing.T) {
+	scheme := testScheme(t)
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(
+			checkResult("p1", "baseline-cis", "PASS"),
+			checkResult("f1", "baseline-cis", "FAIL"),
+		).Build(),
+		Scheme: scheme,
+	}
+	cb := &baselinev1alpha1.ClusterBaseline{
+		Spec: baselinev1alpha1.ClusterBaselineSpec{Profiles: []baselinev1alpha1.ProfileKey{"cis"}},
+	}
+	past := metav1.NewTime(time.Now().Add(-time.Hour))
+	cb.Spec.Waivers = []baselinev1alpha1.WaiverEntry{{Name: "f1", ExpiresAt: &past}}
+	if err := r.aggregateStatus(context.Background(), cb); err != nil {
+		t.Fatal(err)
+	}
+	if cb.Status.Score == nil || *cb.Status.Score != 50 {
+		t.Fatalf("expired-waiver score = %v, want 50 (not excluded)", cb.Status.Score)
+	}
+	if p := cb.Status.Profiles[0]; p.Waived != 0 || p.Fail != 1 {
+		t.Fatalf("expired waiver should not exclude: %+v", p)
+	}
+	future := metav1.NewTime(time.Now().Add(time.Hour))
+	cb.Spec.Waivers = []baselinev1alpha1.WaiverEntry{{Name: "f1", ExpiresAt: &future}}
+	if err := r.aggregateStatus(context.Background(), cb); err != nil {
+		t.Fatal(err)
+	}
+	if cb.Status.Score == nil || *cb.Status.Score != 100 {
+		t.Fatalf("unexpired-waiver score = %v, want 100", cb.Status.Score)
+	}
+	if cb.Status.Profiles[0].Waived != 1 {
+		t.Fatalf("unexpired waiver should exclude, waived=%d", cb.Status.Profiles[0].Waived)
+	}
+}
+
+// TestAggregateStatusSeverityWeighted: weighted mode weights FAILs by severity,
+// so 1 high PASS (10) + 1 low FAIL (2) scores 83, vs flat 1/2 = 50.
+func TestAggregateStatusSeverityWeighted(t *testing.T) {
+	scheme := testScheme(t)
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(
+			checkResultSev("p1", "baseline-cis", "PASS", "high"),
+			checkResultSev("f1", "baseline-cis", "FAIL", "low"),
+		).Build(),
+		Scheme: scheme,
+	}
+	cb := &baselinev1alpha1.ClusterBaseline{
+		Spec: baselinev1alpha1.ClusterBaselineSpec{Profiles: []baselinev1alpha1.ProfileKey{"cis"}},
+	}
+	if err := r.aggregateStatus(context.Background(), cb); err != nil {
+		t.Fatal(err)
+	}
+	if *cb.Status.Score != 50 {
+		t.Fatalf("flat score = %d, want 50", *cb.Status.Score)
+	}
+	cb.Spec.Scoring.Mode = baselinev1alpha1.ScoringSeverityWeighted
+	if err := r.aggregateStatus(context.Background(), cb); err != nil {
+		t.Fatal(err)
+	}
+	if *cb.Status.Score != 83 {
+		t.Fatalf("weighted score = %d, want 83", *cb.Status.Score)
+	}
+}
+
 // TestAggregateStatusPoolsMultipleBenchmarks pins the score as a pooled ratio
 // over every enabled benchmark, not a mean of per-profile scores. cis is 3/4
 // (75%) and stig is 1/2 (50%); the pooled score is 4/6 = 66%, distinct from
@@ -217,6 +290,39 @@ func TestAggregateStatusWaivers(t *testing.T) {
 	}
 }
 
+// TestRecordHistoryRegression: when a new scan completes, newlyFailed/fixed are
+// computed against the previous scan's failures, then the snapshot advances.
+func TestRecordHistoryRegression(t *testing.T) {
+	scheme := testScheme(t)
+	scan := &unstructured.Unstructured{}
+	scan.SetGroupVersionKind(scanGVK)
+	scan.SetName("ocp4-cis")
+	scan.SetNamespace(complianceNamespace)
+	scan.SetLabels(map[string]string{suiteLabel: "baseline-cis"})
+	_ = unstructured.SetNestedField(scan.Object, time.Date(2026, 7, 11, 1, 0, 0, 0, time.UTC).Format(time.RFC3339), "status", "endTimestamp")
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(scan).Build(),
+		Scheme: scheme,
+	}
+	cb := &baselinev1alpha1.ClusterBaseline{
+		Spec:   baselinev1alpha1.ClusterBaselineSpec{Profiles: []baselinev1alpha1.ProfileKey{"cis"}},
+		Status: baselinev1alpha1.ClusterBaselineStatus{PreviousFailures: []string{"a", "c"}},
+	}
+	// Current scan fails a,b (a persists, b new); c was fixed.
+	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(90)), []string{"a", "b"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := cb.Status.NewlyFailed; len(got) != 1 || got[0] != "b" {
+		t.Fatalf("newlyFailed = %v, want [b]", got)
+	}
+	if got := cb.Status.Fixed; len(got) != 1 || got[0] != "c" {
+		t.Fatalf("fixed = %v, want [c]", got)
+	}
+	if got := cb.Status.PreviousFailures; len(got) != 2 || got[0] != "a" || got[1] != "b" {
+		t.Fatalf("previousFailures snapshot = %v, want [a b]", got)
+	}
+}
+
 func TestAggregateStatusClearsStaleScore(t *testing.T) {
 	scheme := testScheme(t)
 	r := &ClusterBaselineReconciler{
@@ -295,7 +401,7 @@ func TestRecordHistoryRing(t *testing.T) {
 			Score: int32(i),
 		})
 	}
-	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(77))); err != nil {
+	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(77)), nil); err != nil {
 		t.Fatal(err)
 	}
 	if len(cb.Status.History) != 30 {
@@ -312,7 +418,7 @@ func TestRecordHistoryRing(t *testing.T) {
 		t.Fatalf("LastScanTime = %v, foreign scan leaked into history", cb.Status.LastScanTime)
 	}
 	before := len(cb.Status.History)
-	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(88))); err != nil {
+	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(88)), nil); err != nil {
 		t.Fatal(err)
 	}
 	if len(cb.Status.History) != before {
@@ -333,7 +439,7 @@ func TestRecordHistoryNoOwnedScans(t *testing.T) {
 	cb := &baselinev1alpha1.ClusterBaseline{
 		Spec: baselinev1alpha1.ClusterBaselineSpec{Profiles: []baselinev1alpha1.ProfileKey{"cis"}},
 	}
-	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(50))); err != nil {
+	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(50)), nil); err != nil {
 		t.Fatal(err)
 	}
 	if cb.Status.LastScanTime != nil || len(cb.Status.History) != 0 {
@@ -366,7 +472,7 @@ func TestRecordHistoryDoesNotRewind(t *testing.T) {
 			},
 		},
 	}
-	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(10))); err != nil {
+	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(10)), nil); err != nil {
 		t.Fatal(err)
 	}
 	if !cb.Status.LastScanTime.Equal(&newer) {
@@ -394,7 +500,7 @@ func TestRecordHistoryIgnoresFarFutureEndTimestamp(t *testing.T) {
 	cb := &baselinev1alpha1.ClusterBaseline{
 		Spec: baselinev1alpha1.ClusterBaselineSpec{Profiles: []baselinev1alpha1.ProfileKey{"cis"}},
 	}
-	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(50))); err != nil {
+	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(50)), nil); err != nil {
 		t.Fatal(err)
 	}
 	if cb.Status.LastScanTime != nil || len(cb.Status.History) != 0 {
@@ -425,7 +531,7 @@ func TestRecordHistoryAppendsWhenScoreAppearsLater(t *testing.T) {
 			LastScanTime: &last,
 		},
 	}
-	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(80))); err != nil {
+	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(80)), nil); err != nil {
 		t.Fatal(err)
 	}
 	if len(cb.Status.History) != 1 || cb.Status.History[0].Score != 80 {

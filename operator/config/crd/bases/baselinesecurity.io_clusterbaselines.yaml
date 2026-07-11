@@ -123,6 +123,18 @@ spec:
                   CR or inflate condition messages that embed the value.
                 maxLength: 128
                 type: string
+              scoring:
+                description: scoring configures how the compliance score is computed.
+                properties:
+                  mode:
+                    default: Flat
+                    description: mode selects flat (default) or severity-weighted
+                      scoring.
+                    enum:
+                    - Flat
+                    - SeverityWeighted
+                    type: string
+                type: object
               tailoredProfiles:
                 description: |-
                   tailoredProfiles names TailoredProfiles in the openshift-compliance
@@ -149,6 +161,17 @@ spec:
                   description: WaiverEntry marks one ComplianceCheckResult as accepted
                     risk.
                   properties:
+                    approvedBy:
+                      description: approvedBy records who approved the waiver (for
+                        audit).
+                      maxLength: 253
+                      type: string
+                    expiresAt:
+                      description: |-
+                        expiresAt is when the waiver stops applying. After it passes, the check is
+                        scored by its raw status again (an accepted risk is not permanent).
+                      format: date-time
+                      type: string
                     name:
                       description: name is the ComplianceCheckResult metadata.name
                         to waive.
@@ -159,6 +182,16 @@ spec:
                       description: reason records why this check is accepted (for
                         audit).
                       maxLength: 1024
+                      type: string
+                    requestedBy:
+                      description: requestedBy records who requested the waiver (for
+                        audit).
+                      maxLength: 253
+                      type: string
+                    reviewBy:
+                      description: reviewBy is a reminder date to re-evaluate the
+                        waiver; informational.
+                      format: date-time
                       type: string
                   required:
                   - name
@@ -232,6 +265,14 @@ spec:
                   - type
                   type: object
                 type: array
+              fixed:
+                description: |-
+                  fixed lists owned checks that were FAIL at the previous scan but are no
+                  longer FAIL now (improvements since last scan).
+                items:
+                  type: string
+                type: array
+                x-kubernetes-list-type: set
               history:
                 description: history holds score snapshots, oldest first, capped at
                   30 entries.
@@ -256,11 +297,27 @@ spec:
               lastScanTime:
                 format: date-time
                 type: string
+              newlyFailed:
+                description: |-
+                  newlyFailed lists owned checks that are FAIL now but were not FAIL at the
+                  previous completed scan (regressions since last scan). Bounded by fail count.
+                items:
+                  type: string
+                type: array
+                x-kubernetes-list-type: set
               nextScanTime:
                 description: nextScanTime is the next scheduled scan, derived from
                   spec.schedule.
                 format: date-time
                 type: string
+              previousFailures:
+                description: |-
+                  previousFailures is the internal FAIL snapshot from the last completed scan,
+                  used to compute newlyFailed/fixed on the next scan.
+                items:
+                  type: string
+                type: array
+                x-kubernetes-list-type: set
               profiles:
                 items:
                   description: ProfileStatus summarizes check results for one selected
@@ -272,6 +329,27 @@ spec:
                     fail:
                       format: int32
                       type: integer
+                    history:
+                      description: history holds this profile's score snapshots, oldest
+                        first, capped at 30.
+                      items:
+                        description: ScoreSnapshot is one point of score history,
+                          recorded when a scan completes.
+                        properties:
+                          score:
+                            format: int32
+                            maximum: 100
+                            minimum: 0
+                            type: integer
+                          time:
+                            format: date-time
+                            type: string
+                        required:
+                        - score
+                        - time
+                        type: object
+                      maxItems: 30
+                      type: array
                     inconsistent:
                       description: |-
                         Inconsistent counts checks whose per-node results disagree across a
@@ -372,6 +450,27 @@ spec:
                     fail:
                       format: int32
                       type: integer
+                    history:
+                      description: history holds this profile's score snapshots, oldest
+                        first, capped at 30.
+                      items:
+                        description: ScoreSnapshot is one point of score history,
+                          recorded when a scan completes.
+                        properties:
+                          score:
+                            format: int32
+                            maximum: 100
+                            minimum: 0
+                            type: integer
+                          time:
+                            format: date-time
+                            type: string
+                        required:
+                        - score
+                        - time
+                        type: object
+                      maxItems: 30
+                      type: array
                     inconsistent:
                       description: |-
                         Inconsistent counts checks whose per-node results disagree across a

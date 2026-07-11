@@ -91,6 +91,10 @@ type ClusterBaselineSpec struct {
 	// +optional
 	Remediation RemediationSpec `json:"remediation,omitempty"`
 
+	// scoring configures how the compliance score is computed.
+	// +optional
+	Scoring ScoringSpec `json:"scoring,omitempty"`
+
 	// waivers exclude specific failing checks from the score as accepted risk.
 	// Each entry names a ComplianceCheckResult and records why it is waived. A
 	// waived check is removed from the pass/fail denominator and reported in the
@@ -114,6 +118,21 @@ type WaiverEntry struct {
 	// +optional
 	// +kubebuilder:validation:MaxLength=1024
 	Reason string `json:"reason,omitempty"`
+	// requestedBy records who requested the waiver (for audit).
+	// +optional
+	// +kubebuilder:validation:MaxLength=253
+	RequestedBy string `json:"requestedBy,omitempty"`
+	// approvedBy records who approved the waiver (for audit).
+	// +optional
+	// +kubebuilder:validation:MaxLength=253
+	ApprovedBy string `json:"approvedBy,omitempty"`
+	// expiresAt is when the waiver stops applying. After it passes, the check is
+	// scored by its raw status again (an accepted risk is not permanent).
+	// +optional
+	ExpiresAt *metav1.Time `json:"expiresAt,omitempty"`
+	// reviewBy is a reminder date to re-evaluate the waiver; informational.
+	// +optional
+	ReviewBy *metav1.Time `json:"reviewBy,omitempty"`
 }
 
 // RemediationSpec configures remediation handling.
@@ -124,6 +143,26 @@ type RemediationSpec struct {
 	// +kubebuilder:default=Manual
 	// +optional
 	Apply RemediationApplyPolicy `json:"apply,omitempty"`
+}
+
+// ScoringMode selects how the compliance score is computed.
+// +kubebuilder:validation:Enum=Flat;SeverityWeighted
+type ScoringMode string
+
+const (
+	// ScoringFlat is the default pooled PASS/(PASS+FAIL) ratio; every check counts equally.
+	ScoringFlat ScoringMode = "Flat"
+	// ScoringSeverityWeighted weights each PASS/FAIL by the check's severity, so a
+	// high-severity failure lowers the score more than a low-severity one.
+	ScoringSeverityWeighted ScoringMode = "SeverityWeighted"
+)
+
+// ScoringSpec configures score computation.
+type ScoringSpec struct {
+	// mode selects flat (default) or severity-weighted scoring.
+	// +kubebuilder:default=Flat
+	// +optional
+	Mode ScoringMode `json:"mode,omitempty"`
 }
 
 // ConsoleSpec configures the console plugin.
@@ -159,12 +198,20 @@ type ProfileStatus struct {
 	Key          ProfileKey `json:"key"`
 	ProfileNames []string   `json:"profileNames,omitempty"`
 	ResultCounts `json:",inline"`
+	// history holds this profile's score snapshots, oldest first, capped at 30.
+	// +optional
+	// +kubebuilder:validation:MaxItems=30
+	History []ScoreSnapshot `json:"history,omitempty"`
 }
 
 // TailoredProfileStatus summarizes check results for one bound TailoredProfile.
 type TailoredProfileStatus struct {
 	Name         string `json:"name"`
 	ResultCounts `json:",inline"`
+	// history holds this profile's score snapshots, oldest first, capped at 30.
+	// +optional
+	// +kubebuilder:validation:MaxItems=30
+	History []ScoreSnapshot `json:"history,omitempty"`
 }
 
 // ObjectRef points at a cluster resource this baseline owns or drives; consumed
@@ -214,6 +261,21 @@ type ClusterBaselineStatus struct {
 	// relatedObjects lists the resources this baseline owns or drives.
 	// +optional
 	RelatedObjects []ObjectRef `json:"relatedObjects,omitempty"`
+	// newlyFailed lists owned checks that are FAIL now but were not FAIL at the
+	// previous completed scan (regressions since last scan). Bounded by fail count.
+	// +optional
+	// +listType=set
+	NewlyFailed []string `json:"newlyFailed,omitempty"`
+	// fixed lists owned checks that were FAIL at the previous scan but are no
+	// longer FAIL now (improvements since last scan).
+	// +optional
+	// +listType=set
+	Fixed []string `json:"fixed,omitempty"`
+	// previousFailures is the internal FAIL snapshot from the last completed scan,
+	// used to compute newlyFailed/fixed on the next scan.
+	// +optional
+	// +listType=set
+	PreviousFailures []string `json:"previousFailures,omitempty"`
 }
 
 // ClusterBaseline is the cluster-scoped singleton configuring baseline

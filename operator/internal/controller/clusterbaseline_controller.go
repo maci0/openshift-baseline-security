@@ -39,6 +39,7 @@ const (
 	pluginName          = "baseline-security-console-plugin"
 	pluginNS            = "openshift-baseline-security"
 	suiteLabel          = "compliance.openshift.io/suite"
+	checkSeverityLabel  = "compliance.openshift.io/check-severity"
 	historyMax          = 30
 	// Grace before a not-ready Compliance Operator install rolls up to Degraded
 	// (OLM resolve + CSV install + pods can take several minutes on a slow cluster).
@@ -239,6 +240,42 @@ func score(pass, fail int32) *int32 {
 	}
 	s := int32(int64(pass) * 100 / total)
 	return &s
+}
+
+// score64 is score() over already-int64 (severity-weighted) sums.
+func score64(pass, fail int64) *int32 {
+	if pass < 0 || fail < 0 || pass+fail == 0 {
+		return nil
+	}
+	s := int32(pass * 100 / (pass + fail))
+	return &s
+}
+
+// severityWeight maps a ComplianceCheckResult severity to a score weight, so a
+// high-severity failure moves the severity-weighted score more than a low one.
+func severityWeight(sev string) int64 {
+	switch sev {
+	case "high":
+		return 10
+	case "medium":
+		return 5
+	case "low":
+		return 2
+	default: // "unknown", "info", or missing
+		return 1
+	}
+}
+
+// notIn returns the sorted members of a that are absent from set b.
+func notIn(a []string, b map[string]bool) []string {
+	var out []string
+	for _, x := range a {
+		if !b[x] {
+			out = append(out, x)
+		}
+	}
+	slices.Sort(out)
+	return out
 }
 
 // withoutPlugin returns plugins without name (copy; does not mutate input).
@@ -1023,14 +1060,22 @@ func (r *ClusterBaselineReconciler) aggregateStatus(ctx context.Context, cb *bas
 	// Checks waived as accepted risk are pulled out of the pass/fail denominator
 	// and reported in the Waived bucket, keyed by ComplianceCheckResult name.
 	// Skip empty names so a corrupt entry cannot match every empty-named object.
+	// An expired waiver no longer applies: the check is scored by its raw status.
+	nowT := time.Now()
 	waived := make(map[string]bool, len(cb.Spec.Waivers))
 	for _, w := range cb.Spec.Waivers {
-		if w.Name != "" {
-			waived[w.Name] = true
+		if w.Name == "" {
+			continue
 		}
+		if w.ExpiresAt != nil && !w.ExpiresAt.After(nowT) {
+			continue
+		}
+		waived[w.Name] = true
 	}
 
 	var pass, fail int32
+	var wPass, wFail int64 // severity-weighted totals
+	var currentFails []string
 	// tally routes one check result's status into the counts and the score.
 	// INFO is counted (excluded from score) so Overview totals match Results.
 	// SKIP is folded into NotApplicable (CO: check skipped for this system).
@@ -1059,6 +1104,20 @@ func (r *ClusterBaselineReconciler) aggregateStatus(ctx context.Context, cb *bas
 	}
 	for _, item := range list.Items {
 		suite := item.GetLabels()[suiteLabel]
+		// Route to the owning bucket first so weighting/regression only see owned checks.
+		var rc *baselinev1alpha1.ResultCounts
+		if name, ok := tailoredNameFromSuite(suite); ok {
+			if ts := byTailored[name]; ts != nil {
+				rc = &ts.ResultCounts
+			}
+		} else if key, ok := profileKeyFromSuite(suite); ok {
+			if ps := byProfile[key]; ps != nil {
+				rc = &ps.ResultCounts
+			}
+		}
+		if rc == nil {
+			continue
+		}
 		status, _, _ := unstructured.NestedString(item.Object, "status")
 		// Waivers apply to failing checks only: a waived FAIL leaves the score
 		// denominator into the Waived bucket. If a waived check later passes it
@@ -1067,35 +1126,49 @@ func (r *ClusterBaselineReconciler) aggregateStatus(ctx context.Context, cb *bas
 		if status == "FAIL" && waived[item.GetName()] {
 			status = "WAIVED"
 		}
-		if name, ok := tailoredNameFromSuite(suite); ok {
-			if ts := byTailored[name]; ts != nil {
-				tally(&ts.ResultCounts, status)
-			}
-			continue
-		}
-		if key, ok := profileKeyFromSuite(suite); ok {
-			if ps := byProfile[key]; ps != nil {
-				tally(&ps.ResultCounts, status)
-			}
+		tally(rc, status)
+		if status == "FAIL" {
+			currentFails = append(currentFails, item.GetName())
+			wFail += severityWeight(item.GetLabels()[checkSeverityLabel])
+		} else if status == "PASS" {
+			wPass += severityWeight(item.GetLabels()[checkSeverityLabel])
 		}
 	}
+	slices.Sort(currentFails)
 
+	// Preserve per-profile score history across the status.Profiles rebuild.
+	profHist := map[baselinev1alpha1.ProfileKey][]baselinev1alpha1.ScoreSnapshot{}
+	for _, p := range cb.Status.Profiles {
+		profHist[p.Key] = p.History
+	}
+	tpHist := map[string][]baselinev1alpha1.ScoreSnapshot{}
+	for _, tp := range cb.Status.TailoredProfiles {
+		tpHist[tp.Name] = tp.History
+	}
 	cb.Status.Profiles = cb.Status.Profiles[:0]
 	for _, key := range cb.Spec.Profiles {
-		cb.Status.Profiles = append(cb.Status.Profiles, *byProfile[key])
+		p := *byProfile[key]
+		p.History = profHist[key]
+		cb.Status.Profiles = append(cb.Status.Profiles, p)
 	}
 	cb.Status.TailoredProfiles = cb.Status.TailoredProfiles[:0]
 	for _, name := range cb.Spec.TailoredProfiles {
-		cb.Status.TailoredProfiles = append(cb.Status.TailoredProfiles, *byTailored[name])
+		tp := *byTailored[name]
+		tp.History = tpHist[name]
+		cb.Status.TailoredProfiles = append(cb.Status.TailoredProfiles, tp)
 	}
 	// LastScanTime is tracked even when no score is computable (all MANUAL /
 	// ERROR / NOT-APPLICABLE results) so completed scans stay visible.
-	cb.Status.Score = score(pass, fail)
+	if cb.Spec.Scoring.Mode == baselinev1alpha1.ScoringSeverityWeighted {
+		cb.Status.Score = score64(wPass, wFail)
+	} else {
+		cb.Status.Score = score(pass, fail)
+	}
 	// Fill deterministic status fields before history so a scan-list failure
 	// still leaves a coherent rollup on the error-path status update.
 	cb.Status.NextScanTime = nextScanTime(cb.Spec.Schedule, time.Now())
 	cb.Status.RelatedObjects = relatedObjects(cb)
-	return r.recordHistory(ctx, cb, cb.Status.Score)
+	return r.recordHistory(ctx, cb, cb.Status.Score, currentFails)
 }
 
 // nextScanTime computes the next cron fire after now, or nil on an invalid or
@@ -1141,7 +1214,7 @@ func relatedObjects(cb *baselinev1alpha1.ClusterBaseline) []baselinev1alpha1.Obj
 	return refs
 }
 
-func (r *ClusterBaselineReconciler) recordHistory(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline, s *int32) error {
+func (r *ClusterBaselineReconciler) recordHistory(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline, s *int32, currentFails []string) error {
 	scans := uList(scanGVK)
 	if err := r.List(ctx, scans, client.InNamespace(complianceNamespace)); err != nil {
 		if meta.IsNoMatchError(err) {
@@ -1183,6 +1256,30 @@ func (r *ClusterBaselineReconciler) recordHistory(ctx context.Context, cb *basel
 	cb.Status.LastScanTime = &last
 	if s != nil {
 		cb.Status.History = appendHistoryRing(cb.Status.History, last, *s, historyMax)
+	}
+	// A new scan completed: compute regressions vs the previous scan's failures,
+	// then snapshot the current failures for next time, and append a per-profile
+	// history point so each benchmark can be trended.
+	prev := make(map[string]bool, len(cb.Status.PreviousFailures))
+	for _, n := range cb.Status.PreviousFailures {
+		prev[n] = true
+	}
+	cur := make(map[string]bool, len(currentFails))
+	for _, n := range currentFails {
+		cur[n] = true
+	}
+	cb.Status.NewlyFailed = notIn(currentFails, prev)
+	cb.Status.Fixed = notIn(cb.Status.PreviousFailures, cur)
+	cb.Status.PreviousFailures = currentFails
+	for i := range cb.Status.Profiles {
+		if ps := score(cb.Status.Profiles[i].Pass, cb.Status.Profiles[i].Fail); ps != nil {
+			cb.Status.Profiles[i].History = appendHistoryRing(cb.Status.Profiles[i].History, last, *ps, historyMax)
+		}
+	}
+	for i := range cb.Status.TailoredProfiles {
+		if ps := score(cb.Status.TailoredProfiles[i].Pass, cb.Status.TailoredProfiles[i].Fail); ps != nil {
+			cb.Status.TailoredProfiles[i].History = appendHistoryRing(cb.Status.TailoredProfiles[i].History, last, *ps, historyMax)
+		}
 	}
 	return nil
 }
