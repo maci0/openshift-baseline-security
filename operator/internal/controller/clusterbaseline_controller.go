@@ -432,9 +432,17 @@ func clampScore(s *int32) *int32 {
 
 // sanitizeStatusForUpdate applies admission-safe bounds to status fields the
 // reconciler writes so a hostile or stale status cannot brick updates.
+// Per-profile and tailored history share the CRD MaxItems=30 / score [0,100]
+// bounds with the top-level history ring.
 func sanitizeStatusForUpdate(cb *baselinev1alpha1.ClusterBaseline) {
 	cb.Status.History = clampHistory(cb.Status.History, historyMax)
 	cb.Status.Score = clampScore(cb.Status.Score)
+	for i := range cb.Status.Profiles {
+		cb.Status.Profiles[i].History = clampHistory(cb.Status.Profiles[i].History, historyMax)
+	}
+	for i := range cb.Status.TailoredProfiles {
+		cb.Status.TailoredProfiles[i].History = clampHistory(cb.Status.TailoredProfiles[i].History, historyMax)
+	}
 }
 
 // condMessage caps condition messages so a huge wrapped error, invalid cron,
@@ -1340,9 +1348,16 @@ func (r *ClusterBaselineReconciler) setMCPPaused(ctx context.Context, pool strin
 // annotation: pause the affected MachineConfigPools and set apply on all listed
 // remediations, then resume once they are Applied (or after a grace) so the pools
 // reboot once. Resume is guaranteed: any failure still resumes the pools.
+//
+// The one-shot annotation is kept until pools are resumed. Clearing it before
+// status.remediationBatch is persisted would leave pools paused forever if the
+// end-of-reconcile Status().Update fails (annotation gone, batch nil, no recovery).
 func (r *ClusterBaselineReconciler) applyRemediationBatch(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline) error {
 	batch := cb.Status.RemediationBatch
-	names := cb.Annotations[batchApplyAnnotation]
+	names := ""
+	if cb.Annotations != nil {
+		names = cb.Annotations[batchApplyAnnotation]
+	}
 
 	if batch == nil {
 		if strings.TrimSpace(names) == "" {
@@ -1385,13 +1400,9 @@ func (r *ClusterBaselineReconciler) applyRemediationBatch(ctx context.Context, c
 				return err
 			}
 		}
-		// Clear the one-shot annotation first (a meta Update refreshes cb from the
-		// server, which would strip an in-memory status), then record the batch so
-		// the end-of-reconcile Status().Update persists it.
-		delete(cb.Annotations, batchApplyAnnotation)
-		if err := r.Update(ctx, cb); err != nil {
-			return err
-		}
+		// Keep the annotation until resume. status.remediationBatch is written by
+		// the end-of-reconcile Status().Update; if that fails, the annotation still
+		// drives a restart rather than orphaning paused pools.
 		cb.Status.RemediationBatch = &baselinev1alpha1.RemediationBatchStatus{
 			Phase: "Applying", Pools: poolList, Remediations: list, StartedAt: metav1.Now(),
 		}
@@ -1413,6 +1424,16 @@ func (r *ClusterBaselineReconciler) applyRemediationBatch(ctx context.Context, c
 		for _, p := range batch.Pools {
 			if err := r.setMCPPaused(ctx, p, false); err != nil {
 				return err
+			}
+		}
+		// Clear one-shot annotation after pools are resumed. Pools are safe even
+		// if this Update fails; the next reconcile retries the clear.
+		if cb.Annotations != nil {
+			if _, ok := cb.Annotations[batchApplyAnnotation]; ok {
+				delete(cb.Annotations, batchApplyAnnotation)
+				if err := r.Update(ctx, cb); err != nil {
+					return err
+				}
 			}
 		}
 		cb.Status.RemediationBatch = nil

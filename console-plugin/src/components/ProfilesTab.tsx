@@ -28,7 +28,7 @@ import { ClusterBaseline, ClusterBaselineModel, TailoredProfileModel } from '../
 import {
   errorMessage,
   isAlreadyExists,
-  isValidK8sName,
+  isValidTailoredProfileName,
   tailoredProfileManifest,
   toggledProfiles,
 } from '../utils';
@@ -75,7 +75,7 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => 
 
   const createTailored = async () => {
     const name = tpName.trim();
-    if (!baseline || !isValidK8sName(name)) return;
+    if (!baseline || !isValidTailoredProfileName(name)) return;
     setPending(true);
     setError(null);
     // Two steps: create the TailoredProfile, then bind it into spec. Track which
@@ -121,7 +121,7 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => 
     }
   };
 
-  const nameValid = tpName.trim() === '' || isValidK8sName(tpName.trim());
+  const nameValid = tpName.trim() === '' || isValidTailoredProfileName(tpName.trim());
 
   const toggle = async (key: string, checked: boolean) => {
     if (!baseline) return;
@@ -214,7 +214,7 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => 
         <ModalFooter>
           <Button
             variant="primary"
-            isDisabled={!isValidK8sName(tpName.trim()) || pending}
+            isDisabled={!isValidTailoredProfileName(tpName.trim()) || pending}
             isLoading={pending}
             onClick={() => void createTailored()}
           >

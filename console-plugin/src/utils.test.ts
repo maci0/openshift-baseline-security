@@ -30,6 +30,7 @@ import {
   buildReportHtml,
   tailoredProfileManifest,
   isValidK8sName,
+  isValidTailoredProfileName,
   isAlreadyExists,
 } from './utils';
 import { ClusterBaseline, ComplianceCheckResult, ComplianceRemediation, ResultCounts } from './models';
@@ -437,6 +438,23 @@ describe('isValidK8sName', () => {
     expect(isValidK8sName('-lead')).toBe(false);
     expect(isValidK8sName('trail-')).toBe(false);
     expect(isValidK8sName('a'.repeat(254))).toBe(false);
+  });
+});
+
+describe('isValidTailoredProfileName', () => {
+  it('accepts names that fit baseline-tp-<name> label budget (51 chars)', () => {
+    expect(isValidTailoredProfileName('cis-custom')).toBe(true);
+    expect(isValidTailoredProfileName('a'.repeat(51))).toBe(true);
+  });
+  it('rejects names longer than the ClusterBaseline tailoredProfiles MaxLength', () => {
+    // isValidK8sName would accept 52 alphanumerics; suite label would exceed 63.
+    expect(isValidK8sName('a'.repeat(52))).toBe(true);
+    expect(isValidTailoredProfileName('a'.repeat(52))).toBe(false);
+  });
+  it('rejects the same shape invalids as isValidK8sName', () => {
+    expect(isValidTailoredProfileName('')).toBe(false);
+    expect(isValidTailoredProfileName('UPPER')).toBe(false);
+    expect(isValidTailoredProfileName('-x')).toBe(false);
   });
 });
 

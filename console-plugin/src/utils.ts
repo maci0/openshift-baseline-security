@@ -201,10 +201,15 @@ export const effectiveStatus = (
 };
 
 // Valid Kubernetes resource name (RFC1123 subdomain): lowercase alphanumeric,
-// '-' or '.', starting and ending alphanumeric, at most 253 chars. Used to catch
-// an invalid TailoredProfile name in the form instead of at a raw apiserver 422.
+// '-' or '.', starting and ending alphanumeric, at most 253 chars.
 export const isValidK8sName = (name: string): boolean =>
   name.length > 0 && name.length <= 253 && /^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$/.test(name);
+
+// TailoredProfile names bound into the baseline are capped at 51 so the suite
+// label "baseline-tp-<name>" stays a valid Kubernetes label value (63 chars).
+// Matches ClusterBaselineSpec.tailoredProfiles items MaxLength.
+export const isValidTailoredProfileName = (name: string): boolean =>
+  name.length > 0 && name.length <= 51 && /^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$/.test(name);
 
 // True for an apiserver "already exists" (409) rejection, so a create can be
 // retried idempotently after a later step failed.

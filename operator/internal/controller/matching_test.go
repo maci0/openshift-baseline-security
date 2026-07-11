@@ -186,11 +186,27 @@ func TestSanitizeStatusForUpdate(t *testing.T) {
 			History: []baselinev1alpha1.ScoreSnapshot{
 				{Score: -1}, {Score: 999},
 			},
+			// Per-profile history shares MaxItems/score bounds; omit sanitize
+			// and a hand-edit bricks Status().Update the same way.
+			Profiles: []baselinev1alpha1.ProfileStatus{{
+				Key: "cis",
+				History: []baselinev1alpha1.ScoreSnapshot{
+					{Score: -3}, {Score: 150},
+				},
+			}},
+			TailoredProfiles: []baselinev1alpha1.TailoredProfileStatus{{
+				Name: "custom",
+				History: []baselinev1alpha1.ScoreSnapshot{
+					{Score: 200},
+				},
+			}},
 		},
 	}
 	// Pad history past MaxItems.
 	for i := 0; i < 40; i++ {
 		cb.Status.History = append(cb.Status.History, baselinev1alpha1.ScoreSnapshot{Score: int32(i % 50)})
+		cb.Status.Profiles[0].History = append(cb.Status.Profiles[0].History,
+			baselinev1alpha1.ScoreSnapshot{Score: int32(i % 50)})
 	}
 	sanitizeStatusForUpdate(cb)
 	if cb.Status.Score == nil || *cb.Status.Score != 100 {
@@ -203,6 +219,17 @@ func TestSanitizeStatusForUpdate(t *testing.T) {
 		if h.Score < 0 || h.Score > 100 {
 			t.Fatalf("history score out of range: %d", h.Score)
 		}
+	}
+	if len(cb.Status.Profiles[0].History) != historyMax {
+		t.Fatalf("profile history len = %d, want %d", len(cb.Status.Profiles[0].History), historyMax)
+	}
+	for _, h := range cb.Status.Profiles[0].History {
+		if h.Score < 0 || h.Score > 100 {
+			t.Fatalf("profile history score out of range: %d", h.Score)
+		}
+	}
+	if h := cb.Status.TailoredProfiles[0].History; len(h) != 1 || h[0].Score != 100 {
+		t.Fatalf("tailored history = %+v, want score 100", h)
 	}
 }
 

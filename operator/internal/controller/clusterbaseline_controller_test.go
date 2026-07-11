@@ -97,15 +97,16 @@ func TestRemediationBatch(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	// Phase 1: pause + apply.
+	// Phase 1: pause + apply. Annotation must stay until resume so a failed
+	// Status().Update cannot leave pools paused with no batch to recover.
 	if err := r.applyRemediationBatch(ctx, cb); err != nil {
 		t.Fatal(err)
 	}
 	if cb.Status.RemediationBatch == nil || cb.Status.RemediationBatch.Phase != "Applying" {
 		t.Fatalf("batch not started: %+v", cb.Status.RemediationBatch)
 	}
-	if cb.Annotations[batchApplyAnnotation] != "" {
-		t.Fatal("annotation not cleared")
+	if cb.Annotations[batchApplyAnnotation] == "" {
+		t.Fatal("annotation must remain until pools are resumed")
 	}
 	gotPool := machineConfigPool("worker")
 	_ = r.Get(ctx, types.NamespacedName{Name: "worker"}, gotPool)
@@ -119,15 +120,18 @@ func TestRemediationBatch(t *testing.T) {
 		t.Fatal("rem1 not set to apply")
 	}
 
-	// Phase 2: not Applied yet -> pool stays paused.
+	// Phase 2: not Applied yet -> pool stays paused; annotation still held.
 	if err := r.applyRemediationBatch(ctx, cb); err != nil {
 		t.Fatal(err)
 	}
 	if cb.Status.RemediationBatch == nil {
 		t.Fatal("batch resumed before Applied")
 	}
+	if cb.Annotations[batchApplyAnnotation] == "" {
+		t.Fatal("annotation cleared before resume")
+	}
 
-	// Mark Applied -> resume.
+	// Mark Applied -> resume and clear annotation.
 	_ = unstructured.SetNestedField(gotRem.Object, "Applied", "status", "applicationState")
 	_ = r.Update(ctx, gotRem)
 	if err := r.applyRemediationBatch(ctx, cb); err != nil {
@@ -136,9 +140,42 @@ func TestRemediationBatch(t *testing.T) {
 	if cb.Status.RemediationBatch != nil {
 		t.Fatalf("batch not cleared after Applied: %+v", cb.Status.RemediationBatch)
 	}
+	// Re-read from API: annotation clear is a meta Update.
+	gotCB := &baselinev1alpha1.ClusterBaseline{}
+	_ = r.Get(ctx, types.NamespacedName{Name: "cluster"}, gotCB)
+	if gotCB.Annotations[batchApplyAnnotation] != "" {
+		t.Fatal("annotation not cleared after resume")
+	}
 	_ = r.Get(ctx, types.NamespacedName{Name: "worker"}, gotPool)
 	if paused, _, _ := unstructured.NestedBool(gotPool.Object, "spec", "paused"); paused {
 		t.Fatal("worker pool not resumed")
+	}
+}
+
+// TestRemediationBatchRestartsFromAnnotation: if status.remediationBatch was
+// never persisted (Status().Update failed after pause), the kept annotation
+// restarts the batch instead of leaving pools paused forever.
+func TestRemediationBatchRestartsFromAnnotation(t *testing.T) {
+	scheme := testScheme(t)
+	rem := nodeRemediation("rem1", "worker", "")
+	pool := machineConfigPool("worker")
+	// Pool already paused as if a prior start succeeded but status was lost.
+	_ = unstructured.SetNestedField(pool.Object, true, "spec", "paused")
+	cb := &baselinev1alpha1.ClusterBaseline{}
+	cb.SetName("cluster")
+	cb.SetAnnotations(map[string]string{batchApplyAnnotation: "rem1"})
+	// No RemediationBatch in status: models lost status write.
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).
+			WithObjects(cb, rem, pool).
+			WithStatusSubresource(&baselinev1alpha1.ClusterBaseline{}).Build(),
+		Scheme: scheme,
+	}
+	if err := r.applyRemediationBatch(context.Background(), cb); err != nil {
+		t.Fatal(err)
+	}
+	if cb.Status.RemediationBatch == nil {
+		t.Fatal("annotation must restart batch when status was lost")
 	}
 }
 
