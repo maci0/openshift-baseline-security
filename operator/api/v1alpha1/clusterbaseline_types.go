@@ -223,6 +223,21 @@ type ObjectRef struct {
 	Namespace string `json:"namespace,omitempty"`
 }
 
+// RemediationBatchStatus tracks an in-progress batch apply that pauses the
+// affected MachineConfigPools so node remediations reboot once, not per apply.
+type RemediationBatchStatus struct {
+	// phase is Applying while pools are paused and remediations are being applied.
+	Phase string `json:"phase"`
+	// pools are the MachineConfigPools paused for this batch.
+	// +listType=set
+	Pools []string `json:"pools,omitempty"`
+	// remediations are the ComplianceRemediation names in this batch.
+	// +listType=set
+	Remediations []string `json:"remediations,omitempty"`
+	// startedAt bounds how long pools stay paused before a forced resume.
+	StartedAt metav1.Time `json:"startedAt"`
+}
+
 // ScoreSnapshot is one point of score history, recorded when a scan completes.
 type ScoreSnapshot struct {
 	Time metav1.Time `json:"time"`
@@ -276,6 +291,9 @@ type ClusterBaselineStatus struct {
 	// +optional
 	// +listType=set
 	PreviousFailures []string `json:"previousFailures,omitempty"`
+	// remediationBatch tracks an in-progress MachineConfigPool-paused batch apply.
+	// +optional
+	RemediationBatch *RemediationBatchStatus `json:"remediationBatch,omitempty"`
 }
 
 // ClusterBaseline is the cluster-scoped singleton configuring baseline

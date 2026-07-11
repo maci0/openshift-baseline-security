@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"maps"
 	"os"
 	"slices"
 	"strconv"
@@ -62,7 +63,17 @@ var (
 	consolePluginGVK = schema.GroupVersionKind{Group: "console.openshift.io", Version: "v1", Kind: "ConsolePlugin"}
 	consoleGVK       = schema.GroupVersionKind{Group: "operator.openshift.io", Version: "v1", Kind: "Console"}
 	operatorGroupGVK = schema.GroupVersionKind{Group: "operators.coreos.com", Version: "v1", Kind: "OperatorGroup"}
+	remediationGVK   = schema.GroupVersionKind{Group: "compliance.openshift.io", Version: "v1alpha1", Kind: "ComplianceRemediation"}
+	mcpGVK           = schema.GroupVersionKind{Group: "machineconfiguration.openshift.io", Version: "v1", Kind: "MachineConfigPool"}
 )
+
+// batchApplyAnnotation on the ClusterBaseline carries a comma-separated list of
+// ComplianceRemediation names to batch-apply with MachineConfigPool pause/resume.
+const batchApplyAnnotation = "baselinesecurity.io/batch-apply"
+
+// batchResumeGrace forces a resume even if remediations never reach Applied, so
+// a MachineConfigPool is never left paused.
+const batchResumeGrace = 10 * time.Minute
 
 // ClusterBaselineReconciler reconciles the ClusterBaseline singleton.
 type ClusterBaselineReconciler struct {
@@ -75,6 +86,8 @@ type ClusterBaselineReconciler struct {
 // +kubebuilder:rbac:groups=baselinesecurity.io,resources=clusterbaselines/finalizers,verbs=update
 // +kubebuilder:rbac:groups=compliance.openshift.io,resources=scansettings;scansettingbindings,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=compliance.openshift.io,resources=compliancecheckresults;compliancescans,verbs=get;list;watch
+// +kubebuilder:rbac:groups=compliance.openshift.io,resources=complianceremediations,verbs=get;list;watch;patch
+// +kubebuilder:rbac:groups=machineconfiguration.openshift.io,resources=machineconfigpools,verbs=get;list;watch;patch
 // Subscriptions need update/patch so complianceCatalogSource can be synced after
 // the initial createIfMissing (OKD / disconnected catalog moves).
 // +kubebuilder:rbac:groups=operators.coreos.com,resources=subscriptions,verbs=get;list;watch;create;update;patch
@@ -144,6 +157,9 @@ func (r *ClusterBaselineReconciler) reconcileOwned(ctx context.Context, cb *base
 	}
 	if err := r.ensureConsolePlugin(ctx, cb); err != nil {
 		return fmt.Errorf("ensuring console plugin: %w", err)
+	}
+	if err := r.applyRemediationBatch(ctx, cb); err != nil {
+		return fmt.Errorf("applying remediation batch: %w", err)
 	}
 	if err := r.aggregateStatus(ctx, cb); err != nil {
 		return fmt.Errorf("aggregating status: %w", err)
@@ -264,6 +280,17 @@ func severityWeight(sev string) int64 {
 	default: // "unknown", "info", or missing
 		return 1
 	}
+}
+
+// splitCSV splits a comma-separated list, trimming and dropping empty items.
+func splitCSV(s string) []string {
+	var out []string
+	for _, p := range strings.Split(s, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // notIn returns the sorted members of a that are absent from set b.
@@ -1212,6 +1239,116 @@ func relatedObjects(cb *baselinev1alpha1.ClusterBaseline) []baselinev1alpha1.Obj
 		})
 	}
 	return refs
+}
+
+// poolFromRemediation returns the MachineConfigPool a node remediation targets,
+// read from its rendered MachineConfig's role label, or "" for a non-node one.
+func poolFromRemediation(rem *unstructured.Unstructured) string {
+	obj, _, _ := unstructured.NestedMap(rem.Object, "spec", "current", "object")
+	if obj == nil {
+		return ""
+	}
+	if kind, _, _ := unstructured.NestedString(obj, "kind"); kind != "MachineConfig" {
+		return ""
+	}
+	role, _, _ := unstructured.NestedString(obj, "metadata", "labels", "machineconfiguration.openshift.io/role")
+	return role
+}
+
+func (r *ClusterBaselineReconciler) setMCPPaused(ctx context.Context, pool string, paused bool) error {
+	mcp := u(mcpGVK)
+	mcp.SetName(pool)
+	patch := []byte(fmt.Sprintf(`{"spec":{"paused":%t}}`, paused))
+	err := r.Patch(ctx, mcp, client.RawPatch(types.MergePatchType, patch))
+	// A missing pool or absent MCP CRD must not wedge the batch.
+	if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) {
+		return nil
+	}
+	return err
+}
+
+// applyRemediationBatch runs a two-phase batch apply driven by the batch-apply
+// annotation: pause the affected MachineConfigPools and set apply on all listed
+// remediations, then resume once they are Applied (or after a grace) so the pools
+// reboot once. Resume is guaranteed: any failure still resumes the pools.
+func (r *ClusterBaselineReconciler) applyRemediationBatch(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline) error {
+	batch := cb.Status.RemediationBatch
+	names := cb.Annotations[batchApplyAnnotation]
+
+	if batch == nil {
+		if strings.TrimSpace(names) == "" {
+			return nil
+		}
+		list := splitCSV(names)
+		pools := map[string]bool{}
+		for _, name := range list {
+			rem := u(remediationGVK)
+			if err := r.Get(ctx, types.NamespacedName{Namespace: complianceNamespace, Name: name}, rem); err != nil {
+				if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) {
+					continue
+				}
+				return err
+			}
+			if p := poolFromRemediation(rem); p != "" {
+				pools[p] = true
+			}
+		}
+		poolList := slices.Sorted(maps.Keys(pools))
+		// Pause first so all apply-triggered MachineConfig renders coalesce.
+		for _, p := range poolList {
+			if err := r.setMCPPaused(ctx, p, true); err != nil {
+				return err
+			}
+		}
+		for _, name := range list {
+			rem := u(remediationGVK)
+			rem.SetName(name)
+			rem.SetNamespace(complianceNamespace)
+			patch := []byte(`{"spec":{"apply":true}}`)
+			if err := r.Patch(ctx, rem, client.RawPatch(types.MergePatchType, patch)); err != nil {
+				if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) {
+					continue
+				}
+				// Resume any paused pools so a failure never leaves them paused.
+				for _, p := range poolList {
+					_ = r.setMCPPaused(ctx, p, false)
+				}
+				return err
+			}
+		}
+		// Clear the one-shot annotation first (a meta Update refreshes cb from the
+		// server, which would strip an in-memory status), then record the batch so
+		// the end-of-reconcile Status().Update persists it.
+		delete(cb.Annotations, batchApplyAnnotation)
+		if err := r.Update(ctx, cb); err != nil {
+			return err
+		}
+		cb.Status.RemediationBatch = &baselinev1alpha1.RemediationBatchStatus{
+			Phase: "Applying", Pools: poolList, Remediations: list, StartedAt: metav1.Now(),
+		}
+		return nil
+	}
+
+	// Applying: resume when every listed remediation is Applied, or past grace.
+	applied := true
+	for _, name := range batch.Remediations {
+		rem := u(remediationGVK)
+		if err := r.Get(ctx, types.NamespacedName{Namespace: complianceNamespace, Name: name}, rem); err != nil {
+			continue
+		}
+		if s, _, _ := unstructured.NestedString(rem.Object, "status", "applicationState"); s != "Applied" {
+			applied = false
+		}
+	}
+	if applied || time.Since(batch.StartedAt.Time) > batchResumeGrace {
+		for _, p := range batch.Pools {
+			if err := r.setMCPPaused(ctx, p, false); err != nil {
+				return err
+			}
+		}
+		cb.Status.RemediationBatch = nil
+	}
+	return nil
 }
 
 func (r *ClusterBaselineReconciler) recordHistory(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline, s *int32, currentFails []string) error {

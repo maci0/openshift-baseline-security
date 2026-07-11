@@ -48,7 +48,97 @@ func testScheme(t *testing.T) *runtime.Scheme {
 	scheme.AddKnownTypeWithName(operatorGroupGVK, &unstructured.Unstructured{})
 	scheme.AddKnownTypeWithName(consolePluginGVK, &unstructured.Unstructured{})
 	scheme.AddKnownTypeWithName(consoleGVK, &unstructured.Unstructured{})
+	scheme.AddKnownTypeWithName(remediationGVK, &unstructured.Unstructured{})
+	scheme.AddKnownTypeWithName(mcpGVK, &unstructured.Unstructured{})
 	return scheme
+}
+
+// nodeRemediation builds a ComplianceRemediation whose rendered object is a
+// MachineConfig for the given pool role, in the given applicationState.
+func nodeRemediation(name, pool, state string) *unstructured.Unstructured {
+	rem := &unstructured.Unstructured{}
+	rem.SetGroupVersionKind(remediationGVK)
+	rem.SetName(name)
+	rem.SetNamespace(complianceNamespace)
+	_ = unstructured.SetNestedMap(rem.Object, map[string]any{
+		"kind": "MachineConfig",
+		"metadata": map[string]any{
+			"labels": map[string]any{"machineconfiguration.openshift.io/role": pool},
+		},
+	}, "spec", "current", "object")
+	if state != "" {
+		_ = unstructured.SetNestedField(rem.Object, state, "status", "applicationState")
+	}
+	return rem
+}
+
+func machineConfigPool(name string) *unstructured.Unstructured {
+	mcp := &unstructured.Unstructured{}
+	mcp.SetGroupVersionKind(mcpGVK)
+	mcp.SetName(name)
+	return mcp
+}
+
+// TestRemediationBatch: the annotation triggers pause + apply, then a later
+// reconcile resumes once the remediation is Applied.
+func TestRemediationBatch(t *testing.T) {
+	scheme := testScheme(t)
+	rem := nodeRemediation("rem1", "worker", "")
+	pool := machineConfigPool("worker")
+	cb := &baselinev1alpha1.ClusterBaseline{}
+	cb.SetName("cluster")
+	cb.SetAnnotations(map[string]string{batchApplyAnnotation: "rem1"})
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).
+			WithObjects(cb, rem, pool).
+			WithStatusSubresource(&baselinev1alpha1.ClusterBaseline{}).Build(),
+		Scheme: scheme,
+	}
+	ctx := context.Background()
+
+	// Phase 1: pause + apply.
+	if err := r.applyRemediationBatch(ctx, cb); err != nil {
+		t.Fatal(err)
+	}
+	if cb.Status.RemediationBatch == nil || cb.Status.RemediationBatch.Phase != "Applying" {
+		t.Fatalf("batch not started: %+v", cb.Status.RemediationBatch)
+	}
+	if cb.Annotations[batchApplyAnnotation] != "" {
+		t.Fatal("annotation not cleared")
+	}
+	gotPool := machineConfigPool("worker")
+	_ = r.Get(ctx, types.NamespacedName{Name: "worker"}, gotPool)
+	if paused, _, _ := unstructured.NestedBool(gotPool.Object, "spec", "paused"); !paused {
+		t.Fatal("worker pool not paused")
+	}
+	gotRem := &unstructured.Unstructured{}
+	gotRem.SetGroupVersionKind(remediationGVK)
+	_ = r.Get(ctx, types.NamespacedName{Namespace: complianceNamespace, Name: "rem1"}, gotRem)
+	if apply, _, _ := unstructured.NestedBool(gotRem.Object, "spec", "apply"); !apply {
+		t.Fatal("rem1 not set to apply")
+	}
+
+	// Phase 2: not Applied yet -> pool stays paused.
+	if err := r.applyRemediationBatch(ctx, cb); err != nil {
+		t.Fatal(err)
+	}
+	if cb.Status.RemediationBatch == nil {
+		t.Fatal("batch resumed before Applied")
+	}
+
+	// Mark Applied -> resume.
+	_ = unstructured.SetNestedField(gotRem.Object, "Applied", "status", "applicationState")
+	_ = r.Update(ctx, gotRem)
+	if err := r.applyRemediationBatch(ctx, cb); err != nil {
+		t.Fatal(err)
+	}
+	if cb.Status.RemediationBatch != nil {
+		t.Fatalf("batch not cleared after Applied: %+v", cb.Status.RemediationBatch)
+	}
+	_ = r.Get(ctx, types.NamespacedName{Name: "worker"}, gotPool)
+	if paused, _, _ := unstructured.NestedBool(gotPool.Object, "spec", "paused"); paused {
+		t.Fatal("worker pool not resumed")
+	}
 }
 
 func checkResult(name, suite, status string) *unstructured.Unstructured {

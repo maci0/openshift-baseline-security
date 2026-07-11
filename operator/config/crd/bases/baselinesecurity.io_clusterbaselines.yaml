@@ -429,6 +429,37 @@ spec:
                   - resource
                   type: object
                 type: array
+              remediationBatch:
+                description: remediationBatch tracks an in-progress MachineConfigPool-paused
+                  batch apply.
+                properties:
+                  phase:
+                    description: phase is Applying while pools are paused and remediations
+                      are being applied.
+                    type: string
+                  pools:
+                    description: pools are the MachineConfigPools paused for this
+                      batch.
+                    items:
+                      type: string
+                    type: array
+                    x-kubernetes-list-type: set
+                  remediations:
+                    description: remediations are the ComplianceRemediation names
+                      in this batch.
+                    items:
+                      type: string
+                    type: array
+                    x-kubernetes-list-type: set
+                  startedAt:
+                    description: startedAt bounds how long pools stay paused before
+                      a forced resume.
+                    format: date-time
+                    type: string
+                required:
+                - phase
+                - startedAt
+                type: object
               score:
                 description: |-
                   score is pass/(pass+fail) across all profiles, 0-100. MANUAL, INFO,

@@ -82,6 +82,15 @@ rules:
 - apiGroups:
   - compliance.openshift.io
   resources:
+  - complianceremediations
+  verbs:
+  - get
+  - list
+  - patch
+  - watch
+- apiGroups:
+  - compliance.openshift.io
+  resources:
   - scansettingbindings
   - scansettings
   verbs:
@@ -103,6 +112,15 @@ rules:
   - list
   - patch
   - update
+  - watch
+- apiGroups:
+  - machineconfiguration.openshift.io
+  resources:
+  - machineconfigpools
+  verbs:
+  - get
+  - list
+  - patch
   - watch
 - apiGroups:
   - operator.openshift.io
