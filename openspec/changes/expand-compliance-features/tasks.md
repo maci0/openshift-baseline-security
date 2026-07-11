@@ -15,7 +15,7 @@
 - [x] 2.2 Surface expired/expiring waivers: Results shows an expired waiver as failing with metadata; Overview shows an expiring-soon count; jest + Playwright
 - [ ] 2.3 Regressions view (new tab or Overview section): list PASS->FAIL and new-FAIL from status, deep-link each; first-scan empty state; jest + Playwright
 - [x] 2.4 Schedule editor: cron input with validation, gated on clusterbaselines patch, patches spec.schedule; jest for validation + patch
-- [ ] 2.5 Per-profile trend: render each profile card's own trend line from per-profile history; jest
+- [x] 2.5 Per-profile trend: render each profile card's own trend line from per-profile history; jest
 
 ## 3. Guided remediation
 
@@ -39,8 +39,8 @@
 
 ## 6. Score-trend + informer
 
-- [ ] 6.1 Console trend card / extend the existing history chart for the shipped in-console trend (pairs with 5.2 Grafana)
-- [ ] 6.2 Dynamic informer: watch ComplianceCheckResult/Scan/Remediation once CRDs exist, map events to the singleton reconcile; tolerate NoKindMatch at startup; keep poll fallback
+- [x] 6.1 Console trend card / extend the existing history chart for the shipped in-console trend (pairs with 5.2 Grafana)
+- [ ] 6.2 (DEFERRED - polling works; needs a lazy informer tolerating CRD-absent startup) Dynamic informer: watch ComplianceCheckResult/Scan/Remediation once CRDs exist, map events to the singleton reconcile; tolerate NoKindMatch at startup; keep poll fallback
 - [ ] 6.3 e2e/unit: reconcile fires on scan-result change without waiting for the poll; manager starts without the CRDs
 
 ## 7. Docs + test-plan

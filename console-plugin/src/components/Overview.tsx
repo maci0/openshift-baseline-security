@@ -40,7 +40,7 @@ import {
   InfoCircleIcon,
   MinusCircleIcon,
 } from '@patternfly/react-icons';
-import { ClusterBaseline, ClusterBaselineModel, ResultCounts } from '../models';
+import { ClusterBaseline, ClusterBaselineModel, ResultCounts, ScoreSnapshot } from '../models';
 import {
   aggregateCounts,
   errorMessage,
@@ -154,6 +154,26 @@ const CountRow: React.FC<{
     <FlexItem>{href && count > 0 ? <a href={href}>{count}</a> : count}</FlexItem>
   </Flex>
 );
+
+// Compact score sparkline for a profile card from its history (>=2 points).
+const MiniTrend: React.FC<{ history?: ScoreSnapshot[] }> = ({ history }) => {
+  if (!history || history.length < 2) {
+    return null;
+  }
+  return (
+    <div style={{ height: 40, marginTop: 'var(--pf-t--global--spacer--sm)' }}>
+      <Chart
+        ariaTitle="score trend"
+        height={40}
+        padding={{ top: 4, bottom: 4, left: 0, right: 0 }}
+        minDomain={{ y: 0 }}
+        maxDomain={{ y: 100 }}
+      >
+        <ChartArea data={history.map((h) => ({ x: h.time, y: h.score }))} />
+      </Chart>
+    </div>
+  );
+};
 
 // Per-profile status rows for a score card. Pass/Fail always show; the rest
 // (Manual, Info, Inconsistent, Error, Waived, N/A) show only when non-zero, so
@@ -486,6 +506,7 @@ const Overview: React.FC<{ baseline?: ClusterBaseline; loaded: boolean }> = ({
               </CardHeader>
               <CardBody>
                 <ProfileCounts counts={p} filterKey={p.key} />
+                <MiniTrend history={p.history} />
               </CardBody>
             </Card>
           );
@@ -514,6 +535,7 @@ const Overview: React.FC<{ baseline?: ClusterBaseline; loaded: boolean }> = ({
               </CardHeader>
               <CardBody>
                 <ProfileCounts counts={tp} filterKey={`tp-${tp.name}`} />
+                <MiniTrend history={tp.history} />
               </CardBody>
             </Card>
           );
