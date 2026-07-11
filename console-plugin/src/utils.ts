@@ -171,6 +171,20 @@ export const toggledProfiles = (
   return next.length ? next : null;
 };
 
+// Loose 5-field cron validation for the schedule editor: five whitespace-
+// separated fields of the allowed character set. The operator does the real
+// parse; this just blocks obvious garbage before patching.
+export const isValidCron = (s: string): boolean => {
+  const fields = s.trim().split(/\s+/);
+  return fields.length === 5 && fields.every((f) => /^[0-9*/,\-]+$/.test(f));
+};
+
+// JSON patch for spec.schedule (add when absent, replace when present).
+export const schedulePatch = (hasSchedule: boolean, cron: string) =>
+  hasSchedule
+    ? [{ op: 'replace' as const, path: '/spec/schedule', value: cron }]
+    : [{ op: 'add' as const, path: '/spec/schedule', value: cron }];
+
 // JSON patch for spec.remediation.apply (Automatic|Manual).
 export const remediationApplyPatch = (hasRemediation: boolean, automatic: boolean) => {
   const apply = automatic ? 'Automatic' : 'Manual';

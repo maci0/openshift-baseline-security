@@ -100,5 +100,13 @@
   "Requested by": "Requested by",
   "Approved by": "Approved by",
   "Expires": "Expires",
-  "This waiver has expired; the check is scored by its status again.": "This waiver has expired; the check is scored by its status again."
+  "This waiver has expired; the check is scored by its status again.": "This waiver has expired; the check is scored by its status again.",
+  "{{count}} check(s) newly failing since the last scan": "{{count}} check(s) newly failing since the last scan",
+  "Review failing checks": "Review failing checks",
+  "{{count}} fixed": "{{count}} fixed",
+  "{{count}} waiver(s) expiring within two weeks": "{{count}} waiver(s) expiring within two weeks",
+  "Edit": "Edit",
+  "Save": "Save",
+  "Enter a 5-field cron schedule.": "Enter a 5-field cron schedule.",
+  "Failed to update schedule.": "Failed to update schedule."
 }

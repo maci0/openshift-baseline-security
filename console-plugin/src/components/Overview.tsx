@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { useTranslation } from 'react-i18next';
-import { Timestamp } from '@openshift-console/dynamic-plugin-sdk';
+import { k8sPatch, Timestamp, useAccessReview } from '@openshift-console/dynamic-plugin-sdk';
 import {
   Chart,
   ChartArea,
@@ -9,6 +9,7 @@ import {
 } from '@patternfly/react-charts/victory';
 import {
   Alert,
+  Button,
   Card,
   CardBody,
   CardHeader,
@@ -23,9 +24,14 @@ import {
   Flex,
   FlexItem,
   Gallery,
+  HelperText,
+  HelperTextItem,
   Icon,
   PageSection,
   Skeleton,
+  Split,
+  SplitItem,
+  TextInput,
 } from '@patternfly/react-core';
 import {
   CheckCircleIcon,
@@ -34,8 +40,102 @@ import {
   InfoCircleIcon,
   MinusCircleIcon,
 } from '@patternfly/react-icons';
-import { ClusterBaseline, ResultCounts } from '../models';
-import { aggregateCounts, resultsHref } from '../utils';
+import { ClusterBaseline, ClusterBaselineModel, ResultCounts } from '../models';
+import {
+  aggregateCounts,
+  errorMessage,
+  expiringWaivers,
+  isValidCron,
+  resultsHref,
+  schedulePatch,
+} from '../utils';
+
+// Inline editor for spec.schedule in the Details card, gated on patch permission.
+const ScheduleEditor: React.FC<{ baseline: ClusterBaseline }> = ({ baseline }) => {
+  const { t } = useTranslation('plugin__baseline-security-console-plugin');
+  const current = baseline.spec.schedule || '0 1 * * *';
+  const [editing, setEditing] = React.useState(false);
+  const [value, setValue] = React.useState(current);
+  const [busy, setBusy] = React.useState(false);
+  const [err, setErr] = React.useState<string | null>(null);
+  const [canEdit, canEditLoading] = useAccessReview({
+    group: 'baselinesecurity.io',
+    resource: 'clusterbaselines',
+    verb: 'patch',
+  });
+  const valid = isValidCron(value);
+
+  if (!editing) {
+    return (
+      <Split hasGutter>
+        <SplitItem>
+          <code>{current}</code>
+        </SplitItem>
+        {canEdit && !canEditLoading && (
+          <SplitItem>
+            <Button
+              variant="link"
+              isInline
+              onClick={() => {
+                setValue(current);
+                setErr(null);
+                setEditing(true);
+              }}
+            >
+              {t('Edit')}
+            </Button>
+          </SplitItem>
+        )}
+      </Split>
+    );
+  }
+  const save = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      await k8sPatch({
+        model: ClusterBaselineModel,
+        resource: baseline,
+        data: schedulePatch(!!baseline.spec.schedule, value.trim()),
+      });
+      setEditing(false);
+    } catch (e) {
+      setErr(errorMessage(e) ?? t('Failed to update schedule.'));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <>
+      <Split hasGutter>
+        <SplitItem isFilled>
+          <TextInput
+            aria-label={t('Schedule')}
+            value={value}
+            onChange={(_e, v) => setValue(v)}
+            validated={valid ? 'default' : 'error'}
+          />
+        </SplitItem>
+        <SplitItem>
+          <Button variant="primary" isInline isDisabled={!valid || busy} isLoading={busy} onClick={() => void save()}>
+            {t('Save')}
+          </Button>
+        </SplitItem>
+        <SplitItem>
+          <Button variant="link" isInline isDisabled={busy} onClick={() => setEditing(false)}>
+            {t('Cancel')}
+          </Button>
+        </SplitItem>
+      </Split>
+      {!valid && (
+        <HelperText>
+          <HelperTextItem variant="error">{t('Enter a 5-field cron schedule.')}</HelperTextItem>
+        </HelperText>
+      )}
+      {err && <Alert variant="danger" isInline title={err} style={{ marginTop: 4 }} />}
+    </>
+  );
+};
 
 const CountRow: React.FC<{
   icon: React.ReactElement;
@@ -181,6 +281,11 @@ const Overview: React.FC<{ baseline?: ClusterBaseline; loaded: boolean }> = ({
   ].filter((s) => s.value > 0);
   const totalChecks = segments.reduce((n, s) => n + s.value, 0);
 
+  const WEEK = 7 * 24 * 60 * 60 * 1000;
+  const expiring = expiringWaivers(baseline.spec.waivers, 2 * WEEK);
+  const newlyFailed = baseline.status?.newlyFailed ?? [];
+  const fixed = baseline.status?.fixed ?? [];
+
   return (
     <PageSection>
       {degraded && (
@@ -202,6 +307,27 @@ const Overview: React.FC<{ baseline?: ClusterBaseline; loaded: boolean }> = ({
         >
           {progressing.message || t('installing or configuring dependencies')}
         </Alert>
+      )}
+      {newlyFailed.length > 0 && (
+        <Alert
+          variant="danger"
+          isInline
+          title={t('{{count}} check(s) newly failing since the last scan', {
+            count: newlyFailed.length,
+          })}
+          style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}
+        >
+          <a href={resultsHref('FAIL')}>{t('Review failing checks')}</a>
+          {fixed.length > 0 && ` • ${t('{{count}} fixed', { count: fixed.length })}`}
+        </Alert>
+      )}
+      {expiring.length > 0 && (
+        <Alert
+          variant="warning"
+          isInline
+          title={t('{{count}} waiver(s) expiring within two weeks', { count: expiring.length })}
+          style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}
+        />
       )}
       <Gallery hasGutter minWidths={{ default: '300px' }}>
         <Card>
@@ -286,7 +412,7 @@ const Overview: React.FC<{ baseline?: ClusterBaseline; loaded: boolean }> = ({
                 <DescriptionListTerm>{t('Schedule')}</DescriptionListTerm>
                 <DescriptionListDescription>
                   {/* Empty schedule is defaulted by the operator to 0 1 * * *. */}
-                  <code>{baseline.spec.schedule || '0 1 * * *'}</code>
+                  <ScheduleEditor baseline={baseline} />
                 </DescriptionListDescription>
               </DescriptionListGroup>
               <DescriptionListGroup>

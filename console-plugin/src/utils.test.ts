@@ -23,6 +23,8 @@ import {
   resultsHref,
   scoreColor,
   toggledProfiles,
+  isValidCron,
+  schedulePatch,
 } from './utils';
 import { ClusterBaseline, ComplianceCheckResult, ComplianceRemediation, ResultCounts } from './models';
 
@@ -633,5 +635,24 @@ describe('clusterScore', () => {
   });
   it('treats a zero score as a value, not absent', () => {
     expect(clusterScore([cb('cluster', 0)])).toBe(0);
+  });
+});
+
+describe('schedule editor helpers', () => {
+  it('isValidCron accepts 5 fields, rejects otherwise', () => {
+    expect(isValidCron('0 1 * * *')).toBe(true);
+    expect(isValidCron('*/5 0-6 1,15 * 1-5')).toBe(true);
+    expect(isValidCron('0 1 * *')).toBe(false); // 4 fields
+    expect(isValidCron('0 1 * * * *')).toBe(false); // 6 fields
+    expect(isValidCron('not a cron')).toBe(false);
+    expect(isValidCron('')).toBe(false);
+  });
+  it('schedulePatch replaces when present, adds when absent', () => {
+    expect(schedulePatch(true, '0 2 * * *')).toEqual([
+      { op: 'replace', path: '/spec/schedule', value: '0 2 * * *' },
+    ]);
+    expect(schedulePatch(false, '0 2 * * *')).toEqual([
+      { op: 'add', path: '/spec/schedule', value: '0 2 * * *' },
+    ]);
   });
 });
