@@ -116,5 +116,11 @@
   "Batch apply": "Batch apply",
   "Failed to start batch apply.": "Failed to start batch apply.",
   "The affected MachineConfigPools are paused, all {{count}} node remediations are applied, then the pools resume so nodes reboot once instead of per remediation. A rescan is required afterwards.": "The affected MachineConfigPools are paused, all {{count}} node remediations are applied, then the pools resume so nodes reboot once instead of per remediation. A rescan is required afterwards.",
-  "Export report": "Export report"
+  "Export report": "Export report",
+  "New tailored profile": "New tailored profile",
+  "Name": "Name",
+  "Extends (base profile)": "Extends (base profile)",
+  "Disable rules (one per line)": "Disable rules (one per line)",
+  "Create and bind": "Create and bind",
+  "Failed to create tailored profile.": "Failed to create tailored profile."
 }

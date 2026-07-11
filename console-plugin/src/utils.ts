@@ -171,6 +171,29 @@ export const toggledProfiles = (
   return next.length ? next : null;
 };
 
+// Build a TailoredProfile CR body from an editor: a base profile to extend and
+// optional rule names to enable/disable. Empty rule lists are omitted.
+export const tailoredProfileManifest = (
+  name: string,
+  extendsProfile: string,
+  disableRules: string[],
+  enableRules: string[] = [],
+): Record<string, unknown> => {
+  const spec: Record<string, unknown> = {
+    title: name,
+    extends: extendsProfile,
+  };
+  const rule = (n: string) => ({ name: n, rationale: 'set via console' });
+  if (enableRules.length) spec.enableRules = enableRules.map(rule);
+  if (disableRules.length) spec.disableRules = disableRules.map(rule);
+  return {
+    apiVersion: 'compliance.openshift.io/v1alpha1',
+    kind: 'TailoredProfile',
+    metadata: { name, namespace: 'openshift-compliance' },
+    spec,
+  };
+};
+
 // HTML-escape untrusted text (waiver reasons, rule titles) for the report.
 const esc = (s: string): string =>
   s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string);

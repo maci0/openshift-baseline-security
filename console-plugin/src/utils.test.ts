@@ -27,6 +27,7 @@ import {
   schedulePatch,
   batchApplyPatch,
   buildReportHtml,
+  tailoredProfileManifest,
 } from './utils';
 import { ClusterBaseline, ComplianceCheckResult, ComplianceRemediation, ResultCounts } from './models';
 
@@ -701,5 +702,21 @@ describe('buildReportHtml', () => {
     expect(html).toContain('chk');
     expect(html).not.toContain('>old<');
     expect(html).toContain('Active waivers (1)');
+  });
+});
+
+describe('tailoredProfileManifest', () => {
+  it('builds a TailoredProfile CR, omitting empty rule lists', () => {
+    const m = tailoredProfileManifest('cis-custom', 'ocp4-cis', []);
+    expect(m.kind).toBe('TailoredProfile');
+    expect((m.metadata as { name: string }).name).toBe('cis-custom');
+    expect((m.spec as { extends: string }).extends).toBe('ocp4-cis');
+    expect((m.spec as Record<string, unknown>).disableRules).toBeUndefined();
+  });
+  it('includes enable/disable rules when provided', () => {
+    const m = tailoredProfileManifest('x', 'ocp4-cis', ['r1', 'r2'], ['r3']);
+    const spec = m.spec as { enableRules: { name: string }[]; disableRules: { name: string }[] };
+    expect(spec.disableRules.map((r) => r.name)).toEqual(['r1', 'r2']);
+    expect(spec.enableRules.map((r) => r.name)).toEqual(['r3']);
   });
 });

@@ -36,9 +36,16 @@ const model = (gvk: K8sGroupVersionKind, plural: string, namespaced: boolean): K
   namespaced,
 });
 
+export const TailoredProfileGVK: K8sGroupVersionKind = {
+  group: 'compliance.openshift.io',
+  version: 'v1alpha1',
+  kind: 'TailoredProfile',
+};
+
 export const ClusterBaselineModel = model(ClusterBaselineGVK, 'clusterbaselines', false);
 export const ComplianceScanModel = model(ComplianceScanGVK, 'compliancescans', true);
 export const ComplianceRemediationModel = model(ComplianceRemediationGVK, 'complianceremediations', true);
+export const TailoredProfileModel = model(TailoredProfileGVK, 'tailoredprofiles', true);
 
 export type CheckStatus =
   | 'PASS'

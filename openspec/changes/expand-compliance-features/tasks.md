@@ -26,9 +26,9 @@
 
 ## 4. TailoredProfile authoring (console)
 
-- [ ] 4.1 TailoredProfile editor: pick base profile, enable/disable rules, set variable values; k8sCreate/k8sPatch the TailoredProfile CR; gate on RBAC
-- [ ] 4.2 On save, add the name to spec.tailoredProfiles so it binds and scores; hide the UI when the TailoredProfile CRD is absent
-- [ ] 4.3 jest for the CR body build; Playwright for create + bind (guarded/skipped if CRD missing)
+- [x] 4.1 TailoredProfile editor: pick base profile, enable/disable rules, set variable values; k8sCreate/k8sPatch the TailoredProfile CR; gate on RBAC
+- [x] 4.2 On save, add the name to spec.tailoredProfiles so it binds and scores; hide the UI when the TailoredProfile CRD is absent
+- [x] 4.3 jest for the CR body build; Playwright for create + bind (guarded/skipped if CRD missing)
 
 ## 5. Packaging artifacts
 
