@@ -10,6 +10,7 @@ import {
   aggregateCounts,
   clusterScore,
   isNodeRemediation,
+  effectiveStatus,
   inconsistentSources,
   machineConfigPoolHref,
   nodeScanPool,
@@ -418,6 +419,50 @@ describe('inconsistentSources', () => {
       );
       expect(Array.isArray(sources)).toBe(true);
     }
+  });
+});
+
+describe('effectiveStatus', () => {
+  const inc = (ann: Record<string, string>) =>
+    ({ status: 'INCONSISTENT', metadata: { annotations: ann } }) as unknown as ComplianceCheckResult;
+
+  it('passes through a non-inconsistent status unchanged', () => {
+    expect(effectiveStatus({ status: 'FAIL', metadata: {} })).toBe('FAIL');
+    expect(effectiveStatus({ status: 'PASS', metadata: {} })).toBe('PASS');
+  });
+  it('collapses PASS + NOT-APPLICABLE to PASS', () => {
+    expect(
+      effectiveStatus(
+        inc({
+          'compliance.openshift.io/inconsistent-source': 'node0:PASS',
+          'compliance.openshift.io/most-common-status': 'NOT-APPLICABLE',
+        }),
+      ),
+    ).toBe('PASS');
+  });
+  it('collapses all-not-applicable to NOT-APPLICABLE', () => {
+    expect(
+      effectiveStatus(
+        inc({
+          'compliance.openshift.io/inconsistent-source': 'node0:NOT-APPLICABLE',
+          'compliance.openshift.io/most-common-status': 'NOT-APPLICABLE',
+        }),
+      ),
+    ).toBe('NOT-APPLICABLE');
+  });
+  it('keeps a genuine PASS/FAIL split as INCONSISTENT', () => {
+    expect(
+      effectiveStatus(
+        inc({
+          'compliance.openshift.io/inconsistent-source': 'node0:FAIL',
+          'compliance.openshift.io/most-common-status': 'PASS',
+        }),
+      ),
+    ).toBe('INCONSISTENT');
+  });
+  it('keeps unknown/empty states as INCONSISTENT', () => {
+    expect(inc({}).status).toBe('INCONSISTENT');
+    expect(effectiveStatus(inc({}))).toBe('INCONSISTENT');
   });
 });
 

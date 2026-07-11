@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -138,6 +139,77 @@ func TestRemediationBatch(t *testing.T) {
 	_ = r.Get(ctx, types.NamespacedName{Name: "worker"}, gotPool)
 	if paused, _, _ := unstructured.NestedBool(gotPool.Object, "spec", "paused"); paused {
 		t.Fatal("worker pool not resumed")
+	}
+}
+
+// TestEnsureComplianceDashboard: the operator creates the console-dashboard
+// ConfigMap in openshift-config-managed, labeled console.openshift.io/dashboard,
+// carrying the embedded Grafana-schema JSON and an owner ref for GC.
+func TestEnsureComplianceDashboard(t *testing.T) {
+	scheme := testScheme(t)
+	cb := &baselinev1alpha1.ClusterBaseline{}
+	cb.SetName("cluster")
+	cb.SetUID("test-uid")
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(cb).Build(),
+		Scheme: scheme,
+	}
+	ctx := context.Background()
+	if err := r.ensureComplianceDashboard(ctx, cb); err != nil {
+		t.Fatal(err)
+	}
+	cm := &corev1.ConfigMap{}
+	if err := r.Get(ctx, types.NamespacedName{Namespace: dashboardNS, Name: dashboardName}, cm); err != nil {
+		t.Fatalf("dashboard ConfigMap not created: %v", err)
+	}
+	if cm.Labels["console.openshift.io/dashboard"] != "true" {
+		t.Fatalf("missing dashboard label: %v", cm.Labels)
+	}
+	json := cm.Data["baseline-security-compliance.json"]
+	if !strings.Contains(json, "baseline_security_compliance_score") {
+		t.Fatalf("dashboard JSON missing score query: %q", json)
+	}
+	if len(cm.OwnerReferences) != 1 || cm.OwnerReferences[0].UID != "test-uid" {
+		t.Fatalf("missing/incorrect owner ref: %+v", cm.OwnerReferences)
+	}
+	// Idempotent: a second reconcile must not error or duplicate.
+	if err := r.ensureComplianceDashboard(ctx, cb); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestEffectiveInconsistentStatus: benign PASS+NA disagreements collapse; a real
+// PASS/FAIL split stays INCONSISTENT.
+func TestEffectiveInconsistentStatus(t *testing.T) {
+	mk := func(src, mostCommon string) *unstructured.Unstructured {
+		u := &unstructured.Unstructured{}
+		ann := map[string]string{}
+		if src != "" {
+			ann[inconsistentSourceAnn] = src
+		}
+		if mostCommon != "" {
+			ann[mostCommonStatusAnn] = mostCommon
+		}
+		u.SetAnnotations(ann)
+		return u
+	}
+	cases := []struct {
+		name, src, mostCommon, want string
+	}{
+		{"pass-vs-na", "cluster0-node0:PASS", "NOT-APPLICABLE", "PASS"},
+		{"na-most-common-pass-source", "cluster0-node0:NOT-APPLICABLE", "PASS", "PASS"},
+		{"all-na", "n0:NOT-APPLICABLE", "NOT-APPLICABLE", "NOT-APPLICABLE"},
+		{"real-fail-split", "n0:FAIL", "PASS", "INCONSISTENT"},
+		{"error-present", "n0:ERROR", "PASS", "INCONSISTENT"},
+		{"malformed-empty", "garbage,,:", "", "INCONSISTENT"},
+		{"skip-only", "n0:SKIP", "SKIP", "NOT-APPLICABLE"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := effectiveInconsistentStatus(mk(c.src, c.mostCommon)); got != c.want {
+				t.Fatalf("effectiveInconsistentStatus(%q,%q) = %q, want %q", c.src, c.mostCommon, got, c.want)
+			}
+		})
 	}
 }
 

@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	_ "embed"
 	"fmt"
 	"maps"
 	"os"
@@ -39,6 +40,10 @@ const (
 	finalizerName       = "baselinesecurity.io/cleanup"
 	pluginName          = "baseline-security-console-plugin"
 	pluginNS            = "openshift-baseline-security"
+	// The console renders dashboards from ConfigMaps in this namespace; ours is
+	// created here so it shows under Observe -> Dashboards without a Grafana.
+	dashboardNS   = "openshift-config-managed"
+	dashboardName = "baseline-security-compliance-dashboard"
 	suiteLabel          = "compliance.openshift.io/suite"
 	checkSeverityLabel  = "compliance.openshift.io/check-severity"
 	historyMax          = 30
@@ -66,6 +71,58 @@ var (
 	remediationGVK   = schema.GroupVersionKind{Group: "compliance.openshift.io", Version: "v1alpha1", Kind: "ComplianceRemediation"}
 	mcpGVK           = schema.GroupVersionKind{Group: "machineconfiguration.openshift.io", Version: "v1", Kind: "MachineConfigPool"}
 )
+
+//go:embed assets/compliance-dashboard.json
+var complianceDashboardJSON string
+
+// Compliance Operator annotations on an INCONSISTENT ComplianceCheckResult: the
+// diverging nodes ("node:STATE,node:STATE") and the state the rest share.
+const (
+	inconsistentSourceAnn = "compliance.openshift.io/inconsistent-source"
+	mostCommonStatusAnn   = "compliance.openshift.io/most-common-status"
+)
+
+// effectiveInconsistentStatus collapses a benign INCONSISTENT check to the status
+// a user actually cares about. The Compliance Operator flags a check INCONSISTENT
+// whenever nodes in a pool disagree, including when the check simply does not
+// apply on some nodes (PASS where it applies, NOT-APPLICABLE elsewhere). That is
+// not a real conflict, so:
+//   - any FAIL or ERROR among the node states -> INCONSISTENT (genuine, review it)
+//   - else at least one PASS                  -> PASS (passes where it applies)
+//   - else only NOT-APPLICABLE/SKIP           -> NOT-APPLICABLE
+//   - unknown/empty states                    -> INCONSISTENT (keep the raw signal)
+func effectiveInconsistentStatus(item *unstructured.Unstructured) string {
+	states := inconsistentStates(item)
+	switch {
+	case states["FAIL"] || states["ERROR"]:
+		return "INCONSISTENT"
+	case states["PASS"]:
+		return "PASS"
+	case states["NOT-APPLICABLE"] || states["SKIP"]:
+		return "NOT-APPLICABLE"
+	default:
+		return "INCONSISTENT"
+	}
+}
+
+// inconsistentStates returns the set of per-node states of an INCONSISTENT check,
+// gathered from the inconsistent-source annotation and most-common-status.
+// Untrusted cluster data: tolerant of malformed values, never panics.
+func inconsistentStates(item *unstructured.Unstructured) map[string]bool {
+	ann := item.GetAnnotations()
+	states := map[string]bool{}
+	for _, s := range strings.Split(ann[inconsistentSourceAnn], ",") {
+		if i := strings.IndexByte(s, ':'); i >= 0 {
+			if st := strings.ToUpper(strings.TrimSpace(s[i+1:])); st != "" {
+				states[st] = true
+			}
+		}
+	}
+	if mc := strings.ToUpper(strings.TrimSpace(ann[mostCommonStatusAnn])); mc != "" {
+		states[mc] = true
+	}
+	return states
+}
 
 // batchApplyAnnotation on the ClusterBaseline carries a comma-separated list of
 // ComplianceRemediation names to batch-apply with MachineConfigPool pause/resume.
@@ -95,6 +152,8 @@ type ClusterBaselineReconciler struct {
 // +kubebuilder:rbac:groups=operators.coreos.com,resources=clusterserviceversions,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch;create
 // +kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create;update;patch;delete
+// ConfigMaps: the console score-trend dashboard in openshift-config-managed.
+// +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update;patch
 // +kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;watch
 // +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=console.openshift.io,resources=consoleplugins,verbs=get;list;watch;create;update;patch;delete
@@ -157,6 +216,9 @@ func (r *ClusterBaselineReconciler) reconcileOwned(ctx context.Context, cb *base
 	}
 	if err := r.ensureConsolePlugin(ctx, cb); err != nil {
 		return fmt.Errorf("ensuring console plugin: %w", err)
+	}
+	if err := r.ensureComplianceDashboard(ctx, cb); err != nil {
+		return fmt.Errorf("ensuring compliance dashboard: %w", err)
 	}
 	if err := r.applyRemediationBatch(ctx, cb); err != nil {
 		return fmt.Errorf("applying remediation batch: %w", err)
@@ -1146,6 +1208,13 @@ func (r *ClusterBaselineReconciler) aggregateStatus(ctx context.Context, cb *bas
 			continue
 		}
 		status, _, _ := unstructured.NestedString(item.Object, "status")
+		// A check the Compliance Operator marks INCONSISTENT only because it does
+		// not apply on some nodes (PASS where it applies, NOT-APPLICABLE elsewhere)
+		// is benign; collapse it so it does not read as "review each". A real
+		// PASS-vs-FAIL split stays INCONSISTENT.
+		if status == "INCONSISTENT" {
+			status = effectiveInconsistentStatus(&item)
+		}
 		// Waivers apply to failing checks only: a waived FAIL leaves the score
 		// denominator into the Waived bucket. If a waived check later passes it
 		// counts as PASS again (self-healing), so a stale waiver never silently
@@ -1417,6 +1486,31 @@ func (r *ClusterBaselineReconciler) recordHistory(ctx context.Context, cb *basel
 		if ps := score(cb.Status.TailoredProfiles[i].Pass, cb.Status.TailoredProfiles[i].Fail); ps != nil {
 			cb.Status.TailoredProfiles[i].History = appendHistoryRing(cb.Status.TailoredProfiles[i].History, last, *ps, historyMax)
 		}
+	}
+	return nil
+}
+
+// ensureComplianceDashboard creates the score-trend dashboard as a ConfigMap in
+// openshift-config-managed labeled console.openshift.io/dashboard, so the console
+// renders it under Observe -> Dashboards (no Grafana). Data needs user-workload
+// monitoring + the metrics ServiceMonitor; the dashboard renders regardless.
+// Best-effort: a write failure here is logged, not Degrading, since the dashboard
+// is cosmetic and must never block scanning or status.
+func (r *ClusterBaselineReconciler) ensureComplianceDashboard(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline) error {
+	cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: dashboardName, Namespace: dashboardNS}}
+	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, cm, func() error {
+		if cm.Labels == nil {
+			cm.Labels = map[string]string{}
+		}
+		cm.Labels["console.openshift.io/dashboard"] = "true"
+		cm.Labels["app.kubernetes.io/part-of"] = "baseline-security"
+		cm.Data = map[string]string{"baseline-security-compliance.json": complianceDashboardJSON}
+		// cb is cluster-scoped, so a namespaced dependent in another namespace is a
+		// valid ownerref target; the ConfigMap is GCed when the CR is deleted.
+		return controllerutil.SetControllerReference(cb, cm, r.Scheme)
+	})
+	if err != nil {
+		log.FromContext(ctx).V(1).Info("compliance dashboard configmap not reconciled", "error", err)
 	}
 	return nil
 }

@@ -1,0 +1,89 @@
+{
+  "title": "Baseline Security / Compliance",
+  "uid": "baseline-security-compliance",
+  "schemaVersion": 17,
+  "editable": true,
+  "tags": ["compliance", "baseline-security"],
+  "time": { "from": "now-30d", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {},
+        "hide": 0
+      }
+    ]
+  },
+  "rows": [
+    {
+      "title": "Score",
+      "showTitle": false,
+      "height": "150px",
+      "panels": [
+        {
+          "id": 1,
+          "title": "Compliance score",
+          "type": "singlestat",
+          "datasource": "$datasource",
+          "span": 12,
+          "format": "none",
+          "valueName": "current",
+          "thresholds": "60,80",
+          "colorValue": true,
+          "colors": ["#d64456", "#f0ab00", "#3e8635"],
+          "targets": [
+            { "expr": "max(baseline_security_compliance_score >= 0)", "refId": "A" }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Score trend",
+      "showTitle": false,
+      "height": "250px",
+      "panels": [
+        {
+          "id": 2,
+          "title": "Compliance score (30d)",
+          "type": "graph",
+          "datasource": "$datasource",
+          "span": 12,
+          "yaxes": [ { "format": "none", "min": 0, "max": 100 }, { "show": false } ],
+          "targets": [
+            { "expr": "max(baseline_security_compliance_score >= 0)", "legendFormat": "score", "refId": "A" }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Checks by status",
+      "showTitle": false,
+      "height": "250px",
+      "panels": [
+        {
+          "id": 3,
+          "title": "Checks by status",
+          "type": "graph",
+          "datasource": "$datasource",
+          "span": 6,
+          "stack": true,
+          "targets": [
+            { "expr": "sum by (status) (max by (profile, status) (baseline_security_checks))", "legendFormat": "{{status}}", "refId": "A" }
+          ]
+        },
+        {
+          "id": 4,
+          "title": "Failing checks by profile",
+          "type": "graph",
+          "datasource": "$datasource",
+          "span": 6,
+          "targets": [
+            { "expr": "max by (profile) (baseline_security_checks{status=\"fail\"})", "legendFormat": "{{profile}}", "refId": "A" }
+          ]
+        }
+      ]
+    }
+  ]
+}

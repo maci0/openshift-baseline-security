@@ -72,7 +72,7 @@ rot). Record topology, versions, and the concrete result.
 | 2026-07-10 | 4 | Lifecycle scenarios after waiver-self-healing + MCP-drill-down deploy: invalid-schedule Degrade+recover, schedule→NextScanTime advance, console Removed→teardown+deregister→Managed→redeploy. Full battery re-run | SNO + 2 day-2 workers | 4.22 / CO 1.9.1 | pass — Go 15/15, Playwright 22/22, jest 72, -race clean |
 | 2026-07-10 | 4 | Deploy 0.3.0 (r6: stuck-install grace, errorMessage guard) + full e2e re-run | SNO + 2 day-2 workers | 4.22 / CO 1.9.1 | pass — Go 15/15, Playwright 22/22; Available=True, score 94, cluster self-cleaned |
 | 2026-07-11 | 4 | 0.3.1: per-profile cards now show Inconsistent (was donut-only); light+dark screenshots; dark-theme spec | SNO + 2 day-2 workers | 4.22 / CO 1.9.1 | pass — Go e2e 16/16, Playwright 26/26 (incl. dark theme + per-profile Inconsistent), jest 78 |
-| 2026-07-11 | 4 | 0.4.0 compliance-features expansion (waiver governance, regressions, guided remediation/MCP batch, tailored authoring, schedule editor, severity-weighted score, Helm, report, Grafana, hardening profile). Full battery | SNO + 2 day-2 workers | 4.22 / CO 1.9.1 | pass — operator unit+race+fuzz(15)+promtool, jest 90, Go e2e 16/16, Playwright 26/26, bundle validate, helm lint |
+| 2026-07-11 | 4 | 0.4.0 compliance-features expansion (waiver governance, regressions, guided remediation/MCP batch, tailored authoring, schedule editor, severity-weighted score, Helm, report, console dashboard, hardening profile). Full battery | SNO + 2 day-2 workers | 4.22 / CO 1.9.1 | pass — operator unit+race+fuzz(15)+promtool, jest 90, Go e2e 16/16, Playwright 26/26, bundle validate, helm lint |
 
 ## Fixture and harness strategy
 

@@ -75,7 +75,9 @@ Legend: `[x]` done · `[ ]` planned · **(H/M/L)** rough value.
 - [x] Severity-weighted score option (`spec.scoring.mode`).
 - [x] Helm chart for non-OLM installs (`deploy/helm`).
 - [x] Compliance report export (printable HTML).
-- [x] Grafana trend dashboard (`config/grafana`).
+- [x] Native console score-trend dashboard: a `console.openshift.io/dashboard`
+      ConfigMap (`config/console-dashboard`) rendered under Observe -> Dashboards,
+      no Grafana. Needs UWM + the metrics ServiceMonitor for data.
 - [x] NSA/CISA hardening `TailoredProfile` (`config/samples/tailored-nsa-cisa.yaml`).
 
 ## Planned

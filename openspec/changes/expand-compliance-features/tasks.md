@@ -33,13 +33,13 @@
 ## 5. Packaging artifacts
 
 - [x] 5.1 Helm chart: CRD, RBAC, operator Deployment, console plugin, default-CR toggle, configurable images/profiles; `helm template` + `helm lint` in CI; uninstall leaves the Compliance Operator
-- [x] 5.2 Grafana dashboard JSON from baseline_security_compliance_score + checks; document import
+- [x] 5.2 Native console dashboard (`console.openshift.io/dashboard` ConfigMap in openshift-config-managed) from baseline_security_compliance_score + checks; renders in Observe -> Dashboards, no Grafana; document the UWM + ServiceMonitor prerequisite
 - [x] 5.3 NSA/CISA hardening TailoredProfile YAML + a documented rule mapping (note guidance with no rule); apply/bind smoke
 - [x] 5.4 Compliance report export (printable HTML) from watched data: score, per-profile, failing checks, active waivers w/ attribution; untrusted text rendered as text; jest for the report model builder
 
 ## 6. Score-trend + informer
 
-- [x] 6.1 Console trend card / extend the existing history chart for the shipped in-console trend (pairs with 5.2 Grafana)
+- [x] 6.1 Console trend card / extend the existing history chart for the shipped in-console trend (pairs with the 5.2 console dashboard)
 - [ ] 6.2 (DEFERRED - polling works; needs a lazy informer tolerating CRD-absent startup) Dynamic informer: watch ComplianceCheckResult/Scan/Remediation once CRDs exist, map events to the singleton reconcile; tolerate NoKindMatch at startup; keep poll fallback
 - [ ] 6.3 e2e/unit: reconcile fires on scan-result change without waiting for the poll; manager starts without the CRDs
 

@@ -56,6 +56,7 @@ import {
   checkBody,
   checkResultHref,
   checkTitle,
+  effectiveStatus,
   errorMessage,
   findWaiver,
   inconsistentSources,
@@ -153,7 +154,10 @@ const ResultsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => {
 
   const Row = React.useCallback(
     ({ obj, activeColumnIDs }: RowProps<ComplianceCheckResult>) => {
-      const s = statusLabel[obj.status] ?? { color: 'grey' as const, icon: <MinusCircleIcon /> };
+      // Show the effective status: a benign INCONSISTENT (applies on some nodes,
+      // not others) reads as PASS/NOT-APPLICABLE, not a scary "Inconsistent".
+      const eff = effectiveStatus(obj) as CheckStatus;
+      const s = statusLabel[eff] ?? { color: 'grey' as const, icon: <MinusCircleIcon /> };
       return (
         <>
           <TableData id="title" activeColumnIDs={activeColumnIDs}>
@@ -165,7 +169,7 @@ const ResultsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => {
           </TableData>
           <TableData id="status" activeColumnIDs={activeColumnIDs}>
             <Label isCompact color={s.color} icon={s.icon}>
-              {obj.status}
+              {eff}
             </Label>
             {isWaived(obj.metadata.name, waivers) && (
               <Label isCompact color="grey" style={{ marginLeft: 8 }}>
@@ -315,11 +319,18 @@ const ResultsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => {
                 (() => {
                   const { sources, mostCommon } = inconsistentSources(selected);
                   const pool = nodeScanPool(selected);
+                  // A real PASS-vs-FAIL split needs review; a PASS/NOT-APPLICABLE
+                  // split just means the rule applies to only some nodes.
+                  const genuineConflict = effectiveStatus(selected) === 'INCONSISTENT';
                   return (
                     <>
                       <Title headingLevel="h3">{t('Per-node results')}</Title>
                       <Content component="p">
-                        {t('Nodes disagree on this rule; review each before acting.')}
+                        {genuineConflict
+                          ? t('Nodes disagree on this rule; review each before acting.')
+                          : t(
+                              'This rule applies to only some nodes. It passes where it applies; the others report not-applicable.',
+                            )}
                         {pool && (
                           <>
                             {' '}

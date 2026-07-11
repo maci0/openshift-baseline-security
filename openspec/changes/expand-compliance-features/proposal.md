@@ -26,7 +26,7 @@ layer on top, not a reimplementation of the operator.
 - An opt-in severity-weighted score weights FAILs by check severity.
 - A Helm chart installs the operator without OLM.
 - A compliance report (PDF/HTML) can be exported for a point-in-time snapshot.
-- A score-trend dashboard is shipped (console dashboard card and/or Grafana).
+- A score-trend dashboard is shipped as a native console dashboard (Observe -> Dashboards, no Grafana) plus the in-console history chart.
 - A curated NSA/CISA Kubernetes-hardening profile ships as a TailoredProfile.
 - The controller watches Compliance CRs via a dynamic informer instead of
   requeue polling once the CRDs exist.
@@ -68,7 +68,7 @@ layer on top, not a reimplementation of the operator.
   batch-apply flow, a TailoredProfile editor, a schedule editor, per-profile
   trend, a report export, a trend card.
 - packaging/docs: Helm chart, shipped hardening TailoredProfile manifest,
-  Grafana dashboard JSON, report assets; metrics may gain a severity-weighted
+  console dashboard ConfigMap, report assets; metrics may gain a severity-weighted
   score series.
 - tests: unit + fuzz for new parsers/among untrusted input (waiver dates,
   inconsistent/severity parsing), e2e for each user-visible flow.

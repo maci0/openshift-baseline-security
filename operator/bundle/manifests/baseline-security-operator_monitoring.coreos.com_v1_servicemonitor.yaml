@@ -1,0 +1,23 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: baseline-security-operator
+  labels:
+    app: baseline-security-operator
+spec:
+  selector:
+    matchLabels:
+      app: baseline-security-operator
+      control-plane: controller-manager
+  endpoints:
+    - port: https
+      scheme: https
+      path: /metrics
+      interval: 30s
+      tlsConfig:
+        insecureSkipVerify: true
+      authorization:
+        type: Bearer
+        credentials:
+          name: baseline-security-metrics-scraper-token
+          key: token

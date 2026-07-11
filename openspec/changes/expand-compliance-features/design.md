@@ -51,8 +51,8 @@ results; we never re-run scans ourselves.
 - **Per-profile history** extends the existing history ring to a per-profile
   keyed structure, same 30-cap semantics.
 - **Report/dashboard/helm/hardening are packaging + client artifacts**, not new
-  controller logic: report is generated in-browser from watched data; the Grafana
-  dashboard is JSON; Helm is a chart mirroring the kustomize/bundle; the hardening
+  controller logic: report is generated in-browser from watched data; the console
+  dashboard is a ConfigMap of Grafana-schema JSON; Helm is a chart mirroring the kustomize/bundle; the hardening
   profile is a shipped TailoredProfile YAML with a documented rule mapping.
 - **Dynamic informer**: register watches for the compliance GVKs once the CRDs are
   present (controller-runtime source with a lazy/dynamic REST mapper, or restart
@@ -85,7 +85,7 @@ results; we never re-run scans ourselves.
      per-profile trend, report export.
   3. Guided remediation (operator MCP pause/resume + UI batch flow).
   4. TailoredProfile authoring.
-  5. Packaging artifacts: Helm chart, Grafana dashboard, hardening TailoredProfile.
+  5. Packaging artifacts: Helm chart, native console dashboard ConfigMap, hardening TailoredProfile.
   6. Dynamic informer (internal; no user-visible surface).
 - Rollback: new spec fields are optional; reverting the operator image restores
   prior behavior since defaults are unchanged and status additions are ignored by
@@ -98,4 +98,7 @@ results; we never re-run scans ourselves.
 - Batch-remediation trigger surface: transient annotation vs a small
   `spec.remediation.batch` intent. Lean annotation/action to avoid spec bloat.
 - Whether the score-trend "dashboard" ships as Grafana JSON, a console card, or
-  both; start with Grafana JSON + reuse the existing console history chart.
+  both. Resolved: ship a native console dashboard (a `console.openshift.io/dashboard`
+  ConfigMap rendered under Observe -> Dashboards, no Grafana, since OpenShift ships
+  none) plus reuse the existing in-console history chart. Data needs UWM + the
+  metrics ServiceMonitor.

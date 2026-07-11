@@ -160,6 +160,42 @@ export const inconsistentSources = (
   return { sources, mostCommon: ann['compliance.openshift.io/most-common-status'] || null };
 };
 
+// Effective status of a check, collapsing a benign INCONSISTENT (mirrors the
+// operator). The Compliance Operator flags a check INCONSISTENT whenever nodes in
+// a pool disagree, including when it simply does not apply on some nodes (PASS
+// where it applies, NOT-APPLICABLE elsewhere). That is not a real conflict:
+//   - any FAIL/ERROR among the node states -> INCONSISTENT (genuine)
+//   - else at least one PASS               -> PASS
+//   - else only NOT-APPLICABLE/SKIP        -> NOT-APPLICABLE
+//   - unknown/empty                        -> INCONSISTENT (keep the raw signal)
+export const effectiveStatus = (
+  r: { status: string; metadata?: { annotations?: Record<string, string> } },
+): string => {
+  if (r.status !== 'INCONSISTENT') {
+    return r.status;
+  }
+  const { sources, mostCommon } = inconsistentSources(r as ComplianceCheckResult);
+  const states = new Set<string>();
+  for (const s of sources) {
+    if (s.status) {
+      states.add(s.status.toUpperCase());
+    }
+  }
+  if (mostCommon) {
+    states.add(mostCommon.toUpperCase());
+  }
+  if (states.has('FAIL') || states.has('ERROR')) {
+    return 'INCONSISTENT';
+  }
+  if (states.has('PASS')) {
+    return 'PASS';
+  }
+  if (states.has('NOT-APPLICABLE') || states.has('SKIP')) {
+    return 'NOT-APPLICABLE';
+  }
+  return 'INCONSISTENT';
+};
+
 // New profile list after toggling one key; null when the change is invalid
 // (the CRD requires at least one profile).
 export const toggledProfiles = (
@@ -318,10 +354,12 @@ export const expiringWaivers = (
 // Results FAIL filter matches Overview fail counts (operator score math excludes
 // waived fails from the Fail bucket). A waived PASS stays PASS (still scored).
 export const resultFilterStatus = (
-  r: Pick<ComplianceCheckResult, 'status'> & { metadata: { name: string } },
+  r: { status: string; metadata: { name: string; annotations?: Record<string, string> } },
   waivers?: Waiver[],
-): string =>
-  r.status === 'FAIL' && isWaived(r.metadata.name, waivers) ? 'WAIVED' : r.status;
+): string => {
+  const eff = effectiveStatus(r);
+  return eff === 'FAIL' && isWaived(r.metadata.name, waivers) ? 'WAIVED' : eff;
+};
 
 // JSON patch adding a waiver for a check. When the array is absent, create it;
 // when it exists (including empty after the last remove), append with "/-".

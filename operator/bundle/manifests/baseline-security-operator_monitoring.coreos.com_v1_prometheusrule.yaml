@@ -1,0 +1,36 @@
+# Alerting on compliance posture, driven by the operator's custom metrics.
+# Install alongside the ServiceMonitor when user-workload monitoring is enabled.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: baseline-security-operator
+  labels:
+    app: baseline-security-operator
+spec:
+  groups:
+    - name: baseline-security.rules
+      rules:
+        - alert: ComplianceScoreLow
+          # -1 is the "no score yet" sentinel; only alert on a real low score.
+          # max() is instance-safe under HA: only the leader updates gauges, so
+          # non-leaders may stay at -1 or stale values if scraped.
+          expr: max(baseline_security_compliance_score) >= 0 and max(baseline_security_compliance_score) < 80
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: Cluster compliance score is below 80
+            description: >-
+              The baseline compliance score is {{ $value }} (threshold 80).
+              Review failing checks under Administration -> Compliance.
+        - alert: ComplianceChecksFailing
+          # Collapse per-pod series before summing so HA replicas do not double-count.
+          expr: sum(max by (profile, status) (baseline_security_checks{status="fail"})) > 0
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: Compliance checks are failing
+            description: >-
+              {{ $value }} compliance check(s) are failing across the selected
+              benchmark profiles.

@@ -1,0 +1,7 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# Metrics scrape + alerts. Inert without the Prometheus Operator CRDs and
+# user-workload monitoring; ship by default so enabling UWM is all that is left.
+resources:
+  - servicemonitor.yaml
+  - prometheusrule.yaml
