@@ -184,6 +184,11 @@ func (r *ClusterBaselineReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	}
 
 	if !cb.DeletionTimestamp.IsZero() {
+		// Unpause any MCPs a live batch held. Finalizer removal + GC must not
+		// leave MachineConfigPools stuck paused with no operator left to resume.
+		if err := r.resumeBatchPoolsOnDelete(ctx, cb); err != nil {
+			return ctrl.Result{}, err
+		}
 		if err := r.deregisterConsolePlugin(ctx); err != nil {
 			return ctrl.Result{}, err
 		}
@@ -1154,6 +1159,9 @@ func (r *ClusterBaselineReconciler) aggregateStatus(ctx context.Context, cb *bas
 			cb.Status.LastScanTime = nil
 			cb.Status.NextScanTime = nil
 			cb.Status.History = nil
+			cb.Status.PreviousFailures = nil
+			cb.Status.NewlyFailed = nil
+			cb.Status.Fixed = nil
 			// Keep relatedObjects in sync with desired ownership even when CO is absent.
 			cb.Status.RelatedObjects = relatedObjects(cb)
 			return nil
@@ -1349,6 +1357,9 @@ func poolFromRemediation(rem *unstructured.Unstructured) string {
 }
 
 func (r *ClusterBaselineReconciler) setMCPPaused(ctx context.Context, pool string, paused bool) error {
+	if pool == "" {
+		return nil
+	}
 	mcp := u(mcpGVK)
 	mcp.SetName(pool)
 	patch := []byte(fmt.Sprintf(`{"spec":{"paused":%t}}`, paused))
@@ -1358,6 +1369,43 @@ func (r *ClusterBaselineReconciler) setMCPPaused(ctx context.Context, pool strin
 		return nil
 	}
 	return err
+}
+
+// resumeBatchPoolsOnDelete unpauses every MachineConfigPool a remediation batch
+// may have paused. Prefer status.remediationBatch.pools; if status was lost but
+// the batch-apply annotation remains, re-resolve pools from those remediations.
+// Best-effort per pool: NotFound/NoMatch ignored; other errors fail deletion so
+// we retry rather than drop the finalizer with pools still paused.
+func (r *ClusterBaselineReconciler) resumeBatchPoolsOnDelete(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline) error {
+	pools := map[string]bool{}
+	if batch := cb.Status.RemediationBatch; batch != nil {
+		for _, p := range batch.Pools {
+			if p != "" {
+				pools[p] = true
+			}
+		}
+	}
+	// Status lost but annotation still present: rediscover pools from rem names.
+	if len(pools) == 0 && cb.Annotations != nil {
+		for _, name := range splitCSV(cb.Annotations[batchApplyAnnotation]) {
+			rem := u(remediationGVK)
+			if err := r.Get(ctx, types.NamespacedName{Namespace: complianceNamespace, Name: name}, rem); err != nil {
+				if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) {
+					continue
+				}
+				return err
+			}
+			if p := poolFromRemediation(rem); p != "" {
+				pools[p] = true
+			}
+		}
+	}
+	for _, p := range slices.Sorted(maps.Keys(pools)) {
+		if err := r.setMCPPaused(ctx, p, false); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // applyRemediationBatch runs a two-phase batch apply driven by the batch-apply
@@ -1380,6 +1428,10 @@ func (r *ClusterBaselineReconciler) applyRemediationBatch(ctx context.Context, c
 			return nil
 		}
 		list := splitCSV(names)
+		// Annotation of only commas/whitespace: do not open an empty batch.
+		if len(list) == 0 {
+			return nil
+		}
 		pools := map[string]bool{}
 		for _, name := range list {
 			rem := u(remediationGVK)

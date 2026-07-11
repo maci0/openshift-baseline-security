@@ -90,6 +90,65 @@ func TestReconcileDeletionDeregistersAndRemovesFinalizer(t *testing.T) {
 	}
 }
 
+// TestReconcileDeletionResumesBatchPools: deleting the CR mid-batch must unpause
+// MachineConfigPools recorded in status.remediationBatch before the finalizer
+// drops (otherwise pools stay paused with no operator left to resume them).
+func TestReconcileDeletionResumesBatchPools(t *testing.T) {
+	scheme := testScheme(t)
+	cb := newCB("cis")
+	cb.Finalizers = []string{finalizerName}
+	now := metav1.Now()
+	cb.DeletionTimestamp = &now
+	cb.Status.RemediationBatch = &baselinev1alpha1.RemediationBatchStatus{
+		Phase: "Applying", Pools: []string{"worker"}, Remediations: []string{"rem1"},
+		StartedAt: now,
+	}
+	pool := machineConfigPool("worker")
+	_ = unstructured.SetNestedField(pool.Object, true, "spec", "paused")
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).
+			WithObjects(cb, pool, consoleCluster(pluginName)).
+			WithStatusSubresource(&baselinev1alpha1.ClusterBaseline{}).Build(),
+		Scheme: scheme,
+	}
+	if _, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: "cluster"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got := machineConfigPool("worker")
+	if err := r.Get(context.Background(), types.NamespacedName{Name: "worker"}, got); err != nil {
+		t.Fatal(err)
+	}
+	if paused, _, _ := unstructured.NestedBool(got.Object, "spec", "paused"); paused {
+		t.Fatal("worker pool must be unpaused on ClusterBaseline deletion")
+	}
+}
+
+// TestResumeBatchPoolsOnDeleteFromAnnotation: when status.remediationBatch is
+// missing but the batch-apply annotation remains, rediscover pools from remediations.
+func TestResumeBatchPoolsOnDeleteFromAnnotation(t *testing.T) {
+	scheme := testScheme(t)
+	cb := newCB("cis")
+	cb.SetAnnotations(map[string]string{batchApplyAnnotation: "rem1"})
+	rem := nodeRemediation("rem1", "worker", "")
+	pool := machineConfigPool("worker")
+	_ = unstructured.SetNestedField(pool.Object, true, "spec", "paused")
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).
+			WithObjects(cb, rem, pool).Build(),
+		Scheme: scheme,
+	}
+	if err := r.resumeBatchPoolsOnDelete(context.Background(), cb); err != nil {
+		t.Fatal(err)
+	}
+	got := machineConfigPool("worker")
+	_ = r.Get(context.Background(), types.NamespacedName{Name: "worker"}, got)
+	if paused, _, _ := unstructured.NestedBool(got.Object, "spec", "paused"); paused {
+		t.Fatal("pool must resume from annotation rediscovery on delete")
+	}
+}
+
 func TestEnsureComplianceOperatorCreatesSubscription(t *testing.T) {
 	scheme := testScheme(t)
 	r := &ClusterBaselineReconciler{

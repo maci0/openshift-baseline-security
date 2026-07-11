@@ -361,6 +361,26 @@ func TestRemediationBatchGetErrorPastGraceResumes(t *testing.T) {
 	}
 }
 
+// TestRemediationBatchEmptyAnnotationNoop: commas-only annotation must not open
+// an empty status.remediationBatch.
+func TestRemediationBatchEmptyAnnotationNoop(t *testing.T) {
+	scheme := testScheme(t)
+	cb := &baselinev1alpha1.ClusterBaseline{}
+	cb.SetName("cluster")
+	cb.SetAnnotations(map[string]string{batchApplyAnnotation: " , , "})
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(cb).
+			WithStatusSubresource(&baselinev1alpha1.ClusterBaseline{}).Build(),
+		Scheme: scheme,
+	}
+	if err := r.applyRemediationBatch(context.Background(), cb); err != nil {
+		t.Fatal(err)
+	}
+	if cb.Status.RemediationBatch != nil {
+		t.Fatalf("empty CSV must not start batch: %+v", cb.Status.RemediationBatch)
+	}
+}
+
 // TestRemediationBatchRestartsFromAnnotation: if status.remediationBatch was
 // never persisted (Status().Update failed after pause), the kept annotation
 // restarts the batch instead of leaving pools paused forever.
