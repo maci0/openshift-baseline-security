@@ -231,6 +231,27 @@ func TestConditionProgressing(t *testing.T) {
 	}
 }
 
+func TestRequeueAfter(t *testing.T) {
+	steady := &baselinev1alpha1.ClusterBaseline{}
+	setCond(steady, "Progressing", metav1.ConditionFalse, "AsExpected", "")
+	if got := requeueAfter(steady); got != time.Minute {
+		t.Fatalf("steady = %v, want 1m", got)
+	}
+	installing := &baselinev1alpha1.ClusterBaseline{}
+	setCond(installing, "Progressing", metav1.ConditionTrue, "Reconciling", "installing")
+	if got := requeueAfter(installing); got != 15*time.Second {
+		t.Fatalf("Progressing = %v, want 15s", got)
+	}
+	// In-flight batch must poll faster so cancel/grace/Applied are not stuck
+	// behind the 1m steady cadence when the informer is lagging.
+	batching := &baselinev1alpha1.ClusterBaseline{}
+	setCond(batching, "Progressing", metav1.ConditionFalse, "AsExpected", "")
+	batching.Status.RemediationBatch = &baselinev1alpha1.RemediationBatchStatus{Phase: "Applying"}
+	if got := requeueAfter(batching); got != 15*time.Second {
+		t.Fatalf("batch Applying = %v, want 15s", got)
+	}
+}
+
 func TestPluginDeploymentUnavailable(t *testing.T) {
 	now := metav1.Now()
 	old := metav1.NewTime(now.Add(-10 * time.Minute))

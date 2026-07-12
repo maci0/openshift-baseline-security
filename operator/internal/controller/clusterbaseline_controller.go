@@ -224,12 +224,22 @@ func (r *ClusterBaselineReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return ctrl.Result{}, err
 	}
 	logger.V(1).Info("reconciled", "score", cb.Status.Score)
-	// Poll while CRDs may be absent; requeue faster while still installing.
-	requeue := time.Minute
+	return ctrl.Result{RequeueAfter: requeueAfter(cb)}, nil
+}
+
+// requeueAfter picks the poll cadence. Steady state is 1m; install Progressing
+// and an in-flight remediation batch use 15s so cancel/grace/Applied are not
+// stuck behind a full minute when the dynamic informer is lagging or not yet up.
+func requeueAfter(cb *baselinev1alpha1.ClusterBaseline) time.Duration {
+	const fast = 15 * time.Second
+	const slow = time.Minute
 	if progressing := meta.FindStatusCondition(cb.Status.Conditions, "Progressing"); progressing != nil && progressing.Status == metav1.ConditionTrue {
-		requeue = 15 * time.Second
+		return fast
 	}
-	return ctrl.Result{RequeueAfter: requeue}, nil
+	if cb.Status.RemediationBatch != nil {
+		return fast
+	}
+	return slow
 }
 
 // reconcileOwned drives every owned object and refreshes status fields.
