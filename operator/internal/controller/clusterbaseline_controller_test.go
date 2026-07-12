@@ -73,6 +73,29 @@ func nodeRemediation(name, pool, state string) *unstructured.Unstructured {
 	return rem
 }
 
+// TestPoolFromRemediation: prefer the MachineConfig role label, fall back to the
+// scan-name label ("<profile>-node-<pool>") when the CO leaves the role empty,
+// and return "" for a non-node remediation.
+func TestPoolFromRemediation(t *testing.T) {
+	// Role label present -> use it.
+	if got := poolFromRemediation(nodeRemediation("r", "worker", "")); got != "worker" {
+		t.Fatalf("role-labeled: got %q, want worker", got)
+	}
+	// Role label empty, but the scan-name label carries the pool.
+	rem := nodeRemediation("r", "", "")
+	rem.SetLabels(map[string]string{"compliance.openshift.io/scan-name": "ocp4-pci-dss-node-master"})
+	if got := poolFromRemediation(rem); got != "master" {
+		t.Fatalf("scan-name fallback: got %q, want master", got)
+	}
+	// Non-node remediation (not a MachineConfig) -> no pool.
+	pl := &unstructured.Unstructured{}
+	pl.SetGroupVersionKind(remediationGVK)
+	_ = unstructured.SetNestedMap(pl.Object, map[string]any{"kind": "ConfigMap"}, "spec", "current", "object")
+	if got := poolFromRemediation(pl); got != "" {
+		t.Fatalf("non-node: got %q, want empty", got)
+	}
+}
+
 func machineConfigPool(name string) *unstructured.Unstructured {
 	mcp := &unstructured.Unstructured{}
 	mcp.SetGroupVersionKind(mcpGVK)
@@ -149,6 +172,52 @@ func TestRemediationBatch(t *testing.T) {
 	_ = r.Get(ctx, types.NamespacedName{Name: "worker"}, gotPool)
 	if paused, _, _ := unstructured.NestedBool(gotPool.Object, "spec", "paused"); paused {
 		t.Fatal("worker pool not resumed")
+	}
+}
+
+// TestRemediationBatchCancelResumes: reverting every remediation to apply=false
+// mid-batch cancels it, so the pool resumes at once (not only after the grace).
+func TestRemediationBatchCancelResumes(t *testing.T) {
+	scheme := testScheme(t)
+	rem := nodeRemediation("rem1", "worker", "")
+	pool := machineConfigPool("worker")
+	cb := &baselinev1alpha1.ClusterBaseline{}
+	cb.SetName("cluster")
+	cb.SetAnnotations(map[string]string{batchApplyAnnotation: "rem1"})
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).
+			WithObjects(cb, rem, pool).
+			WithStatusSubresource(&baselinev1alpha1.ClusterBaseline{}).Build(),
+		Scheme: scheme,
+	}
+	ctx := context.Background()
+
+	// Phase 1: pause + apply.
+	if err := r.applyRemediationBatch(ctx, cb); err != nil {
+		t.Fatal(err)
+	}
+	if cb.Status.RemediationBatch == nil {
+		t.Fatal("batch not started")
+	}
+
+	// User reverts the remediation to apply=false (not Applied).
+	gotRem := &unstructured.Unstructured{}
+	gotRem.SetGroupVersionKind(remediationGVK)
+	_ = r.Get(ctx, types.NamespacedName{Namespace: complianceNamespace, Name: "rem1"}, gotRem)
+	_ = unstructured.SetNestedField(gotRem.Object, false, "spec", "apply")
+	_ = r.Update(ctx, gotRem)
+
+	// Next reconcile: cancelled -> resume without waiting out the grace.
+	if err := r.applyRemediationBatch(ctx, cb); err != nil {
+		t.Fatal(err)
+	}
+	if cb.Status.RemediationBatch != nil {
+		t.Fatalf("batch not cleared after cancel: %+v", cb.Status.RemediationBatch)
+	}
+	gotPool := machineConfigPool("worker")
+	_ = r.Get(ctx, types.NamespacedName{Name: "worker"}, gotPool)
+	if paused, _, _ := unstructured.NestedBool(gotPool.Object, "spec", "paused"); paused {
+		t.Fatal("worker pool left paused after cancel")
 	}
 }
 

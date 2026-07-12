@@ -1343,17 +1343,26 @@ func relatedObjects(cb *baselinev1alpha1.ClusterBaseline) []baselinev1alpha1.Obj
 }
 
 // poolFromRemediation returns the MachineConfigPool a node remediation targets,
-// read from its rendered MachineConfig's role label, or "" for a non-node one.
+// or "" for a non-node one. Prefer the rendered MachineConfig's role label, but
+// the Compliance Operator does not always set it, so fall back to the scan-name
+// label: node scans run per-MCP, named "<profile>-node-<pool>". Without this
+// fallback a node remediation whose MachineConfig has no role label would pause
+// no pool, so its apply would reboot the node uncoalesced.
 func poolFromRemediation(rem *unstructured.Unstructured) string {
 	obj, _, _ := unstructured.NestedMap(rem.Object, "spec", "current", "object")
-	if obj == nil {
-		return ""
+	if obj != nil {
+		if kind, _, _ := unstructured.NestedString(obj, "kind"); kind != "MachineConfig" {
+			return ""
+		}
+		if role, _, _ := unstructured.NestedString(obj, "metadata", "labels", "machineconfiguration.openshift.io/role"); role != "" {
+			return role
+		}
 	}
-	if kind, _, _ := unstructured.NestedString(obj, "kind"); kind != "MachineConfig" {
-		return ""
+	scan := rem.GetLabels()["compliance.openshift.io/scan-name"]
+	if i := strings.Index(scan, "-node-"); i >= 0 {
+		return scan[i+len("-node-"):]
 	}
-	role, _, _ := unstructured.NestedString(obj, "metadata", "labels", "machineconfiguration.openshift.io/role")
-	return role
+	return ""
 }
 
 func (r *ClusterBaselineReconciler) setMCPPaused(ctx context.Context, pool string, paused bool) error {
@@ -1488,7 +1497,10 @@ func (r *ClusterBaselineReconciler) applyRemediationBatch(ctx context.Context, c
 	// NotFound/NoMatch: remediation or CRDs gone; skip (do not block resume forever).
 	// Transient Get errors must not look like Applied (would unpause early), but
 	// must not bypass batchResumeGrace either (pools must never stay paused forever).
+	// Also track whether any remediation is still apply=true: if none are (the
+	// user reverted them all), the batch is cancelled and we resume at once.
 	applied := true
+	anyApplying := false
 	var getErr error
 	for _, name := range batch.Remediations {
 		rem := u(remediationGVK)
@@ -1503,9 +1515,15 @@ func (r *ClusterBaselineReconciler) applyRemediationBatch(ctx context.Context, c
 		if s, _, _ := unstructured.NestedString(rem.Object, "status", "applicationState"); s != "Applied" {
 			applied = false
 		}
+		if a, _, _ := unstructured.NestedBool(rem.Object, "spec", "apply"); a {
+			anyApplying = true
+		}
 	}
+	// Cancelled only when we saw every remediation cleanly (no transient error hid
+	// an apply=true one), so a flaky Get never triggers an early resume.
+	cancelled := !anyApplying && getErr == nil
 	pastGrace := batchPastGrace(batch.StartedAt, time.Now(), batchResumeGrace)
-	if applied || pastGrace {
+	if applied || pastGrace || cancelled {
 		for _, p := range batch.Pools {
 			if err := r.setMCPPaused(ctx, p, false); err != nil {
 				return err

@@ -22,7 +22,7 @@
 - [x] 3.1 Operator: batch-apply action that pauses target MachineConfigPool(s), sets apply on the selected remediations, resumes (guaranteed resume on failure); RBAC for machineconfigpools patch; unit test pause/apply/resume + resume-on-error
 - [x] 3.2 Surface MissingDependencies/Outdated as blocked with the missing dependency named; order so prerequisites apply first; jest on state mapping
 - [x] 3.3 Console: multi-select + Batch apply flow with reboot-once confirmation and MCP-pause explanation; Playwright asserts the confirm + selection
-- [ ] 3.4 e2e (Go, live): batch apply pauses then resumes the pool; pool never left paused
+- [x] 3.4 e2e (Go, live): batch pauses the pool then resumes it (via the cancel path so no MachineConfig rolls), asserting the pool is never left paused; restricted to a non-control-plane pool and skipped when none exists. Also fixed poolFromRemediation to fall back to the scan-name label (the MC role label is often empty, so the batch was pausing no pool) and added cancel-resume when all remediations revert to apply=false; unit-tested both.
 
 ## 4. TailoredProfile authoring (console)
 
