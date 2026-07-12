@@ -93,9 +93,10 @@ Legend: `[x]` done · `[ ]` planned · **(H/M/L)** rough value.
       community-operators once stable. Needs a quay robot token.
 
 ### Operator / API
-- [ ] **(M)** Watch compliance CRs via a dynamic informer once the CRDs
-      exist, replacing the 1-minute poll (deferred: needs a lazy informer that
-      tolerates CRD-absent startup; polling is sufficient today).
+- [x] **(M)** Watch compliance CRs (Scan/Remediation/CheckResult) via a lazy
+      dynamic informer that starts once the CRDs register and tolerates
+      CRD-absent startup; events reconcile the singleton at once. The 1-minute
+      poll is kept as a fallback (strictly additive).
 
 ## Productization
 

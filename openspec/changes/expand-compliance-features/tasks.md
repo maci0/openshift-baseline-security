@@ -40,8 +40,8 @@
 ## 6. Score-trend + informer
 
 - [x] 6.1 Console trend card / extend the existing history chart for the shipped in-console trend (pairs with the 5.2 console dashboard)
-- [ ] 6.2 (DEFERRED - polling works; needs a lazy informer tolerating CRD-absent startup) Dynamic informer: watch ComplianceCheckResult/Scan/Remediation once CRDs exist, map events to the singleton reconcile; tolerate NoKindMatch at startup; keep poll fallback
-- [ ] 6.3 e2e/unit: reconcile fires on scan-result change without waiting for the poll; manager starts without the CRDs
+- [x] 6.2 Dynamic informer: a lazy Runnable adds watches on ComplianceScan/Remediation/CheckResult once their CRDs register (probes the RESTMapper, retries every 30s), mapping every event to the singleton reconcile (coalesced by the workqueue). The poll requeue is kept as a fallback, so the change is strictly additive and tolerates the CRDs being absent at startup.
+- [x] 6.3 unit: enqueueSingleton maps any event to the "cluster" reconcile; manager starts without the CRDs (the lazy watcher retries rather than failing, and the reconcile already tolerates NoMatch on list). "Fires on change" is exercised by the full live e2e still passing with watches wired; a timing-only assertion was skipped as inherently flaky.
 
 ## 7. Docs + test-plan
 

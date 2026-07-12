@@ -76,6 +76,15 @@ func nodeRemediation(name, pool, state string) *unstructured.Unstructured {
 // TestPoolFromRemediation: prefer the MachineConfig role label, fall back to the
 // scan-name label ("<profile>-node-<pool>") when the CO leaves the role empty,
 // and return "" for a non-node remediation.
+// TestEnqueueSingleton: any watched compliance-CR event maps to a reconcile of
+// the ClusterBaseline singleton "cluster".
+func TestEnqueueSingleton(t *testing.T) {
+	reqs := enqueueSingleton(context.Background(), &unstructured.Unstructured{})
+	if len(reqs) != 1 || reqs[0].Name != "cluster" || reqs[0].Namespace != "" {
+		t.Fatalf("enqueueSingleton = %+v, want one request Name=cluster", reqs)
+	}
+}
+
 func TestPoolFromRemediation(t *testing.T) {
 	// Role label present -> use it.
 	if got := poolFromRemediation(nodeRemediation("r", "worker", "")); got != "worker" {

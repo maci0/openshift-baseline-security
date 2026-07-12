@@ -27,9 +27,14 @@ import (
 	"k8s.io/client-go/util/retry"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	baselinev1alpha1 "github.com/maci0/baseline-security-operator/api/v1alpha1"
 )
@@ -1906,10 +1911,79 @@ func applyPluginContainer(pod *corev1.PodSpec, image string) {
 }
 
 func (r *ClusterBaselineReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewControllerManagedBy(mgr).
+	c, err := ctrl.NewControllerManagedBy(mgr).
 		For(&baselinev1alpha1.ClusterBaseline{}).
 		Owns(&appsv1.Deployment{}).
 		Owns(&corev1.Service{}).
 		Named("clusterbaseline").
-		Complete(r)
+		Build(r)
+	if err != nil {
+		return err
+	}
+	// Event-driven watches on the compliance CRs so a finished scan or a
+	// remediation reaching Applied reconciles at once instead of up to a poll
+	// interval later. The Compliance Operator is installed after startup, so its
+	// CRDs may be absent initially; add the watches lazily once they exist. The
+	// poll requeue in Reconcile keeps everything working until then and if the
+	// informers ever fail, so this is strictly additive.
+	return mgr.Add(&lazyComplianceWatch{
+		ctrl:   c,
+		cache:  mgr.GetCache(),
+		mapper: mgr.GetRESTMapper(),
+		gvks:   []schema.GroupVersionKind{scanGVK, remediationGVK, checkResultGVK},
+	})
+}
+
+// enqueueSingleton maps any compliance-CR event to a reconcile of the
+// ClusterBaseline singleton, coalesced by the workqueue.
+func enqueueSingleton(context.Context, client.Object) []reconcile.Request {
+	return []reconcile.Request{{NamespacedName: types.NamespacedName{Name: "cluster"}}}
+}
+
+// lazyComplianceWatch adds informers for the compliance CRs once their CRDs
+// exist, retrying until then, so the manager starts cleanly before the
+// Compliance Operator is installed.
+type lazyComplianceWatch struct {
+	ctrl   controller.Controller
+	cache  cache.Cache
+	mapper meta.RESTMapper
+	gvks   []schema.GroupVersionKind
+}
+
+// Run on the leader only: the watches feed the same reconcile the leader owns.
+func (l *lazyComplianceWatch) NeedLeaderElection() bool { return true }
+
+func (l *lazyComplianceWatch) Start(ctx context.Context) error {
+	logger := log.FromContext(ctx).WithName("lazy-compliance-watch")
+	pending := append([]schema.GroupVersionKind(nil), l.gvks...)
+	for {
+		var still []schema.GroupVersionKind
+		for _, gvk := range pending {
+			// RESTMapping fails with NoMatch until the CRD is registered; the
+			// mapper is dynamic and refreshes, so a later attempt succeeds.
+			if _, err := l.mapper.RESTMapping(gvk.GroupKind(), gvk.Version); err != nil {
+				still = append(still, gvk)
+				continue
+			}
+			obj := &unstructured.Unstructured{}
+			obj.SetGroupVersionKind(gvk)
+			src := source.Kind(l.cache, client.Object(obj),
+				handler.EnqueueRequestsFromMapFunc(enqueueSingleton))
+			if err := l.ctrl.Watch(src); err != nil {
+				logger.V(1).Info("watch not established yet", "kind", gvk.Kind, "error", err)
+				still = append(still, gvk)
+				continue
+			}
+			logger.Info("watching compliance resource", "kind", gvk.Kind)
+		}
+		if len(still) == 0 {
+			return nil
+		}
+		pending = still
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-time.After(30 * time.Second):
+		}
+	}
 }
