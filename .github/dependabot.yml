@@ -1,4 +1,4 @@
-# Keep GitHub Actions, Go modules, and the console-plugin lockfile current.
+# Keep GitHub Actions, Go modules, the console-plugin lockfile, and image digests current.
 version: 2
 updates:
   - package-ecosystem: github-actions
@@ -14,6 +14,19 @@ updates:
     open-pull-requests-limit: 5
 
   - package-ecosystem: npm
+    directory: /console-plugin
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  # Digest-pinned base images in Dockerfiles (operator, plugin, catalog opm).
+  - package-ecosystem: docker
+    directory: /operator
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: docker
     directory: /console-plugin
     schedule:
       interval: weekly

@@ -32,6 +32,7 @@ spec:
               Open Administration -> Compliance, filter Results by Fail, and
               review newlyFailed on the ClusterBaseline status. Check Degraded
               and ScanStorageReady conditions if the score is unexpectedly low.
+              CLI: oc get clusterbaseline cluster -o yaml; operator/hack/must-gather.sh
         - alert: ComplianceChecksFailing
           # Select the newest publishing replica before summing profiles. This
           # avoids both HA double-counting and stale values after leader failover.
@@ -47,6 +48,7 @@ spec:
               {{ $value }} compliance check(s) are failing across the selected
               benchmark profiles. Open Administration -> Compliance -> Results
               (status=Fail). Compare status.newlyFailed vs fixed for regressions.
+              CLI: oc get compliancecheckresults -n openshift-compliance
         - alert: ComplianceChecksInError
           # ERROR is distinct from FAIL: the check did not run cleanly (scanner,
           # RBAC, or node issues). Same HA newest-publisher selection as fails.
@@ -63,6 +65,7 @@ spec:
               Inspect ComplianceCheckResult objects in openshift-compliance and
               Compliance Operator pod logs; ERROR often means a scan/runtime
               problem rather than a policy violation.
+              CLI: oc logs -n openshift-compliance deploy/compliance-operator --tail=200
         - alert: ComplianceStatusStale
           # Operator stopped publishing (crash loop, stuck reconcile, scrape
           # only from a demoted replica that never aggregated). Timestamp 0 is
@@ -82,6 +85,8 @@ spec:
               Check the baseline-security-operator Deployment and pod logs in
               openshift-baseline-security, leader election, and that user-workload
               monitoring scrapes the metrics ServiceMonitor.
+              CLI: oc -n openshift-baseline-security get pods,servicemonitor;
+              oc -n openshift-baseline-security logs deploy/baseline-security-operator --tail=200
         - alert: RemediationBatchStuck
           # batchResumeGrace is 10m; past ~20m the batch should have cleared.
           # A stuck batch means MachineConfigPools may remain paused.
@@ -99,6 +104,8 @@ spec:
               MachineConfigPool .spec.paused; resume pools if the operator cannot
               (operator logs mention resume failures). Unpausing without care may
               trigger node reboots.
+              CLI: oc get clusterbaseline cluster -o jsonpath='{.status.remediationBatch}{"\n"}';
+              oc get mcp -o custom-columns=NAME:.metadata.name,PAUSED:.spec.paused
         - alert: ClusterBaselineDegraded
           # Covers InvalidSchedule, CSVFailed, InstallStalled, ScanStorageNotReady,
           # ConsolePluginUnavailable, and ReconcileError. Score/check alerts alone
@@ -118,3 +125,50 @@ spec:
               message), operator logs in openshift-baseline-security, and
               related detail conditions (ComplianceOperatorReady, ScanConfigured,
               ScanStorageReady, ConsolePluginReady).
+              CLI: oc get clusterbaseline cluster -o jsonpath='{range .status.conditions[*]}{.type}={.status} {.reason} {.message}{"\n"}{end}';
+              operator/hack/must-gather.sh
+        - alert: ComplianceScanStale
+          # Default schedule is daily (0 1 * * *). 36h allows one missed run plus
+          # slack for long scans; 0 means never scanned (install grace, skip).
+          # Operator publish freshness (ComplianceStatusStale) can stay green while
+          # the Compliance Operator stops producing completed scans.
+          # Select the newest publisher's last_scan (same HA pattern as score/checks).
+          expr: >-
+            (
+              max(baseline_security_last_scan_timestamp_seconds
+                and on(instance) topk(1, baseline_security_status_observed_timestamp_seconds)) > 0
+            )
+            and
+            (
+              time()
+              - max(baseline_security_last_scan_timestamp_seconds
+                and on(instance) topk(1, baseline_security_status_observed_timestamp_seconds))
+              > 129600
+            )
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: Last compliance scan is older than 36h
+            description: >-
+              status.lastScanTime is more than 36 hours old while metrics are still
+              publishing. Check ComplianceSuites/Scans in openshift-compliance,
+              ScanSetting schedule, and that profiles are selected.
+              CLI: oc get clusterbaseline cluster -o jsonpath='{.status.lastScanTime}{"\n"}{.spec.schedule}{"\n"}';
+              oc -n openshift-compliance get compliancesuites,compliancescans
+        - alert: ComplianceRegressions
+          # New FAILs since the previous completed scan. Fires even when overall
+          # score stays above ComplianceScoreLow (threshold 80).
+          expr: >-
+            max(baseline_security_newly_failed
+              and on(instance) topk(1, baseline_security_status_observed_timestamp_seconds)) > 0
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: New compliance check failures since last scan
+            description: >-
+              {{ $value }} check(s) newly failed versus the previous completed
+              scan (status.newlyFailed). Open Administration -> Compliance
+              Overview for the regressions list, or filter Results by Fail.
+              CLI: oc get clusterbaseline cluster -o jsonpath='{.status.newlyFailed}{"\n"}'

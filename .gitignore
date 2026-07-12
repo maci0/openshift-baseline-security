@@ -17,3 +17,9 @@ console-plugin/.yarn/
 .codex/
 .qwen/
 console-plugin/test-results/
+# Playwright session cookies after e2e login (also in console-plugin/.gitignore).
+console-plugin/e2e/.auth/
+# Python bytecode from hack/ scripts (e.g. prometheusrule_to_rules.py).
+**/__pycache__/
+*.py[cod]
+

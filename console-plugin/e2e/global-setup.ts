@@ -1,12 +1,12 @@
 import { chromium, FullConfig } from '@playwright/test';
-import { mkdir } from 'fs/promises';
+import { chmod, mkdir } from 'fs/promises';
 
 // Logs into the OpenShift console once and saves the authenticated storage
 // state so each spec starts already logged in.
 export default async function globalSetup(_config: FullConfig) {
-  const consoleURL = process.env.CONSOLE_URL;
-  const user = process.env.KUBEADMIN_USER ?? 'kubeadmin';
-  const password = process.env.KUBEADMIN_PASSWORD;
+  const consoleURL = (process.env.CONSOLE_URL ?? '').trim();
+  const user = (process.env.KUBEADMIN_USER ?? 'kubeadmin').trim() || 'kubeadmin';
+  const password = (process.env.KUBEADMIN_PASSWORD ?? '').trim();
   if (!consoleURL || !password) {
     throw new Error(
       'CONSOLE_URL and KUBEADMIN_PASSWORD must be set (see console-plugin/.env.example)',
@@ -34,7 +34,10 @@ export default async function globalSetup(_config: FullConfig) {
     // no tour
   }
 
-  await mkdir('e2e/.auth', { recursive: true });
-  await page.context().storageState({ path: 'e2e/.auth/state.json' });
+  await mkdir('e2e/.auth', { recursive: true, mode: 0o700 });
+  const statePath = 'e2e/.auth/state.json';
+  await page.context().storageState({ path: statePath });
+  // Session cookies: owner-only (gitignored path; still tighten on shared hosts).
+  await chmod(statePath, 0o600);
   await browser.close();
 }

@@ -34,8 +34,7 @@ func complianceCSVVersion(name string) (complianceVersion, bool) {
 		return complianceVersion{}, false
 	}
 	v, _, _ = strings.Cut(v, "+")
-	core, _, _ := strings.Cut(v, "-")
-	_, prerelease, _ := strings.Cut(v, "-")
+	core, prerelease, _ := strings.Cut(v, "-")
 	parts := strings.Split(core, ".")
 	out := make([]int, len(parts))
 	for i, p := range parts {

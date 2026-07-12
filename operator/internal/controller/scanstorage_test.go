@@ -60,7 +60,7 @@ func TestCheckScanStorageDegradedOnPendingPVC(t *testing.T) {
 	}
 	c := meta.FindStatusCondition(cb.Status.Conditions, "ScanStorageReady")
 	if c == nil || c.Status != metav1.ConditionFalse || c.Reason != "ScanStoragePending" {
-		t.Fatalf("Degraded condition = %+v, want False/ScanStoragePending", c)
+		t.Fatalf("ScanStorageReady = %+v, want False/ScanStoragePending", c)
 	}
 	if c.Message == "" || !strings.Contains(c.Message, "ocp4-cis") {
 		t.Fatalf("Message should list ocp4-cis: %q", c.Message)
@@ -69,14 +69,14 @@ func TestCheckScanStorageDegradedOnPendingPVC(t *testing.T) {
 		t.Fatalf("fresh PVC should not be reported: %q", c.Message)
 	}
 
-	// Bound PVC clears it.
+	// Bound PVC clears ScanStorageReady to True/AsExpected (not a leftover Pending).
 	stale.Status.Phase = corev1.ClaimBound
 	r.Client = fake.NewClientBuilder().WithScheme(scheme).WithObjects(stale, other, fresh).Build()
 	if err := r.checkScanStorage(context.Background(), cb); err != nil {
 		t.Fatal(err)
 	}
-	if c := meta.FindStatusCondition(cb.Status.Conditions, "ScanStorageReady"); c == nil || c.Status != metav1.ConditionTrue {
-		t.Fatalf("Degraded condition = %+v, want False", c)
+	if c := meta.FindStatusCondition(cb.Status.Conditions, "ScanStorageReady"); c == nil || c.Status != metav1.ConditionTrue || c.Reason != "AsExpected" {
+		t.Fatalf("ScanStorageReady = %+v, want True/AsExpected after Bound", c)
 	}
 }
 

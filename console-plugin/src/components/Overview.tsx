@@ -48,31 +48,51 @@ import {
   ClusterBaseline,
   ClusterBaselineModel,
   ComplianceCheckResult,
-  isOwnedByBaseline,
+  DEFAULT_SCAN_SCHEDULE,
+  profileTitle,
   ResultCounts,
   ScoreSnapshot,
   suiteFilterKey,
 } from '../models';
+import { isValidCron } from '../cron';
+import { formatCount, safeLocale } from '../dates';
+import { errorMessage } from '../errors';
+import { resultsHref } from '../links';
+import { resourceVersionTest, schedulePatch } from '../patches';
+import { changedChecks } from '../results';
 import {
   aggregateCounts,
-  changedChecks,
-  errorMessage,
-  expiringWaivers,
-  isValidCron,
+  effectiveScoringMode,
+  historyScoringModeMismatch,
   profileScore,
-  resourceVersionTest,
-  resultsHref,
-  schedulePatch,
-} from '../utils';
+} from '../scoring';
+import { activeWaivedNames, expiringWaivers } from '../waivers';
+
+// Stable empty list so optional status arrays do not allocate each render.
+const EMPTY_NAMES: readonly string[] = [];
+const EMPTY_RESULTS: ComplianceCheckResult[] = [];
 
 // Inline editor for spec.schedule in the Details card, gated on patch permission.
 const ScheduleEditor: React.FC<{ baseline: ClusterBaseline }> = ({ baseline }) => {
   const { t } = useTranslation('plugin__baseline-security-console-plugin');
-  const current = baseline.spec.schedule || '0 1 * * *';
+  const current = (baseline.spec.schedule ?? '').trim() || DEFAULT_SCAN_SCHEDULE;
   const [editing, setEditing] = React.useState(false);
   const [value, setValue] = React.useState(current);
   const [busy, setBusy] = React.useState(false);
+  // Sync guard: React state alone cannot block a second click before re-render.
+  const busyRef = React.useRef(false);
   const [err, setErr] = React.useState<string | null>(null);
+  const [saved, setSaved] = React.useState(false);
+  const inputRef = React.useRef<HTMLInputElement>(null);
+  const editButtonRef = React.useRef<HTMLButtonElement>(null);
+  // Track edit sessions so Cancel/Save can restore focus to Edit (WCAG 2.4.3).
+  const wasEditing = React.useRef(false);
+  // Auto-clear "Schedule updated" so success feedback does not stick forever.
+  React.useEffect(() => {
+    if (!saved) return;
+    const id = window.setTimeout(() => setSaved(false), 5000);
+    return () => window.clearTimeout(id);
+  }, [saved]);
   const [canEdit, canEditLoading] = useAccessReview({
     group: 'baselinesecurity.io',
     resource: 'clusterbaselines',
@@ -80,31 +100,68 @@ const ScheduleEditor: React.FC<{ baseline: ClusterBaseline }> = ({ baseline }) =
   });
   const valid = isValidCron(value);
 
+  // Move focus into the field when opening edit; return it to Edit when closing.
+  React.useEffect(() => {
+    if (editing) {
+      inputRef.current?.focus();
+      wasEditing.current = true;
+    } else if (wasEditing.current) {
+      editButtonRef.current?.focus();
+      wasEditing.current = false;
+    }
+  }, [editing]);
+
+  const cancelEdit = () => {
+    if (busyRef.current) return;
+    setValue(current);
+    setErr(null);
+    setEditing(false);
+  };
+
   if (!editing) {
     return (
-      <Split hasGutter>
-        <SplitItem>
-          <code>{current}</code>
-        </SplitItem>
-        {canEdit && !canEditLoading && (
+      <>
+        <Split hasGutter>
           <SplitItem>
-            <Button
-              variant="link"
-              isInline
-              onClick={() => {
-                setValue(current);
-                setErr(null);
-                setEditing(true);
-              }}
-            >
-              {t('Edit')}
-            </Button>
+            <code>{current}</code>
           </SplitItem>
+          {canEdit && !canEditLoading && (
+            <SplitItem>
+              <Button
+                ref={editButtonRef}
+                variant="link"
+                isInline
+                onClick={() => {
+                  setValue(current);
+                  setErr(null);
+                  setSaved(false);
+                  setEditing(true);
+                }}
+              >
+                {t('Edit')}
+              </Button>
+            </SplitItem>
+          )}
+        </Split>
+        {saved && (
+          <HelperText role="status">
+            <HelperTextItem variant="success">{t('Schedule updated.')}</HelperTextItem>
+          </HelperText>
         )}
-      </Split>
+      </>
     );
   }
   const save = async () => {
+    if (!valid || busyRef.current) return;
+    // Presence is != null (not !!): empty string is still a present field.
+    // Empty schedule ops would leave only an RV test: a successful no-op that
+    // looks like the schedule was updated when nothing changed.
+    const scheduleOps = schedulePatch(baseline.spec.schedule != null, value.trim());
+    if (!scheduleOps.length) {
+      setErr(t('Invalid schedule. Use a five-field cron expression.'));
+      return;
+    }
+    busyRef.current = true;
     setBusy(true);
     setErr(null);
     try {
@@ -113,13 +170,15 @@ const ScheduleEditor: React.FC<{ baseline: ClusterBaseline }> = ({ baseline }) =
         resource: baseline,
         data: [
           ...resourceVersionTest(baseline.metadata.resourceVersion),
-          ...schedulePatch(!!baseline.spec.schedule, value.trim()),
+          ...scheduleOps,
         ],
       });
+      setSaved(true);
       setEditing(false);
     } catch (e) {
       setErr(errorMessage(e) ?? t('Failed to update schedule.'));
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
   };
@@ -128,9 +187,22 @@ const ScheduleEditor: React.FC<{ baseline: ClusterBaseline }> = ({ baseline }) =
       <Split hasGutter>
         <SplitItem isFilled>
           <TextInput
+            ref={inputRef}
+            id="schedule-cron"
             aria-label={t('Schedule')}
+            aria-invalid={!valid}
+            aria-describedby="schedule-cron-help"
             value={value}
             onChange={(_e, v) => setValue(v)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                void save();
+              } else if (e.key === 'Escape') {
+                e.preventDefault();
+                cancelEdit();
+              }
+            }}
             validated={valid ? 'default' : 'error'}
           />
         </SplitItem>
@@ -140,26 +212,19 @@ const ScheduleEditor: React.FC<{ baseline: ClusterBaseline }> = ({ baseline }) =
           </Button>
         </SplitItem>
         <SplitItem>
-          <Button
-            variant="link"
-            isInline
-            isDisabled={busy}
-            onClick={() => {
-              setValue(current);
-              setErr(null);
-              setEditing(false);
-            }}
-          >
+          <Button variant="link" isInline isDisabled={busy} onClick={cancelEdit}>
             {t('Cancel')}
           </Button>
         </SplitItem>
       </Split>
-      {!valid && (
-        <HelperText>
-          <HelperTextItem variant="error">{t('Enter a 5-field cron schedule.')}</HelperTextItem>
-        </HelperText>
-      )}
-      {err && <Alert variant="danger" isInline title={err} style={{ marginTop: 4 }} />}
+      <HelperText id="schedule-cron-help">
+        <HelperTextItem variant={valid ? 'default' : 'error'}>
+          {valid
+            ? t('Five-field cron (minute hour day-of-month month day-of-week). Example: 0 1 * * *')
+            : t('Enter a 5-field cron schedule.')}
+        </HelperTextItem>
+      </HelperText>
+      {err && <Alert variant="danger" isInline isLiveRegion title={err} style={{ marginTop: 4 }} />}
     </>
   );
 };
@@ -170,17 +235,32 @@ const CountRow: React.FC<{
   label: string;
   count: number;
   href?: string;
-}> = ({ icon, status, label, count, href }) => (
-  <Flex gap={{ default: 'gapSm' }} alignItems={{ default: 'alignItemsCenter' }}>
-    <FlexItem>
-      <Icon status={status} size="sm">
-        {icon}
-      </Icon>
-    </FlexItem>
-    <FlexItem grow={{ default: 'grow' }}>{label}</FlexItem>
-    <FlexItem>{href && count > 0 ? <a href={href}>{count}</a> : count}</FlexItem>
-  </Flex>
-);
+}> = ({ icon, status, label, count, href }) => {
+  const { t, i18n } = useTranslation('plugin__baseline-security-console-plugin');
+  // formatCount: underscore BCP 47 + invalid tags (toLocaleString throws RangeError).
+  const countText = formatCount(count, i18n.language);
+  return (
+    <Flex gap={{ default: 'gapSm' }} alignItems={{ default: 'alignItemsCenter' }}>
+      <FlexItem>
+        <Icon status={status} size="sm">
+          {icon}
+        </Icon>
+      </FlexItem>
+      <FlexItem grow={{ default: 'grow' }}>{label}</FlexItem>
+      <FlexItem>
+        {href && count > 0 ? (
+          // Link text is only the number; name it so screen readers announce
+          // the localized "Fail: 5" pattern, not a context-free "5" (WCAG 2.4.4).
+          <a href={href} aria-label={t('{{label}}: {{value}}', { label, value: countText })}>
+            {countText}
+          </a>
+        ) : (
+          countText
+        )}
+      </FlexItem>
+    </Flex>
+  );
+};
 
 // Compact score sparkline for a profile card from its history (>=2 points).
 const MiniTrend: React.FC<{ history?: ScoreSnapshot[] }> = ({ history }) => {
@@ -247,6 +327,11 @@ const ProfileCounts: React.FC<{ counts: ResultCounts; filterKey: string }> = ({
   );
 };
 
+// PatternFly Label color for a profile score, using the same 60/90 thresholds
+// as scoreColor (which returns CSS vars, not Label color tokens).
+const scoreLabelColor = (score: number): 'green' | 'orange' | 'red' =>
+  score >= 90 ? 'green' : score >= 60 ? 'orange' : 'red';
+
 const Overview: React.FC<{
   baseline?: ClusterBaseline;
   loaded: boolean;
@@ -254,24 +339,25 @@ const Overview: React.FC<{
   // and SeverityWeighted per-profile scores.
   checkResults?: ComplianceCheckResult[];
 }> = ({ baseline, loaded, checkResults }) => {
-  const { t } = useTranslation('plugin__baseline-security-console-plugin');
+  const { t, i18n } = useTranslation('plugin__baseline-security-console-plugin');
+  // One BCP 47 tag for all score/count formatting (same path as report / dates).
+  const locale = safeLocale(i18n.language);
 
   // SeverityWeighted per-profile scores need to scan check results. Group owned
   // results by filter key once here instead of letting each profile card's
   // profileScore re-scan every result (O(cards x results)); each card then only
   // weighs its own bucket. null in Flat mode, where scores use counts alone.
-  const weighted = baseline?.spec.scoring?.mode === 'SeverityWeighted';
+  // checkResults is already baseline-owned (CompliancePage suite selector);
+  // only bucket by suiteFilterKey (no second ownership scan).
+  const scoringMode = effectiveScoringMode(baseline);
+  const weighted = scoringMode === 'SeverityWeighted';
+  const historyModeMismatch = historyScoringModeMismatch(baseline);
   const resultsByKey = React.useMemo(() => {
     if (!weighted) {
       return null;
     }
-    const profiles = baseline?.spec.profiles;
-    const tailored = baseline?.spec.tailoredProfiles;
     const m = new Map<string, ComplianceCheckResult[]>();
     for (const r of checkResults ?? []) {
-      if (!isOwnedByBaseline(r.metadata.labels, profiles, tailored)) {
-        continue;
-      }
       const key = suiteFilterKey(r.metadata.labels);
       if (key === undefined) {
         continue;
@@ -284,7 +370,60 @@ const Overview: React.FC<{
       }
     }
     return m;
-  }, [weighted, checkResults, baseline?.spec.profiles, baseline?.spec.tailoredProfiles]);
+  }, [weighted, checkResults]);
+
+  // One waiver Set + one score pass for all cards (avoids N Set builds and
+  // re-scoring every Overview re-render during CCR watch churn).
+  const weightedScores = React.useMemo(() => {
+    if (!resultsByKey) {
+      return null;
+    }
+    const waived = activeWaivedNames(baseline?.spec.waivers);
+    const scores = new Map<string, number | null>();
+    for (const p of baseline?.status?.profiles ?? []) {
+      scores.set(
+        p.key,
+        profileScore(p, {
+          mode: 'SeverityWeighted',
+          filterKey: p.key,
+          results: resultsByKey.get(p.key) ?? EMPTY_RESULTS,
+          activeWaived: waived,
+        }),
+      );
+    }
+    for (const tp of baseline?.status?.tailoredProfiles ?? []) {
+      const key = `tp-${tp.name}`;
+      scores.set(
+        key,
+        profileScore(tp, {
+          mode: 'SeverityWeighted',
+          filterKey: key,
+          results: resultsByKey.get(key) ?? EMPTY_RESULTS,
+          activeWaived: waived,
+        }),
+      );
+    }
+    return scores;
+  }, [
+    resultsByKey,
+    baseline?.spec.waivers,
+    baseline?.status?.profiles,
+    baseline?.status?.tailoredProfiles,
+  ]);
+
+  // Hooks must run before early returns. Resolve titles from the watched CCR
+  // list; changedChecks early-exits on empty names and only indexes requested
+  // check names (not every CCR).
+  const newlyFailed = baseline?.status?.newlyFailed ?? EMPTY_NAMES;
+  const fixed = baseline?.status?.fixed ?? EMPTY_NAMES;
+  const newlyFailedItems = React.useMemo(
+    () => changedChecks(newlyFailed, checkResults),
+    [newlyFailed, checkResults],
+  );
+  const fixedItems = React.useMemo(
+    () => changedChecks(fixed, checkResults),
+    [fixed, checkResults],
+  );
 
   if (!loaded) {
     return (
@@ -304,7 +443,7 @@ const Overview: React.FC<{
   if (!baseline) {
     return (
       <PageSection>
-        <EmptyState titleText={t('Baseline not configured')}>
+        <EmptyState titleText={t('Baseline not configured')} headingLevel="h2">
           <EmptyStateBody>
             {t(
               'No ClusterBaseline resource found. Install the baseline-security operator and create a ClusterBaseline to start scanning.',
@@ -369,10 +508,6 @@ const Overview: React.FC<{
 
   const WEEK = 7 * 24 * 60 * 60 * 1000;
   const expiring = expiringWaivers(baseline.spec.waivers, 2 * WEEK);
-  const newlyFailed = baseline.status?.newlyFailed ?? [];
-  const fixed = baseline.status?.fixed ?? [];
-  const newlyFailedItems = changedChecks(newlyFailed, checkResults);
-  const fixedItems = changedChecks(fixed, checkResults);
   // Prefer status.diffBaseScanTime (set once a prior completed scan exists for
   // regression diff). History length alone is wrong when the first scan had no
   // countable score (history stays short) but a second scan already compared.
@@ -388,16 +523,19 @@ const Overview: React.FC<{
         <Alert
           variant="info"
           isInline
+          isLiveRegion
           title={t('Scanning is disabled')}
           style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}
         >
-          {t('No profiles are selected. Enable a profile under the Profiles tab to resume scanning.')}
+          {t('No profiles are selected. Enable a profile to resume scanning.')}{' '}
+          <a href="/baseline-security/profiles">{t('Go to Profiles')}</a>
         </Alert>
       )}
       {degraded && (
         <Alert
           variant="warning"
           isInline
+          isLiveRegion
           title={t('Scanning degraded')}
           style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}
         >
@@ -408,6 +546,7 @@ const Overview: React.FC<{
         <Alert
           variant="info"
           isInline
+          isLiveRegion
           title={t('Baseline is progressing')}
           style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}
         >
@@ -418,20 +557,36 @@ const Overview: React.FC<{
         <Alert
           variant="danger"
           isInline
+          isLiveRegion
           title={t('{{count}} check newly failing since the last scan', {
+            // count must stay numeric for i18next plural selection; formattedCount
+            // is the locale-aware display value in the translated string.
             count: newlyFailed.length,
+            formattedCount: formatCount(newlyFailed.length, locale),
           })}
           style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}
         >
           <a href={resultsHref('FAIL')}>{t('Review failing checks')}</a>
-          {fixed.length > 0 && ` • ${t('{{count}} fixed', { count: fixed.length })}`}
+          {fixed.length > 0 && (
+            <>
+              {' '}
+              {t('({{count}} fixed)', {
+                count: fixed.length,
+                formattedCount: formatCount(fixed.length, locale),
+              })}
+            </>
+          )}
         </Alert>
       )}
       {expiring.length > 0 && (
         <Alert
           variant="warning"
           isInline
-          title={t('{{count}} waiver expiring within two weeks', { count: expiring.length })}
+          isLiveRegion
+          title={t('{{count}} waiver expiring within two weeks', {
+            count: expiring.length,
+            formattedCount: formatCount(expiring.length, locale),
+          })}
           style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}
         >
           {expiring.map((w) => w.name).join(', ')}
@@ -447,9 +602,10 @@ const Overview: React.FC<{
             {totalChecks === 0 ? (
               <ChartDonut
                 ariaTitle={t('Compliance score')}
+                ariaDesc={t('No check results yet. Score is unavailable until a scan completes.')}
                 data={[{ x: t('No results'), y: 1 }]}
                 colorScale={[grey]}
-                title={score != null ? `${score}` : '—'}
+                title={score != null ? formatCount(score, locale) : '—'}
                 subTitle={t('of 100')}
                 height={200}
                 width={300}
@@ -463,8 +619,13 @@ const Overview: React.FC<{
                   constrainToVisibleArea
                   data={segments.map((s) => ({ x: s.label, y: s.value }))}
                   colorScale={segments.map((s) => s.color)}
-                  labels={({ datum }) => `${datum.x}: ${datum.y}`}
-                  title={score != null ? `${score}` : '—'}
+                  labels={({ datum }) =>
+                    t('{{label}}: {{value}}', {
+                      label: datum.x,
+                      value: formatCount(Number(datum.y), locale),
+                    })
+                  }
+                  title={score != null ? formatCount(score, locale) : '—'}
                   subTitle={t('of 100')}
                   height={200}
                   width={200}
@@ -488,7 +649,12 @@ const Overview: React.FC<{
                           backgroundColor: s.color,
                         }}
                       />
-                      <span>{`${s.label} (${s.value})`}</span>
+                      <span>
+                        {t('{{label}} ({{num}})', {
+                          label: s.label,
+                          num: formatCount(s.value, locale),
+                        })}
+                      </span>
                     </li>
                   ))}
                 </ul>
@@ -523,13 +689,21 @@ const Overview: React.FC<{
               <DescriptionListGroup>
                 <DescriptionListTerm>{t('Schedule')}</DescriptionListTerm>
                 <DescriptionListDescription>
-                  {/* Empty schedule is defaulted by the operator to 0 1 * * *. */}
+                  {/* Empty/whitespace schedule is defaulted to DEFAULT_SCAN_SCHEDULE. */}
                   <ScheduleEditor baseline={baseline} />
                 </DescriptionListDescription>
               </DescriptionListGroup>
               <DescriptionListGroup>
                 <DescriptionListTerm>{t('Compliance Operator')}</DescriptionListTerm>
                 <DescriptionListDescription>{coLabel}</DescriptionListDescription>
+              </DescriptionListGroup>
+              <DescriptionListGroup>
+                <DescriptionListTerm>{t('Scoring mode')}</DescriptionListTerm>
+                <DescriptionListDescription>
+                  {scoringMode === 'SeverityWeighted'
+                    ? t('Severity-weighted')
+                    : t('Flat (equal weight)')}
+                </DescriptionListDescription>
               </DescriptionListGroup>
               <DescriptionListGroup>
                 <DescriptionListTerm>{t('Remediations')}</DescriptionListTerm>
@@ -543,7 +717,16 @@ const Overview: React.FC<{
         {(baseline.status?.history?.length ?? 0) > 1 && (
           <Card>
             <CardTitle>{t('Score trend')}</CardTitle>
-            <CardBody style={{ height: 230 }}>
+            <CardBody style={{ height: historyModeMismatch ? 260 : 230 }}>
+              {historyModeMismatch && (
+                <HelperText style={{ marginBottom: 'var(--pf-t--global--spacer--sm)' }}>
+                  <HelperTextItem variant="warning">
+                    {t(
+                      'Scoring mode changed since some history points were recorded. Older points may not be comparable until the next completed scan.',
+                    )}
+                  </HelperTextItem>
+                </HelperText>
+              )}
               <Chart
                 ariaTitle={t('Score trend')}
                 height={200}
@@ -555,10 +738,13 @@ const Overview: React.FC<{
                 scale={{ x: 'time', y: 'linear' }}
               >
                 <ChartAxis
-                  tickFormat={(x: Date) => new Date(x).toLocaleDateString()}
+                  tickFormat={(x: Date) => new Date(x).toLocaleDateString(locale)}
                   fixLabelOverlap
                 />
-                <ChartAxis dependentAxis />
+                <ChartAxis
+                  dependentAxis
+                  tickFormat={(y: number) => formatCount(y, locale)}
+                />
                 <ChartArea
                   data={(baseline.status?.history ?? []).map((h) => ({
                     x: new Date(h.time),
@@ -580,13 +766,22 @@ const Overview: React.FC<{
                     : t('No previous scan to compare yet')
                 }
                 headingLevel="h4"
-              />
+              >
+                <EmptyStateBody>
+                  {hasPriorScan
+                    ? t('Fail and fix deltas will appear here after the next completed scan.')
+                    : t('Run a scan, then rescan later to see newly failing and fixed checks.')}
+                </EmptyStateBody>
+              </EmptyState>
             ) : (
               <DescriptionList isCompact>
                 {newlyFailedItems.length > 0 && (
                   <DescriptionListGroup>
                     <DescriptionListTerm>
-                      {t('Newly failing ({{count}})', { count: newlyFailedItems.length })}
+                      {t('Newly failing ({{count}})', {
+                        count: newlyFailedItems.length,
+                        formattedCount: formatCount(newlyFailedItems.length, locale),
+                      })}
                     </DescriptionListTerm>
                     <DescriptionListDescription>
                       {newlyFailedItems.map((c) => (
@@ -603,7 +798,10 @@ const Overview: React.FC<{
                 {fixedItems.length > 0 && (
                   <DescriptionListGroup>
                     <DescriptionListTerm>
-                      {t('Fixed ({{count}})', { count: fixedItems.length })}
+                      {t('Fixed ({{count}})', {
+                        count: fixedItems.length,
+                        formattedCount: formatCount(fixedItems.length, locale),
+                      })}
                     </DescriptionListTerm>
                     <DescriptionListDescription>
                       {fixedItems.map((c) => (
@@ -630,30 +828,30 @@ const Overview: React.FC<{
         style={{ marginTop: 'var(--pf-t--global--spacer--md)' }}
       >
         {(baseline.status?.profiles ?? []).map((p) => {
-          // Match operator scoring.mode: Flat uses counts; SeverityWeighted uses
-          // the same weight table over watched check results.
-          const pScore = profileScore(p, {
-            mode: baseline.spec.scoring?.mode,
-            filterKey: p.key,
-            results: resultsByKey ? resultsByKey.get(p.key) ?? [] : checkResults,
-            profiles: baseline.spec.profiles,
-            tailoredProfiles: baseline.spec.tailoredProfiles,
-            waivers: baseline.spec.waivers,
-          });
+          // Flat: counts only. SeverityWeighted: memoized weightedScores map.
+          const pScore = weightedScores
+            ? (weightedScores.get(p.key) ?? null)
+            : profileScore(p);
           return (
             <Card key={p.key}>
               <CardHeader
                 actions={{
                   actions:
                     pScore != null ? (
-                      <Label isCompact color={pScore >= 90 ? 'green' : pScore >= 60 ? 'orange' : 'red'}>
-                        {pScore}
+                      <Label
+                        isCompact
+                        color={scoreLabelColor(pScore)}
+                        aria-label={t('Compliance score {{score}} of 100', {
+                          score: formatCount(pScore, locale),
+                        })}
+                      >
+                        {formatCount(pScore, locale)}
                       </Label>
                     ) : undefined,
                   hasNoOffset: true,
                 }}
               >
-                <CardTitle>{p.key.toUpperCase()}</CardTitle>
+                <CardTitle>{t(profileTitle(p.key))}</CardTitle>
               </CardHeader>
               <CardBody>
                 <ProfileCounts counts={p} filterKey={p.key} />
@@ -663,22 +861,24 @@ const Overview: React.FC<{
           );
         })}
         {(baseline.status?.tailoredProfiles ?? []).map((tp) => {
-          const pScore = profileScore(tp, {
-            mode: baseline.spec.scoring?.mode,
-            filterKey: `tp-${tp.name}`,
-            results: resultsByKey ? resultsByKey.get(`tp-${tp.name}`) ?? [] : checkResults,
-            profiles: baseline.spec.profiles,
-            tailoredProfiles: baseline.spec.tailoredProfiles,
-            waivers: baseline.spec.waivers,
-          });
+          const tpKey = `tp-${tp.name}`;
+          const pScore = weightedScores
+            ? (weightedScores.get(tpKey) ?? null)
+            : profileScore(tp);
           return (
             <Card key={`tp-${tp.name}`}>
               <CardHeader
                 actions={{
                   actions:
                     pScore != null ? (
-                      <Label isCompact color={pScore >= 90 ? 'green' : pScore >= 60 ? 'orange' : 'red'}>
-                        {pScore}
+                      <Label
+                        isCompact
+                        color={scoreLabelColor(pScore)}
+                        aria-label={t('Compliance score {{score}} of 100', {
+                          score: formatCount(pScore, locale),
+                        })}
+                      >
+                        {formatCount(pScore, locale)}
                       </Label>
                     ) : undefined,
                   hasNoOffset: true,

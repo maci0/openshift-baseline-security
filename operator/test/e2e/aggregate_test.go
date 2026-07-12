@@ -145,7 +145,10 @@ func TestRelatedObjectsPopulated(t *testing.T) {
 	if len(cb.Status.RelatedObjects) == 0 {
 		t.Fatal("status.relatedObjects is empty")
 	}
-	wantResources := map[string]bool{"scansettings": false, "deployments": false, "consoleplugins": false}
+	wantResources := map[string]bool{
+		"scansettings": false, "deployments": false,
+		"poddisruptionbudgets": false, "consoleplugins": false,
+	}
 	for _, ref := range cb.Status.RelatedObjects {
 		if _, ok := wantResources[ref.Resource]; ok {
 			wantResources[ref.Resource] = true

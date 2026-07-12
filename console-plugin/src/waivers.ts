@@ -24,7 +24,24 @@ export const isWaived = (name: string, waivers?: Waiver[], now?: Date): boolean 
   return !!w && !waiverExpired(w, now ?? new Date());
 };
 
+// Names of currently-active (non-expired) waivers as a Set, so score math and
+// row filters are O(1) per check instead of scanning the waiver list each time.
+// Shared by scoring, CSV export, and the Results table.
+export const activeWaivedNames = (
+  waivers: Waiver[] | undefined,
+  now: Date = new Date(),
+): Set<string> => {
+  const set = new Set<string>();
+  for (const w of waivers ?? []) {
+    if (w.name && !waiverExpired(w, now)) {
+      set.add(w.name);
+    }
+  }
+  return set;
+};
+
 // Active waivers expiring within `withinMs` (not yet expired), for surfacing.
+// Unparseable expiresAt is excluded (NaN is not finite); matches waiverExpired.
 export const expiringWaivers = (
   waivers: Waiver[] | undefined,
   withinMs: number,
@@ -35,5 +52,8 @@ export const expiringWaivers = (
       return false;
     }
     const t = new Date(w.expiresAt).getTime();
+    if (Number.isNaN(t)) {
+      return false;
+    }
     return t > now.getTime() && t <= now.getTime() + withinMs;
   });

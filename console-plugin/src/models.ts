@@ -1,5 +1,73 @@
 import { K8sGroupVersionKind, K8sModel } from '@openshift-console/dynamic-plugin-sdk';
 
+// ProfileKey matches ClusterBaselineSpec.profiles CRD enum. Keep in lockstep with
+// the operator ProfileKey constants / AllProfileKeys and Profiles MaxItems=8.
+export type ProfileKey =
+  | 'cis'
+  | 'pci-dss'
+  | 'nist-moderate'
+  | 'nist-high'
+  | 'stig'
+  | 'nerc-cip'
+  | 'e8'
+  | 'bsi';
+
+export const PROFILE_KEYS: readonly ProfileKey[] = [
+  'cis',
+  'pci-dss',
+  'nist-moderate',
+  'nist-high',
+  'stig',
+  'nerc-cip',
+  'e8',
+  'bsi',
+] as const;
+
+// Display metadata for every known ProfileKey. Record<ProfileKey, ...> fails
+// typecheck if a CRD enum value is missing here (lockstep with PROFILE_KEYS).
+// title/description are i18n source keys (English); pass through t() at render.
+export const PROFILE_INFO: Record<ProfileKey, { title: string; description: string }> = {
+  cis: { title: 'CIS', description: 'CIS Red Hat OpenShift Container Platform Benchmark' },
+  'pci-dss': { title: 'PCI-DSS', description: 'Payment Card Industry Data Security Standard' },
+  'nist-moderate': { title: 'NIST 800-53 Moderate', description: 'FedRAMP Moderate impact baseline' },
+  'nist-high': { title: 'NIST 800-53 High', description: 'FedRAMP High impact baseline' },
+  stig: {
+    title: 'DISA STIG',
+    description: 'Defense Information Systems Agency Security Technical Implementation Guide',
+  },
+  'nerc-cip': {
+    title: 'NERC CIP',
+    description: 'North American Electric Reliability Corporation Critical Infrastructure Protection',
+  },
+  e8: { title: 'ACSC Essential Eight', description: 'Australian Cyber Security Centre Essential Eight' },
+  bsi: {
+    title: 'BSI',
+    description: 'German Federal Office for Information Security IT-Grundschutz',
+  },
+};
+
+// O(1) membership for profileTitle / lockstep with PROFILE_KEYS.
+const PROFILE_KEY_SET: ReadonlySet<string> = new Set(PROFILE_KEYS);
+
+// Human title for a built-in profile key (i18n source string). Unknown keys fall
+// back to uppercased key so Overview/filter stay readable for future enums.
+export const profileTitle = (key: string): string => {
+  if (PROFILE_KEY_SET.has(key)) {
+    return PROFILE_INFO[key as ProfileKey].title;
+  }
+  // CR status.profiles[].key is not runtime type-checked; coerce so a tampered
+  // non-string key cannot throw on .toUpperCase.
+  return String(key ?? '').toUpperCase();
+};
+
+// CRD list MaxItems for ClusterBaselineSpec (client fail-closed before admission).
+export const PROFILE_MAX_ITEMS = 8;
+export const TAILORED_PROFILE_MAX_ITEMS = 32;
+export const WAIVER_MAX_ITEMS = 256;
+
+// Matches operator DefaultScanSchedule / CRD default for spec.schedule when empty.
+export const DEFAULT_SCAN_SCHEDULE = '0 1 * * *';
+
 export const ClusterBaselineGVK: K8sGroupVersionKind = {
   group: 'baselinesecurity.io',
   version: 'v1alpha1',
@@ -65,7 +133,9 @@ export type ComplianceCheckResult = {
     annotations?: Record<string, string>;
   };
   status: CheckStatus;
-  severity: 'unknown' | 'info' | 'low' | 'medium' | 'high';
+  // Optional: CO usually sets .severity; when absent, use the
+  // compliance.openshift.io/check-severity label (see checkSeverity).
+  severity?: 'unknown' | 'info' | 'low' | 'medium' | 'high' | string;
   description?: string;
   instructions?: string;
 };
@@ -80,13 +150,25 @@ export type RemediationObject = {
 };
 
 export type ComplianceRemediation = {
-  metadata: { name: string; namespace: string; labels?: Record<string, string> };
+  metadata: {
+    name: string;
+    namespace: string;
+    labels?: Record<string, string>;
+    annotations?: Record<string, string>;
+    resourceVersion?: string;
+  };
   spec: { apply: boolean; current?: { object?: RemediationObject } };
   status?: {
     applicationState?: 'Applied' | 'NotApplied' | 'Error' | 'Outdated' | 'MissingDependencies';
+    // CO status.errorMessage when applicationState is Error (or sometimes
+    // MissingDependencies); shown in the Remediations table for diagnosis.
+    errorMessage?: string;
   };
 };
 
+// Score under the scoring mode active when the operator wrote the point.
+// Flat <-> SeverityWeighted flips do not rewrite prior points; charts may step
+// across a mode change until the next completed scan.
 export type ScoreSnapshot = { time: string; score: number };
 
 export type ResultCounts = {
@@ -111,7 +193,8 @@ export type Waiver = {
 
 export type ProfileStatus = ResultCounts & {
   key: string;
-  profileNames: string[];
+  // Optional on the CR (omitempty); absent until the first aggregate fill.
+  profileNames?: string[];
   history?: ScoreSnapshot[];
 };
 
@@ -120,7 +203,8 @@ export type TailoredProfileStatus = ResultCounts & { name: string; history?: Sco
 export type ClusterBaseline = {
   metadata: { name: string; resourceVersion?: string; annotations?: Record<string, string> };
   spec: {
-    profiles: string[];
+    // ProfileKey when from a valid CR; string retained so partial/hand-edited CRs still typecheck.
+    profiles: ProfileKey[] | string[];
     tailoredProfiles?: string[];
     schedule?: string;
     installComplianceOperator?: 'Automatic' | 'Manual';
@@ -140,10 +224,24 @@ export type ClusterBaseline = {
     complianceOperatorVersion?: string;
     profiles?: ProfileStatus[];
     tailoredProfiles?: TailoredProfileStatus[];
-    conditions?: { type: string; status: string; reason?: string; message?: string }[];
+    conditions?: {
+      type: string;
+      status: string;
+      reason?: string;
+      message?: string;
+      lastTransitionTime?: string;
+      observedGeneration?: number;
+    }[];
     history?: ScoreSnapshot[];
     newlyFailed?: string[];
     fixed?: string[];
+    // Owned/driven resources for must-gather (status.relatedObjects).
+    relatedObjects?: {
+      group?: string;
+      resource: string;
+      name: string;
+      namespace?: string;
+    }[];
     // Set when a prior completed scan exists for regression diff (operator
     // internal bookkeeping exposed on the CR). Used by Overview empty-state
     // copy so a second scan with a thin history ring is not "no prior scan".
@@ -158,6 +256,8 @@ export type ClusterBaseline = {
   };
 };
 
+const SUITE_LABEL = 'compliance.openshift.io/suite';
+
 /**
  * Display key encoded in a CO object's suite label for built-in profiles
  * ("baseline-<key>"). Tailored suites ("baseline-tp-<name>") are excluded so
@@ -167,7 +267,7 @@ export type ClusterBaseline = {
 export const suiteProfileKey = (
   labels: Record<string, string> | undefined,
 ): string | undefined => {
-  const suite = labels?.['compliance.openshift.io/suite'];
+  const suite = labels?.[SUITE_LABEL];
   if (!suite?.startsWith('baseline-') || suite.startsWith('baseline-tp-')) {
     return undefined;
   }
@@ -179,7 +279,7 @@ export const suiteProfileKey = (
 export const suiteTailoredName = (
   labels: Record<string, string> | undefined,
 ): string | undefined => {
-  const suite = labels?.['compliance.openshift.io/suite'];
+  const suite = labels?.[SUITE_LABEL];
   if (!suite?.startsWith('baseline-tp-')) {
     return undefined;
   }
@@ -191,20 +291,67 @@ export const suiteTailoredName = (
 /**
  * Row-filter / deep-link id for a suite label: built-in profile key, or
  * "tp-<name>" for tailored (matches Overview resultsHref and e2e filters).
+ * Parses the suite label once (hot path: Results filters over thousands of rows).
  */
 export const suiteFilterKey = (
   labels: Record<string, string> | undefined,
 ): string | undefined => {
-  const tailored = suiteTailoredName(labels);
-  if (tailored !== undefined) {
-    return `tp-${tailored}`;
+  const suite = labels?.[SUITE_LABEL];
+  if (!suite?.startsWith('baseline-')) {
+    return undefined;
   }
-  return suiteProfileKey(labels);
+  if (suite.startsWith('baseline-tp-')) {
+    const name = suite.slice('baseline-tp-'.length);
+    return name ? `tp-${name}` : undefined;
+  }
+  const key = suite.slice('baseline-'.length);
+  return key || undefined;
+};
+
+/**
+ * Suite label values this baseline owns ("baseline-<key>", "baseline-tp-<name>").
+ * Used as a label selector so list watches do not pull foreign CO objects.
+ */
+export const ownedSuiteLabels = (
+  profiles: readonly string[] | undefined,
+  tailoredProfiles: readonly string[] | undefined,
+): string[] => {
+  const out: string[] = [];
+  for (const p of profiles ?? []) {
+    if (p) {
+      out.push(`baseline-${p}`);
+    }
+  }
+  for (const name of tailoredProfiles ?? []) {
+    if (name) {
+      out.push(`baseline-tp-${name}`);
+    }
+  }
+  return out;
+};
+
+/**
+ * Label selector for CO list watches scoped to this baseline's suites.
+ * Shared by CompliancePage (scans/results) and RemediationsTab so the
+ * matchExpressions shape cannot drift. Undefined when nothing is selected
+ * (callers should skip the watch rather than list the whole namespace).
+ */
+export const ownedSuiteSelector = (
+  profiles: readonly string[] | undefined,
+  tailoredProfiles: readonly string[] | undefined,
+): { matchExpressions: { key: string; operator: 'In'; values: string[] }[] } | undefined => {
+  const values = ownedSuiteLabels(profiles, tailoredProfiles);
+  if (!values.length) {
+    return undefined;
+  }
+  return {
+    matchExpressions: [{ key: SUITE_LABEL, operator: 'In', values }],
+  };
 };
 
 /**
  * Human label for a check's owning profile, for the Results Profile column:
- * built-in benchmark keys uppercased (CIS, PCI-DSS) to match the Overview cards,
+ * built-in keys use profileTitle (i18n source string; pass through t() at render),
  * a tailored profile by its plain name, and an em dash when unknown.
  */
 export const checkProfileLabel = (labels: Record<string, string> | undefined): string => {
@@ -213,22 +360,57 @@ export const checkProfileLabel = (labels: Record<string, string> | undefined): s
     return tailored;
   }
   const key = suiteProfileKey(labels);
-  return key ? key.toUpperCase() : '—';
+  return key ? profileTitle(key) : '—';
+};
+
+/** Profile / tailored name list: array (includes) or Set (has) for O(1) hot paths. */
+export type NameSet = readonly string[] | ReadonlySet<string>;
+
+const nameIn = (list: NameSet | undefined, name: string): boolean => {
+  if (!list) {
+    return false;
+  }
+  if (list instanceof Set) {
+    return list.has(name);
+  }
+  return (list as readonly string[]).includes(name);
 };
 
 /**
  * True when a CO object belongs to this baseline: a built-in profile suite for
  * a selected profile, or a tailored suite for a bound TailoredProfile.
+ * Callers that filter thousands of results should pass Set instances so
+ * membership is O(1) per check instead of a linear includes scan.
+ * Parses the suite label once (avoids dual suiteTailoredName + suiteProfileKey).
  */
 export const isOwnedByBaseline = (
   labels: Record<string, string> | undefined,
-  profiles: string[] | undefined,
-  tailoredProfiles?: string[],
+  profiles: NameSet | undefined,
+  tailoredProfiles?: NameSet,
 ): boolean => {
-  const tailored = suiteTailoredName(labels);
-  if (tailored !== undefined) {
-    return !!tailoredProfiles?.includes(tailored);
+  const suite = labels?.[SUITE_LABEL];
+  if (!suite?.startsWith('baseline-')) {
+    return false;
   }
-  const key = suiteProfileKey(labels);
-  return key !== undefined && !!profiles?.includes(key);
+  if (suite.startsWith('baseline-tp-')) {
+    const name = suite.slice('baseline-tp-'.length);
+    return !!name && nameIn(tailoredProfiles, name);
+  }
+  const key = suite.slice('baseline-'.length);
+  return !!key && nameIn(profiles, key);
+};
+
+/**
+ * Filter a list of CO objects down to those owned by this baseline. Builds the
+ * profile / tailored membership Sets once so isOwnedByBaseline stays O(1) per
+ * object when filtering thousands of scans / check results / remediations.
+ */
+export const filterOwnedByBaseline = <T extends { metadata: { labels?: Record<string, string> } }>(
+  list: T[] | undefined,
+  profiles: readonly string[] | undefined,
+  tailoredProfiles: readonly string[] | undefined,
+): T[] => {
+  const p = new Set(profiles ?? []);
+  const t = new Set(tailoredProfiles ?? []);
+  return (list ?? []).filter((r) => isOwnedByBaseline(r.metadata.labels, p, t));
 };

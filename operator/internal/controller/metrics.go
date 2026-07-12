@@ -39,6 +39,27 @@ var (
 		Name: "baseline_security_condition",
 		Help: "ClusterBaseline rollup condition: 1 if True, 0 if False or absent. Labels: type (Available|Progressing|Degraded).",
 	}, []string{"type"})
+	// Last completed scan (status.lastScanTime). 0 when never scanned / CR gone.
+	// Distinct from statusObservedTimestamp (operator publish freshness): scans
+	// can stop while the reconciler keeps republishing a stale score.
+	lastScanTimestamp = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "baseline_security_last_scan_timestamp_seconds",
+		Help: "Unix timestamp of the last completed compliance scan (status.lastScanTime). 0 when never scanned or when scanning is disabled (no profiles/tailored selected).",
+	})
+	// Count of status.newlyFailed (regressions vs previous completed scan).
+	// Cardinality is a single series; names stay on the CR for drill-down.
+	newlyFailedCount = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "baseline_security_newly_failed",
+		Help: "Number of checks that newly failed since the previous completed scan (len(status.newlyFailed)).",
+	})
+	// Unix start of the active remediation batch (status.remediationBatch.startedAt).
+	// 0 when no batch. Complements remediationBatchActive (0/1) so dashboards and
+	// on-call can see how long MachineConfigPools have been paused without
+	// scraping the CR; RemediationBatchStuck only fires after 20m.
+	remediationBatchStartedTimestamp = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "baseline_security_remediation_batch_started_timestamp_seconds",
+		Help: "Unix timestamp when the active remediation batch started (status.remediationBatch.startedAt). 0 when no batch is active.",
+	})
 
 	// Serialize publishMetrics so concurrent reconciles (or a future raise of
 	// MaxConcurrentReconciles) cannot interleave Reset/Set sequences. Also track
@@ -52,7 +73,11 @@ var (
 var publishedConditionTypes = []string{"Available", "Progressing", "Degraded"}
 
 func init() {
-	metrics.Registry.MustRegister(complianceScore, complianceChecks, statusObservedTimestamp, remediationBatchActive, conditionStatus)
+	metrics.Registry.MustRegister(
+		complianceScore, complianceChecks, statusObservedTimestamp,
+		remediationBatchActive, remediationBatchStartedTimestamp,
+		conditionStatus, lastScanTimestamp, newlyFailedCount,
+	)
 	// Seed the "no score yet" sentinel so a never-reconciled or
 	// error-before-aggregation state reads as -1, not the gauge default of 0
 	// (which the ComplianceScoreLow alert's `>= 0 and < 80` would treat as a
@@ -60,9 +85,20 @@ func init() {
 	complianceScore.Set(-1)
 	statusObservedTimestamp.Set(0)
 	remediationBatchActive.Set(0)
+	remediationBatchStartedTimestamp.Set(0)
+	lastScanTimestamp.Set(0)
+	newlyFailedCount.Set(0)
 	for _, typ := range publishedConditionTypes {
 		conditionStatus.WithLabelValues(typ).Set(0)
 	}
+}
+
+// clearPublishedMetrics resets posture gauges when the ClusterBaseline is gone
+// (score -1, no check series, batch inactive, conditions 0). Keeps a fresh
+// observation timestamp so ComplianceStatusStale does not page for an
+// intentional delete while the operator process is still healthy.
+func clearPublishedMetrics() {
+	publishMetrics(&baselinev1alpha1.ClusterBaseline{})
 }
 
 // publishMetrics reflects the aggregated status onto the Prometheus gauges.
@@ -96,10 +132,17 @@ func publishMetrics(cb *baselinev1alpha1.ClusterBaseline) {
 	}
 	publishedChecks = desired
 
-	if cb.Status.RemediationBatch != nil {
+	if batch := cb.Status.RemediationBatch; batch != nil {
 		remediationBatchActive.Set(1)
+		if !batch.StartedAt.IsZero() {
+			remediationBatchStartedTimestamp.Set(float64(batch.StartedAt.Unix()))
+		} else {
+			// Zero StartedAt is corrupt; keep 0 so age queries stay well-defined.
+			remediationBatchStartedTimestamp.Set(0)
+		}
 	} else {
 		remediationBatchActive.Set(0)
+		remediationBatchStartedTimestamp.Set(0)
 	}
 
 	for _, typ := range publishedConditionTypes {
@@ -110,6 +153,18 @@ func publishMetrics(cb *baselinev1alpha1.ClusterBaseline) {
 		}
 		conditionStatus.WithLabelValues(typ).Set(v)
 	}
+
+	// Suppress last-scan freshness when scanning is intentionally disabled
+	// (no profiles and no tailored). status.lastScanTime may still hold the
+	// last known scan for the UI/history, but ComplianceScanStale must not page
+	// for an admin who turned scanning off.
+	scanning := len(cb.Spec.Profiles) > 0 || len(cb.Spec.TailoredProfiles) > 0
+	if scanning && cb.Status.LastScanTime != nil && !cb.Status.LastScanTime.IsZero() {
+		lastScanTimestamp.Set(float64(cb.Status.LastScanTime.Unix()))
+	} else {
+		lastScanTimestamp.Set(0)
+	}
+	newlyFailedCount.Set(float64(len(cb.Status.NewlyFailed)))
 
 	// Publish freshness last so a concurrent scrape cannot select this replica as
 	// newest before its score and check gauges have been refreshed.

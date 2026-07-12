@@ -30,12 +30,22 @@ func TestOwnedSuites(t *testing.T) {
 	}
 	cb := &baselinev1alpha1.ClusterBaseline{
 		Spec: baselinev1alpha1.ClusterBaselineSpec{
-			Profiles: []baselinev1alpha1.ProfileKey{"cis", "stig"},
+			Profiles:         []baselinev1alpha1.ProfileKey{"cis", "stig"},
+			TailoredProfiles: []string{"custom", "cis-local"},
 		},
 	}
 	s := ownedSuites(cb)
-	if !s["baseline-cis"] || !s["baseline-stig"] || len(s) != 2 {
+	// Built-in + tailored suites feed aggregate, batch eligibility, and scanconfig.
+	if !s["baseline-cis"] || !s["baseline-stig"] ||
+		!s["baseline-tp-custom"] || !s["baseline-tp-cis-local"] || len(s) != 4 {
 		t.Fatalf("%v", s)
+	}
+	// Tailored-only baseline still owns its suites (no built-in profiles).
+	tpOnly := ownedSuites(&baselinev1alpha1.ClusterBaseline{
+		Spec: baselinev1alpha1.ClusterBaselineSpec{TailoredProfiles: []string{"only"}},
+	})
+	if !tpOnly["baseline-tp-only"] || len(tpOnly) != 1 {
+		t.Fatalf("tailored-only ownedSuites = %v", tpOnly)
 	}
 }
 
@@ -82,21 +92,6 @@ func TestMatchesAnyProfile(t *testing.T) {
 	}
 	if matchesAnyProfile("x", nil) || matchesAnyProfile("x", map[string]bool{}) {
 		t.Fatal("empty profiles must never match")
-	}
-}
-
-func TestScore(t *testing.T) {
-	if score(0, 0) != nil || score(-1, 0) != nil || score(1, -1) != nil {
-		t.Fatal("zero/negative countable should be nil")
-	}
-	if s := score(2, 1); s == nil || *s != 66 {
-		t.Fatalf("score(2,1) = %v, want 66", s)
-	}
-	if s := score(1, 0); s == nil || *s != 100 {
-		t.Fatalf("score(1,0) = %v, want 100", s)
-	}
-	if s := score(0, 5); s == nil || *s != 0 {
-		t.Fatalf("score(0,5) = %v, want 0", s)
 	}
 }
 
@@ -158,24 +153,6 @@ func TestClampHistory(t *testing.T) {
 	fixed := clampHistory(bad, 30)
 	if fixed[0].Score != 0 || fixed[1].Score != 100 || fixed[2].Score != 50 {
 		t.Fatalf("score sanitize = %v,%v,%v", fixed[0].Score, fixed[1].Score, fixed[2].Score)
-	}
-}
-
-func TestClampScore(t *testing.T) {
-	if clampScore(nil) != nil {
-		t.Fatal("nil stays nil")
-	}
-	neg := int32(-1)
-	if s := clampScore(&neg); s == nil || *s != 0 {
-		t.Fatalf("neg = %v", s)
-	}
-	hi := int32(101)
-	if s := clampScore(&hi); s == nil || *s != 100 {
-		t.Fatalf("hi = %v", s)
-	}
-	ok := int32(77)
-	if s := clampScore(&ok); s == nil || *s != 77 {
-		t.Fatalf("ok = %v", s)
 	}
 }
 
@@ -319,10 +296,15 @@ func TestSetCondCapsMessage(t *testing.T) {
 }
 
 func TestProfileNames(t *testing.T) {
-	keys := []baselinev1alpha1.ProfileKey{
-		"cis", "pci-dss", "nist-moderate", "nist-high", "stig", "nerc-cip", "e8", "bsi",
+	keys := baselinev1alpha1.AllProfileKeys()
+	// Profiles MaxItems=8 and the kubebuilder Enum must stay in lockstep with AllProfileKeys.
+	if len(keys) != 8 {
+		t.Fatalf("AllProfileKeys len = %d, want 8 (Profiles MaxItems)", len(keys))
 	}
 	for _, k := range keys {
+		if !k.Known() {
+			t.Errorf("AllProfileKeys entry %q not Known()", k)
+		}
 		names := k.ProfileNames()
 		if len(names) == 0 {
 			t.Errorf("ProfileNames(%q) empty", k)
@@ -335,6 +317,15 @@ func TestProfileNames(t *testing.T) {
 	}
 	if baselinev1alpha1.ProfileKey("nope").ProfileNames() != nil {
 		t.Error("unknown key should return nil")
+	}
+	if baselinev1alpha1.ProfileKey("nope").Known() {
+		t.Error("unknown key should not be Known()")
+	}
+	if baselinev1alpha1.HistoryMax != 30 {
+		t.Fatalf("HistoryMax = %d, want 30 (CRD MaxItems)", baselinev1alpha1.HistoryMax)
+	}
+	if baselinev1alpha1.RemediationBatchPhaseApplying != "Applying" {
+		t.Fatalf("RemediationBatchPhaseApplying = %q", baselinev1alpha1.RemediationBatchPhaseApplying)
 	}
 }
 
@@ -406,35 +397,6 @@ func FuzzMatchesAnyProfile(f *testing.F) {
 	})
 }
 
-func FuzzScore(f *testing.F) {
-	f.Add(int32(0), int32(0))
-	f.Add(int32(1), int32(0))
-	f.Add(int32(0), int32(1))
-	f.Add(int32(2), int32(1))
-	f.Add(int32(-1), int32(5))
-	f.Add(int32(2147483647), int32(0)) // int32-overflow regression seed
-	f.Fuzz(func(t *testing.T, pass, fail int32) {
-		s := score(pass, fail)
-		// Oracle must use int64 sums (same as score) so int32 overflow is not expected nil.
-		if pass < 0 || fail < 0 || int64(pass)+int64(fail) == 0 {
-			if s != nil {
-				t.Fatalf("expected nil for pass=%d fail=%d", pass, fail)
-			}
-			return
-		}
-		if s == nil {
-			t.Fatal("expected non-nil")
-		}
-		if *s < 0 || *s > 100 {
-			t.Fatalf("score %d out of range", *s)
-		}
-		want := int32(int64(pass) * 100 / (int64(pass) + int64(fail)))
-		if *s != want {
-			t.Fatalf("got %d want %d", *s, want)
-		}
-	})
-}
-
 func FuzzWithoutPlugin(f *testing.F) {
 	f.Add("a,b,c", "b")
 	f.Add("", "x")
@@ -473,6 +435,8 @@ func FuzzAppendHistoryRing(f *testing.F) {
 	f.Add(int32(1), 30, 40)
 	f.Add(int32(0), 0, 5)
 	f.Add(int32(99), 1, 100)
+	f.Add(int32(-5), 30, 10) // out-of-range scores must clamp
+	f.Add(int32(150), 30, 10)
 	f.Fuzz(func(t *testing.T, s int32, max, n int) {
 		if n < 0 {
 			n = -n
@@ -491,6 +455,13 @@ func FuzzAppendHistoryRing(f *testing.F) {
 		}
 		if max <= 0 && len(hist) != n {
 			t.Fatalf("no-trim len %d want %d", len(hist), n)
+		}
+		// clampHistory always sanitizes scores so Status().Update admission cannot
+		// fail on a hand-edited or buggy out-of-range value.
+		for _, h := range hist {
+			if h.Score < 0 || h.Score > 100 {
+				t.Fatalf("history score %d out of [0,100]", h.Score)
+			}
 		}
 	})
 }
@@ -546,21 +517,30 @@ func FuzzComplianceCSVVersion(f *testing.F) {
 	})
 }
 
-// FuzzCompareComplianceCSVVersion pins the ordering as a total order: reflexive
-// and antisymmetric for any two arbitrary CSV name strings. A bug in the version
-// or prerelease comparison (non-antisymmetric) fails here.
+// FuzzCompareComplianceCSVVersion pins the ordering as a total order: reflexive,
+// antisymmetric, and transitive for arbitrary CSV name strings. Transitivity is
+// the invariant the max-selection at clusterbaseline_controller.go:429 relies on;
+// a non-transitive comparator can pin the operator to the wrong CSV version.
 func FuzzCompareComplianceCSVVersion(f *testing.F) {
-	f.Add("compliance-operator.v1.6.0", "compliance-operator.v1.6.1")
-	f.Add("compliance-operator.v1.6.0-rc1", "compliance-operator.v1.6.0")
-	f.Add("compliance-operator.v1.6.0", "compliance-operator.v1.6.0+b2")
-	f.Add("junk", "compliance-operator.v1.0.0")
-	f.Add("", "")
-	f.Fuzz(func(t *testing.T, a, b string) {
-		if c := compareComplianceCSVVersion(a, a); c != 0 {
-			t.Fatalf("compare(a,a)=%d for %q, want 0", c, a)
+	f.Add("compliance-operator.v1.6.0", "compliance-operator.v1.6.1", "compliance-operator.v1.6.2")
+	f.Add("compliance-operator.v1.6.0-rc1", "compliance-operator.v1.6.0", "compliance-operator.v1.6.0+b2")
+	f.Add("junk", "compliance-operator.v1.0.0", "compliance-operator.v2.0.0")
+	f.Add("", "", "")
+	f.Fuzz(func(t *testing.T, a, b, c string) {
+		if got := compareComplianceCSVVersion(a, a); got != 0 {
+			t.Fatalf("compare(a,a)=%d for %q, want 0", got, a)
 		}
 		if ab, ba := compareComplianceCSVVersion(a, b), compareComplianceCSVVersion(b, a); sign(ab) != -sign(ba) {
 			t.Fatalf("not antisymmetric: compare(%q,%q)=%d vs compare(b,a)=%d", a, b, ab, ba)
+		}
+		ab := sign(compareComplianceCSVVersion(a, b))
+		bc := sign(compareComplianceCSVVersion(b, c))
+		ac := sign(compareComplianceCSVVersion(a, c))
+		if ab <= 0 && bc <= 0 && ac > 0 {
+			t.Fatalf("not transitive: %q<=%q<=%q but compare(a,c)=%d", a, b, c, ac)
+		}
+		if ab >= 0 && bc >= 0 && ac < 0 {
+			t.Fatalf("not transitive: %q>=%q>=%q but compare(a,c)=%d", a, b, c, ac)
 		}
 	})
 }
@@ -660,312 +640,466 @@ func FuzzCondMessage(f *testing.F) {
 	})
 }
 
-// FuzzScore64: severity-weighted totals are int64 sums over cluster checks.
-// Same invariants as score(): nil on non-positive totals, result in [0,100].
-func FuzzScore64(f *testing.F) {
-	f.Add(int64(0), int64(0))
-	f.Add(int64(1), int64(0))
-	f.Add(int64(0), int64(1))
-	f.Add(int64(10), int64(5))
-	f.Add(int64(-1), int64(5))
-	f.Add(int64(1<<62), int64(1<<62))
-	f.Fuzz(func(t *testing.T, pass, fail int64) {
-		s := score64(pass, fail)
-		if pass < 0 || fail < 0 || pass+fail == 0 {
-			if s != nil {
-				t.Fatalf("expected nil for pass=%d fail=%d", pass, fail)
+// FuzzClampFailureList: hand-edited or pathologically large newlyFailed/fixed/
+// previousFailures/diffBaseFailures lists must stay <= CRD MaxItems=4096 so
+// Status().Update cannot fail admission and freeze reconciliation.
+func FuzzClampFailureList(f *testing.F) {
+	f.Add("", 0)
+	f.Add("a,b,c", 3)
+	f.Add(strings.Repeat("x,", 5000), 5000)
+	f.Add(",,,", 0)
+	f.Fuzz(func(t *testing.T, csv string, n int) {
+		// Build a list either from CSV fields or a bounded count of synthetic names.
+		var in []string
+		if n < 0 {
+			n = -n
+		}
+		n = n % (failureListMax + 64) // exercise over-limit without OOM
+		if n > 0 {
+			in = make([]string, n)
+			for i := range in {
+				in[i] = fmt.Sprintf("chk-%d", i)
+			}
+		} else {
+			in = splitCSV(csv)
+		}
+		// Capture prefix before clamp so we can assert no mutation of over-limit input.
+		var prefixCopy []string
+		if len(in) > failureListMax {
+			prefixCopy = append([]string(nil), in[:failureListMax]...)
+		}
+		got := clampFailureList(in)
+		if len(got) > failureListMax {
+			t.Fatalf("len %d > failureListMax %d", len(got), failureListMax)
+		}
+		if len(in) <= failureListMax {
+			if len(got) != len(in) {
+				t.Fatalf("under-limit len %d want %d", len(got), len(in))
+			}
+			for i := range got {
+				if got[i] != in[i] {
+					t.Fatalf("under-limit mutated index %d", i)
+				}
 			}
 			return
 		}
-		if s == nil {
-			t.Fatal("expected non-nil")
-		}
-		if *s < 0 || *s > 100 {
-			t.Fatalf("score %d out of range", *s)
-		}
-		// When pass+fail can overflow int64 addition above, Go wraps; still
-		// require the returned ratio uses the same arithmetic as production.
-		want := int32(pass * 100 / (pass + fail))
-		if *s != want {
-			t.Fatalf("got %d want %d", *s, want)
-		}
-	})
-}
-
-// FuzzSeverityWeight: untrusted ComplianceCheckResult severity strings map to
-// the product weight table and never panic.
-func FuzzSeverityWeight(f *testing.F) {
-	for _, seed := range []string{"", "high", "medium", "low", "unknown", "info", "HIGH", "x"} {
-		f.Add(seed)
-	}
-	f.Fuzz(func(t *testing.T, sev string) {
-		w := severityWeight(sev)
-		switch sev {
-		case "high":
-			if w != 10 {
-				t.Fatalf("high weight = %d", w)
-			}
-		case "medium":
-			if w != 5 {
-				t.Fatalf("medium weight = %d", w)
-			}
-		case "low":
-			if w != 2 {
-				t.Fatalf("low weight = %d", w)
-			}
-		default:
-			if w != 1 {
-				t.Fatalf("default weight for %q = %d", sev, w)
-			}
-		}
-	})
-}
-
-// TestBatchRemediationNames pins the annotation CSV contract with exact outputs.
-// The fuzz target below covers arbitrary input; this table catches intentional
-// shape regressions (sort order, trim, empty drop) with readable failure text.
-func TestBatchRemediationNames(t *testing.T) {
-	cases := []struct {
-		raw  string
-		want []string
-	}{
-		{"", nil},
-		{",,,", nil},
-		{"a", []string{"a"}},
-		{"a,b", []string{"a", "b"}},
-		{"b,a", []string{"a", "b"}},
-		{"a, a, b", []string{"a", "b"}},
-		{"  x  , y ", []string{"x", "y"}},
-		{"a,b,a", []string{"a", "b"}},
-	}
-	for _, c := range cases {
-		got := batchRemediationNames(c.raw)
-		if len(got) != len(c.want) {
-			t.Fatalf("batchRemediationNames(%q) = %v, want %v", c.raw, got, c.want)
+		// Truncation keeps the prefix and must not alias the input backing array.
+		if len(got) != failureListMax {
+			t.Fatalf("over-limit len %d want %d", len(got), failureListMax)
 		}
 		for i := range got {
-			if got[i] != c.want[i] {
-				t.Fatalf("batchRemediationNames(%q) = %v, want %v", c.raw, got, c.want)
+			if got[i] != prefixCopy[i] {
+				t.Fatalf("truncated prefix mismatch at %d", i)
 			}
 		}
-	}
+		if len(in) > 0 && len(got) > 0 {
+			in[0] = "mutated"
+			if got[0] == "mutated" {
+				t.Fatal("clampFailureList must not alias input after truncation")
+			}
+		}
+	})
 }
 
-// FuzzBatchRemediationNames: annotation CSV of remediation names is untrusted
-// CR/annotation text. Must never panic; drop empties; sort+dedupe; no empty items.
-func FuzzBatchRemediationNames(f *testing.F) {
+// FuzzNormalizedSchedule: spec.schedule is untrusted CR text. Must never panic;
+// empty uses the default five-field cron; descriptors and non-5-field forms fail.
+func FuzzNormalizedSchedule(f *testing.F) {
 	for _, seed := range []string{
-		"", "a", "a,b", "a, a, b", ",,,", "  x  , y ", "a,b,a",
+		"", "   ", "\t", "0 1 * * *", "*/5 * * * *", "@daily", "@every 1s",
+		"not a cron", "0 1 * * * *", "61 0 * * *", "  0  1  *  *  *  ",
+		"0 1 * * mon", "*/7 , 1 1 0",
+	} {
+		f.Add(seed)
+	}
+	f.Fuzz(func(t *testing.T, schedule string) {
+		got, err := normalizedSchedule(schedule)
+		if strings.TrimSpace(schedule) == "" {
+			if err != nil {
+				t.Fatalf("empty schedule err: %v", err)
+			}
+			if got != defaultScanSchedule {
+				t.Fatalf("empty schedule = %q, want default %q", got, defaultScanSchedule)
+			}
+			return
+		}
+		fields := strings.Fields(schedule)
+		if len(fields) != 5 {
+			if err == nil {
+				t.Fatalf("non-5-field %q accepted as %q", schedule, got)
+			}
+			return
+		}
+		if err != nil {
+			// Rejected by robfig (out of range, junk tokens, never-firing, etc.).
+			return
+		}
+		// Accepted schedules are exactly five whitespace-normalized fields.
+		gotFields := strings.Fields(got)
+		if len(gotFields) != 5 {
+			t.Fatalf("accepted schedule %q has %d fields", got, len(gotFields))
+		}
+		if got != strings.Join(fields, " ") {
+			t.Fatalf("normalization %q -> %q", schedule, got)
+		}
+	})
+}
+
+// FuzzSyncFailureDiff: current/base failure name lists come from cluster check
+// results. newlyFailed ⊆ current\base and fixed ⊆ base\current; never panics.
+func FuzzSyncFailureDiff(f *testing.F) {
+	f.Add("a,b,c", "b,d")
+	f.Add("", "")
+	f.Add("a", "a")
+	f.Add("x,y", "")
+	f.Add("", "x,y")
+	f.Add("a,a,b", "b,b,c")
+	f.Fuzz(func(t *testing.T, currentCSV, baseCSV string) {
+		// Bound work: huge CSV would dominate fuzz time without more coverage.
+		if len(currentCSV) > 4096 {
+			currentCSV = currentCSV[:4096]
+		}
+		if len(baseCSV) > 4096 {
+			baseCSV = baseCSV[:4096]
+		}
+		current := splitCSV(currentCSV)
+		base := splitCSV(baseCSV)
+		cb := &baselinev1alpha1.ClusterBaseline{}
+		syncFailureDiff(cb, current, base)
+		baseSet := map[string]bool{}
+		for _, n := range base {
+			baseSet[n] = true
+		}
+		currentSet := map[string]bool{}
+		for _, n := range current {
+			currentSet[n] = true
+		}
+		for _, n := range cb.Status.NewlyFailed {
+			if baseSet[n] {
+				t.Fatalf("newlyFailed %q still in base", n)
+			}
+			if !currentSet[n] {
+				t.Fatalf("newlyFailed %q not in current", n)
+			}
+		}
+		for _, n := range cb.Status.Fixed {
+			if currentSet[n] {
+				t.Fatalf("fixed %q still in current", n)
+			}
+			if !baseSet[n] {
+				t.Fatalf("fixed %q not in base", n)
+			}
+		}
+		// Sorted (notIn sorts).
+		for i := 1; i < len(cb.Status.NewlyFailed); i++ {
+			if cb.Status.NewlyFailed[i-1] > cb.Status.NewlyFailed[i] {
+				t.Fatalf("newlyFailed unsorted: %v", cb.Status.NewlyFailed)
+			}
+		}
+		for i := 1; i < len(cb.Status.Fixed); i++ {
+			if cb.Status.Fixed[i-1] > cb.Status.Fixed[i] {
+				t.Fatalf("fixed unsorted: %v", cb.Status.Fixed)
+			}
+		}
+	})
+}
+
+// FuzzSyncHistorySnapshot: late-arriving same-timestamp score updates and
+// nil-score drops must keep the ring bounded and scores admission-safe.
+func FuzzSyncHistorySnapshot(f *testing.F) {
+	f.Add(int64(1), int32(50), false, false)
+	f.Add(int64(1), int32(50), true, false)  // same timestamp update
+	f.Add(int64(1), int32(50), true, true)   // same timestamp nil drop
+	f.Add(int64(2), int32(-5), false, false) // out-of-range score
+	f.Add(int64(3), int32(150), false, false)
+	f.Fuzz(func(t *testing.T, unix int64, scoreVal int32, sameTS, nilScore bool) {
+		if unix < 0 {
+			unix = -unix
+		}
+		unix = unix % (1 << 30)
+		ts := metav1.NewTime(time.Unix(unix, 0).UTC())
+		var hist []baselinev1alpha1.ScoreSnapshot
+		// Seed a prior point so same-timestamp and append paths both run.
+		prior := ts
+		if !sameTS {
+			prior = metav1.NewTime(ts.Add(-time.Hour))
+		}
+		hist = appendHistoryRing(hist, prior, 40, historyMax)
+		var s *int32
+		if !nilScore {
+			s = &scoreVal
+		}
+		got := syncHistorySnapshot(hist, ts, s)
+		if len(got) > historyMax {
+			t.Fatalf("len %d > historyMax %d", len(got), historyMax)
+		}
+		for _, h := range got {
+			if h.Score < 0 || h.Score > 100 {
+				t.Fatalf("score %d out of [0,100]", h.Score)
+			}
+		}
+		if sameTS && nilScore {
+			// Dropping the matching last point leaves only earlier history.
+			if n := len(hist); n > 0 && hist[n-1].Time.Equal(&ts) {
+				if len(got) != n-1 {
+					t.Fatalf("nil same-ts drop: len %d want %d", len(got), n-1)
+				}
+			}
+			return
+		}
+		if sameTS && !nilScore {
+			if len(got) == 0 {
+				t.Fatal("same-ts update emptied history")
+			}
+			want := scoreVal
+			if want < 0 {
+				want = 0
+			} else if want > 100 {
+				want = 100
+			}
+			if last := got[len(got)-1]; !last.Time.Equal(&ts) || last.Score != want {
+				t.Fatalf("same-ts update last=%+v want score %d at %v", last, want, ts)
+			}
+		}
+	})
+}
+
+// FuzzSplitCSV: comma-separated annotation/list text is untrusted. Never panic;
+// drop empties after trim; every non-empty trimmed field must appear (order free).
+func FuzzSplitCSV(f *testing.F) {
+	for _, seed := range []string{
+		"", "a", "a,b", "a, a, b", ",,,", "  x  , y ", "a,b,a", "\t,\n",
 	} {
 		f.Add(seed)
 	}
 	f.Fuzz(func(t *testing.T, raw string) {
-		got := batchRemediationNames(raw)
-		seen := map[string]bool{}
+		if len(raw) > 4096 {
+			raw = raw[:4096]
+		}
+		got := splitCSV(raw)
+		seen := map[string]int{}
 		for _, n := range got {
 			if n == "" {
-				t.Fatal("empty name in result")
+				t.Fatal("empty item in splitCSV result")
 			}
-			if seen[n] {
-				t.Fatalf("duplicate %q", n)
+			if n != strings.TrimSpace(n) {
+				t.Fatalf("untrimmed item %q", n)
 			}
-			seen[n] = true
+			seen[n]++
 		}
-		// Sorted ascending.
-		for i := 1; i < len(got); i++ {
-			if got[i-1] > got[i] {
-				t.Fatalf("unsorted: %v", got)
-			}
-		}
-		// Every non-empty trimmed CSV field must appear.
+		// Multiset: splitCSV keeps duplicates (unlike batchRemediationNames).
+		wantCounts := map[string]int{}
 		for _, p := range strings.Split(raw, ",") {
 			p = strings.TrimSpace(p)
 			if p == "" {
 				continue
 			}
-			if !seen[p] {
-				t.Fatalf("missing field %q from %v (raw=%q)", p, got, raw)
+			wantCounts[p]++
+		}
+		total := 0
+		for _, c := range wantCounts {
+			total += c
+		}
+		if len(got) != total {
+			t.Fatalf("len %d want %d for raw=%q got=%v", len(got), total, raw, got)
+		}
+		for p, c := range wantCounts {
+			if seen[p] != c {
+				t.Fatalf("field %q count %d want %d (raw=%q)", p, seen[p], c, raw)
 			}
 		}
 	})
 }
 
-// FuzzEffectiveInconsistentStatus: CO inconsistent-source / most-common-status
-// annotations are untrusted cluster data. Must never panic; result is one of
-// PASS | NOT-APPLICABLE | INCONSISTENT; FAIL/ERROR among nodes stay INCONSISTENT.
-func FuzzEffectiveInconsistentStatus(f *testing.F) {
-	for _, seed := range []struct{ src, mc string }{
-		{"n0:PASS", "NOT-APPLICABLE"},
-		{"n0:FAIL", "PASS"},
-		{"n0:ERROR", "PASS"},
-		{"n0:SKIP", "SKIP"},
-		{"n0:FUTURE-STATE", "PASS"},
-		{"garbage,,:", ""},
-		{"", ""},
-		{"n0:PASS,n1:FAIL", "PASS"},
-		{" n0 : pass ", " not-applicable "},
-	} {
-		f.Add(seed.src, seed.mc)
-	}
-	allowed := map[string]bool{"PASS": true, "NOT-APPLICABLE": true, "INCONSISTENT": true}
-	f.Fuzz(func(t *testing.T, src, mostCommon string) {
-		u := &unstructured.Unstructured{}
-		ann := map[string]string{}
-		if src != "" {
-			ann[inconsistentSourceAnn] = src
+// FuzzClampHistory: hand-edited history rings must stay <= max and scores in
+// [0,100] so Status().Update cannot fail CRD admission.
+func FuzzClampHistory(f *testing.F) {
+	f.Add(int32(50), 5, 30)
+	f.Add(int32(-1), 40, 30)
+	f.Add(int32(150), 0, 30)
+	f.Add(int32(0), 1, 0)
+	f.Add(int32(100), 35, -5)
+	f.Fuzz(func(t *testing.T, scoreSeed int32, n, max int) {
+		if n < 0 {
+			n = -n
 		}
-		if mostCommon != "" {
-			ann[mostCommonStatusAnn] = mostCommon
+		n = n % 64 // bound allocation
+		if max < 0 {
+			max = -max
 		}
-		u.SetAnnotations(ann)
-		got := effectiveInconsistentStatus(u)
-		if !allowed[got] {
-			t.Fatalf("unexpected status %q for src=%q mc=%q", got, src, mostCommon)
+		max = max % 64
+		in := make([]baselinev1alpha1.ScoreSnapshot, n)
+		for i := range in {
+			// Mix in-range and out-of-range scores from the seed.
+			s := scoreSeed + int32(i)
+			in[i] = baselinev1alpha1.ScoreSnapshot{
+				Time:  metav1.NewTime(time.Unix(int64(i), 0).UTC()),
+				Score: s,
+			}
 		}
-		// FAIL or ERROR anywhere in the gathered states must fail closed.
-		states := inconsistentStates(u)
-		if (states["FAIL"] || states["ERROR"]) && got != "INCONSISTENT" {
-			t.Fatalf("FAIL/ERROR must stay INCONSISTENT, got %q (states=%v)", got, states)
+		var prefixCopy []baselinev1alpha1.ScoreSnapshot
+		if max > 0 && len(in) > max {
+			prefixCopy = append([]baselinev1alpha1.ScoreSnapshot(nil), in[len(in)-max:]...)
 		}
-		// Unknown states must fail closed even if PASS is also present.
-		for st := range states {
-			switch st {
-			case "PASS", "FAIL", "ERROR", "NOT-APPLICABLE", "SKIP":
-			default:
-				if got != "INCONSISTENT" {
-					t.Fatalf("unknown state %q must fail closed, got %q", st, got)
+		got := clampHistory(in, max)
+		if max > 0 && len(got) > max {
+			t.Fatalf("len %d > max %d", len(got), max)
+		}
+		if max <= 0 && len(got) != len(in) {
+			// max <= 0 means no length trim (only score clamp).
+			t.Fatalf("max<=0 len %d want %d", len(got), len(in))
+		}
+		for _, h := range got {
+			if h.Score < 0 || h.Score > 100 {
+				t.Fatalf("score %d out of [0,100]", h.Score)
+			}
+		}
+		if max > 0 && len(in) > max {
+			if len(got) != max {
+				t.Fatalf("truncated len %d want %d", len(got), max)
+			}
+			// Score clamp on the kept suffix; times must match the suffix.
+			for i := range got {
+				if !got[i].Time.Equal(&prefixCopy[i].Time) {
+					t.Fatalf("suffix time mismatch at %d", i)
+				}
+				want := prefixCopy[i].Score
+				if want < 0 {
+					want = 0
+				} else if want > 100 {
+					want = 100
+				}
+				if got[i].Score != want {
+					t.Fatalf("suffix score[%d]=%d want %d", i, got[i].Score, want)
+				}
+			}
+			// Truncation must not alias the input backing array.
+			if len(in) > 0 && len(got) > 0 {
+				in[len(in)-1].Score = -999
+				if got[len(got)-1].Score == -999 {
+					t.Fatal("clampHistory must not alias input after truncation")
 				}
 			}
 		}
 	})
 }
 
-// FuzzPoolFromRemediation: untrusted remediation object + scan-name label drive
-// which MachineConfigPool is paused during batch apply. Must never panic;
-// non-MachineConfig kinds yield ""; MachineConfig role label wins over scan.
-func FuzzPoolFromRemediation(f *testing.F) {
-	f.Add("MachineConfig", "worker", "ocp4-cis-node-master")
-	f.Add("ConfigMap", "worker", "ocp4-cis-node-worker")
-	f.Add("", "", "ocp4-cis-node-worker")
-	f.Add("", "", "no-node-suffix")
-	f.Add("MachineConfig", "", "profile-node-infra")
-	f.Add("MachineConfig", "master", "")
-	f.Add("", "ignored", "x-node-")
-	f.Fuzz(func(t *testing.T, kind, role, scan string) {
-		rem := &unstructured.Unstructured{Object: map[string]any{}}
-		if scan != "" {
-			rem.SetLabels(map[string]string{"compliance.openshift.io/scan-name": scan})
+// FuzzCheckSeverity: CCR severity field and check-severity label are untrusted
+// cluster data. Prefer non-empty field; fall back to label; never panic.
+func FuzzCheckSeverity(f *testing.F) {
+	f.Add("high", "medium")
+	f.Add("", "low")
+	f.Add("unknown", "")
+	f.Add("", "")
+	f.Add("HIGH", "high")
+	f.Add("info", "info")
+	f.Fuzz(func(t *testing.T, field, label string) {
+		// Bound string sizes so NestedString paths stay cheap.
+		if len(field) > 256 {
+			field = field[:256]
 		}
-		if kind != "" || role != "" {
-			obj := map[string]any{}
-			if kind != "" {
-				obj["kind"] = kind
+		if len(label) > 256 {
+			label = label[:256]
+		}
+		item := &unstructured.Unstructured{Object: map[string]any{}}
+		if field != "" {
+			_ = unstructured.SetNestedField(item.Object, field, "severity")
+		}
+		if label != "" {
+			item.SetLabels(map[string]string{checkSeverityLabel: label})
+		}
+		got := checkSeverity(item)
+		want := field
+		if want == "" {
+			want = label
+		}
+		if got != want {
+			t.Fatalf("checkSeverity field=%q label=%q got %q want %q", field, label, got, want)
+		}
+	})
+}
+
+// FuzzSanitizeStatusForUpdate: hostile/stale status fields must be admission-safe
+// (score [0,100] or nil, history rings <= historyMax with scores clamped,
+// failure-name lists <= failureListMax).
+func FuzzSanitizeStatusForUpdate(f *testing.F) {
+	f.Add(int32(200), 40, 5000)
+	f.Add(int32(-5), 0, 0)
+	f.Add(int32(50), 5, 3)
+	f.Add(int32(100), 30, 4096)
+	f.Fuzz(func(t *testing.T, scoreVal int32, histN, failN int) {
+		if histN < 0 {
+			histN = -histN
+		}
+		histN = histN % 64
+		if failN < 0 {
+			failN = -failN
+		}
+		failN = failN % (failureListMax + 32)
+
+		hist := make([]baselinev1alpha1.ScoreSnapshot, histN)
+		for i := range hist {
+			hist[i] = baselinev1alpha1.ScoreSnapshot{
+				Time:  metav1.NewTime(time.Unix(int64(i), 0).UTC()),
+				Score: scoreVal + int32(i),
 			}
-			if role != "" {
-				obj["metadata"] = map[string]any{
-					"labels": map[string]any{"machineconfiguration.openshift.io/role": role},
+		}
+		fails := make([]string, failN)
+		for i := range fails {
+			fails[i] = fmt.Sprintf("chk-%d", i)
+		}
+		s := scoreVal
+		cb := &baselinev1alpha1.ClusterBaseline{
+			Status: baselinev1alpha1.ClusterBaselineStatus{
+				Score:            &s,
+				History:          append([]baselinev1alpha1.ScoreSnapshot(nil), hist...),
+				NewlyFailed:      append([]string(nil), fails...),
+				Fixed:            append([]string(nil), fails...),
+				PreviousFailures: append([]string(nil), fails...),
+				DiffBaseFailures: append([]string(nil), fails...),
+				Profiles: []baselinev1alpha1.ProfileStatus{{
+					Key:     "cis",
+					History: append([]baselinev1alpha1.ScoreSnapshot(nil), hist...),
+				}},
+				TailoredProfiles: []baselinev1alpha1.TailoredProfileStatus{{
+					Name:    "custom",
+					History: append([]baselinev1alpha1.ScoreSnapshot(nil), hist...),
+				}},
+			},
+		}
+		sanitizeStatusForUpdate(cb)
+
+		if cb.Status.Score == nil {
+			t.Fatal("non-nil score became nil")
+		}
+		if *cb.Status.Score < 0 || *cb.Status.Score > 100 {
+			t.Fatalf("score %d out of [0,100]", *cb.Status.Score)
+		}
+		assertHistorySafe := func(h []baselinev1alpha1.ScoreSnapshot, label string) {
+			t.Helper()
+			if len(h) > historyMax {
+				t.Fatalf("%s len %d > historyMax %d", label, len(h), historyMax)
+			}
+			for _, snap := range h {
+				if snap.Score < 0 || snap.Score > 100 {
+					t.Fatalf("%s score %d out of [0,100]", label, snap.Score)
 				}
 			}
-			_ = unstructured.SetNestedMap(rem.Object, obj, "spec", "current", "object")
 		}
-		got := poolFromRemediation(rem)
-		if kind != "" && kind != "MachineConfig" {
-			if got != "" {
-				t.Fatalf("non-MachineConfig kind %q returned pool %q", kind, got)
-			}
-			return
+		assertHistorySafe(cb.Status.History, "history")
+		if len(cb.Status.Profiles) > 0 {
+			assertHistorySafe(cb.Status.Profiles[0].History, "profile history")
 		}
-		if kind == "MachineConfig" && role != "" {
-			if got != role {
-				t.Fatalf("MachineConfig role %q, got pool %q", role, got)
-			}
-			return
+		if len(cb.Status.TailoredProfiles) > 0 {
+			assertHistorySafe(cb.Status.TailoredProfiles[0].History, "tailored history")
 		}
-		// Scan-name fallback: last "-node-" segment, or empty.
-		if i := strings.LastIndex(scan, "-node-"); i >= 0 {
-			want := scan[i+len("-node-"):]
-			if got != want {
-				t.Fatalf("scan fallback: scan=%q got %q want %q", scan, got, want)
-			}
-		} else if got != "" {
-			t.Fatalf("no role/scan pool, got %q", got)
-		}
-	})
-}
-
-// FuzzBatchPastGrace: batch StartedAt from status/annotation is untrusted.
-// Zero and far-future must trip the safety valve; modest skew must not.
-func FuzzBatchPastGrace(f *testing.F) {
-	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
-	f.Add(int64(0), true) // metav1 zero via flag
-	f.Add(now.Unix(), false)
-	f.Add(now.Add(-batchResumeGrace-time.Second).Unix(), false)
-	f.Add(now.Add(batchResumeGrace+time.Second).Unix(), false)
-	f.Add(now.Add(30*time.Second).Unix(), false)
-	f.Fuzz(func(t *testing.T, unix int64, forceZero bool) {
-		var started metav1.Time
-		if forceZero {
-			started = metav1.Time{}
-		} else {
-			// Bound unix so time math stays well-defined.
-			if unix < 0 {
-				unix = -unix
-			}
-			unix = unix % (1 << 40)
-			started = metav1.NewTime(time.Unix(unix, 0).UTC())
-		}
-		past := batchPastGrace(started, now)
-		if started.IsZero() {
-			if !past {
-				t.Fatal("zero StartedAt must be past grace")
-			}
-			return
-		}
-		if started.After(now.Add(batchResumeGrace)) {
-			if !past {
-				t.Fatalf("far-future StartedAt %v must be past grace", started.Time)
-			}
-			return
-		}
-		want := now.Sub(started.Time) > batchResumeGrace
-		if past != want {
-			t.Fatalf("batchPastGrace(%v) = %v, want %v", started.Time, past, want)
-		}
-	})
-}
-
-// FuzzClampScore: hand-edited or buggy status.score must stay in [0,100] or nil
-// so Status().Update cannot fail CRD admission and freeze reconciliation.
-func FuzzClampScore(f *testing.F) {
-	f.Add(int32(0))
-	f.Add(int32(100))
-	f.Add(int32(-1))
-	f.Add(int32(101))
-	f.Add(int32(50))
-	f.Fuzz(func(t *testing.T, v int32) {
-		// nil path
-		if clampScore(nil) != nil {
-			t.Fatal("clampScore(nil) must be nil")
-		}
-		got := clampScore(&v)
-		if got == nil {
-			t.Fatal("clampScore(non-nil) returned nil")
-		}
-		if *got < 0 || *got > 100 {
-			t.Fatalf("clamped score %d out of [0,100]", *got)
-		}
-		switch {
-		case v < 0:
-			if *got != 0 {
-				t.Fatalf("negative %d clamped to %d, want 0", v, *got)
-			}
-		case v > 100:
-			if *got != 100 {
-				t.Fatalf("over %d clamped to %d, want 100", v, *got)
-			}
-		default:
-			if *got != v {
-				t.Fatalf("in-range %d mutated to %d", v, *got)
+		for name, list := range map[string][]string{
+			"newlyFailed":      cb.Status.NewlyFailed,
+			"fixed":            cb.Status.Fixed,
+			"previousFailures": cb.Status.PreviousFailures,
+			"diffBaseFailures": cb.Status.DiffBaseFailures,
+		} {
+			if len(list) > failureListMax {
+				t.Fatalf("%s len %d > failureListMax", name, len(list))
 			}
 		}
 	})

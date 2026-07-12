@@ -78,18 +78,19 @@ func splitCSV(s string) []string {
 }
 
 // notIn returns the sorted members of a that are absent from set b.
+// When a is already sorted (production failure lists always are), filtering
+// preserves order and the Sort is skipped (IsSorted is O(n), Sort is O(n log n)).
 func notIn(a []string, b map[string]bool) []string {
-	var out []string
+	// Pre-size for worst case (all of a missing from b) so failure-diff on
+	// multi-thousand FAIL sets does not thrash append.
+	out := make([]string, 0, len(a))
 	for _, x := range a {
 		if !b[x] {
 			out = append(out, x)
 		}
 	}
-	slices.Sort(out)
+	if !slices.IsSorted(out) {
+		slices.Sort(out)
+	}
 	return out
-}
-
-// withoutPlugin returns plugins without name (copy; does not mutate input).
-func withoutPlugin(plugins []string, name string) []string {
-	return slices.DeleteFunc(slices.Clone(plugins), func(p string) bool { return p == name })
 }

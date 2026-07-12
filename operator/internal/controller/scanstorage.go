@@ -9,6 +9,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	baselinev1alpha1 "github.com/maci0/baseline-security-operator/api/v1alpha1"
 )
@@ -20,7 +21,7 @@ import (
 func (r *ClusterBaselineReconciler) checkScanStorage(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline) error {
 	pvcs := &corev1.PersistentVolumeClaimList{}
 	if err := r.List(ctx, pvcs, client.InNamespace(complianceNamespace)); err != nil {
-		return err
+		return fmt.Errorf("listing PVCs in %s: %w", complianceNamespace, err)
 	}
 	// Owned scan PVC names: built-in CO profile names and TailoredProfile names,
 	// plus known role suffixes only (see matchesAnyProfile / scanRoleSuffix).
@@ -46,6 +47,10 @@ func (r *ClusterBaselineReconciler) checkScanStorage(ctx context.Context, cb *ba
 		}
 	}
 	if len(pending) > 0 {
+		// Info: rolls up to Degraded; default logs must name the stuck PVCs so
+		// operators can fix StorageClass without only reading the CR condition.
+		log.FromContext(ctx).Info("scan storage PVCs pending",
+			"namespace", complianceNamespace, "pvcs", pending, "name", cb.Name)
 		setCond(cb, "ScanStorageReady", metav1.ConditionFalse, "ScanStoragePending",
 			fmt.Sprintf("PVC(s) %s/%s Pending >2m; need a default StorageClass",
 				complianceNamespace, strings.Join(pending, ", ")))

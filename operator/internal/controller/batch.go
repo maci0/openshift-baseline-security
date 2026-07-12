@@ -1,9 +1,16 @@
 package controller
 
 import (
+	"maps"
+	"slices"
+	"strings"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	utilvalidation "k8s.io/apimachinery/pkg/util/validation"
+
+	baselinev1alpha1 "github.com/maci0/baseline-security-operator/api/v1alpha1"
 )
 
 // batchApplyAnnotation on the ClusterBaseline carries a comma-separated list of
@@ -43,4 +50,70 @@ func batchPastGrace(started metav1.Time, now time.Time) bool {
 		return true
 	}
 	return now.Sub(started.Time) > batchResumeGrace
+}
+
+// poolFromRemediation returns the MachineConfigPool a node remediation targets,
+// or "" for a non-node one. Prefer the rendered MachineConfig's role label, but
+// the Compliance Operator does not always set it, so fall back to the scan-name
+// label: node scans run per-MCP, named "<profile>-node-<pool>". Without this
+// fallback a node remediation whose MachineConfig has no role label would pause
+// no pool, so its apply would reboot the node uncoalesced.
+// Role labels and scan-name suffixes are untrusted cluster data; non-DNS1123
+// values are dropped so they never enter batch pool lists or MCP Get calls.
+func poolFromRemediation(rem *unstructured.Unstructured) string {
+	obj, _, err := unstructured.NestedMap(rem.Object, "spec", "current", "object")
+	// Wrong-type object: ignore it and fall through to the scan-name label.
+	if err == nil && obj != nil {
+		kind, _, _ := unstructured.NestedString(obj, "kind")
+		// Only reject known non-node kinds. Missing/empty kind still allows the
+		// scan-name fallback so a partially rendered MachineConfig does not
+		// skip MCP pause during batch apply.
+		if kind != "" && kind != "MachineConfig" {
+			return ""
+		}
+		if kind == "MachineConfig" {
+			if role, _, _ := unstructured.NestedString(obj, "metadata", "labels", "machineconfiguration.openshift.io/role"); role != "" {
+				return validMCPPoolName(role)
+			}
+		}
+	}
+	// Single-key read: GetLabels copies the whole map (batch path can hit 256 remediations).
+	scan := unstructuredLabel(rem.Object, "compliance.openshift.io/scan-name")
+	if i := strings.LastIndex(scan, "-node-"); i >= 0 {
+		return validMCPPoolName(scan[i+len("-node-"):])
+	}
+	return ""
+}
+
+// validMCPPoolName returns name when it is a non-empty DNS-1123 subdomain
+// (Kubernetes resource name shape), otherwise "".
+func validMCPPoolName(name string) string {
+	if name == "" || len(utilvalidation.IsDNS1123Subdomain(name)) > 0 {
+		return ""
+	}
+	return name
+}
+
+func batchPauseOwner(cb *baselinev1alpha1.ClusterBaseline) string {
+	if cb.UID != "" {
+		return string(cb.UID)
+	}
+	if cb.Name != "" {
+		return cb.Name
+	}
+	return "cluster"
+}
+
+func uniqueSortedStrings(values []string) []string {
+	set := make(map[string]bool, len(values))
+	for _, value := range values {
+		if value != "" {
+			set[value] = true
+		}
+	}
+	return slices.Sorted(maps.Keys(set))
+}
+
+func batchRemediationNames(raw string) []string {
+	return uniqueSortedStrings(splitCSV(raw))
 }

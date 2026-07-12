@@ -21,47 +21,39 @@ import {
   ModalFooter,
   ModalHeader,
   PageSection,
+  Skeleton,
   Split,
   SplitItem,
   Switch,
   TextArea,
   TextInput,
 } from '@patternfly/react-core';
-import { ClusterBaseline, ClusterBaselineModel, TailoredProfileModel } from '../models';
 import {
-  errorMessage,
-  isAlreadyExists,
-  isValidTailoredProfileName,
-  resourceVersionTest,
-  tailoredProfileManifest,
-  tailoredProfileBindingPatch,
-  toggledProfiles,
-} from '../utils';
+  ClusterBaseline,
+  ClusterBaselineModel,
+  PROFILE_INFO,
+  PROFILE_KEYS,
+  TAILORED_PROFILE_MAX_ITEMS,
+  TailoredProfileModel,
+} from '../models';
+import { errorMessage, isAlreadyExists } from '../errors';
+import { isValidK8sName, isValidTailoredProfileName } from '../names';
+import { resourceVersionTest, tailoredProfileBindingPatch } from '../patches';
+import { tailoredProfileManifest, toggledProfiles } from '../profiles';
+import { withDisabledTip } from './DisabledTip';
 
-const PROFILE_INFO: Record<string, { title: string; description: string }> = {
-  cis: { title: 'CIS', description: 'CIS Red Hat OpenShift Container Platform Benchmark' },
-  'pci-dss': { title: 'PCI-DSS', description: 'Payment Card Industry Data Security Standard' },
-  'nist-moderate': { title: 'NIST 800-53 Moderate', description: 'FedRAMP Moderate impact baseline' },
-  'nist-high': { title: 'NIST 800-53 High', description: 'FedRAMP High impact baseline' },
-  stig: {
-    title: 'DISA STIG',
-    description: 'Defense Information Systems Agency Security Technical Implementation Guide',
-  },
-  'nerc-cip': {
-    title: 'NERC CIP',
-    description: 'North American Electric Reliability Corporation Critical Infrastructure Protection',
-  },
-  e8: { title: 'ACSC Essential Eight', description: 'Australian Cyber Security Centre Essential Eight' },
-  bsi: {
-    title: 'BSI',
-    description: 'German Federal Office for Information Security IT-Grundschutz',
-  },
-};
-
-const ProfilesTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => {
+const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = ({
+  baseline,
+  loaded = true,
+}) => {
   const { t } = useTranslation('plugin__baseline-security-console-plugin');
   const [pending, setPending] = React.useState(false);
+  // Which profile switch is mid-patch (for per-control loading feedback).
+  const [pendingKey, setPendingKey] = React.useState<string | null>(null);
+  // Sync guard: React state alone cannot block a second click before re-render.
+  const pendingRef = React.useRef(false);
   const [error, setError] = React.useState<string | null>(null);
+  const [success, setSuccess] = React.useState<string | null>(null);
   const [canEdit, canEditLoading] = useAccessReview({
     group: 'baselinesecurity.io',
     resource: 'clusterbaselines',
@@ -77,10 +69,39 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => 
   const [tpName, setTpName] = React.useState('');
   const [tpExtends, setTpExtends] = React.useState('ocp4-cis');
   const [tpDisable, setTpDisable] = React.useState('');
+  const tpNameRef = React.useRef<HTMLInputElement>(null);
+
+  // Focus the name field when the create modal opens (keyboard users).
+  React.useEffect(() => {
+    if (creating) {
+      tpNameRef.current?.focus();
+    }
+  }, [creating]);
 
   const createTailored = async () => {
     const name = tpName.trim();
-    if (!baseline || !isValidTailoredProfileName(name)) return;
+    if (!baseline || pendingRef.current) return;
+    // Enter key can fire while the primary button is disabled; surface validation
+    // instead of a silent no-op so the form never looks broken.
+    if (!isValidTailoredProfileName(name)) {
+      setError(
+        t(
+          'Use lowercase letters, digits, - and .; must start and end with a letter or digit.',
+        ),
+      );
+      return;
+    }
+    // Base profile must be a DNS-1123 name (same shape as CO Profile metadata.name).
+    const extendsBase = tpExtends.trim() || 'ocp4-cis';
+    if (!isValidK8sName(extendsBase)) {
+      setError(
+        t(
+          'Base profile name is invalid. Use lowercase letters, digits, - and .; must start and end with a letter or digit.',
+        ),
+      );
+      return;
+    }
+    pendingRef.current = true;
     setPending(true);
     setError(null);
     // Two steps: create the TailoredProfile, then bind it into spec. Track which
@@ -88,14 +109,15 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => 
     // an AlreadyExists on retry is treated as the create having succeeded.
     let created = false;
     try {
+      // Drop non-DNS-1123 rule lines before create (manifest also filters).
       const disable = tpDisable
         .split('\n')
         .map((s) => s.trim())
-        .filter(Boolean);
+        .filter((s) => isValidK8sName(s));
       try {
         await k8sCreate({
           model: TailoredProfileModel,
-          data: tailoredProfileManifest(name, tpExtends.trim() || 'ocp4-cis', disable),
+          data: tailoredProfileManifest(name, extendsBase, disable),
         });
       } catch (e) {
         if (!isAlreadyExists(e)) throw e;
@@ -108,10 +130,21 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => 
       );
       if (bindPatch.length) {
         await k8sPatch({ model: ClusterBaselineModel, resource: baseline, data: bindPatch });
+      } else if (!(baseline.spec.tailoredProfiles ?? []).includes(name)) {
+        // Empty patch is MaxItems or validation: profile may exist in CO but is
+        // not bound. Do not report success or the orphan is invisible.
+        setError(
+          t(
+            'Tailored profile "{{name}}" was created but could not be bound (limit of {{max}} tailored profiles reached). Remove one, then retry.',
+            { name, max: TAILORED_PROFILE_MAX_ITEMS },
+          ),
+        );
+        return;
       }
       setCreating(false);
       setTpName('');
       setTpDisable('');
+      setSuccess(t('Tailored profile created and bound.'));
     } catch (e) {
       const detail = errorMessage(e);
       setError(
@@ -123,18 +156,34 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => 
           : detail ?? t('Failed to create tailored profile.'),
       );
     } finally {
+      pendingRef.current = false;
       setPending(false);
     }
   };
 
   const nameValid = tpName.trim() === '' || isValidTailoredProfileName(tpName.trim());
+  const extendsValid =
+    tpExtends.trim() === '' || isValidK8sName(tpExtends.trim());
+
+  const editDisabled = !canEdit || canEditLoading || pending;
+  let editDisabledReason: string | undefined;
+  if (!pending) {
+    if (canEditLoading) {
+      editDisabledReason = t('Checking permissions…');
+    } else if (!canEdit) {
+      editDisabledReason = t('You do not have permission to edit the baseline.');
+    }
+  }
 
   const toggle = async (key: string, checked: boolean) => {
-    if (!baseline) return;
+    if (!baseline || pendingRef.current) return;
     // Empty is allowed: clearing every profile disables scanning.
     const profiles = toggledProfiles(baseline.spec.profiles ?? [], key, checked);
+    pendingRef.current = true;
     setPending(true);
+    setPendingKey(key);
     setError(null);
+    setSuccess(null);
     try {
       await k8sPatch({
         model: ClusterBaselineModel,
@@ -147,17 +196,42 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => 
           { op: 'replace', path: '/spec/profiles', value: profiles },
         ],
       });
+      const title = t(PROFILE_INFO[key as (typeof PROFILE_KEYS)[number]].title);
+      setSuccess(
+        checked
+          ? t('{{profile}} enabled. Scans will include this profile on the next run.', {
+              profile: title,
+            })
+          : t('{{profile}} disabled.', { profile: title }),
+      );
     } catch (e) {
       setError(errorMessage(e) ?? t('Failed to update profiles.'));
     } finally {
+      pendingRef.current = false;
       setPending(false);
+      setPendingKey(null);
     }
   };
 
+  if (!loaded) {
+    return (
+      <PageSection>
+        <Gallery hasGutter minWidths={{ default: '330px' }}>
+          {[0, 1, 2].map((i) => (
+            <Card key={i}>
+              <CardBody>
+                <Skeleton height="80px" screenreaderText={t('Loading compliance data')} />
+              </CardBody>
+            </Card>
+          ))}
+        </Gallery>
+      </PageSection>
+    );
+  }
   if (!baseline) {
     return (
       <PageSection>
-        <EmptyState titleText={t('Baseline not configured')} headingLevel="h4">
+        <EmptyState titleText={t('Baseline not configured')} headingLevel="h2">
           <EmptyStateBody>
             {t(
               'No ClusterBaseline resource found. Install the baseline-security operator and create a ClusterBaseline to start scanning.',
@@ -174,6 +248,7 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => 
         <Alert
           variant="danger"
           isInline
+          isLiveRegion
           title={error}
           style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}
           actionClose={
@@ -181,27 +256,48 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => 
           }
         />
       )}
+      {success && (
+        <Alert
+          variant="success"
+          isInline
+          isLiveRegion
+          title={success}
+          style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}
+          actionClose={
+            <AlertActionCloseButton aria-label={t('Close')} onClose={() => setSuccess(null)} />
+          }
+        />
+      )}
       {canAuthor && (
         <Split hasGutter style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}>
           <SplitItem isFilled />
           <SplitItem>
-            <Button
-              variant="secondary"
-              isDisabled={!canEdit || canEditLoading || pending}
-              onClick={() => {
-                setError(null);
-                setCreating(true);
-              }}
-            >
-              {t('New tailored profile')}
-            </Button>
+            {withDisabledTip(
+              editDisabled && editDisabledReason ? editDisabledReason : undefined,
+              <Button
+                variant="secondary"
+                isDisabled={editDisabled}
+                onClick={() => {
+                  setError(null);
+                  setSuccess(null);
+                  setCreating(true);
+                }}
+              >
+                {t('New tailored profile')}
+              </Button>,
+            )}
           </SplitItem>
         </Split>
       )}
       <Modal
         variant="medium"
         isOpen={creating}
-        onClose={() => setCreating(false)}
+        onClose={() => {
+          // pendingRef: setPending is async; dismiss between pendingRef=true and
+          // re-render must not wipe the create form mid-request.
+          if (pendingRef.current) return;
+          setCreating(false);
+        }}
         aria-labelledby="new-tp-title"
       >
         <ModalHeader title={t('New tailored profile')} labelId="new-tp-title" />
@@ -210,20 +306,31 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => 
             <Alert
               variant="danger"
               isInline
+              isLiveRegion
               title={error}
               style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}
             />
           )}
           <FormGroup label={t('Name')} fieldId="tp-name" isRequired>
             <TextInput
+              ref={tpNameRef}
               id="tp-name"
               value={tpName}
               onChange={(_e, v) => setTpName(v)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  void createTailored();
+                }
+              }}
               validated={nameValid ? 'default' : 'error'}
+              isRequired
+              aria-invalid={!nameValid}
+              aria-describedby={!nameValid ? 'tp-name-help' : undefined}
             />
             {!nameValid && (
               <FormHelperText>
-                <HelperText>
+                <HelperText id="tp-name-help">
                   <HelperTextItem variant="error">
                     {t(
                       'Use lowercase letters, digits, - and .; must start and end with a letter or digit.',
@@ -234,7 +341,33 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => 
             )}
           </FormGroup>
           <FormGroup label={t('Extends (base profile)')} fieldId="tp-extends">
-            <TextInput id="tp-extends" value={tpExtends} onChange={(_e, v) => setTpExtends(v)} />
+            <TextInput
+              id="tp-extends"
+              value={tpExtends}
+              onChange={(_e, v) => setTpExtends(v)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  void createTailored();
+                }
+              }}
+              validated={extendsValid ? 'default' : 'error'}
+              aria-invalid={!extendsValid}
+              aria-describedby="tp-extends-help"
+            />
+            <FormHelperText>
+              <HelperText id="tp-extends-help">
+                <HelperTextItem variant={extendsValid ? 'default' : 'error'}>
+                  {extendsValid
+                    ? t(
+                        'Compliance Operator profile name this tailored profile extends (for example ocp4-cis).',
+                      )
+                    : t(
+                        'Use lowercase letters, digits, - and .; must start and end with a letter or digit.',
+                      )}
+                </HelperTextItem>
+              </HelperText>
+            </FormHelperText>
           </FormGroup>
           <FormGroup label={t('Disable rules (one per line)')} fieldId="tp-disable">
             <TextArea
@@ -242,26 +375,47 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => 
               value={tpDisable}
               onChange={(_e, v) => setTpDisable(v)}
               rows={4}
-              placeholder="ocp4-cis-..."
+              placeholder={t('ocp4-cis-...')}
+              aria-label={t('Disable rules (one per line)')}
+              aria-describedby="tp-disable-help"
             />
+            <FormHelperText>
+              <HelperText id="tp-disable-help">
+                <HelperTextItem>
+                  {t('Optional. One Compliance Operator rule name per line to disable in the base profile.')}
+                </HelperTextItem>
+              </HelperText>
+            </FormHelperText>
           </FormGroup>
         </ModalBody>
         <ModalFooter>
           <Button
             variant="primary"
-            isDisabled={!isValidTailoredProfileName(tpName.trim()) || pending}
+            isDisabled={
+              !isValidTailoredProfileName(tpName.trim()) ||
+              !isValidK8sName(tpExtends.trim() || 'ocp4-cis') ||
+              pending
+            }
             isLoading={pending}
             onClick={() => void createTailored()}
           >
             {t('Create and bind')}
           </Button>
-          <Button variant="link" isDisabled={pending} onClick={() => setCreating(false)}>
+          <Button
+            variant="link"
+            isDisabled={pending}
+            onClick={() => {
+              if (pendingRef.current) return;
+              setCreating(false);
+            }}
+          >
             {t('Cancel')}
           </Button>
         </ModalFooter>
       </Modal>
       <Gallery hasGutter minWidths={{ default: '330px' }}>
-        {Object.keys(PROFILE_INFO).map((key) => {
+        {PROFILE_KEYS.map((key) => {
+          const info = PROFILE_INFO[key];
           const enabled = baseline.spec.profiles?.includes(key) ?? false;
           return (
             <Card key={key}>
@@ -269,24 +423,30 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => 
                 actions={{
                   // Any profile can be toggled off, including the last one, which
                   // disables scanning.
-                  actions: (
+                  actions: withDisabledTip(
+                    editDisabled && editDisabledReason ? editDisabledReason : undefined,
                     <Switch
                       id={`profile-${key}`}
-                      aria-label={t('Enable {{profile}} profile', {
-                        profile: PROFILE_INFO[key].title,
-                      })}
+                      aria-label={
+                        pendingKey === key
+                          ? t('Updating {{profile}} profile', { profile: t(info.title) })
+                          : t('Enable {{profile}} profile', {
+                              profile: t(info.title),
+                            })
+                      }
+                      aria-busy={pendingKey === key || undefined}
                       isChecked={enabled}
-                      isDisabled={!canEdit || canEditLoading || pending}
+                      isDisabled={editDisabled}
                       onChange={(_e, checked) => {
                         void toggle(key, checked);
                       }}
-                    />
+                    />,
                   ),
                 }}
               >
-                <CardTitle>{PROFILE_INFO[key].title}</CardTitle>
+                <CardTitle>{t(info.title)}</CardTitle>
               </CardHeader>
-              <CardBody>{t(PROFILE_INFO[key].description)}</CardBody>
+              <CardBody>{t(info.description)}</CardBody>
             </Card>
           );
         })}

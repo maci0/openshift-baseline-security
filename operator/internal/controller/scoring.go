@@ -2,6 +2,34 @@ package controller
 
 import baselinev1alpha1 "github.com/maci0/baseline-security-operator/api/v1alpha1"
 
+// historyScoringModeAnn records which scoring mode wrote the latest history
+// ring points. Late CCR refresh for the same LastScanTime must not rewrite those
+// snapshots under a different formula when the admin flips Flat <-> SeverityWeighted.
+const historyScoringModeAnn = "baselinesecurity.io/history-scoring-mode"
+
+// scoringMode returns the effective scoring mode (Flat when unset).
+func scoringMode(cb *baselinev1alpha1.ClusterBaseline) baselinev1alpha1.ScoringMode {
+	if cb.Spec.Scoring.Mode == baselinev1alpha1.ScoringSeverityWeighted {
+		return baselinev1alpha1.ScoringSeverityWeighted
+	}
+	return baselinev1alpha1.ScoringFlat
+}
+
+// historyModeMatches is true when late history refresh may rewrite the latest
+// snapshots under the current formula. Missing annotation (pre-feature CRs)
+// allows refresh so existing clusters keep late-CCR correction; the next history
+// write stamps the mode.
+func historyModeMatches(cb *baselinev1alpha1.ClusterBaseline) bool {
+	got := ""
+	if cb.Annotations != nil {
+		got = cb.Annotations[historyScoringModeAnn]
+	}
+	if got == "" {
+		return true
+	}
+	return got == string(scoringMode(cb))
+}
+
 // score is pass/(pass+fail)*100, or nil when there are no countable results.
 // Widens to int64 so pass+fail and pass*100 cannot overflow int32.
 // Overall score is a single pooled ratio across every selected profile (and

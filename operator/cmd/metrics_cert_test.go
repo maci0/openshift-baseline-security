@@ -5,6 +5,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -111,6 +112,25 @@ func TestIsLoopbackMetricsAddr(t *testing.T) {
 	}
 }
 
+func TestEnvTruthy(t *testing.T) {
+	for _, v := range []string{"true", "TRUE", " True ", "1", "yes", "YES"} {
+		t.Setenv("BASELINE_SECURITY_SKIP_DEFAULT_CR", v)
+		if !envTruthy("BASELINE_SECURITY_SKIP_DEFAULT_CR") {
+			t.Fatalf("%q should be truthy", v)
+		}
+	}
+	for _, v := range []string{"", "false", "0", "no", "maybe", " truex"} {
+		t.Setenv("BASELINE_SECURITY_SKIP_DEFAULT_CR", v)
+		if envTruthy("BASELINE_SECURITY_SKIP_DEFAULT_CR") {
+			t.Fatalf("%q should be falsy", v)
+		}
+	}
+	t.Setenv("BASELINE_SECURITY_SKIP_DEFAULT_CR", "")
+	if envTruthy("BASELINE_SECURITY_UNSET_KEY") {
+		t.Fatal("unset key should be falsy")
+	}
+}
+
 func TestMetricsTLSOptsMinVersion(t *testing.T) {
 	opts := metricsTLSOpts(t.TempDir())
 	if len(opts) != 1 {
@@ -185,4 +205,133 @@ func TestMetricsCertProviderConcurrentLoad(t *testing.T) {
 			t.Fatal("concurrent load produced multiple certificate pointers for one fingerprint")
 		}
 	}
+}
+
+// Concurrent handshakes during an on-disk rotation must not leave the cache on
+// a pair whose fingerprint no longer matches disk (stale parse overwriting a
+// newer install). After the dust settles, GetCertificate matches the final files.
+func TestMetricsCertProviderConcurrentReload(t *testing.T) {
+	dir := t.TempDir()
+	writeTestPair(t, dir)
+	p := &metricsCertProvider{certDir: dir}
+	// Seed cache with the first pair.
+	if _, err := p.GetCertificate(nil); err != nil {
+		t.Fatal(err)
+	}
+
+	const n = 32
+	var wg sync.WaitGroup
+	errs := make([]error, n)
+	wg.Add(n)
+	for i := 0; i < n; i++ {
+		i := i
+		go func() {
+			defer wg.Done()
+			if i == n/2 {
+				// Mid-flight rotation while others load/reload.
+				writeTestPair(t, dir)
+			}
+			_, errs[i] = p.GetCertificate(nil)
+		}()
+	}
+	wg.Wait()
+	for i := 0; i < n; i++ {
+		if errs[i] != nil {
+			t.Fatalf("goroutine %d: %v", i, errs[i])
+		}
+	}
+	// Final load must match current on-disk pair (not a stale overwritten cert).
+	got, err := p.GetCertificate(nil)
+	if err != nil || got == nil {
+		t.Fatalf("final load: cert=%v err=%v", got, err)
+	}
+	_, _, wantFP, ok := readCertPair(filepath.Join(dir, "tls.crt"), filepath.Join(dir, "tls.key"))
+	if !ok {
+		t.Fatal("final on-disk pair missing")
+	}
+	p.mu.Lock()
+	cachedFP := p.fingerprint
+	cached := p.cert
+	p.mu.Unlock()
+	if cached != got {
+		t.Fatal("final GetCertificate did not return cached cert")
+	}
+	if cachedFP != wantFP {
+		t.Fatal("cache fingerprint does not match final on-disk pair after concurrent reload")
+	}
+}
+
+// FuzzMetricsCertCorruptPair: service-ca Secret projections can be partial,
+// truncated, or binary garbage during rotation. GetCertificate is on the TLS
+// handshake hot path and must never panic; corrupt pairs fall back to last-good
+// or self-signed so metrics stay available.
+func FuzzMetricsCertCorruptPair(f *testing.F) {
+	f.Add([]byte(""), []byte(""))
+	f.Add([]byte("not-a-pem"), []byte("also-not"))
+	f.Add([]byte("-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----\n"),
+		[]byte("-----BEGIN PRIVATE KEY-----\nBBBB\n-----END PRIVATE KEY-----\n"))
+	f.Add([]byte{0x00, 0xff, 0x30, 0x82}, []byte{0x30, 0x82, 0x00})
+	f.Fuzz(func(t *testing.T, certPEM, keyPEM []byte) {
+		// Bound I/O: real Secrets are small; huge blobs only stress the fuzzer.
+		const max = 8192
+		if len(certPEM) > max {
+			certPEM = certPEM[:max]
+		}
+		if len(keyPEM) > max {
+			keyPEM = keyPEM[:max]
+		}
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "tls.crt"), certPEM, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "tls.key"), keyPEM, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		p := &metricsCertProvider{certDir: dir}
+		c, err := p.GetCertificate(nil)
+		if err != nil || c == nil {
+			t.Fatalf("GetCertificate must return a cert (self-signed fallback): cert=%v err=%v", c, err)
+		}
+		// Second call: either cache hit (valid pair) or sticky bad + self-signed.
+		c2, err2 := p.GetCertificate(nil)
+		if err2 != nil || c2 == nil {
+			t.Fatalf("second GetCertificate: cert=%v err=%v", c2, err2)
+		}
+	})
+}
+
+// FuzzIsLoopbackMetricsAddr: --metrics-bind-address is operator config but
+// shapes a security decision (whether insecure metrics are allowed). Hostile
+// or partial addresses must never panic; only disabled/"0" and explicit
+// loopback hosts classify as loopback.
+func FuzzIsLoopbackMetricsAddr(f *testing.F) {
+	for _, seed := range []string{
+		"", "0", ":8443", "127.0.0.1:8080", "localhost:8443", "[::1]:8443",
+		"0.0.0.0:8443", "[::]:8443", "example.com:8443", "127.0.0.1",
+		"localhost", "::1", "[::1]", "127.0.0.1:", ":::8443",
+		"127.0.0.1:8443:extra", " 127.0.0.1:8443",
+	} {
+		f.Add(seed)
+	}
+	f.Fuzz(func(t *testing.T, addr string) {
+		if len(addr) > 512 {
+			addr = addr[:512]
+		}
+		got := isLoopbackMetricsAddr(addr)
+		if addr == "0" {
+			if !got {
+				t.Fatal(`"0" must be loopback (disabled metrics)`)
+			}
+			return
+		}
+		host := addr
+		if i := strings.LastIndex(addr, ":"); i >= 0 {
+			host = addr[:i]
+		}
+		host = strings.Trim(host, "[]")
+		want := host == "127.0.0.1" || host == "localhost" || host == "::1"
+		if got != want {
+			t.Fatalf("isLoopbackMetricsAddr(%q) = %v, want %v (host=%q)", addr, got, want, host)
+		}
+	})
 }

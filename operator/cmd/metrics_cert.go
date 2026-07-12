@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/sha256"
 	"crypto/tls"
+	"log"
 	"net"
 	"os"
 	"path/filepath"
@@ -26,6 +27,10 @@ type metricsCertProvider struct {
 	cert        *tls.Certificate
 	fingerprint [sha256.Size]byte
 	selfSigned  *tls.Certificate
+	// badFingerprint is the last corrupt on-disk pair we logged so a sticky
+	// parse failure does not spam every TLS handshake.
+	badFingerprint [sha256.Size]byte
+	loggedBad      bool
 }
 
 func readCertPair(certPath, keyPath string) ([]byte, []byte, [sha256.Size]byte, bool) {
@@ -47,44 +52,83 @@ func readCertPair(certPath, keyPath string) ([]byte, []byte, [sha256.Size]byte, 
 }
 
 func (p *metricsCertProvider) GetCertificate(_ *tls.ClientHelloInfo) (*tls.Certificate, error) {
-	var (
-		certPEM, keyPEM []byte
-		fingerprint     [sha256.Size]byte
-		haveFiles       bool
-	)
-	if p.certDir != "" {
-		certPath := filepath.Join(p.certDir, "tls.crt")
-		keyPath := filepath.Join(p.certDir, "tls.key")
-		certPEM, keyPEM, fingerprint, haveFiles = readCertPair(certPath, keyPath)
-	}
+	// One retry when disk rotates between read and install so a slow parse of an
+	// older pair cannot overwrite a newer cert installed by a concurrent handshake.
+	for attempt := 0; attempt < 2; attempt++ {
+		var (
+			certPEM, keyPEM []byte
+			fingerprint     [sha256.Size]byte
+			haveFiles       bool
+		)
+		if p.certDir != "" {
+			certPath := filepath.Join(p.certDir, "tls.crt")
+			keyPath := filepath.Join(p.certDir, "tls.key")
+			certPEM, keyPEM, fingerprint, haveFiles = readCertPair(certPath, keyPath)
+		}
 
-	// Cache hit: same on-disk content as last successful load.
-	p.mu.Lock()
-	if haveFiles && p.cert != nil && fingerprint == p.fingerprint {
-		c := p.cert
-		p.mu.Unlock()
-		return c, nil
-	}
-	p.mu.Unlock()
-
-	// Parse outside the lock: rare (startup / cert rotation) but can be slow.
-	if haveFiles {
-		pair, err := tls.X509KeyPair(certPEM, keyPEM)
-		if err == nil {
-			p.mu.Lock()
-			// Another handshake may have published the same fingerprint already.
-			if p.cert != nil && fingerprint == p.fingerprint {
-				c := p.cert
-				p.mu.Unlock()
-				return c, nil
-			}
-			p.cert = &pair
-			p.fingerprint = fingerprint
+		// Cache hit: same on-disk content as last successful load.
+		p.mu.Lock()
+		if haveFiles && p.cert != nil && fingerprint == p.fingerprint {
 			c := p.cert
 			p.mu.Unlock()
 			return c, nil
 		}
-		// Partial/corrupt Secret: fall through to last good / self-signed.
+		p.mu.Unlock()
+
+		// Parse outside the lock: rare (startup / cert rotation) but can be slow.
+		if haveFiles {
+			pair, err := tls.X509KeyPair(certPEM, keyPEM)
+			if err == nil {
+				p.mu.Lock()
+				// Another handshake may have published the same fingerprint already.
+				if p.cert != nil && fingerprint == p.fingerprint {
+					c := p.cert
+					p.mu.Unlock()
+					return c, nil
+				}
+				// Stale-parse guard: re-read under the lock so we never install an
+				// older parse over a different fingerprint that is still (or now)
+				// on disk after a concurrent rotation.
+				if p.certDir != "" {
+					_, _, currentFP, ok := readCertPair(
+						filepath.Join(p.certDir, "tls.crt"),
+						filepath.Join(p.certDir, "tls.key"),
+					)
+					if ok && currentFP != fingerprint {
+						if p.cert != nil {
+							// Cache holds something else (often the concurrent winner).
+							c := p.cert
+							p.mu.Unlock()
+							return c, nil
+						}
+						p.mu.Unlock()
+						// Empty cache and disk moved: re-read/parse once.
+						continue
+					}
+				}
+				p.cert = &pair
+				p.fingerprint = fingerprint
+				// Clear sticky bad log so a later rotation of the same path re-logs.
+				p.loggedBad = false
+				c := p.cert
+				p.mu.Unlock()
+				return c, nil
+			}
+			// Partial/corrupt Secret: fall through to last good / self-signed.
+			// Log once per corrupt content so scrapers failing TLS are debuggable
+			// without spamming every handshake while the Secret stays broken.
+			p.mu.Lock()
+			if !p.loggedBad || fingerprint != p.badFingerprint {
+				p.loggedBad = true
+				p.badFingerprint = fingerprint
+				p.mu.Unlock()
+				log.Printf("metrics TLS: failed to parse cert/key in %s: %v; using previous or self-signed",
+					p.certDir, err)
+			} else {
+				p.mu.Unlock()
+			}
+		}
+		break
 	}
 
 	p.mu.Lock()

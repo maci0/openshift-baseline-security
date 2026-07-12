@@ -3,7 +3,6 @@ package controller
 import (
 	"context"
 	"testing"
-	"time"
 
 	baselinev1alpha1 "github.com/maci0/baseline-security-operator/api/v1alpha1"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -68,35 +67,5 @@ func TestAggregateStatusWithTailored(t *testing.T) {
 	}
 	if cb.Status.NextScanTime == nil {
 		t.Fatal("nextScanTime not set")
-	}
-}
-
-func TestNextScanTime(t *testing.T) {
-	now := time.Date(2026, 7, 10, 3, 0, 0, 0, time.UTC)
-	// Daily at 01:00 -> next is tomorrow 01:00.
-	next := nextScanTime("0 1 * * *", now)
-	if next == nil {
-		t.Fatal("nil for valid schedule")
-	}
-	want := time.Date(2026, 7, 11, 1, 0, 0, 0, time.UTC)
-	if !next.Time.Equal(want) {
-		t.Fatalf("next = %v, want %v", next.Time, want)
-	}
-	if nextScanTime("not a cron", now) != nil {
-		t.Fatal("invalid schedule should yield nil")
-	}
-	// robfig ParseStandard accepts descriptors, but ScanSetting is intentionally
-	// constrained to five-field cron so an annotation cannot request @every 1s.
-	if nextScanTime("@every 1s", now) != nil {
-		t.Fatal("cron descriptor should be rejected")
-	}
-	// Parseable but never-firing schedule (fuzz-found): Next returns the zero
-	// time; must be nil, not a year-0001 timestamp.
-	if got := nextScanTime("*/7 , 1 1 0", now); got != nil {
-		t.Fatalf("degenerate schedule should yield nil, got %v", got.Time)
-	}
-	// Empty falls back to the default daily schedule (non-nil).
-	if nextScanTime("", now) == nil {
-		t.Fatal("empty schedule should use default")
 	}
 }

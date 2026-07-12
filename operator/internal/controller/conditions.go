@@ -108,7 +108,7 @@ func conditionProgressing(c *metav1.Condition) bool {
 	}
 	switch c.Reason {
 	// Steady states (must not Progress / 15s-poll forever):
-	// - ImageMissing: permanent deployment misconfig
+	// - ImageMissing / ImageInvalid: permanent deployment misconfig
 	// - ConsoleMissing: Console capability disabled
 	// - CRDsMissing: no compliance CRDs (common with installComplianceOperator=Manual
 	//   until the admin installs CO; Automatic install is already Progressing via

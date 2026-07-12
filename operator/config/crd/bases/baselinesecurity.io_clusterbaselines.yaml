@@ -3,7 +3,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.19.0
+    controller-gen.kubebuilder.io/version: v0.20.1
   name: clusterbaselines.baselinesecurity.io
 spec:
   group: baselinesecurity.io
@@ -132,6 +132,7 @@ spec:
                   ScanSettings only accept five-field forms. Empty uses the default.
                   Bounded so a hostile or accidental multi-megabyte string cannot bloat the
                   CR or inflate condition messages that embed the value.
+                  Empty/whitespace uses DefaultScanSchedule at reconcile (same as CRD default).
                 maxLength: 128
                 type: string
               scoring:
@@ -163,11 +164,10 @@ spec:
               waivers:
                 description: |-
                   waivers exclude specific failing checks from the score as accepted risk.
-                  Each entry names a ComplianceCheckResult and records why it is waived. A
-                  waived check is removed from the pass/fail denominator and reported in the
-                  Waived bucket instead, so an accepted risk neither inflates nor tanks the
-                  score. Waivers are keyed by result name, which is stable across rescans.
-                  Capped so a hostile list cannot bloat the CR past practical audit size.
+                  Each entry names a ComplianceCheckResult (stable across rescans). Only a
+                  current FAIL with a non-expired waiver is remapped to the Waived bucket and
+                  dropped from the pass/fail denominator; a waived check that later PASSes is
+                  scored as PASS again. Capped so a hostile list cannot bloat the CR.
                 items:
                   description: WaiverEntry marks one ComplianceCheckResult as accepted
                     risk.
@@ -224,6 +224,11 @@ spec:
                 maxLength: 128
                 type: string
               conditions:
+                description: |-
+                  conditions report readiness rollups and detail (Available, Progressing,
+                  Degraded, plus ComplianceOperatorReady / ScanConfigured / etc.).
+                  Map by type so Server-Side Apply and strategic merges update one condition
+                  without replacing the whole list (Kubernetes API convention).
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
@@ -279,11 +284,15 @@ spec:
                   - type
                   type: object
                 type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
               diffBaseFailures:
                 description: |-
                   diffBaseFailures retains the scan-before-last FAIL snapshot while results
                   for lastScanTime settle, allowing late CheckResult events to correct the
-                  current newlyFailed/fixed diff. Internal bookkeeping, not a user setting.
+                  current newlyFailed/fixed diff. Internal bookkeeping only; not a consumer
+                  contract (may change in 0.x without a major bump).
                 items:
                   maxLength: 253
                   type: string
@@ -294,6 +303,7 @@ spec:
                 description: |-
                   diffBaseScanTime identifies the lastScanTime whose diffBaseFailures apply.
                   It is nil for the first completed scan, which has no comparison baseline.
+                  Internal bookkeeping only; not a consumer contract.
                 format: date-time
                 type: string
               fixed:
@@ -310,8 +320,11 @@ spec:
                 description: history holds score snapshots, oldest first, capped at
                   30 entries.
                 items:
-                  description: ScoreSnapshot is one point of score history, recorded
-                    when a scan completes.
+                  description: |-
+                    ScoreSnapshot is one point of score history, recorded when a scan completes.
+                    Score is under the scoring mode active at capture time (Flat or
+                    SeverityWeighted). Mode flips do not rewrite prior points; consecutive points
+                    may be incomparable across a mode change until the next completed scan.
                   properties:
                     score:
                       format: int32
@@ -349,7 +362,9 @@ spec:
               previousFailures:
                 description: |-
                   previousFailures is the internal FAIL snapshot from the last completed scan,
-                  used to compute newlyFailed/fixed on the next scan.
+                  used to compute newlyFailed/fixed on the next scan. Not a consumer contract:
+                  shape and presence may change in 0.x without a major bump; use newlyFailed
+                  and fixed for user-facing regression views.
                 items:
                   maxLength: 253
                   type: string
@@ -357,6 +372,8 @@ spec:
                 type: array
                 x-kubernetes-list-type: set
               profiles:
+                description: profiles summarizes results per selected built-in profile
+                  key.
                 items:
                   description: ProfileStatus summarizes check results for one selected
                     profile key.
@@ -373,8 +390,11 @@ spec:
                       description: history holds this profile's score snapshots, oldest
                         first, capped at 30.
                       items:
-                        description: ScoreSnapshot is one point of score history,
-                          recorded when a scan completes.
+                        description: |-
+                          ScoreSnapshot is one point of score history, recorded when a scan completes.
+                          Score is under the scoring mode active at capture time (Flat or
+                          SeverityWeighted). Mode flips do not rewrite prior points; consecutive points
+                          may be incomparable across a mode change until the next completed scan.
                         properties:
                           score:
                             format: int32
@@ -461,6 +481,9 @@ spec:
                   type: object
                 maxItems: 16
                 type: array
+                x-kubernetes-list-map-keys:
+                - key
+                x-kubernetes-list-type: map
               relatedObjects:
                 description: relatedObjects lists the resources this baseline owns
                   or drives.
@@ -564,8 +587,11 @@ spec:
                       description: history holds this profile's score snapshots, oldest
                         first, capped at 30.
                       items:
-                        description: ScoreSnapshot is one point of score history,
-                          recorded when a scan completes.
+                        description: |-
+                          ScoreSnapshot is one point of score history, recorded when a scan completes.
+                          Score is under the scoring mode active at capture time (Flat or
+                          SeverityWeighted). Mode flips do not rewrite prior points; consecutive points
+                          may be incomparable across a mode change until the next completed scan.
                         properties:
                           score:
                             format: int32
@@ -635,6 +661,9 @@ spec:
                   type: object
                 maxItems: 32
                 type: array
+                x-kubernetes-list-map-keys:
+                - name
+                x-kubernetes-list-type: map
             type: object
         required:
         - spec

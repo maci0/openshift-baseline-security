@@ -14,20 +14,21 @@ import {
 } from '@openshift-console/dynamic-plugin-sdk';
 import {
   Alert,
+  AlertActionCloseButton,
   Button,
   Content,
   DescriptionList,
   DescriptionListDescription,
   DescriptionListGroup,
   DescriptionListTerm,
+  Flex,
+  FlexItem,
   Label,
   FormGroup,
   Modal,
   ModalBody,
   ModalFooter,
   ModalHeader,
-  Split,
-  SplitItem,
   TextArea,
   TextInput,
   Title,
@@ -42,31 +43,42 @@ import {
 } from '@patternfly/react-icons';
 import {
   CheckStatus,
-  checkProfileLabel,
   ClusterBaseline,
   ClusterBaselineModel,
   ComplianceCheckResult,
-  isOwnedByBaseline,
+  profileTitle,
   suiteFilterKey,
+  suiteProfileKey,
+  suiteTailoredName,
+  WAIVER_MAX_ITEMS,
 } from '../models';
 import { Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table';
+import { downloadBlob } from '../download';
+import { errorMessage } from '../errors';
+import { checkResultHref, machineConfigPoolHref } from '../links';
+import { addWaiverPatch, removeWaiverPatch, resourceVersionTest } from '../patches';
 import {
-  addWaiverPatch,
   checkBody,
-  checkResultHref,
   checkTitle,
-  dateInputEndOfDayIso,
-  effectiveStatus,
-  errorMessage,
-  findWaiver,
-  inconsistentSources,
-  machineConfigPoolHref,
   nodeScanPool,
-  removeWaiverPatch,
-  resourceVersionTest,
   resultsCsv,
+  severityDisplayTitle,
+} from '../results';
+import { checkSeverity } from '../scoring';
+import { effectiveStatus, inconsistentSources } from '../status';
+import {
+  dateInputEndOfDayIso,
+  formatCount,
+  formatLocalDate,
+  localDateInputValue,
+  safeLocale,
+} from '../dates';
+import {
+  activeWaivedNames,
+  findWaiver,
   waiverExpired,
-} from '../utils';
+} from '../waivers';
+import { withDisabledTip } from './DisabledTip';
 
 const statusLabel: Record<
   CheckStatus,
@@ -83,6 +95,35 @@ const statusLabel: Record<
   'NOT-APPLICABLE': { color: 'grey', icon: <MinusCircleIcon /> },
 };
 
+// Stable empty list for optional results prop (avoids new [] each render).
+const EMPTY_RESULTS: ComplianceCheckResult[] = [];
+
+// Filter ids and CR status values stay English enums; only the visible title is
+// localized so chips, labels, and deep-links keep matching.
+const statusDisplayTitle = (status: string, t: (k: string) => string): string => {
+  switch (status) {
+    case 'PASS':
+      return t('Pass');
+    case 'FAIL':
+      return t('Fail');
+    case 'ERROR':
+      return t('Error');
+    case 'MANUAL':
+      return t('Manual');
+    case 'INFO':
+      return t('Info');
+    case 'INCONSISTENT':
+      return t('Inconsistent');
+    case 'SKIP':
+    case 'NOT-APPLICABLE':
+      return t('Not applicable');
+    case 'WAIVED':
+      return t('Waived');
+    default:
+      return status;
+  }
+};
+
 const ResultsTab: React.FC<{
   baseline?: ClusterBaseline;
   // Shared list from CompliancePage so this tab does not open a second watch.
@@ -90,9 +131,8 @@ const ResultsTab: React.FC<{
   resultsLoaded?: boolean;
   resultsError?: unknown;
 }> = ({ baseline, results, resultsLoaded = false, resultsError }) => {
-  const { t } = useTranslation('plugin__baseline-security-console-plugin');
+  const { t, i18n } = useTranslation('plugin__baseline-security-console-plugin');
   const loaded = resultsLoaded;
-  const error = resultsError;
   const [selected, setSelected] = React.useState<ComplianceCheckResult | null>(null);
   const [waiveReason, setWaiveReason] = React.useState('');
   const [waiveRequestedBy, setWaiveRequestedBy] = React.useState('');
@@ -100,7 +140,13 @@ const ResultsTab: React.FC<{
   const [waiveExpiresAt, setWaiveExpiresAt] = React.useState('');
   const [waiveReviewBy, setWaiveReviewBy] = React.useState('');
   const [busy, setBusy] = React.useState(false);
+  // Sync guard: React state alone cannot block a second click before re-render.
+  const busyRef = React.useRef(false);
   const [waiveError, setWaiveError] = React.useState<string | null>(null);
+  // Page-level (not modal-only): CSV export failures must surface outside the detail modal.
+  const [exportError, setExportError] = React.useState<string | null>(null);
+  // Success feedback after the detail modal closes so waive/unwaive is not a silent no-op.
+  const [waiveSuccess, setWaiveSuccess] = React.useState<string | null>(null);
   const [canWaive, canWaiveLoading] = useAccessReview({
     group: 'baselinesecurity.io',
     resource: 'clusterbaselines',
@@ -109,23 +155,14 @@ const ResultsTab: React.FC<{
   const waivers = baseline?.spec.waivers;
   // Active (non-expired) waiver names as a Set so row filters and cells are O(1)
   // per check instead of scanning the waiver list on every result.
-  const activeWaived = React.useMemo(() => {
-    const now = new Date();
-    const set = new Set<string>();
-    for (const w of waivers ?? []) {
-      if (w.name && !waiverExpired(w, now)) {
-        set.add(w.name);
-      }
-    }
-    return set;
-  }, [waivers]);
+  const activeWaived = React.useMemo(() => activeWaivedNames(waivers), [waivers]);
   // Offer the waiver controls for a FAIL (the only score-affecting status), and
   // for any already-waived check so a stale waiver can always be removed even
   // after the check starts passing.
   const showWaiver = (r: ComplianceCheckResult): boolean =>
     !!findWaiver(r.metadata.name, waivers) || (!!baseline && effectiveStatus(r) === 'FAIL');
 
-  const closeModal = () => {
+  const resetWaiverForm = () => {
     setSelected(null);
     setWaiveReason('');
     setWaiveRequestedBy('');
@@ -135,11 +172,22 @@ const ResultsTab: React.FC<{
     setWaiveError(null);
   };
 
+  // User dismiss (Escape/X/Cancel): block while a patch is in flight so form
+  // state and the error context are not wiped mid-request. Use the ref, not
+  // React state: setBusy is async and a dismiss between busyRef=true and the
+  // re-render would still see busy===false.
+  const closeModal = () => {
+    if (busyRef.current) return;
+    resetWaiverForm();
+  };
+
   const patchWaivers = async (
     data: Parameters<typeof k8sPatch>[0]['data'],
     failMsg: string,
+    successMsg: string,
   ): Promise<void> => {
-    if (!baseline) return;
+    if (!baseline || busyRef.current) return;
+    busyRef.current = true;
     setBusy(true);
     setWaiveError(null);
     try {
@@ -148,68 +196,155 @@ const ResultsTab: React.FC<{
         resource: baseline,
         data: [...resourceVersionTest(baseline.metadata.resourceVersion), ...data],
       });
-      closeModal();
+      // Success path bypasses the busy guard on closeModal.
+      resetWaiverForm();
+      setWaiveSuccess(successMsg);
     } catch (e) {
       setWaiveError(errorMessage(e) ?? failMsg);
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
   };
 
-  const columns: TableColumn<ComplianceCheckResult>[] = React.useMemo(
-    () => [
-      { title: t('Check'), id: 'title', sort: 'description' },
-      // The same rule appears in several benchmarks, so a Check title can repeat;
-      // the Profile column tells otherwise-identical rows apart.
-      { title: t('Profile'), id: 'profile', sort: "metadata.labels['compliance.openshift.io/suite']" },
-      { title: t('Status'), id: 'status', sort: 'status' },
-      { title: t('Severity'), id: 'severity', sort: 'severity' },
-    ],
-    [t],
-  );
+  const waiveDisabled = !baseline || !canWaive || canWaiveLoading || busy;
+  let waiveDisabledReason: string | undefined;
+  if (!busy) {
+    if (canWaiveLoading) {
+      waiveDisabledReason = t('Checking permissions…');
+    } else if (!canWaive) {
+      waiveDisabledReason = t('You do not have permission to waive checks.');
+    } else if (!baseline) {
+      waiveDisabledReason = t('Baseline not configured');
+    }
+  }
 
   const profiles = baseline?.spec.profiles;
   const tailored = baseline?.spec.tailoredProfiles;
-  const ownedResults = React.useMemo(
-    () => (results ?? []).filter((r) => isOwnedByBaseline(r.metadata.labels, profiles, tailored)),
-    [results, profiles, tailored],
+  // CompliancePage already suite-selects / ownership-filters this list; do not
+  // re-scan thousands of CCRs on every Results render.
+  const ownedResults = results ?? EMPTY_RESULTS;
+
+  // Prefer the latest watched object for the open detail modal so status,
+  // severity, and waiver state stay current while the dialog is open.
+  // Index by name once when the modal is open (avoids O(n) find per update).
+  const selectedLive = React.useMemo(() => {
+    if (!selected) return null;
+    const want = selected.metadata.name;
+    for (const r of ownedResults) {
+      if (r.metadata.name === want) {
+        return r;
+      }
+    }
+    return selected;
+  }, [ownedResults, selected]);
+
+  // FAIL+active-waiver -> WAIVED so FAIL chips/deep-links match Overview fail
+  // counts (operator excludes waived fails from the Fail bucket). Uses the
+  // activeWaived Set (built once) instead of scanning waivers per row.
+  // Defined before columns so status sort uses the same key as filters.
+  const rowFilterStatus = React.useCallback(
+    (r: ComplianceCheckResult): string => {
+      const eff = effectiveStatus(r);
+      return eff === 'FAIL' && activeWaived.has(r.metadata.name) ? 'WAIVED' : eff;
+    },
+    [activeWaived],
+  );
+
+  // Sort by the same values the cells show (and filters use), not raw CR fields.
+  // Raw `status` leaves benign INCONSISTENT / waived FAIL out of visual order;
+  // raw `severity` ignores the check-severity label fallback; raw `description`
+  // puts empty-description rows under "" while the cell shows the check name.
+  const sortByString = React.useCallback(
+    (keyOf: (r: ComplianceCheckResult) => string) =>
+      (data: ComplianceCheckResult[], sortDirection: string): ComplianceCheckResult[] => {
+        const mul = sortDirection === 'desc' ? -1 : 1;
+        // Match profile-chip sort: console locale, never throw on a bad i18n tag.
+        const locale = safeLocale(i18n.language);
+        return [...data].sort((a, b) => mul * keyOf(a).localeCompare(keyOf(b), locale));
+      },
+    [i18n.language],
+  );
+
+  const columns: TableColumn<ComplianceCheckResult>[] = React.useMemo(
+    () => [
+      { title: t('Check'), id: 'title', sort: sortByString(checkTitle) },
+      // The same rule appears in several benchmarks, so a Check title can repeat;
+      // the Profile column tells otherwise-identical rows apart.
+      {
+        title: t('Profile'),
+        id: 'profile',
+        sort: sortByString((r) => suiteFilterKey(r.metadata.labels) ?? ''),
+      },
+      { title: t('Status'), id: 'status', sort: sortByString(rowFilterStatus) },
+      { title: t('Severity'), id: 'severity', sort: sortByString(checkSeverity) },
+    ],
+    [t, sortByString, rowFilterStatus],
   );
 
   const Row = React.useCallback(
     ({ obj, activeColumnIDs }: RowProps<ComplianceCheckResult>) => {
-      // Show the effective status: a benign INCONSISTENT (applies on some nodes,
-      // not others) reads as PASS/NOT-APPLICABLE, not a scary "Inconsistent".
-      const eff = effectiveStatus(obj) as CheckStatus;
-      const s = statusLabel[eff] ?? { color: 'grey' as const, icon: <MinusCircleIcon /> };
+      // Same key as filters/sort: FAIL+active-waiver is WAIVED (not red FAIL) so
+      // the table matches Overview waived/fail counts and WAIVED chip deep-links.
+      // Benign INCONSISTENT collapses via effectiveStatus inside rowFilterStatus.
+      const status = rowFilterStatus(obj);
+      const s =
+        status === 'WAIVED'
+          ? { color: 'grey' as const, icon: <MinusCircleIcon /> }
+          : (statusLabel[status as CheckStatus] ?? {
+              color: 'grey' as const,
+              icon: <MinusCircleIcon />,
+            });
+      // Title once: aria-label and visible text (avoids dual description scans).
+      const title = checkTitle(obj);
+      // Field + check-severity label; empty normalizes to "unknown".
+      const sev = checkSeverity(obj);
       return (
         <>
           <TableData id="title" activeColumnIDs={activeColumnIDs}>
             {/* Single-line rows: VirtualizedTable virtualizes with a fixed row
                 height; the raw check name lives in the detail modal. */}
-            <Button variant="link" isInline onClick={() => setSelected(obj)}>
-              {checkTitle(obj)}
+            <Button
+              variant="link"
+              isInline
+              aria-label={t('View details for {{title}}', { title })}
+              onClick={() => {
+                setWaiveSuccess(null);
+                setSelected(obj);
+              }}
+            >
+              {title}
             </Button>
           </TableData>
           <TableData id="profile" activeColumnIDs={activeColumnIDs}>
-            {checkProfileLabel(obj.metadata.labels)}
+            {(() => {
+              const tailored = suiteTailoredName(obj.metadata.labels);
+              if (tailored !== undefined) {
+                return tailored;
+              }
+              const key = suiteProfileKey(obj.metadata.labels);
+              return key ? t(profileTitle(key)) : '—';
+            })()}
           </TableData>
           <TableData id="status" activeColumnIDs={activeColumnIDs}>
             <Label isCompact color={s.color} icon={s.icon}>
-              {eff}
+              {statusDisplayTitle(status, t)}
             </Label>
-            {activeWaived.has(obj.metadata.name) && (
-              <Label isCompact color="grey" style={{ marginLeft: 8 }}>
+            {/* Stale waiver on a non-FAIL (e.g. self-healed PASS): keep a badge
+                so the waiver can still be found; FAIL+waiver is already WAIVED. */}
+            {status !== 'WAIVED' && activeWaived.has(obj.metadata.name) && (
+              <Label isCompact color="grey" style={{ marginInlineStart: 8 }}>
                 {t('Waived')}
               </Label>
             )}
           </TableData>
           <TableData id="severity" activeColumnIDs={activeColumnIDs}>
-            {obj.severity}
+            {severityDisplayTitle(sev, t)}
           </TableData>
         </>
       );
     },
-    [setSelected, activeWaived, t],
+    [setSelected, activeWaived, t, rowFilterStatus],
   );
 
   const profileItems = React.useMemo(() => {
@@ -225,20 +360,16 @@ const ResultsTab: React.FC<{
       }
     }
     // Keep the id as the filter key (reducer + resultsHref depend on it) but
-    // show tailored profiles by their clean name, not the "tp-" prefix.
-    return [...keys].sort().map((k) => ({ id: k, title: k.startsWith('tp-') ? k.slice(3) : k }));
-  }, [profiles, tailored, ownedResults]);
-
-  // FAIL+active-waiver -> WAIVED so FAIL chips/deep-links match Overview fail
-  // counts (operator excludes waived fails from the Fail bucket). Uses the
-  // activeWaived Set (built once) instead of scanning waivers per row.
-  const rowFilterStatus = React.useCallback(
-    (r: ComplianceCheckResult): string => {
-      const eff = effectiveStatus(r);
-      return eff === 'FAIL' && activeWaived.has(r.metadata.name) ? 'WAIVED' : eff;
-    },
-    [activeWaived],
-  );
+    // show tailored profiles by their clean name and built-ins by localized title.
+    // Sort by display title (console locale) so chip order matches what users read,
+    // not the English-ish profile key / tp- prefix.
+    return [...keys]
+      .map((k) => ({
+        id: k,
+        title: k.startsWith('tp-') ? k.slice(3) : t(profileTitle(k)),
+      }))
+      .sort((a, b) => a.title.localeCompare(b.title, safeLocale(i18n.language)));
+  }, [profiles, tailored, ownedResults, i18n, t]);
 
   const rowFilters: RowFilter<ComplianceCheckResult>[] = React.useMemo(
     () => [
@@ -246,8 +377,12 @@ const ResultsTab: React.FC<{
         filterGroupName: t('Status'),
         type: 'result-status',
         reducer: rowFilterStatus,
-        filter: (input, r) =>
-          !input.selected?.length || input.selected.includes(rowFilterStatus(r)),
+        // selected is small (chip count); still avoid re-running rowFilterStatus
+        // when no chip is active (common default: show all).
+        filter: (input, r) => {
+          const sel = input.selected;
+          return !sel?.length || sel.includes(rowFilterStatus(r));
+        },
         // SKIP is folded into NOT-APPLICABLE by effectiveStatus (operator
         // ResultCounts.notApplicable); a separate SKIP chip would never match.
         items: [
@@ -261,23 +396,34 @@ const ResultsTab: React.FC<{
           'NOT-APPLICABLE',
         ].map((s) => ({
           id: s,
-          title: s,
+          title: statusDisplayTitle(s, t),
         })),
       },
       {
         filterGroupName: t('Severity'),
         type: 'result-severity',
-        reducer: (r) => r.severity,
-        filter: (input, r) => !input.selected?.length || input.selected.includes(r.severity),
-        items: ['high', 'medium', 'low', 'info', 'unknown'].map((s) => ({ id: s, title: s })),
+        reducer: (r) => checkSeverity(r),
+        filter: (input, r) => {
+          const sel = input.selected;
+          return !sel?.length || sel.includes(checkSeverity(r));
+        },
+        items: ['high', 'medium', 'low', 'info', 'unknown'].map((s) => ({
+          id: s,
+          title: severityDisplayTitle(s, t),
+        })),
       },
       {
         filterGroupName: t('Profiles'),
         type: 'result-profile',
         reducer: (r) => suiteFilterKey(r.metadata.labels) ?? '',
-        filter: (input, r) =>
-          !input.selected?.length ||
-          input.selected.includes(suiteFilterKey(r.metadata.labels) ?? ''),
+        filter: (input, r) => {
+          const sel = input.selected;
+          if (!sel?.length) {
+            return true;
+          }
+          // Parse suite once per filtered row when chips are active.
+          return sel.includes(suiteFilterKey(r.metadata.labels) ?? '');
+        },
         items: profileItems,
       },
     ],
@@ -286,77 +432,174 @@ const ResultsTab: React.FC<{
 
   const [data, filteredData, onFilterChange] = useListPageFilter(ownedResults, rowFilters);
 
+  const exportCsvDisabled = !loaded || filteredData.length === 0;
+  let exportCsvDisabledReason: string | undefined;
+  if (!loaded) {
+    exportCsvDisabledReason = t('Waiting for check results to load.');
+  } else if (filteredData.length === 0) {
+    exportCsvDisabledReason = t('No results to export.');
+  }
+
   const downloadCsv = React.useCallback(() => {
     // Export the currently filtered rows so the download matches the view.
     // Pass waivers so the waived column matches score exclusions.
-    const blob = new Blob([resultsCsv(filteredData, waivers)], {
-      type: 'text/csv;charset=utf-8',
-    });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'compliance-results.csv';
-    a.style.display = 'none';
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    window.setTimeout(() => URL.revokeObjectURL(url), 0);
-  }, [filteredData, waivers]);
+    setExportError(null);
+    try {
+      const blob = new Blob([resultsCsv(filteredData, waivers)], {
+        type: 'text/csv;charset=utf-8',
+      });
+      downloadBlob(blob, 'compliance-results.csv');
+    } catch (e) {
+      // DOM / serialization failures must not look like a silent no-op click.
+      setExportError(errorMessage(e) ?? t('Failed to export results CSV.'));
+    }
+  }, [filteredData, waivers, t]);
 
   return (
     <ListPageBody>
-      <Split hasGutter>
-        <SplitItem isFilled>
+      {waiveSuccess && (
+        <Alert
+          variant="success"
+          isInline
+          isLiveRegion
+          title={waiveSuccess}
+          style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}
+          actionClose={
+            <AlertActionCloseButton
+              aria-label={t('Close')}
+              onClose={() => setWaiveSuccess(null)}
+            />
+          }
+        />
+      )}
+      {exportError && (
+        <Alert
+          variant="danger"
+          isInline
+          isLiveRegion
+          title={exportError}
+          style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}
+          actionClose={
+            <AlertActionCloseButton
+              aria-label={t('Close')}
+              onClose={() => setExportError(null)}
+            />
+          }
+        />
+      )}
+      <Flex
+        justifyContent={{ default: 'justifyContentSpaceBetween' }}
+        alignItems={{ default: 'alignItemsFlexStart' }}
+        flexWrap={{ default: 'wrap' }}
+        gap={{ default: 'gapMd' }}
+        style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}
+      >
+        <FlexItem grow={{ default: 'grow' }} style={{ minWidth: 200 }}>
           <ListPageFilter
             data={data}
             loaded={loaded}
             rowFilters={rowFilters}
             onFilterChange={onFilterChange}
           />
-        </SplitItem>
-        <SplitItem>
-          <Button
-            variant="secondary"
-            icon={<DownloadIcon />}
-            isDisabled={!loaded || filteredData.length === 0}
-            onClick={downloadCsv}
-          >
-            {t('Export CSV')}
-          </Button>
-        </SplitItem>
-      </Split>
+        </FlexItem>
+        <FlexItem>
+          {withDisabledTip(
+            exportCsvDisabled ? exportCsvDisabledReason : undefined,
+            <Button
+              variant="secondary"
+              icon={<DownloadIcon />}
+              isDisabled={exportCsvDisabled}
+              onClick={downloadCsv}
+            >
+              {t('Export CSV')}
+            </Button>,
+          )}
+        </FlexItem>
+      </Flex>
       <VirtualizedTable<ComplianceCheckResult>
         data={filteredData}
         unfilteredData={data}
         loaded={loaded}
-        loadError={error}
+        loadError={resultsError}
         columns={columns}
         Row={Row}
       />
       <Modal
         variant="medium"
-        isOpen={!!selected}
+        isOpen={!!selectedLive}
         onClose={closeModal}
         aria-labelledby="check-detail-title"
       >
         <ModalHeader
-          title={selected ? checkTitle(selected) : ''}
+          title={selectedLive ? checkTitle(selectedLive) : ''}
           labelId="check-detail-title"
-          description={selected?.metadata.name}
+          description={selectedLive?.metadata.name}
         />
         <ModalBody>
-          {selected && (
+          {selectedLive && (
             <>
+              {/* Status / severity / profile: table cells are covered by the
+                  modal; surface them here so the detail view is self-contained. */}
+              {(() => {
+                // Same status key as the table / filters (FAIL+waiver => WAIVED).
+                const status = rowFilterStatus(selectedLive);
+                const s =
+                  status === 'WAIVED'
+                    ? { color: 'grey' as const, icon: <MinusCircleIcon /> }
+                    : (statusLabel[status as CheckStatus] ?? {
+                        color: 'grey' as const,
+                        icon: <MinusCircleIcon />,
+                      });
+                const sev = checkSeverity(selectedLive);
+                const tailoredName = suiteTailoredName(selectedLive.metadata.labels);
+                const profileKey = suiteProfileKey(selectedLive.metadata.labels);
+                const profileText = tailoredName
+                  ? tailoredName
+                  : profileKey
+                    ? t(profileTitle(profileKey))
+                    : '—';
+                return (
+                  <Flex
+                    gap={{ default: 'gapSm' }}
+                    alignItems={{ default: 'alignItemsCenter' }}
+                    style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}
+                    flexWrap={{ default: 'wrap' }}
+                  >
+                    <FlexItem>
+                      <Label isCompact color={s.color} icon={s.icon}>
+                        {statusDisplayTitle(status, t)}
+                      </Label>
+                    </FlexItem>
+                    {status !== 'WAIVED' && activeWaived.has(selectedLive.metadata.name) && (
+                      <FlexItem>
+                        <Label isCompact color="grey">
+                          {t('Waived')}
+                        </Label>
+                      </FlexItem>
+                    )}
+                    <FlexItem>
+                      <Label isCompact color="grey">
+                        {severityDisplayTitle(sev, t)}
+                      </Label>
+                    </FlexItem>
+                    <FlexItem>
+                      <Label isCompact color="blue">
+                        {profileText}
+                      </Label>
+                    </FlexItem>
+                  </Flex>
+                );
+              })()}
               <Content component="p" style={{ whiteSpace: 'pre-wrap' }}>
-                {checkBody(selected) || t('No description provided.')}
+                {checkBody(selectedLive) || t('No description provided.')}
               </Content>
-              {selected.status === 'INCONSISTENT' &&
+              {selectedLive.status === 'INCONSISTENT' &&
                 (() => {
-                  const { sources, mostCommon } = inconsistentSources(selected);
-                  const pool = nodeScanPool(selected);
+                  const { sources, mostCommon } = inconsistentSources(selectedLive);
+                  const pool = nodeScanPool(selectedLive);
                   // A real PASS-vs-FAIL split needs review; a PASS/NOT-APPLICABLE
                   // split just means the rule applies to only some nodes.
-                  const genuineConflict = effectiveStatus(selected) === 'INCONSISTENT';
+                  const genuineConflict = effectiveStatus(selectedLive) === 'INCONSISTENT';
                   return (
                     <>
                       <Title headingLevel="h3">{t('Per-node results')}</Title>
@@ -382,23 +625,34 @@ const ResultsTab: React.FC<{
                           </Tr>
                         </Thead>
                         <Tbody>
-                          {sources.map((s, i) => (
+                          {sources.map((s, i) => {
+                            // Uppercase for label/title tables (CO is usually already
+                            // uppercased; normalize so hostile/odd data still maps).
+                            const st = s.status.toUpperCase() as CheckStatus;
                             // Index in the key: hostile data could repeat a node name.
-                            <Tr key={`${s.node}-${i}`}>
-                              <Td>{s.node}</Td>
-                              <Td>
-                                <Label isCompact color={statusLabel[s.status as CheckStatus]?.color ?? 'grey'}>
-                                  {s.status || '—'}
-                                </Label>
-                              </Td>
-                            </Tr>
-                          ))}
+                            return (
+                              <Tr key={`${s.node}-${i}`}>
+                                <Td>{s.node}</Td>
+                                <Td>
+                                  <Label isCompact color={statusLabel[st]?.color ?? 'grey'}>
+                                    {s.status ? statusDisplayTitle(st, t) : '—'}
+                                  </Label>
+                                </Td>
+                              </Tr>
+                            );
+                          })}
                           {mostCommon && (
                             <Tr>
                               <Td>{t('all other nodes')}</Td>
                               <Td>
-                                <Label isCompact color={statusLabel[mostCommon as CheckStatus]?.color ?? 'grey'}>
-                                  {mostCommon}
+                                <Label
+                                  isCompact
+                                  color={
+                                    statusLabel[mostCommon.toUpperCase() as CheckStatus]?.color ??
+                                    'grey'
+                                  }
+                                >
+                                  {statusDisplayTitle(mostCommon.toUpperCase(), t)}
                                 </Label>
                               </Td>
                             </Tr>
@@ -408,25 +662,25 @@ const ResultsTab: React.FC<{
                     </>
                   );
                 })()}
-              {selected.instructions && (
+              {selectedLive.instructions && (
                 <>
                   <Title headingLevel="h3">{t('How to verify')}</Title>
                   <Content component="pre" style={{ whiteSpace: 'pre-wrap' }}>
-                    {selected.instructions}
+                    {selectedLive.instructions}
                   </Content>
                 </>
               )}
               <Content component="p" style={{ marginTop: 'var(--pf-t--global--spacer--md)' }}>
-                <a href={checkResultHref(selected.metadata.name)}>
-                  {t('View ComplianceCheckResult resource')}
+                <a href={checkResultHref(selectedLive.metadata.name)}>
+                  {t('View full check details in OpenShift')}
                 </a>
               </Content>
               {/* Waivers: accept a failing check as risk so it leaves the score.
                   Only FAIL affects the score, so waiving is offered for FAIL (and
                   any already-waived check, so a stale waiver stays removable). */}
-              {showWaiver(selected) &&
+              {showWaiver(selectedLive) &&
                 (() => {
-                  const w = findWaiver(selected.metadata.name, waivers);
+                  const w = findWaiver(selectedLive.metadata.name, waivers);
                   const expired = !!w && waiverExpired(w);
                   return (
                     <>
@@ -441,10 +695,12 @@ const ResultsTab: React.FC<{
                           <Content component="p">
                             {expired
                               ? t('This waiver has expired; the check is scored by its status again.')
-                              : selected.status === 'FAIL'
+                              : // Waivers only exclude FAIL from the score (operator tally).
+                                // Use effective status so a collapsed INCONSISTENT matches.
+                                effectiveStatus(selectedLive) === 'FAIL'
                                 ? t('This check is waived (excluded from the score).')
                                 : t(
-                                    'This check is waived, but it currently passes and counts toward the score. Remove the waiver if it is no longer needed.',
+                                    'This check is waived, but it is not currently failing, so it is not excluded from the score. Remove the waiver if it is no longer needed.',
                                   )}
                           </Content>
                           <DescriptionList isCompact isHorizontal>
@@ -470,7 +726,7 @@ const ResultsTab: React.FC<{
                               <DescriptionListGroup>
                                 <DescriptionListTerm>{t('Expires')}</DescriptionListTerm>
                                 <DescriptionListDescription>
-                                  {new Date(w.expiresAt).toLocaleDateString()}
+                                  {formatLocalDate(w.expiresAt, i18n.language)}
                                 </DescriptionListDescription>
                               </DescriptionListGroup>
                             )}
@@ -478,7 +734,7 @@ const ResultsTab: React.FC<{
                               <DescriptionListGroup>
                                 <DescriptionListTerm>{t('Review by')}</DescriptionListTerm>
                                 <DescriptionListDescription>
-                                  {new Date(w.reviewBy).toLocaleDateString()}
+                                  {formatLocalDate(w.reviewBy, i18n.language)}
                                 </DescriptionListDescription>
                               </DescriptionListGroup>
                             )}
@@ -500,54 +756,69 @@ const ResultsTab: React.FC<{
                               rows={2}
                             />
                           </FormGroup>
-                          <Split hasGutter>
-                            <SplitItem isFilled>
+                          {/* Wrap on narrow viewports so four fields do not squash. */}
+                          <Flex
+                            gap={{ default: 'gapMd' }}
+                            flexWrap={{ default: 'wrap' }}
+                            style={{ marginTop: 'var(--pf-t--global--spacer--sm)' }}
+                          >
+                            <FlexItem flex={{ default: 'flex_1' }} style={{ minWidth: 140 }}>
                               <FormGroup label={t('Requested by (optional)')} fieldId="waive-req">
                                 <TextInput
                                   id="waive-req"
                                   value={waiveRequestedBy}
                                   onChange={(_e, v) => setWaiveRequestedBy(v)}
                                   maxLength={253}
+                                  autoComplete="name"
                                 />
                               </FormGroup>
-                            </SplitItem>
-                            <SplitItem isFilled>
+                            </FlexItem>
+                            <FlexItem flex={{ default: 'flex_1' }} style={{ minWidth: 140 }}>
                               <FormGroup label={t('Approved by (optional)')} fieldId="waive-appr">
                                 <TextInput
                                   id="waive-appr"
                                   value={waiveApprovedBy}
                                   onChange={(_e, v) => setWaiveApprovedBy(v)}
                                   maxLength={253}
+                                  autoComplete="name"
                                 />
                               </FormGroup>
-                            </SplitItem>
-                            <SplitItem isFilled>
+                            </FlexItem>
+                            <FlexItem flex={{ default: 'flex_1' }} style={{ minWidth: 140 }}>
                               <FormGroup label={t('Expires (optional)')} fieldId="waive-exp">
                                 <TextInput
                                   id="waive-exp"
                                   type="date"
+                                  // Past expiry creates an immediately expired waiver.
+                                  // Local calendar day (not UTC) so min matches the date picker.
+                                  min={localDateInputValue()}
                                   value={waiveExpiresAt}
                                   onChange={(_e, v) => setWaiveExpiresAt(v)}
+                                  aria-label={t('Expires (optional)')}
                                 />
                               </FormGroup>
-                            </SplitItem>
-                            <SplitItem isFilled>
+                            </FlexItem>
+                            <FlexItem flex={{ default: 'flex_1' }} style={{ minWidth: 140 }}>
                               <FormGroup label={t('Review by (optional)')} fieldId="waive-review">
                                 <TextInput
                                   id="waive-review"
                                   type="date"
+                                  // A review deadline in the past is not schedulable; match Expires.
+                                  min={localDateInputValue()}
                                   value={waiveReviewBy}
                                   onChange={(_e, v) => setWaiveReviewBy(v)}
+                                  aria-label={t('Review by (optional)')}
                                 />
                               </FormGroup>
-                            </SplitItem>
-                          </Split>
+                            </FlexItem>
+                          </Flex>
                         </>
                       )}
                       {waiveError && (
                         <Alert
                           variant="danger"
                           isInline
+                          isLiveRegion
                           title={waiveError}
                           style={{ marginTop: 'var(--pf-t--global--spacer--sm)' }}
                         />
@@ -558,60 +829,82 @@ const ResultsTab: React.FC<{
             </>
           )}
         </ModalBody>
-        {selected && (
+        {selectedLive && (
           <ModalFooter>
-            {showWaiver(selected) &&
+            {showWaiver(selectedLive) &&
               (() => {
-                const idx = waivers?.findIndex((w) => w.name === selected.metadata.name) ?? -1;
+                const idx = waivers?.findIndex((w) => w.name === selectedLive.metadata.name) ?? -1;
                 const storedWaiver = idx >= 0;
-                return storedWaiver ? (
-                  <Button
-                    variant="secondary"
-                    isDisabled={!baseline || !canWaive || canWaiveLoading || busy || idx < 0}
-                    isLoading={busy}
-                    onClick={() => {
-                      if (idx < 0) return;
-                      void patchWaivers(
-                        removeWaiverPatch(idx, selected.metadata.name),
-                        t('Failed to remove waiver.'),
-                      );
-                    }}
-                  >
-                    {t('Remove waiver')}
-                  </Button>
-                ) : (
-                  <Button
-                    variant="primary"
-                    isDisabled={!baseline || !canWaive || canWaiveLoading || busy}
-                    isLoading={busy}
-                    onClick={() => {
-                      const data = addWaiverPatch(waivers, {
-                        name: selected.metadata.name,
-                        reason: waiveReason.trim(),
-                        requestedBy: waiveRequestedBy.trim(),
-                        approvedBy: waiveApprovedBy.trim(),
-                        expiresAt: dateInputEndOfDayIso(waiveExpiresAt),
-                        reviewBy: dateInputEndOfDayIso(waiveReviewBy),
-                      });
-                      // Empty patch is client-side MaxLength/name validation:
-                      // surface it so over-long fields are not a silent no-op.
-                      if (!data.length) {
-                        setWaiveError(
-                          t(
-                            'Waiver fields are invalid or exceed length limits (name 253, reason 1024, attribution 253).',
-                          ),
-                        );
-                        return;
-                      }
-                      void patchWaivers(data, t('Failed to waive check.'));
-                    }}
-                  >
-                    {t('Waive check')}
-                  </Button>
-                );
+                return storedWaiver
+                  ? withDisabledTip(
+                      waiveDisabled && waiveDisabledReason ? waiveDisabledReason : undefined,
+                      <Button
+                        variant="secondary"
+                        isDisabled={waiveDisabled}
+                        isLoading={busy}
+                        onClick={() => {
+                          void patchWaivers(
+                            removeWaiverPatch(idx, selectedLive.metadata.name),
+                            t('Failed to remove waiver.'),
+                            t('Waiver removed. The check counts toward the score again.'),
+                          );
+                        }}
+                      >
+                        {t('Remove waiver')}
+                      </Button>,
+                    )
+                  : withDisabledTip(
+                      waiveDisabled && waiveDisabledReason ? waiveDisabledReason : undefined,
+                      <Button
+                        variant="primary"
+                        isDisabled={waiveDisabled}
+                        isLoading={busy}
+                        onClick={() => {
+                          // MaxItems is a different failure mode from field
+                          // validation; do not conflate them into one message.
+                          if ((waivers?.length ?? 0) >= WAIVER_MAX_ITEMS) {
+                            setWaiveError(
+                              t(
+                                'Maximum of {{max}} waivers reached. Remove one before adding another.',
+                                {
+                                  max: WAIVER_MAX_ITEMS,
+                                  formattedMax: formatCount(WAIVER_MAX_ITEMS, i18n.language),
+                                },
+                              ),
+                            );
+                            return;
+                          }
+                          const data = addWaiverPatch(waivers, {
+                            name: selectedLive.metadata.name,
+                            reason: waiveReason.trim(),
+                            requestedBy: waiveRequestedBy.trim(),
+                            approvedBy: waiveApprovedBy.trim(),
+                            expiresAt: dateInputEndOfDayIso(waiveExpiresAt),
+                            reviewBy: dateInputEndOfDayIso(waiveReviewBy),
+                          });
+                          // Empty patch is client-side MaxLength/name validation:
+                          // surface it so over-long fields are not a silent no-op.
+                          if (!data.length) {
+                            setWaiveError(
+                              t(
+                                'Waiver fields are invalid or exceed length limits (name 253, reason 1024, attribution 253).',
+                              ),
+                            );
+                            return;
+                          }
+                          void patchWaivers(
+                            data,
+                            t('Failed to waive check.'),
+                            t('Check waived. It is excluded from the score.'),
+                          );
+                        }}
+                      >
+                        {t('Waive check')}
+                      </Button>,
+                    );
               })()}
             <Button variant="link" isDisabled={busy} onClick={closeModal}>
-              {showWaiver(selected) ? t('Cancel') : t('Close')}
+              {showWaiver(selectedLive) ? t('Cancel') : t('Close')}
             </Button>
           </ModalFooter>
         )}

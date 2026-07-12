@@ -37,9 +37,14 @@ func (d *defaultClusterBaseline) Start(ctx context.Context) error {
 		return nil
 	}
 	// Retry on transient list/create failures so a brief API blip does not
-	// leave the cluster without the zero-config CR until restart.
+	// leave the cluster without the zero-config CR until restart. Permanent
+	// auth failures stop immediately: retrying Forbidden forever only spams
+	// logs and cannot succeed until RBAC is fixed and the pod restarts.
 	for {
 		if err := d.ensureOnce(ctx); err == nil {
+			return nil
+		} else if isPermanentDefaultCRError(err) {
+			d.Log.Error(err, "permanent error creating default ClusterBaseline; not retrying")
 			return nil
 		}
 		timer := time.NewTimer(10 * time.Second)
@@ -50,6 +55,12 @@ func (d *defaultClusterBaseline) Start(ctx context.Context) error {
 		case <-timer.C:
 		}
 	}
+}
+
+// isPermanentDefaultCRError is true for auth/RBAC failures that will not clear
+// without a config change (and usually a process restart to re-read SA tokens).
+func isPermanentDefaultCRError(err error) bool {
+	return apierrors.IsForbidden(err) || apierrors.IsUnauthorized(err)
 }
 
 func (d *defaultClusterBaseline) ensureOnce(ctx context.Context) error {
@@ -63,7 +74,7 @@ func (d *defaultClusterBaseline) ensureOnce(ctx context.Context) error {
 	}
 	cb := &baselinev1alpha1.ClusterBaseline{
 		ObjectMeta: metav1.ObjectMeta{Name: "cluster"},
-		Spec:       baselinev1alpha1.ClusterBaselineSpec{Profiles: []baselinev1alpha1.ProfileKey{"cis"}},
+		Spec:       baselinev1alpha1.ClusterBaselineSpec{Profiles: []baselinev1alpha1.ProfileKey{baselinev1alpha1.ProfileCIS}},
 	}
 	err := d.Client.Create(ctx, cb)
 	if err != nil && !apierrors.IsAlreadyExists(err) {

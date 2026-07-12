@@ -35,7 +35,13 @@ func syncHistorySnapshot(
 ) []baselinev1alpha1.ScoreSnapshot {
 	if n := len(hist); n > 0 && hist[n-1].Time.Equal(&t) {
 		if s == nil {
-			return hist[:n-1]
+			// Copy: hist[:n-1] would alias the caller's backing array and leave
+			// capacity pointing at the removed snapshot (same class of bug as
+			// appendHistoryRing / clampHistory after truncation).
+			if n == 1 {
+				return nil
+			}
+			return append([]baselinev1alpha1.ScoreSnapshot(nil), hist[:n-1]...)
 		}
 		hist[n-1].Score = *s
 		return clampHistory(hist, historyMax)
@@ -48,12 +54,14 @@ func syncHistorySnapshot(
 
 // checkSeverity returns a ComplianceCheckResult severity for weighting. Prefer
 // the typed .severity field (CO source of truth on the CR); fall back to the
-// check-severity label CO also sets for selection.
+// check-severity label CO also sets for selection. Uses unstructuredLabel so
+// the SeverityWeighted CCR hot path does not copy the full labels map via
+// GetLabels on every PASS/FAIL result.
 func checkSeverity(item *unstructured.Unstructured) string {
-	if sev, _, _ := unstructured.NestedString(item.Object, "severity"); sev != "" {
+	if sev, ok := item.Object["severity"].(string); ok && sev != "" {
 		return sev
 	}
-	return item.GetLabels()[checkSeverityLabel]
+	return unstructuredLabel(item.Object, checkSeverityLabel)
 }
 
 // profileBucketScore is the score recorded for one profile's history ring.
@@ -67,7 +75,7 @@ func profileBucketScore(pass, fail int32, w weightedSum, mode baselinev1alpha1.S
 }
 
 func syncProfileHistory(cb *baselinev1alpha1.ClusterBaseline, t metav1.Time, weights *scoreWeights) {
-	mode := cb.Spec.Scoring.Mode
+	mode := scoringMode(cb)
 	haveWeights := weights != nil
 	for i := range cb.Status.Profiles {
 		var w weightedSum

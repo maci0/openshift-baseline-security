@@ -5,17 +5,17 @@ import {
   k8sPatch,
   useAccessReview,
   useK8sWatchResource,
+  WatchK8sResource,
 } from '@openshift-console/dynamic-plugin-sdk';
 import {
   Alert,
   AlertActionCloseButton,
   Button,
+  Flex,
+  FlexItem,
   PageSection,
   Content,
-  Split,
-  SplitItem,
   Title,
-  Tooltip,
 } from '@patternfly/react-core';
 import {
   ClusterBaseline,
@@ -24,16 +24,21 @@ import {
   ComplianceCheckResultGVK,
   ComplianceScanGVK,
   ComplianceScanModel,
-  isOwnedByBaseline,
+  ownedSuiteSelector,
 } from '../models';
-import { buildReportHtml, errorMessage, rescanPatch } from '../utils';
+import { formatCount } from '../dates';
+import { downloadBlob } from '../download';
+import { errorMessage } from '../errors';
+import { rescanPatch } from '../patches';
+import { buildReportHtml } from '../report';
+import { withDisabledTip } from './DisabledTip';
 import {
   BaselineContext,
   OverviewRoute,
   ProfilesRoute,
   RemediationsRoute,
   ResultsRoute,
-} from '../baselineContext';
+} from './BaselineContext';
 
 type Scan = {
   metadata: {
@@ -45,28 +50,70 @@ type Scan = {
   };
 };
 
+// Stable empties so `?? []` does not allocate a new array every render (hooks deps).
+const EMPTY_SCANS: Scan[] = [];
+const EMPTY_RESULTS: ComplianceCheckResult[] = [];
+
 const CompliancePage: React.FC = () => {
-  const { t } = useTranslation('plugin__baseline-security-console-plugin');
+  const { t, i18n } = useTranslation('plugin__baseline-security-console-plugin');
   const [baselines, loaded, baselineError] = useK8sWatchResource<ClusterBaseline[]>({
     groupVersionKind: ClusterBaselineGVK,
     isList: true,
   });
-  const [scans, , scansError] = useK8sWatchResource<Scan[]>({
-    groupVersionKind: ComplianceScanGVK,
-    isList: true,
-    namespace: 'openshift-compliance',
-  });
-  const [checkResults, checkResultsLoaded, checkResultsError] = useK8sWatchResource<ComplianceCheckResult[]>({
-    groupVersionKind: ComplianceCheckResultGVK,
-    isList: true,
-    namespace: 'openshift-compliance',
-  });
   // CRD requires metadata.name == "cluster"; prefer that over list order.
   const baseline =
     baselines?.find((b) => b.metadata.name === 'cluster') ?? baselines?.[0];
+  const profiles = baseline?.spec.profiles;
+  const tailored = baseline?.spec.tailoredProfiles;
+  // Content keys: status-only CR updates reallocate spec arrays with the same
+  // membership. Identity deps would rebuild suiteSel (and re-open CCR/scan
+  // watches) on every reconcile even when owned suites did not change.
+  const profilesKey = (profiles ?? []).join('\0');
+  const tailoredKey = (tailored ?? []).join('\0');
+  // Suite selector depends on the baseline; wait for baseline load so we do not
+  // briefly open an unfiltered full-namespace CCR watch.
+  const suiteSel = React.useMemo(
+    () => (loaded ? ownedSuiteSelector(profiles, tailored) : undefined),
+    // profiles/tailored read from the latest render when keys change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- content keys
+    [loaded, profilesKey, tailoredKey],
+  );
+  // No owned suites (or baseline still loading): skip list watches entirely.
+  // useK8sWatchResource(null) returns empty/loaded without a namespace list.
+  const scansWatch = React.useMemo((): WatchK8sResource | null => {
+    if (!loaded || !suiteSel) {
+      return null;
+    }
+    return {
+      groupVersionKind: ComplianceScanGVK,
+      isList: true,
+      namespace: 'openshift-compliance',
+      selector: suiteSel,
+    };
+  }, [loaded, suiteSel]);
+  const resultsWatch = React.useMemo((): WatchK8sResource | null => {
+    if (!loaded || !suiteSel) {
+      return null;
+    }
+    return {
+      groupVersionKind: ComplianceCheckResultGVK,
+      isList: true,
+      namespace: 'openshift-compliance',
+      selector: suiteSel,
+    };
+  }, [loaded, suiteSel]);
+  const [scans, , scansError] = useK8sWatchResource<Scan[]>(scansWatch);
+  const [checkResults, checkResultsHookLoaded, checkResultsError] =
+    useK8sWatchResource<ComplianceCheckResult[]>(resultsWatch);
+  // null watch reports loaded=true immediately; wait for the baseline (and for
+  // the suite-scoped list when suites are selected) before treating results ready.
+  const checkResultsLoaded = loaded && (!suiteSel || checkResultsHookLoaded);
   const [rescanning, setRescanning] = React.useState(false);
+  // Sync guard: React state alone cannot block a second click before re-render.
+  const rescanningRef = React.useRef(false);
   const [rescanError, setRescanError] = React.useState<string | null>(null);
   const [rescanStarted, setRescanStarted] = React.useState(false);
+  const [exportNotice, setExportNotice] = React.useState<string | null>(null);
   const [canRescan, canRescanLoading] = useAccessReview({
     group: 'compliance.openshift.io',
     resource: 'compliancescans',
@@ -76,21 +123,13 @@ const CompliancePage: React.FC = () => {
   const rescanWatchError = errorMessage(baselineError) ?? errorMessage(scansError);
   const watchError = rescanWatchError ?? errorMessage(checkResultsError);
 
-  const profiles = baseline?.spec.profiles;
-  const tailored = baseline?.spec.tailoredProfiles;
-  const ownedScans = React.useMemo(
-    () => (scans ?? []).filter((s) => isOwnedByBaseline(s.metadata.labels, profiles, tailored)),
-    [scans, profiles, tailored],
-  );
-  const ownedResults = React.useMemo(
-    () =>
-      (checkResults ?? []).filter((r) =>
-        isOwnedByBaseline(r.metadata.labels, profiles, tailored),
-      ),
-    [checkResults, profiles, tailored],
-  );
+  // Selector already scopes to owned suites; keep stable aliases for rescan/export.
+  const ownedScans = scans ?? EMPTY_SCANS;
+  const ownedResults = checkResults ?? EMPTY_RESULTS;
 
   const rescan = async () => {
+    if (rescanningRef.current) return;
+    rescanningRef.current = true;
     setRescanning(true);
     setRescanError(null);
     setRescanStarted(false);
@@ -123,15 +162,20 @@ const CompliancePage: React.FC = () => {
             ? t('Failed to rescan {{count}} of {{total}} scans: {{detail}}', {
                 count: failed.length,
                 total: results.length,
+                formattedCount: formatCount(failed.length, i18n.language),
+                formattedTotal: formatCount(results.length, i18n.language),
                 detail,
               })
             : t('Failed to rescan {{count}} of {{total}} scans. Check permissions and try again.', {
                 count: failed.length,
                 total: results.length,
+                formattedCount: formatCount(failed.length, i18n.language),
+                formattedTotal: formatCount(results.length, i18n.language),
               }),
         );
       }
     } finally {
+      rescanningRef.current = false;
       setRescanning(false);
     }
   };
@@ -139,15 +183,16 @@ const CompliancePage: React.FC = () => {
   // One watch of ComplianceCheckResults for the whole page tree: Export report,
   // Overview (recent changes / weighted scores), and Results share it instead of
   // each tab opening a parallel list watch of the same large CR set.
+  // Pass ownedResults so tabs skip a second full-namespace ownership scan.
   const ctx = React.useMemo(
     () => ({
       baseline,
       loaded,
-      checkResults,
+      checkResults: ownedResults,
       checkResultsLoaded,
       checkResultsError,
     }),
-    [baseline, loaded, checkResults, checkResultsLoaded, checkResultsError],
+    [baseline, loaded, ownedResults, checkResultsLoaded, checkResultsError],
   );
 
   // Page component types are module-level (stable). Only labels depend on t.
@@ -169,11 +214,18 @@ const CompliancePage: React.FC = () => {
       : undefined;
 
   const rescanDisabled =
-    rescanning || !ownedScans.length || !canRescan || canRescanLoading || !!rescanWatchError;
+    rescanning ||
+    !loaded ||
+    !ownedScans.length ||
+    !canRescan ||
+    canRescanLoading ||
+    !!rescanWatchError;
   let rescanDisabledReason: string | undefined;
   if (!rescanning) {
     if (rescanWatchError) {
       rescanDisabledReason = t('Rescan is unavailable while compliance data fails to load.');
+    } else if (!loaded) {
+      rescanDisabledReason = t('Waiting for compliance data to load.');
     } else if (canRescanLoading) {
       rescanDisabledReason = t('Checking permissions…');
     } else if (!canRescan) {
@@ -183,89 +235,108 @@ const CompliancePage: React.FC = () => {
     }
   }
 
-  // Wrap disabled controls so tooltips still receive pointer events.
-  const withDisabledTip = (tip: string | undefined, child: React.ReactElement) =>
-    tip ? (
-      <Tooltip content={tip}>
-        <span style={{ display: 'inline-block' }}>{child}</span>
-      </Tooltip>
-    ) : (
-      child
-    );
-
   return (
     <BaselineContext.Provider value={ctx}>
       <PageSection hasBodyWrapper={false}>
-        <Split hasGutter>
-          <SplitItem isFilled>
+        <Flex
+          justifyContent={{ default: 'justifyContentSpaceBetween' }}
+          alignItems={{ default: 'alignItemsFlexStart' }}
+          flexWrap={{ default: 'wrap' }}
+          gap={{ default: 'gapMd' }}
+        >
+          <FlexItem flex={{ default: 'flex_1' }} style={{ minWidth: 200 }}>
             <Title headingLevel="h1">{t('Compliance')}</Title>
             <Content component="p">
               {t('Cluster benchmark compliance, scanned by the Compliance Operator.')}
             </Content>
-          </SplitItem>
-          <SplitItem>
-            {baseline &&
-              withDisabledTip(
-                exportDisabled ? exportDisabledReason : undefined,
+          </FlexItem>
+          <FlexItem>
+            <Flex gap={{ default: 'gapSm' }} flexWrap={{ default: 'wrap' }}>
+              {baseline &&
+                withDisabledTip(
+                  exportDisabled ? exportDisabledReason : undefined,
+                  <Button
+                    variant="secondary"
+                    isDisabled={exportDisabled}
+                    onClick={() => {
+                      setExportNotice(null);
+                      try {
+                        const html = buildReportHtml(baseline, ownedResults, new Date(), t);
+                        const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+                        // Prefer a blob URL over document.write: no blank-window
+                        // document mutation, and opener is dropped when available.
+                        const url = URL.createObjectURL(blob);
+                        const w = window.open(url, '_blank');
+                        if (w) {
+                          w.opener = null;
+                          // Keep the blob alive long enough for the tab to load.
+                          window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+                        } else {
+                          URL.revokeObjectURL(url);
+                          // Popup blockers should not turn export into a silent no-op.
+                          downloadBlob(blob, 'compliance-report.html');
+                          setExportNotice(
+                            t('Report downloaded as compliance-report.html (popup was blocked).'),
+                          );
+                        }
+                      } catch (e) {
+                        // DOM / serialization failures must not leave a blank click.
+                        setExportNotice(
+                          errorMessage(e) ?? t('Failed to export compliance report.'),
+                        );
+                      }
+                    }}
+                  >
+                    {t('Export report')}
+                  </Button>,
+                )}
+              {withDisabledTip(
+                rescanDisabled && rescanDisabledReason ? rescanDisabledReason : undefined,
                 <Button
                   variant="secondary"
-                  style={{ marginRight: 'var(--pf-t--global--spacer--sm)' }}
-                  isDisabled={exportDisabled}
                   onClick={() => {
-                    const html = buildReportHtml(baseline, ownedResults, new Date(), t);
-                    const w = window.open('', '_blank');
-                    if (w) {
-                      w.opener = null;
-                      w.document.write(html);
-                      w.document.close();
-                    } else {
-                      // Popup blockers should not turn export into a silent no-op.
-                      const url = URL.createObjectURL(
-                        new Blob([html], { type: 'text/html;charset=utf-8' }),
-                      );
-                      const a = document.createElement('a');
-                      a.href = url;
-                      a.download = 'compliance-report.html';
-                      a.style.display = 'none';
-                      document.body.appendChild(a);
-                      a.click();
-                      a.remove();
-                      window.setTimeout(() => URL.revokeObjectURL(url), 0);
-                    }
+                    void rescan();
                   }}
+                  isDisabled={rescanDisabled}
+                  isLoading={rescanning}
                 >
-                  {t('Export report')}
+                  {t('Rescan now')}
                 </Button>,
               )}
-            {withDisabledTip(
-              rescanDisabled && rescanDisabledReason ? rescanDisabledReason : undefined,
-              <Button
-                variant="secondary"
-                onClick={() => {
-                  void rescan();
-                }}
-                isDisabled={rescanDisabled}
-                isLoading={rescanning}
-              >
-                {t('Rescan now')}
-              </Button>,
-            )}
-          </SplitItem>
-        </Split>
+            </Flex>
+          </FlexItem>
+        </Flex>
         {watchError && (
           <Alert
             variant="danger"
             isInline
+            isLiveRegion
             title={t('Failed to load compliance data.')}
             style={{ marginTop: 'var(--pf-t--global--spacer--md)' }}
           >
             {watchError}
           </Alert>
         )}
+        {exportNotice && (
+          <Alert
+            variant="info"
+            isInline
+            isLiveRegion
+            title={exportNotice}
+            style={{ marginTop: 'var(--pf-t--global--spacer--md)' }}
+            actionClose={
+              <AlertActionCloseButton
+                aria-label={t('Close')}
+                onClose={() => setExportNotice(null)}
+              />
+            }
+          />
+        )}
         {rescanError && (
           <Alert
             variant={rescanStarted ? 'warning' : 'danger'}
             isInline
+            isLiveRegion
             title={rescanError}
             style={{ marginTop: 'var(--pf-t--global--spacer--md)' }}
             actionClose={
@@ -287,6 +358,7 @@ const CompliancePage: React.FC = () => {
           <Alert
             variant="success"
             isInline
+            isLiveRegion
             title={t('Rescan started. Results will update when the scan completes.')}
             style={{ marginTop: 'var(--pf-t--global--spacer--md)' }}
             actionClose={

@@ -5,7 +5,40 @@ PREV_VERSION ?= 0.3.1
 IMG ?= quay.io/openshift-baseline-security/baseline-security-operator:latest
 # Plugin image the operator injects via RELATED_IMAGE_CONSOLE_PLUGIN on deploy.
 PLUGIN_IMG ?= quay.io/openshift-baseline-security/baseline-security-console-plugin:latest
-CONTROLLER_GEN = go run sigs.k8s.io/controller-tools/cmd/controller-gen@v0.19.0
+# Match controller-tools minor to go.mod k8s.io/* (v0.35 -> CT v0.20 per VERSIONING.md).
+CONTROLLER_GEN = go run sigs.k8s.io/controller-tools/cmd/controller-gen@v0.20.1
+
+# Pin the Go toolchain to the go.mod `go` line so local `make` matches CI/setup-go
+# and does not silently use a newer host compiler (GOTOOLCHAIN=local to override).
+# Keep in lockstep with go.mod and the ubi9/go-toolset image (currently 1.25.9).
+GOTOOLCHAIN ?= go1.25.9
+export GOTOOLCHAIN
+
+# Refuse silent go.mod/go.sum edits during test/vet/generate (matches image -mod=readonly).
+# Override with GOFLAGS= when intentionally changing the module graph.
+GOFLAGS ?= -mod=readonly
+export GOFLAGS
+
+# Fail recipes on pipe errors; use bash for pipefail portability.
+SHELL := /usr/bin/env bash
+.SHELLFLAGS := -eo pipefail -c
+
+# Drop incomplete targets if a recipe fails (avoids half-written catalog/ artifacts).
+.DELETE_ON_ERROR:
+
+# Image builds: disable BuildKit provenance/SBOM attestations so identical
+# inputs produce identical image digests (attestations embed build metadata).
+# --pull re-verifies digest-pinned bases (matches CI images job).
+DOCKER_BUILD_FLAGS ?= --pull --provenance=false --sbom=false
+
+# Fixed epoch for local builds (matches operator/Dockerfile and plugin build).
+SOURCE_DATE_EPOCH ?= 0
+export SOURCE_DATE_EPOCH
+
+# Digest-pinned tool images (single source for Makefile docker run recipes).
+# Keep digests in lockstep with catalog.Dockerfile (opm) when bumping.
+OPM_IMAGE ?= quay.io/operator-framework/opm@sha256:e1be045e4a8558624eab2320d548b5fd557b0a0a07ebd33876b71f0778a444e4
+OPERATOR_SDK_IMAGE ?= quay.io/operator-framework/operator-sdk@sha256:d68086836ecc9ddb28f5785815a88f5dcb33beb00e0271e3056dd13d8d352b36
 
 .PHONY: all
 all: build
@@ -26,12 +59,29 @@ generate:
 fmt:
 	go fmt ./...
 
+# Check-only: do not rewrite the tree (test/build must stay non-mutating).
+.PHONY: fmt-check
+fmt-check:
+	@unformatted=$$(gofmt -l .); \
+	if [ -n "$$unformatted" ]; then \
+		echo "gofmt needed on:" >&2; \
+		echo "$$unformatted" >&2; \
+		echo "run: make fmt" >&2; \
+		exit 1; \
+	fi
+
+# Integrity of the module cache against go.sum (same gate as the operator image).
+.PHONY: mod-verify
+mod-verify:
+	go mod download
+	go mod verify
+
 .PHONY: vet
 vet:
 	go vet ./...
 
 .PHONY: test
-test: fmt vet
+test: fmt-check vet mod-verify
 	go test ./...
 
 # Live-cluster e2e; requires KUBECONFIG pointing at a cluster with the operator
@@ -64,15 +114,35 @@ fuzz:
 	go test ./internal/controller/ -run=^$$ -fuzz=^FuzzPoolFromRemediation$$ -fuzztime=3s
 	go test ./internal/controller/ -run=^$$ -fuzz=^FuzzBatchPastGrace$$ -fuzztime=3s
 	go test ./internal/controller/ -run=^$$ -fuzz=^FuzzClampScore$$ -fuzztime=2s
+	go test ./internal/controller/ -run=^$$ -fuzz=^FuzzClampFailureList$$ -fuzztime=3s
+	go test ./internal/controller/ -run=^$$ -fuzz=^FuzzNormalizedSchedule$$ -fuzztime=5s
+	go test ./internal/controller/ -run=^$$ -fuzz=^FuzzSyncFailureDiff$$ -fuzztime=3s
+	go test ./internal/controller/ -run=^$$ -fuzz=^FuzzSyncHistorySnapshot$$ -fuzztime=3s
+	go test ./internal/controller/ -run=^$$ -fuzz=^FuzzValidMCPPoolName$$ -fuzztime=3s
+	go test ./internal/controller/ -run=^$$ -fuzz=^FuzzValidRelatedImage$$ -fuzztime=3s
+	go test ./internal/controller/ -run=^$$ -fuzz=^FuzzSplitCSV$$ -fuzztime=3s
+	go test ./internal/controller/ -run=^$$ -fuzz=^FuzzClampHistory$$ -fuzztime=3s
+	go test ./internal/controller/ -run=^$$ -fuzz=^FuzzCheckSeverity$$ -fuzztime=3s
+	go test ./internal/controller/ -run=^$$ -fuzz=^FuzzSanitizeStatusForUpdate$$ -fuzztime=3s
+	go test ./internal/controller/ -run=^$$ -fuzz=^FuzzCompletedSuiteTimes$$ -fuzztime=5s
+	go test ./internal/controller/ -run=^$$ -fuzz=^FuzzCompletedSuiteTimesTypeConfusion$$ -fuzztime=3s
+	go test ./internal/controller/ -run=^$$ -fuzz=^FuzzUnstructuredMetadataReads$$ -fuzztime=3s
+	go test ./cmd/ -run=^$$ -fuzz=^FuzzMetricsCertCorruptPair$$ -fuzztime=5s
+	go test ./cmd/ -run=^$$ -fuzz=^FuzzIsLoopbackMetricsAddr$$ -fuzztime=3s
 
 GOLANGCI_LINT_VERSION ?= v2.12.2
 .PHONY: lint
 lint:
 	go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION) run ./...
 
+# Keep in lockstep with operator/Dockerfile RUN go build flags (reproducible, stripped).
+GO_BUILD_FLAGS ?= -trimpath -buildvcs=false -mod=readonly
+GO_LDFLAGS ?= -s -w
+
 .PHONY: build
-build: generate manifests fmt vet
-	go build -trimpath -o bin/manager ./cmd
+build: generate manifests fmt-check vet
+	# Match the image build: static, trimpath, no VCS stamp, stripped, lockfile readonly.
+	CGO_ENABLED=0 go build $(GO_BUILD_FLAGS) -ldflags="$(GO_LDFLAGS)" -o bin/manager ./cmd
 
 .PHONY: run
 run: build
@@ -82,7 +152,7 @@ run: build
 
 .PHONY: docker-build
 docker-build:
-	docker build -t $(IMG) .
+	docker build $(DOCKER_BUILD_FLAGS) -t $(IMG) .
 
 .PHONY: docker-push
 docker-push:
@@ -112,14 +182,19 @@ undeploy:
 BUNDLE_IMG ?= quay.io/openshift-baseline-security/baseline-security-operator-bundle:latest
 CATALOG_IMG ?= quay.io/openshift-baseline-security/baseline-security-operator-catalog:latest
 
-# Fail if CSV, console-plugin package.json, and Makefile VERSION disagree.
-# Release process: bump VERSION/PREV_VERSION here, the CSV name/version/images/
-# replaces, console-plugin package.json (version + consolePlugin.version), and
-# CHANGELOG.md in the same change; never re-tag a published version string.
+# Fail if CSV, console-plugin package.json, README, CHANGELOG, and Makefile
+# VERSION disagree. Release process: bump VERSION/PREV_VERSION here, the CSV
+# name/version/images/replaces, console-plugin package.json (version +
+# consolePlugin.version), move CHANGELOG [Unreleased] into ## [VERSION] with
+# a [VERSION]: compare footer and [Unreleased]: ...vVERSION...HEAD, set README
+# "Current release" and upgrade path, create immutable git tag vVERSION (never
+# force-move), and never re-tag or overwrite a published image/CSV version.
 .PHONY: verify-versions
 verify-versions:
 	@csv=bundle/manifests/baseline-security-operator.clusterserviceversion.yaml; \
 	pkg=../console-plugin/package.json; \
+	cl=../CHANGELOG.md; \
+	readme=../README.md; \
 	fail=0; \
 	grep -q "name: baseline-security-operator.v$(VERSION)$$" "$$csv" \
 		|| { echo "CSV name is not baseline-security-operator.v$(VERSION)"; fail=1; }; \
@@ -127,17 +202,42 @@ verify-versions:
 		|| { echo "CSV spec.version is not $(VERSION)"; fail=1; }; \
 	grep -q "replaces: baseline-security-operator.v$(PREV_VERSION)$$" "$$csv" \
 		|| { echo "CSV replaces is not baseline-security-operator.v$(PREV_VERSION)"; fail=1; }; \
+	grep -qE "containerImage:.*:$(VERSION)$$" "$$csv" \
+		|| { echo "CSV containerImage annotation is not tagged :$(VERSION); OLM UI would show the wrong operator image"; fail=1; }; \
 	grep -oE '"version": "[^"]+"' "$$pkg" | grep -vqE "\"version\": \"$(VERSION)\"$$" \
 		&& { echo "console-plugin package.json has a version (top-level or consolePlugin.version) that is not $(VERSION); shipped plugin would report the wrong version"; fail=1; } || true; \
-	grep -oE 'quay.io/openshift-baseline-security/baseline-security-(operator|console-plugin):[^"[:space:]]+' "$$csv" \
-		| grep -vqE ":$(VERSION)$$" \
-		&& { echo "CSV references an image tag that is not :$(VERSION); shipped images would disagree with the release"; fail=1; } || true; \
+	imgs=$$(grep -oE 'quay.io/openshift-baseline-security/baseline-security-(operator|console-plugin):[^"[:space:]]+' "$$csv" || true); \
+	if [ -z "$$imgs" ]; then \
+		echo "CSV has no versioned operator/console-plugin image refs; release would ship without pinned images"; fail=1; \
+	elif echo "$$imgs" | grep -vqE ":$(VERSION)$$"; then \
+		echo "CSV references an image tag that is not :$(VERSION); shipped images would disagree with the release"; fail=1; \
+	fi; \
+	grep -qE "^## \[$(VERSION)\]" "$$cl" \
+		|| { echo "CHANGELOG.md missing ## [$(VERSION)] section; consumers would have no release notes for this version"; fail=1; }; \
+	grep -qE "^## \[$(PREV_VERSION)\]" "$$cl" \
+		|| { echo "CHANGELOG.md missing ## [$(PREV_VERSION)] section (PREV_VERSION); replaces edge has no prior notes"; fail=1; }; \
+	grep -qE "^## \[Unreleased\]" "$$cl" \
+		|| { echo "CHANGELOG.md missing ## [Unreleased] section; post-release work has nowhere to land"; fail=1; }; \
+	unrel_line=$$(grep -nE '^## \[Unreleased\]' "$$cl" | head -1 | cut -d: -f1); \
+	ver_line=$$(grep -nE "^## \[$(VERSION)\]" "$$cl" | head -1 | cut -d: -f1); \
+	if [ -n "$$unrel_line" ] && [ -n "$$ver_line" ] && [ "$$unrel_line" -ge "$$ver_line" ]; then \
+		echo "CHANGELOG.md ## [Unreleased] must appear above ## [$(VERSION)] (Keep a Changelog order)"; fail=1; \
+	fi; \
+	grep -qE "^\[$(VERSION)\]:" "$$cl" \
+		|| { echo "CHANGELOG.md missing [$(VERSION)]: compare footer link; release notes would not deep-link the delta"; fail=1; }; \
+	grep -qE "^\[Unreleased\]: .*compare/v$(VERSION)\.\.\.HEAD" "$$cl" \
+		|| { echo "CHANGELOG.md [Unreleased] footer must compare v$(VERSION)...HEAD; post-cut notes would point at the wrong base"; fail=1; }; \
+	grep -qE "\*\*Current release: $(VERSION)\*\*" "$$readme" \
+		|| { echo "README.md Current release line is not $(VERSION); docs would advertise the wrong version"; fail=1; }; \
+	grep -qE "→ $(VERSION)" "$$readme" \
+		|| { echo "README.md upgrade path does not end at → $(VERSION); consumers would not see the OLM replaces chain end"; fail=1; }; \
 	test "$$fail" -eq 0 || exit 1
 
 .PHONY: bundle
-bundle: manifests verify-crd verify-csv-rbac verify-versions
+bundle: manifests verify-crd verify-csv-rbac verify-monitoring-bundle verify-versions
 	cp config/crd/bases/baselinesecurity.io_clusterbaselines.yaml bundle/manifests/
-	docker run --rm -v $(CURDIR)/bundle:/bundle:Z quay.io/operator-framework/operator-sdk@sha256:d68086836ecc9ddb28f5785815a88f5dcb33beb00e0271e3056dd13d8d352b36 bundle validate /bundle
+	# --network=none: validate is pure filesystem I/O (no registry pulls).
+	docker run --rm --network=none -v $(CURDIR)/bundle:/bundle:Z $(OPERATOR_SDK_IMAGE) bundle validate /bundle
 
 # uniqueItems is forbidden on CRD OpenAPI schemas (kube rejects it at apply time,
 # but operator-sdk bundle-validate does not); use x-kubernetes-list-type: set.
@@ -169,19 +269,44 @@ verify-csv-rbac:
 		bundle/manifests/baseline-security-operator.clusterserviceversion.yaml >/dev/null \
 		|| (echo "CSV missing read access to compliancesuites; completed-suite history needs it" && exit 1)
 
+# Bundle PrometheusRule is hand-copied without namespace (OLM target NS). Fail
+# if alert expressions drift from config/prometheus/prometheusrule.yaml.
+.PHONY: verify-monitoring-bundle
+verify-monitoring-bundle:
+	@diff -u <(sed '/^  namespace: openshift-baseline-security$$/d' config/prometheus/prometheusrule.yaml) \
+		bundle/manifests/baseline-security-operator_monitoring.coreos.com_v1_prometheusrule.yaml \
+		|| { echo "bundle PrometheusRule drifted from config/prometheus/prometheusrule.yaml"; exit 1; }
+
 .PHONY: bundle-build
 bundle-build: bundle
-	docker build -f bundle.Dockerfile -t $(BUNDLE_IMG) .
+	docker build $(DOCKER_BUILD_FLAGS) -f bundle.Dockerfile -t $(BUNDLE_IMG) .
 
 .PHONY: bundle-push
 bundle-push:
 	docker push $(BUNDLE_IMG)
 
-# File-based catalog containing just this package; requires BUNDLE_IMG pushed.
+# File-based catalog for this package. BUNDLE_IMG is the pullspec OLM installs
+# from (must be pushable/pullable at install time; local tags are fine for CI
+# schema validation). Render from the on-disk bundle/ (already validated by
+# `make bundle`) so catalog content cannot drift from a mutable registry tag
+# and so builds work offline without docker.sock / a pushed bundle image.
+# Wipe catalog/ first so stale YAML from a prior build cannot ship in the image.
 .PHONY: catalog-build
 catalog-build:
+	@test -n "$(BUNDLE_IMG)" || { echo "BUNDLE_IMG is empty"; exit 1; }
+	@test -d bundle/manifests || { echo "bundle/manifests missing; run make bundle first"; exit 1; }
+	rm -rf catalog
 	mkdir -p catalog
-	docker run --rm quay.io/operator-framework/opm@sha256:e1be045e4a8558624eab2320d548b5fd557b0a0a07ebd33876b71f0778a444e4 render $(BUNDLE_IMG) --output=yaml > catalog/bundle.yaml
+	# --network=none: read local bundle only; inject BUNDLE_IMG (dir render leaves image: "").
+	docker run --rm --network=none -v $(CURDIR)/bundle:/bundle:ro,Z $(OPM_IMAGE) \
+		render /bundle --output=yaml \
+		| sed 's|^image: ""$$|image: $(BUNDLE_IMG)|' > catalog/bundle.yaml
+	@grep -qE '^image: .+' catalog/bundle.yaml \
+		|| { echo "catalog/bundle.yaml missing image pullspec after inject"; exit 1; }
 	printf 'schema: olm.package\nname: baseline-security-operator\ndefaultChannel: alpha\n---\nschema: olm.channel\npackage: baseline-security-operator\nname: alpha\nentries:\n  - name: baseline-security-operator.v$(VERSION)\n    replaces: baseline-security-operator.v$(PREV_VERSION)\n' > catalog/package.yaml
-	docker run --rm -v $(CURDIR)/catalog:/catalog:Z quay.io/operator-framework/opm@sha256:e1be045e4a8558624eab2320d548b5fd557b0a0a07ebd33876b71f0778a444e4 validate /catalog
-	docker build -f catalog.Dockerfile -t $(CATALOG_IMG) .
+	docker run --rm --network=none -v $(CURDIR)/catalog:/catalog:Z $(OPM_IMAGE) validate /catalog
+	docker build $(DOCKER_BUILD_FLAGS) -f catalog.Dockerfile -t $(CATALOG_IMG) .
+
+.PHONY: catalog-push
+catalog-push:
+	docker push $(CATALOG_IMG)

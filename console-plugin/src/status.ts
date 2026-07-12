@@ -26,16 +26,6 @@ export const inconsistentSources = (
   return { sources, mostCommon: mostCommon || null };
 };
 
-// Known node states for INCONSISTENT collapse. Module-level so the filter hot
-// path does not allocate a fresh array on every includes() call.
-const knownInconsistentStates = new Set([
-  'PASS',
-  'FAIL',
-  'ERROR',
-  'NOT-APPLICABLE',
-  'SKIP',
-]);
-
 // Effective status of a check, collapsing a benign INCONSISTENT (mirrors the
 // operator). The Compliance Operator flags a check INCONSISTENT whenever nodes in
 // a pool disagree, including when it simply does not apply on some nodes (PASS
@@ -47,6 +37,9 @@ const knownInconsistentStates = new Set([
 // Top-level SKIP is folded into NOT-APPLICABLE the same way the operator tallies
 // ResultCounts (SKIP is "check skipped for this system"), so Overview N/A counts
 // and resultsHref('NOT-APPLICABLE') deep-links include those rows.
+//
+// Bit flags (no Set) so the Results filter / CSV / score hot paths stay cheap
+// over multi-thousand rows when a few are INCONSISTENT.
 export const effectiveStatus = (
   r: { status: string; metadata?: { annotations?: Record<string, string> } },
 ): string => {
@@ -56,28 +49,66 @@ export const effectiveStatus = (
   if (r.status !== 'INCONSISTENT') {
     return r.status;
   }
-  const { sources, mostCommon } = inconsistentSources(r as ComplianceCheckResult);
-  const states = new Set<string>();
-  for (const s of sources) {
-    if (s.status) {
-      states.add(s.status.toUpperCase());
+  const ann = r.metadata?.annotations ?? {};
+  const raw = ann['compliance.openshift.io/inconsistent-source'] ?? '';
+  let hasPass = false;
+  let hasFail = false;
+  let hasError = false;
+  let hasNA = false;
+  let hasSkip = false;
+  let hasUnknown = false;
+  const add = (st: string): void => {
+    switch (st) {
+      case 'PASS':
+        hasPass = true;
+        break;
+      case 'FAIL':
+        hasFail = true;
+        break;
+      case 'ERROR':
+        hasError = true;
+        break;
+      case 'NOT-APPLICABLE':
+        hasNA = true;
+        break;
+      case 'SKIP':
+        hasSkip = true;
+        break;
+      default:
+        hasUnknown = true;
     }
+  };
+  // Walk comma-separated "node:STATUS" pairs (no split+map+filter chain).
+  let start = 0;
+  while (start <= raw.length) {
+    const comma = raw.indexOf(',', start);
+    const end = comma < 0 ? raw.length : comma;
+    const s = raw.slice(start, end).trim();
+    if (s) {
+      const colon = s.indexOf(':');
+      if (colon >= 0) {
+        const st = s.slice(colon + 1).trim().toUpperCase();
+        if (st) {
+          add(st);
+        }
+      }
+    }
+    if (comma < 0) {
+      break;
+    }
+    start = comma + 1;
   }
+  const mostCommon = (ann['compliance.openshift.io/most-common-status'] ?? '').trim();
   if (mostCommon) {
-    states.add(mostCommon.toUpperCase());
+    add(mostCommon.toUpperCase());
   }
-  for (const state of states) {
-    if (!knownInconsistentStates.has(state)) {
-      return 'INCONSISTENT';
-    }
-  }
-  if (states.has('FAIL') || states.has('ERROR')) {
+  if (hasUnknown || hasFail || hasError) {
     return 'INCONSISTENT';
   }
-  if (states.has('PASS')) {
+  if (hasPass) {
     return 'PASS';
   }
-  if (states.has('NOT-APPLICABLE') || states.has('SKIP')) {
+  if (hasNA || hasSkip) {
     return 'NOT-APPLICABLE';
   }
   return 'INCONSISTENT';

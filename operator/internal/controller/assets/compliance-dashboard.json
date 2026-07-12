@@ -57,7 +57,7 @@
           "title": "Remediation batch active",
           "type": "singlestat",
           "datasource": "$datasource",
-          "span": 4,
+          "span": 2,
           "format": "none",
           "valueName": "current",
           "thresholds": "0.5,0.5",
@@ -65,6 +65,21 @@
           "colors": ["#3e8635", "#f0ab00", "#d64456"],
           "targets": [
             { "expr": "max(baseline_security_remediation_batch_active and on(instance) topk(1, baseline_security_status_observed_timestamp_seconds))", "refId": "A" }
+          ]
+        },
+        {
+          "id": 11,
+          "title": "Batch age (paused MCPs)",
+          "type": "singlestat",
+          "datasource": "$datasource",
+          "span": 2,
+          "format": "s",
+          "valueName": "current",
+          "thresholds": "600,1200",
+          "colorValue": true,
+          "colors": ["#3e8635", "#f0ab00", "#d64456"],
+          "targets": [
+            { "expr": "(max(baseline_security_remediation_batch_active and on(instance) topk(1, baseline_security_status_observed_timestamp_seconds)) == 1) * (time() - max((baseline_security_remediation_batch_started_timestamp_seconds > 0) and on(instance) topk(1, baseline_security_status_observed_timestamp_seconds))) or vector(0)", "refId": "A" }
           ]
         }
       ]
@@ -125,7 +140,7 @@
           "title": "Rollup conditions",
           "type": "graph",
           "datasource": "$datasource",
-          "span": 6,
+          "span": 3,
           "yaxes": [ { "format": "none", "min": 0, "max": 1 }, { "show": false } ],
           "targets": [
             { "expr": "max by (type) (baseline_security_condition and on(instance) topk(1, baseline_security_status_observed_timestamp_seconds))", "legendFormat": "{{type}}", "refId": "A" }
@@ -136,10 +151,32 @@
           "title": "Metrics freshness (seconds since publish)",
           "type": "graph",
           "datasource": "$datasource",
-          "span": 6,
+          "span": 3,
           "yaxes": [ { "format": "s", "min": 0 }, { "show": false } ],
           "targets": [
-            { "expr": "time() - max(baseline_security_status_observed_timestamp_seconds)", "legendFormat": "age", "refId": "A" }
+            { "expr": "time() - max(baseline_security_status_observed_timestamp_seconds)", "legendFormat": "publish age", "refId": "A" }
+          ]
+        },
+        {
+          "id": 9,
+          "title": "Last scan age",
+          "type": "graph",
+          "datasource": "$datasource",
+          "span": 3,
+          "yaxes": [ { "format": "s", "min": 0 }, { "show": false } ],
+          "targets": [
+            { "expr": "time() - max((baseline_security_last_scan_timestamp_seconds > 0) and on(instance) topk(1, baseline_security_status_observed_timestamp_seconds))", "legendFormat": "scan age", "refId": "A" }
+          ]
+        },
+        {
+          "id": 10,
+          "title": "Newly failed (regressions)",
+          "type": "graph",
+          "datasource": "$datasource",
+          "span": 3,
+          "yaxes": [ { "format": "none", "min": 0 }, { "show": false } ],
+          "targets": [
+            { "expr": "max(baseline_security_newly_failed and on(instance) topk(1, baseline_security_status_observed_timestamp_seconds))", "legendFormat": "newly failed", "refId": "A" }
           ]
         }
       ]

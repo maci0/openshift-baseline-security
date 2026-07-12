@@ -9,6 +9,33 @@ import (
 // +kubebuilder:validation:Enum=cis;pci-dss;nist-moderate;nist-high;stig;nerc-cip;e8;bsi
 type ProfileKey string
 
+// Named ProfileKey values. Keep in lockstep with the kubebuilder Enum marker,
+// AllProfileKeys, Profiles MaxItems, and the console PROFILE_KEYS list.
+const (
+	ProfileCIS          ProfileKey = "cis"
+	ProfilePCIDSS       ProfileKey = "pci-dss"
+	ProfileNISTModerate ProfileKey = "nist-moderate"
+	ProfileNISTHigh     ProfileKey = "nist-high"
+	ProfileSTIG         ProfileKey = "stig"
+	ProfileNERCCIP      ProfileKey = "nerc-cip"
+	ProfileE8           ProfileKey = "e8"
+	ProfileBSI          ProfileKey = "bsi"
+)
+
+// HistoryMax caps overall and per-profile score history rings. Must match the
+// CRD MaxItems on status.history / profiles[].history / tailoredProfiles[].history.
+const HistoryMax = 30
+
+// DefaultScanSchedule is used when ClusterBaselineSpec.schedule is empty or
+// whitespace-only. Keep in lockstep with the kubebuilder default on Schedule
+// and the console DEFAULT_SCAN_SCHEDULE constant.
+const DefaultScanSchedule = "0 1 * * *"
+
+// RemediationBatchPhaseApplying is the only phase written on
+// status.remediationBatch while MachineConfigPools are paused for a batch apply.
+// Absence of remediationBatch means idle; there is no terminal phase.
+const RemediationBatchPhaseApplying = "Applying"
+
 // InstallPolicy controls whether the operator installs a dependency itself.
 // +kubebuilder:validation:Enum=Automatic;Manual
 type InstallPolicy string
@@ -76,6 +103,7 @@ type ClusterBaselineSpec struct {
 	// +kubebuilder:default="0 1 * * *"
 	// +kubebuilder:validation:MaxLength=128
 	// +optional
+	// Empty/whitespace uses DefaultScanSchedule at reconcile (same as CRD default).
 	Schedule string `json:"schedule,omitempty"`
 
 	// installComplianceOperator controls whether the operator creates an OLM
@@ -107,11 +135,10 @@ type ClusterBaselineSpec struct {
 	Scoring ScoringSpec `json:"scoring,omitempty"`
 
 	// waivers exclude specific failing checks from the score as accepted risk.
-	// Each entry names a ComplianceCheckResult and records why it is waived. A
-	// waived check is removed from the pass/fail denominator and reported in the
-	// Waived bucket instead, so an accepted risk neither inflates nor tanks the
-	// score. Waivers are keyed by result name, which is stable across rescans.
-	// Capped so a hostile list cannot bloat the CR past practical audit size.
+	// Each entry names a ComplianceCheckResult (stable across rescans). Only a
+	// current FAIL with a non-expired waiver is remapped to the Waived bucket and
+	// dropped from the pass/fail denominator; a waived check that later PASSes is
+	// scored as PASS again. Capped so a hostile list cannot bloat the CR.
 	// +optional
 	// +listType=map
 	// +listMapKey=name
@@ -290,6 +317,9 @@ type RemediationBatchStatus struct {
 }
 
 // ScoreSnapshot is one point of score history, recorded when a scan completes.
+// Score is under the scoring mode active at capture time (Flat or
+// SeverityWeighted). Mode flips do not rewrite prior points; consecutive points
+// may be incomparable across a mode change until the next completed scan.
 type ScoreSnapshot struct {
 	Time metav1.Time `json:"time"`
 	// +kubebuilder:validation:Minimum=0
@@ -299,8 +329,16 @@ type ScoreSnapshot struct {
 
 // ClusterBaselineStatus is the observed state.
 type ClusterBaselineStatus struct {
+	// conditions report readiness rollups and detail (Available, Progressing,
+	// Degraded, plus ComplianceOperatorReady / ScanConfigured / etc.).
+	// Map by type so Server-Side Apply and strategic merges update one condition
+	// without replacing the whole list (Kubernetes API convention).
 	// +optional
-	Conditions []metav1.Condition `json:"conditions,omitempty"`
+	// +listType=map
+	// +listMapKey=type
+	// +patchStrategy=merge
+	// +patchMergeKey=type
+	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type"`
 	// score across all profiles, 0-100: pass/(pass+fail) in the default Flat
 	// mode, a severity-weighted ratio when spec.scoring.mode is
 	// SeverityWeighted. Benign INCONSISTENT is remapped to PASS or
@@ -319,11 +357,16 @@ type ClusterBaselineStatus struct {
 	// +optional
 	// +kubebuilder:validation:MaxLength=128
 	ComplianceOperatorVersion string `json:"complianceOperatorVersion,omitempty"`
+	// profiles summarizes results per selected built-in profile key.
 	// +optional
+	// +listType=map
+	// +listMapKey=key
 	// +kubebuilder:validation:MaxItems=16
 	Profiles []ProfileStatus `json:"profiles,omitempty"`
 	// tailoredProfiles reports results for bound TailoredProfiles.
 	// +optional
+	// +listType=map
+	// +listMapKey=name
 	// +kubebuilder:validation:MaxItems=32
 	TailoredProfiles []TailoredProfileStatus `json:"tailoredProfiles,omitempty"`
 	// history holds score snapshots, oldest first, capped at 30 entries.
@@ -350,7 +393,9 @@ type ClusterBaselineStatus struct {
 	// +kubebuilder:validation:items:MaxLength=253
 	Fixed []string `json:"fixed,omitempty"`
 	// previousFailures is the internal FAIL snapshot from the last completed scan,
-	// used to compute newlyFailed/fixed on the next scan.
+	// used to compute newlyFailed/fixed on the next scan. Not a consumer contract:
+	// shape and presence may change in 0.x without a major bump; use newlyFailed
+	// and fixed for user-facing regression views.
 	// +optional
 	// +listType=set
 	// +kubebuilder:validation:MaxItems=4096
@@ -358,7 +403,8 @@ type ClusterBaselineStatus struct {
 	PreviousFailures []string `json:"previousFailures,omitempty"`
 	// diffBaseFailures retains the scan-before-last FAIL snapshot while results
 	// for lastScanTime settle, allowing late CheckResult events to correct the
-	// current newlyFailed/fixed diff. Internal bookkeeping, not a user setting.
+	// current newlyFailed/fixed diff. Internal bookkeeping only; not a consumer
+	// contract (may change in 0.x without a major bump).
 	// +optional
 	// +listType=set
 	// +kubebuilder:validation:MaxItems=4096
@@ -366,6 +412,7 @@ type ClusterBaselineStatus struct {
 	DiffBaseFailures []string `json:"diffBaseFailures,omitempty"`
 	// diffBaseScanTime identifies the lastScanTime whose diffBaseFailures apply.
 	// It is nil for the first completed scan, which has no comparison baseline.
+	// Internal bookkeeping only; not a consumer contract.
 	// +optional
 	DiffBaseScanTime *metav1.Time `json:"diffBaseScanTime,omitempty"`
 	// remediationBatch tracks an in-progress MachineConfigPool-paused batch apply.
@@ -402,25 +449,39 @@ func init() {
 	SchemeBuilder.Register(&ClusterBaseline{}, &ClusterBaselineList{})
 }
 
+// AllProfileKeys returns every ProfileKey enum value in stable display order.
+// Length must equal Profiles MaxItems and the Enum marker cardinality.
+func AllProfileKeys() []ProfileKey {
+	return []ProfileKey{
+		ProfileCIS, ProfilePCIDSS, ProfileNISTModerate, ProfileNISTHigh,
+		ProfileSTIG, ProfileNERCCIP, ProfileE8, ProfileBSI,
+	}
+}
+
+// Known reports whether k is a ProfileKey admitted by the CRD enum.
+func (k ProfileKey) Known() bool {
+	return k.ProfileNames() != nil
+}
+
 // ProfileNames maps a profile key to the Compliance Operator Profile names it
 // binds. Single source of truth for the key -> profile expansion.
 func (k ProfileKey) ProfileNames() []string {
 	switch k {
-	case "cis":
+	case ProfileCIS:
 		return []string{"ocp4-cis", "ocp4-cis-node"}
-	case "pci-dss":
+	case ProfilePCIDSS:
 		return []string{"ocp4-pci-dss", "ocp4-pci-dss-node"}
-	case "nist-moderate":
+	case ProfileNISTModerate:
 		return []string{"ocp4-moderate", "ocp4-moderate-node", "rhcos4-moderate"}
-	case "nist-high":
+	case ProfileNISTHigh:
 		return []string{"ocp4-high", "ocp4-high-node", "rhcos4-high"}
-	case "stig":
+	case ProfileSTIG:
 		return []string{"ocp4-stig", "ocp4-stig-node", "rhcos4-stig"}
-	case "nerc-cip":
+	case ProfileNERCCIP:
 		return []string{"ocp4-nerc-cip", "ocp4-nerc-cip-node", "rhcos4-nerc-cip"}
-	case "e8":
+	case ProfileE8:
 		return []string{"ocp4-e8", "rhcos4-e8"}
-	case "bsi":
+	case ProfileBSI:
 		return []string{"ocp4-bsi", "ocp4-bsi-node", "rhcos4-bsi"}
 	}
 	return nil

@@ -4,4 +4,7 @@ CMD ["serve", "/configs", "--cache-dir=/tmp/cache"]
 COPY catalog /configs
 # Precompute the cache; opm's runtime integrity check crash-loops without it.
 RUN ["/bin/opm", "serve", "/configs", "--cache-dir=/tmp/cache", "--cache-only"]
+# Pin the opm image non-root default so a base-image USER drift cannot reintroduce
+# root. UID 1001 owns the precomputed /tmp/cache from the RUN above.
+USER 1001
 LABEL operators.operatorframework.io.index.configs.v1=/configs

@@ -9,8 +9,15 @@ Benchmark out of the box, rendered natively in the console under
 
 **Current release: 0.4.0** (OLM channel `alpha`, API `baselinesecurity.io/v1alpha1`).
 Consumer-facing release notes and upgrade notes: [CHANGELOG.md](CHANGELOG.md).
+Work on `main` that is not yet cut lives under CHANGELOG **[Unreleased]** and is
+not part of the published 0.4.0 CSV/image tags until the next version bump
+(`make verify-versions` keeps those tags aligned with **Current release**).
 
 ## Features
+
+Feature list describes the tree on `main` (published **Current release** plus
+anything still under CHANGELOG **[Unreleased]** until the next version cut).
+Install from published OLM image/CSV tags for only the released surface.
 
 - **Zero-config baseline**: installing the operator scans the cluster against
   CIS on a daily schedule; no YAML required.
@@ -37,19 +44,25 @@ Consumer-facing release notes and upgrade notes: [CHANGELOG.md](CHANGELOG.md).
 - **Observability**: Prometheus metrics
   (`baseline_security_compliance_score`, `baseline_security_checks`,
   `baseline_security_status_observed_timestamp_seconds` for HA scrape
-  selection, `baseline_security_remediation_batch_active`) with
+  selection, `baseline_security_remediation_batch_active`,
+  `baseline_security_last_scan_timestamp_seconds`,
+  `baseline_security_newly_failed`,
+  `baseline_security_condition` for Available/Progressing/Degraded) with
   PrometheusRule alerts (`ComplianceScoreLow`, `ComplianceChecksFailing`,
-  `ComplianceChecksInError`, `ComplianceStatusStale`,
-  `RemediationBatchStuck`); native Observe → Dashboards ConfigMap when
-  user-workload monitoring is enabled.
-- **Support**: `hack/must-gather.sh` collects operator + compliance state.
+  `ComplianceChecksInError`, `ComplianceStatusStale`, `ComplianceScanStale`,
+  `ComplianceRegressions`, `RemediationBatchStuck`, `ClusterBaselineDegraded`);
+  native Observe →
+  Dashboards ConfigMap when user-workload monitoring is enabled.
+- **Support**: `operator/hack/must-gather.sh` collects operator + compliance state.
 
 ## Layout
 
 - `CHANGELOG.md`: consumer-facing release notes and migration notes
 - `docs/SPEC.md`: design specification (read this first)
+- `docs/DESIGN-DECISIONS.md`: ADR-style product design tradeoffs
 - `docs/PATTERNS.md`: OpenShift addon patterns this repo follows
 - `docs/STANDARDS.md`: coding standards reference with authoritative links
+- `docs/TEST-PLAN.md`: unit/e2e coverage catalog, run ledger, and tiers
 - `operator/`: Go operator (kubebuilder go/v4) reconciling the
   `ClusterBaseline` CRD: installs/adopts the Compliance Operator, owns
   ScanSetting/ScanSettingBinding defaults, deploys the console plugin,
@@ -91,13 +104,19 @@ Compliance score deep-linked on the cluster Overview Details card:
 
 ## Install (OLM)
 
-Build and push the three images plus bundle and file-based catalog, then:
+Build and push the operator image, console-plugin image, OLM bundle, and
+file-based catalog (four images; tag them with the release version, never
+reuse a published tag), then:
 
 ```sh
+# Plugin image (must match CSV relatedImages / RELATED_IMAGE_CONSOLE_PLUGIN).
+# --provenance/--sbom false: same as Makefile DOCKER_BUILD_FLAGS (reproducible digests).
+docker build --provenance=false --sbom=false -t <PLUGIN_IMG> console-plugin
+docker push <PLUGIN_IMG>
 cd operator
-make docker-build docker-push          # operator image
+make docker-build docker-push          # operator image (IMG=...)
 make bundle bundle-build bundle-push   # validated OLM bundle
-make catalog-build && docker push $(CATALOG_IMG)
+make catalog-build catalog-push        # file-based catalog
 oc apply -f - <<EOF
 apiVersion: operators.coreos.com/v1alpha1
 kind: CatalogSource
@@ -138,6 +157,10 @@ for every publish.
   minor releases; read [CHANGELOG.md](CHANGELOG.md) before upgrading.
 - **Supported host**: OpenShift 4.22 only (`com.redhat.openshift.versions: =v4.22`;
   a bare `v4.22` would advertise 4.22 *and later*, which is untested).
+- **Support window**: only the latest published 0.x release is supported for
+  bugfixes and security updates. Older 0.x lines get no backports; upgrade to
+  the latest 0.x. Published CSV/image tags are immutable (never re-push the
+  same version string with different bits).
 - **Install path**: OLM bundle + file-based catalog is the only supported
   install. Helm was removed in 0.4.0.
 - **Upgrade path**: OLM `replaces` chain
@@ -146,19 +169,41 @@ for every publish.
 - **Notable 0.4.0 behavior change**: benign Compliance Operator `INCONSISTENT`
   results (PASS where applicable, NOT-APPLICABLE elsewhere) now count as PASS
   in score, metrics, and UI. Scores can rise on upgrade without remediations.
+- **Unreleased (not yet versioned)**: empty `spec.profiles: []` disables
+  scanning; `spec.complianceCatalogSource` is DNS-1123-validated; new metrics
+  `baseline_security_last_scan_timestamp_seconds` /
+  `baseline_security_newly_failed` and alerts `ComplianceScanStale` /
+  `ComplianceRegressions`. Details and migration notes:
+  [CHANGELOG.md](CHANGELOG.md) **[Unreleased]**.
 - **Version sources** (must stay equal; `make verify-versions` checks them):
-  `operator/Makefile` (`VERSION`), the CSV in
-  `operator/bundle/manifests/baseline-security-operator.clusterserviceversion.yaml`,
-  and `console-plugin/package.json` (`version` + `consolePlugin.version`).
+  `operator/Makefile` (`VERSION` / `PREV_VERSION`), the CSV in
+  `operator/bundle/manifests/baseline-security-operator.clusterserviceversion.yaml`
+  (name, version, replaces, containerImage, relatedImages),
+  `console-plugin/package.json` (`version` + `consolePlugin.version`),
+  `CHANGELOG.md` (`## [VERSION]`, `## [PREV_VERSION]`, `## [Unreleased]`, and
+  the `[VERSION]:` / `[Unreleased]:` compare footers), and this README's
+  **Current release** line and upgrade path.
+- **Cutting a release**: bump `VERSION`/`PREV_VERSION`, CSV name/version/images/
+  `replaces`, console-plugin versions, move CHANGELOG `[Unreleased]` into
+  `## [VERSION]` with migration notes and footer compare links (including
+  `[Unreleased]: ...compare/vVERSION...HEAD`), update **Current release** and
+  the upgrade path above, run `make verify-versions` (also in CI), create an
+  immutable git tag `vVERSION` pointing at that commit (CHANGELOG compare
+  URLs require it; never force-move a published tag), then publish **new**
+  image tags only (never overwrite an existing version tag).
 
 ## Development
 
 ```sh
 # operator: build, unit test, lint, run against the current kubeconfig
+# (Makefile sets GOTOOLCHAIN from go.mod; needs Go 1.25+ or auto-download.)
 cd operator && make test && make lint && make install && make run
 
-# console plugin
-cd console-plugin && yarn install && yarn lint && yarn typecheck && yarn test && yarn build
+# console plugin (Node 22 per .nvmrc / package.json engines; Yarn 4 via corepack)
+cd console-plugin
+corepack enable
+yarn install --immutable
+yarn lint && yarn typecheck && yarn test && yarn build
 # against a live console: yarn start (serves on :9001)
 ```
 
@@ -174,8 +219,9 @@ the cluster can pull.
   healthy conditions, the owned ScanSetting/bindings and console plugin
   objects exist and are registered, and a profile add/prune round-trips.
 - E2E, live console (Playwright): `cd console-plugin && yarn test-e2e` with
-  `CONSOLE_URL` and `KUBEADMIN_PASSWORD` set. Drives every tab and doubles
-  as the screenshot generator (`SCREENSHOT_DIR` defaults to
-  `docs/screenshots`).
+  `CONSOLE_URL` and `KUBEADMIN_PASSWORD` set (see
+  `console-plugin/.env.example`; a local `.env` is loaded automatically).
+  Drives every tab and doubles as the screenshot generator
+  (`SCREENSHOT_DIR` defaults to `docs/screenshots`).
 
 Targets OpenShift 4.22. License: Apache-2.0.

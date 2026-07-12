@@ -11,3 +11,15 @@ eslint.config.mjs
 *.log
 *.md
 .dockerignore
+# Secrets and local env must never enter the build context.
+.env
+.env.*
+.git
+.gitignore
+*.tsbuildinfo
+# Toolchain pins and local IDE state are not webpack inputs.
+.nvmrc
+.vscode/
+.idea/
+# Not required by the webpack build stage (nginx.conf is copied in the final stage).
+Dockerfile

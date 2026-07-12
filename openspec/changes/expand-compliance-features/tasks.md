@@ -4,7 +4,7 @@
 - [x] 1.2 aggregateStatus: skip expired waivers (expiresAt < now) so the check counts by raw status; unit test expired-vs-active
 - [x] 1.3 Add `spec.scoring.mode` enum (Flat default | SeverityWeighted); regen CRD
 - [x] 1.4 Implement severity-weighted score (weight PASS/FAIL by severity); keep Flat path identical; unit tests pin both modes + range 0..100
-- [x] 1.5 Record last-two status per owned check in status (bounded map); compute regressed (PASS->FAIL) and new-FAIL sets; unit test transitions + bounded size
+- [x] 1.5 Scan diff via bounded fail-name sets (`previousFailures` / `diffBaseFailures` / `diffBaseScanTime`); compute `newlyFailed`/`fixed` as set differences; unit test transitions + MaxItems=4096 clamp
 - [x] 1.6 Extend history to per-profile score history (reuse 30-cap ring); unit test
 - [x] 1.7 Metrics: add severity-weighted score series (or reuse gauge with a mode label); update TestPublishMetrics
 - [x] 1.8 Fuzz any new untrusted-input parsing (waiver date parse, severity map lookup)

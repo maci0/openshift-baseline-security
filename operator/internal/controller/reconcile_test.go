@@ -5,14 +5,17 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	policyv1 "k8s.io/api/policy/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -60,6 +63,15 @@ func TestReconcileAddsFinalizerAndRequeues(t *testing.T) {
 
 func TestReconcileDeletionDeregistersAndRemovesFinalizer(t *testing.T) {
 	scheme := testScheme(t)
+	resetMetrics(t)
+	// Stale gauges must clear when the finalizer drops (NotFound may never requeue).
+	stale := &baselinev1alpha1.ClusterBaseline{}
+	stale.Status.Score = ptr.To(int32(55))
+	stale.Status.Profiles = []baselinev1alpha1.ProfileStatus{
+		{Key: "cis", ResultCounts: baselinev1alpha1.ResultCounts{Fail: 2}},
+	}
+	publishMetrics(stale)
+
 	cb := newCB("cis")
 	cb.Finalizers = []string{finalizerName}
 	now := metav1.Now()
@@ -87,6 +99,12 @@ func TestReconcileDeletionDeregistersAndRemovesFinalizer(t *testing.T) {
 	err := r.Get(context.Background(), types.NamespacedName{Name: "cluster"}, &baselinev1alpha1.ClusterBaseline{})
 	if !apierrors.IsNotFound(err) {
 		t.Fatalf("ClusterBaseline still present: err=%v", err)
+	}
+	if got := testutil.ToFloat64(complianceScore); got != -1 {
+		t.Fatalf("score after delete = %v, want -1", got)
+	}
+	if got := testutil.CollectAndCount(complianceChecks); got != 0 {
+		t.Fatalf("checks after delete: %d series remain", got)
 	}
 }
 
@@ -267,6 +285,37 @@ func TestEnsureComplianceOperatorManualStillChecksExisting(t *testing.T) {
 	c := meta.FindStatusCondition(cb.Status.Conditions, "ComplianceOperatorReady")
 	if c == nil || c.Status != metav1.ConditionTrue {
 		t.Fatalf("Manual with installed CO must be Ready, got %+v", c)
+	}
+}
+
+// TestEnsureComplianceOperatorGroupScopesTargetNamespaces: createIfMissing left
+// a pre-existing empty OperatorGroup untouched (cluster-wide CO install). The
+// ensure path must rewrite targetNamespaces to openshift-compliance.
+func TestEnsureComplianceOperatorGroupScopesTargetNamespaces(t *testing.T) {
+	scheme := testScheme(t)
+	og := u(operatorGroupGVK)
+	og.SetName("compliance-operator")
+	og.SetNamespace(complianceNamespace)
+	// Empty / missing targetNamespaces is the hazard we fix.
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(og).Build(),
+		Scheme: scheme,
+	}
+	if err := r.ensureComplianceOperatorGroup(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got := u(operatorGroupGVK)
+	if err := r.Get(context.Background(), types.NamespacedName{
+		Namespace: complianceNamespace, Name: "compliance-operator",
+	}, got); err != nil {
+		t.Fatal(err)
+	}
+	ns, _, err := unstructured.NestedStringSlice(got.Object, "spec", "targetNamespaces")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ns) != 1 || ns[0] != complianceNamespace {
+		t.Fatalf("targetNamespaces = %v, want [%s]", ns, complianceNamespace)
 	}
 }
 
@@ -556,6 +605,42 @@ func TestEnsureConsolePlugin(t *testing.T) {
 		t.Fatalf("condition = %+v", c)
 	}
 
+	// Whitespace-only is the same as unset (avoids a Deployment with image " ").
+	t.Setenv("RELATED_IMAGE_CONSOLE_PLUGIN", "  \t ")
+	if err := r.ensureConsolePlugin(context.Background(), cb); err != nil {
+		t.Fatal(err)
+	}
+	c = meta.FindStatusCondition(cb.Status.Conditions, "ConsolePluginReady")
+	if c == nil || c.Reason != "ImageMissing" {
+		t.Fatalf("whitespace image condition = %+v", c)
+	}
+
+	// Garbage refs must not create a Deployment (ImageInvalid, soft-fail).
+	t.Setenv("RELATED_IMAGE_CONSOLE_PLUGIN", "not a valid image!!!")
+	if err := r.ensureConsolePlugin(context.Background(), cb); err != nil {
+		t.Fatal(err)
+	}
+	c = meta.FindStatusCondition(cb.Status.Conditions, "ConsolePluginReady")
+	if c == nil || c.Reason != "ImageInvalid" || c.Status != metav1.ConditionFalse {
+		t.Fatalf("invalid image condition = %+v", c)
+	}
+	depBad := &appsv1.Deployment{}
+	if err := r.Get(context.Background(), types.NamespacedName{Namespace: pluginNS, Name: pluginName}, depBad); err == nil {
+		t.Fatal("invalid RELATED_IMAGE must not create plugin Deployment")
+	}
+
+	t.Setenv("RELATED_IMAGE_CONSOLE_PLUGIN", "  example.test/plugin:1\n")
+	if err := r.ensureConsolePlugin(context.Background(), cb); err != nil {
+		t.Fatal(err)
+	}
+	depPad := &appsv1.Deployment{}
+	if err := r.Get(context.Background(), types.NamespacedName{Namespace: pluginNS, Name: pluginName}, depPad); err != nil {
+		t.Fatal(err)
+	}
+	if img := depPad.Spec.Template.Spec.Containers[0].Image; img != "example.test/plugin:1" {
+		t.Fatalf("trimmed image = %q", img)
+	}
+
 	t.Setenv("RELATED_IMAGE_CONSOLE_PLUGIN", "example.test/plugin:1")
 	if err := r.ensureConsolePlugin(context.Background(), cb); err != nil {
 		t.Fatal(err)
@@ -588,6 +673,16 @@ func TestEnsureConsolePlugin(t *testing.T) {
 	ru := dep.Spec.Strategy.RollingUpdate
 	if ru == nil || ru.MaxUnavailable == nil || ru.MaxUnavailable.IntValue() != 1 {
 		t.Fatalf("rolling update MaxUnavailable = %v, want 1", ru)
+	}
+	pdb := &policyv1.PodDisruptionBudget{}
+	if err := r.Get(context.Background(), types.NamespacedName{Namespace: pluginNS, Name: pluginName}, pdb); err != nil {
+		t.Fatalf("plugin PDB: %v", err)
+	}
+	if pdb.Spec.MinAvailable == nil || pdb.Spec.MinAvailable.IntValue() != int(pluginReadyMin) {
+		t.Fatalf("plugin PDB MinAvailable = %v, want %d", pdb.Spec.MinAvailable, pluginReadyMin)
+	}
+	if pdb.Spec.Selector == nil || pdb.Spec.Selector.MatchLabels["app"] != pluginName {
+		t.Fatalf("plugin PDB selector = %+v", pdb.Spec.Selector)
 	}
 	if sc := dep.Spec.Template.Spec.SecurityContext; sc == nil || sc.RunAsNonRoot == nil || !*sc.RunAsNonRoot {
 		t.Fatal("pod SecurityContext.RunAsNonRoot required")
@@ -684,9 +779,10 @@ func TestDeregisterConsolePluginNoop(t *testing.T) {
 func TestEnsureConsolePluginDisabled(t *testing.T) {
 	scheme := testScheme(t)
 	dep := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: pluginName, Namespace: pluginNS}}
+	pdb := &policyv1.PodDisruptionBudget{ObjectMeta: metav1.ObjectMeta{Name: pluginName, Namespace: pluginNS}}
 	r := &ClusterBaselineReconciler{
 		Client: fake.NewClientBuilder().WithScheme(scheme).
-			WithObjects(dep, consoleCluster(pluginName, "other")).Build(),
+			WithObjects(dep, pdb, consoleCluster(pluginName, "other")).Build(),
 		Scheme: scheme,
 	}
 	cb := newCB("cis")
@@ -698,6 +794,10 @@ func TestEnsureConsolePluginDisabled(t *testing.T) {
 	if !apierrors.IsNotFound(err) {
 		t.Fatalf("deployment should be gone, err=%v", err)
 	}
+	err = r.Get(context.Background(), types.NamespacedName{Namespace: pluginNS, Name: pluginName}, &policyv1.PodDisruptionBudget{})
+	if !apierrors.IsNotFound(err) {
+		t.Fatalf("plugin PDB should be gone, err=%v", err)
+	}
 	c := meta.FindStatusCondition(cb.Status.Conditions, "ConsolePluginReady")
 	if c == nil || c.Reason != "Disabled" {
 		t.Fatalf("%+v", c)
@@ -706,6 +806,15 @@ func TestEnsureConsolePluginDisabled(t *testing.T) {
 
 func TestReconcileNotFound(t *testing.T) {
 	scheme := testScheme(t)
+	// Seed stale posture so NotFound must clear gauges (alerts must not stick).
+	resetMetrics(t)
+	stale := &baselinev1alpha1.ClusterBaseline{}
+	stale.Status.Score = ptr.To(int32(10))
+	stale.Status.Profiles = []baselinev1alpha1.ProfileStatus{
+		{Key: "cis", ResultCounts: baselinev1alpha1.ResultCounts{Fail: 9}},
+	}
+	publishMetrics(stale)
+
 	r := &ClusterBaselineReconciler{
 		Client: fake.NewClientBuilder().WithScheme(scheme).Build(),
 		Scheme: scheme,
@@ -718,6 +827,12 @@ func TestReconcileNotFound(t *testing.T) {
 	}
 	if res.RequeueAfter != 0 {
 		t.Fatalf("unexpected requeue: %+v", res)
+	}
+	if got := testutil.ToFloat64(complianceScore); got != -1 {
+		t.Fatalf("score after NotFound = %v, want -1", got)
+	}
+	if got := testutil.CollectAndCount(complianceChecks); got != 0 {
+		t.Fatalf("checks after NotFound: %d series remain", got)
 	}
 }
 

@@ -52,9 +52,9 @@ than a copied date.
 |---|---|---|---|
 | 0 Fast local correctness | CI `ci.yml`, every PR/push | see latest Actions run on `main` | gating |
 | 1 Generated/build artifacts | CI `ci.yml` (`make bundle`, `yarn build`) | see latest Actions run | gating |
-| 2 Hardening (`-race`, fuzz) | manual / nightly (not yet automated) | not yet run | — |
-| 3 API admission (envtest) | manual (not yet automated) | not yet run | — |
-| 4 Live OpenShift (Go e2e + Playwright) | manual, logged below | 2026-07-10 | pass |
+| 2 Hardening (`-race`, fuzz) | manual / nightly (not yet automated) | 2026-07-11 (see live log: race + fuzz) | pass |
+| 3 API admission (envtest) | manual (not yet automated) | envtest harness not yet run; live informer/batch rows below reuse this label | — |
+| 4 Live OpenShift (Go e2e + Playwright) | manual, logged below | 2026-07-11 | pass |
 | 5 Release / supply chain | manual (pre-release) | not yet run | — |
 
 ### Live verification log (Tiers 4–5)
@@ -161,9 +161,9 @@ silently turn it into a mean of per-profile scores.
 - [x] **Two built-in benchmarks pooled**: enable CIS + STIG (or cis+pci-dss),
       assert `Status.Score` equals combined `PASS/(PASS+FAIL)`, not the mean of
       the two per-profile scores (`TestAggregateStatusPoolsMultipleBenchmarks`).
-- [ ] **Large-benchmark dominance**: a profile with many checks outweighs a
-      small one in the pooled score; assert per-profile cards still show each
-      profile's own ratio independently.
+- [x] **Large-benchmark dominance**: a profile with many checks outweighs a
+      small one in the pooled score; per-profile counts stay independent
+      (`TestAggregateStatusLargeBenchmarkDominance`).
 - [x] MANUAL/ERROR/NOT-APPLICABLE/INFO/INCONSISTENT excluded from denominator
       (`TestScore`, `TestAggregateStatus`, `TestAggregateStatusWithTailored`).
 - [x] **SKIP folded into NotApplicable** and excluded from score
@@ -176,16 +176,16 @@ silently turn it into a mean of per-profile scores.
       `TestReconcileWithoutComplianceCRDs`).
 - [x] **int64 score math**: adversarial huge pass/fail counts do not overflow
       into a false nil score (`FuzzScore` with int32-max seeds).
-- [ ] **INFO-only profile**: score nil, Overview donut still shows an Info
-      slice, Results filter for INFO returns rows.
-- [ ] **ERROR-only profile**: score nil, Error slice visible, no false "0 / 100"
-      success color on the dashboard item.
-- [ ] **Single FAIL among thousands of PASS**: score floors (not rounds) to
-      match Go integer division; Overview per-profile badge uses the same
-      floor (`Math.floor` vs operator `int32` truncate).
-- [ ] **Per-profile card vs global score mismatch is intentional**: document and
-      assert that a profile at 100% can coexist with a global score of 50 when
-      another profile is large and failing.
+- [x] **INFO-only profile**: score nil, Info count preserved
+      (`TestAggregateStatusInfoOnlyNilScore`). Overview donut / Results filter
+      still live-only.
+- [x] **ERROR-only profile**: score nil, Error count preserved, no false "0 / 100"
+      (`TestAggregateStatusErrorOnlyNilScore`).
+- [x] **Single FAIL among thousands of PASS**: score floors (not rounds)
+      (`TestScore` score(999,1)=99; jest `flatProfileScore(999, 1)`).
+- [x] **Per-profile card vs global score mismatch is intentional**: large failing
+      profile dominates pool while a small perfect profile stays 100%
+      (`TestAggregateStatusLargeBenchmarkDominance`).
 
 ## A2. Multi-node behavior (>1 node in a MachineConfigPool)
 
@@ -243,7 +243,9 @@ per-node annotation) when nodes disagree.
       8 profiles appear in `Status.Profiles`, aggregate score spans all.
 - [ ] **Disable a profile mid-scan**: its binding/suite is pruned, its results
       drop out of the aggregate and out of `Status.Profiles` on next reconcile.
-- [x] Cannot remove the last profile (jest `toggledProfiles` rejects empty).
+- [x] Clearing the last profile is allowed and disables scanning
+      (jest `toggledProfiles` returns `[]`; operator prunes bindings via
+      `TestEnsureScanConfigScanningDisabled`).
 - [ ] **Rapid toggle churn**: add+remove same profile within one reconcile
       window leaves no orphaned bindings.
 - [ ] **Unknown/invalid profile key** in spec rejected by CRD enum validation
@@ -403,9 +405,10 @@ per-node annotation) when nodes disagree.
 
 ## G2. Waivers (risk acceptance)
 
-`spec.waivers []{name, reason}` marks a ComplianceCheckResult as accepted risk.
-The controller pulls waived results out of the pass/fail denominator into the
-Waived bucket, so an accepted risk neither inflates nor tanks the score.
+`spec.waivers []{name, reason, …expiry/attribution}` marks a ComplianceCheckResult
+as accepted risk. The controller remaps only FAIL results whose name is actively
+waived (not expired) into the Waived bucket, out of the pass/fail denominator, so
+an accepted risk neither inflates nor tanks the score.
 
 - [x] **Waived FAIL leaves the denominator** into the Waived bucket, raising the
       score (`TestAggregateStatusWaivers`).
@@ -419,9 +422,10 @@ Waived bucket, so an accepted risk neither inflates nor tanks the score.
 - [x] **JSON-patch helpers**: add-array when absent vs append when present;
       remove test-guards the name by index (jest `addWaiverPatch`,
       `removeWaiverPatch`, `isWaived`, incl. fuzz).
-- [x] **Waive UI gated + present**: modal offers Waive/Remove on non-PASS checks,
-      enabled only with `clusterbaselines:patch` (Playwright asserts enabled for
-      kubeadmin; jest/gating in ResultsTab).
+- [x] **Waive UI gated + present**: modal offers Waive on FAIL checks (score-
+      affecting only) and Remove for any already-waived name; enabled only with
+      `clusterbaselines:patch` (Playwright asserts enabled for kubeadmin;
+      ResultsTab `showWaiver`).
 - [x] **Waived donut slice + metric** (`aggregateCounts` waived; `setCheckCounts`
       waived series in `TestPublishMetrics`).
 - [ ] **Waive every FAIL** → score 100 (pass/(pass+0)); **waive all results** →
@@ -562,8 +566,9 @@ Waived bucket, so an accepted risk neither inflates nor tanks the score.
 
 - [ ] **Singleton name admission**: server-side dry-run rejects any
       ClusterBaseline not named `cluster` (CEL rule).
-- [ ] **Profiles validation**: duplicate profiles, empty profile list, and
-      unknown profile keys are rejected by CRD schema.
+- [ ] **Profiles validation**: duplicate profiles and unknown profile keys are
+      rejected by CRD schema; an empty list is allowed (disables scanning when
+      `tailoredProfiles` is also empty; see CHANGELOG Unreleased / SPEC §4.1).
 - [ ] **TailoredProfiles validation**: duplicate, empty, too-long, uppercase,
       underscore, and path-like values are rejected; DNS-subdomain-like names
       are accepted; max length 51 leaves room for `baseline-tp-` suite labels.
@@ -571,7 +576,7 @@ Waived bucket, so an accepted risk neither inflates nor tanks the score.
       (`profiles: [cis]`, daily schedule, Automatic install, Managed console,
       Manual remediation) in a real API server dry-run.
 - [ ] **Status schema completeness**: generated CRD includes all count fields
-      (`pass`, `fail`, `manual`, `info`, `error`, `inconsistent`,
+      (`pass`, `fail`, `manual`, `info`, `error`, `inconsistent`, `waived`,
       `notApplicable`) for built-in and tailored profile status objects.
 - [ ] **OpenAPI printer columns**: `oc get clusterbaseline` shows Score and
       Last Scan from status after reconcile.
@@ -661,7 +666,7 @@ stale Available or eternal Progressing.
 | CO Installing | False | True | False | [x] |
 | CO CSV Failed | False | False | True (CSVFailed) | [x] |
 | Invalid schedule | False | False | True (InvalidSchedule) | [x] |
-| Scan storage Pending >2m | True* | False | True (ScanStoragePending) | [x] *if CO+scan cfg already True |
+| Scan storage Pending >2m | True* | False | True (ScanStorageNotReady) | [x] *if CO+scan cfg already True; detail is ScanStorageReady False / ScanStoragePending |
 | Plugin Unavailable >5m | True* | False | True (ConsolePluginUnavailable) | [x] |
 | Plugin WaitingForPods | True* | True | False | [x] |
 | ConsoleMissing | True* | False | False | [x] Progressing only |
@@ -1150,8 +1155,9 @@ Cases where the UI is "working" but trains admins to do the wrong thing.
       "need variance"); axis labels do not collapse into one unreadable tick.
 - [ ] **Remediation Apply on something already Applied**: button shows Unapply;
       no second Apply that no-ops confusingly.
-- [ ] **Profiles tab all switches on**: still can turn one off; cannot turn
-      last one off (disabled, not silent no-op).
+- [ ] **Profiles tab all switches on**: still can turn one off; turning the
+      last built-in off is allowed and disables scanning when no tailored
+      profiles remain (not disabled, not a silent no-op).
 
 ## AP. Compliance content & OpenSCAP surprises
 
@@ -1242,11 +1248,11 @@ Classic boundary table. Automate as table-driven unit tests where possible.
 
 | Input | Expected |
 |---|---|
-| 0 profiles (admission) | reject |
-| 1 profile | ok; cannot toggle off in UI |
+| 0 profiles (admission) | accept; scanning disabled when tailored also empty |
+| 1 profile | ok; UI may clear the last profile to disable scanning |
 | 8 profiles | ok; score pools all |
 | 0 tailored | status.tailoredProfiles empty/nil |
-| 1 tailored, 0 built-in fails admission? | profiles min 1 still required |
+| 1 tailored, 0 built-in | accept; tailored-only scan (empty profiles allowed) |
 | history 0 points | no trend card |
 | history 1 point | no trend card (need >1) |
 | history 30 points | cap; 31st drops oldest |

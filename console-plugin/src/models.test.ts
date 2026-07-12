@@ -1,6 +1,9 @@
 import {
   checkProfileLabel,
+  filterOwnedByBaseline,
   isOwnedByBaseline,
+  ownedSuiteLabels,
+  ownedSuiteSelector,
   suiteFilterKey,
   suiteProfileKey,
   suiteTailoredName,
@@ -26,6 +29,17 @@ describe('isOwnedByBaseline', () => {
     ).toBe(true);
   });
 
+  // Results/Remediations hot path passes Sets so membership is O(1); Set.has
+  // must match array includes for the same members.
+  it('accepts Set membership for profiles and tailored (hot-path form)', () => {
+    const labels = { 'compliance.openshift.io/suite': 'baseline-cis' };
+    expect(isOwnedByBaseline(labels, new Set(['cis', 'stig']))).toBe(true);
+    expect(isOwnedByBaseline(labels, new Set(['stig']))).toBe(false);
+    const tp = { 'compliance.openshift.io/suite': 'baseline-tp-custom' };
+    expect(isOwnedByBaseline(tp, new Set(['cis']), new Set(['custom']))).toBe(true);
+    expect(isOwnedByBaseline(tp, new Set(['cis']), new Set(['other']))).toBe(false);
+  });
+
   it('fuzz: only true when suite is baseline-<selected profile>', () => {
     const profiles = ['cis', 'stig', 'e8', 'bsi'];
     for (let i = 0; i < 2000; i++) {
@@ -46,6 +60,33 @@ describe('isOwnedByBaseline', () => {
       const want = !!suite && selected.some((s) => suite === `baseline-${s}`);
       expect(got).toBe(want);
     }
+  });
+});
+
+describe('filterOwnedByBaseline', () => {
+  const item = (suite?: string) => ({
+    metadata: {
+      name: suite ?? 'none',
+      labels: suite ? { 'compliance.openshift.io/suite': suite } : undefined,
+    },
+  });
+
+  it('keeps only built-in and tailored suites owned by this baseline', () => {
+    const list = [
+      item('baseline-cis'),
+      item('baseline-stig'),
+      item('baseline-tp-custom'),
+      item('other'),
+      item(undefined),
+    ];
+    const got = filterOwnedByBaseline(list, ['cis'], ['custom']);
+    expect(got.map((r) => r.metadata.name)).toEqual(['baseline-cis', 'baseline-tp-custom']);
+  });
+
+  it('returns empty for undefined/empty input and drops foreign suites', () => {
+    expect(filterOwnedByBaseline(undefined, ['cis'], [])).toEqual([]);
+    expect(filterOwnedByBaseline([], ['cis'], [])).toEqual([]);
+    expect(filterOwnedByBaseline([item('baseline-stig')], ['cis'], [])).toEqual([]);
   });
 });
 
@@ -70,6 +111,30 @@ describe('tailored suite ownership', () => {
     expect(suiteFilterKey(lbl('baseline-tp-'))).toBeUndefined();
     expect(suiteFilterKey(lbl('other'))).toBeUndefined();
     expect(suiteFilterKey(undefined)).toBeUndefined();
+  });
+
+  it('ownedSuiteLabels builds baseline-* and baseline-tp-* values for watches', () => {
+    expect(ownedSuiteLabels(['cis', 'stig'], ['custom'])).toEqual([
+      'baseline-cis',
+      'baseline-stig',
+      'baseline-tp-custom',
+    ]);
+    expect(ownedSuiteLabels(undefined, undefined)).toEqual([]);
+    expect(ownedSuiteLabels([''], [''])).toEqual([]);
+  });
+
+  it('ownedSuiteSelector wraps labels for CO list watches (or undefined when empty)', () => {
+    expect(ownedSuiteSelector(['cis'], ['custom'])).toEqual({
+      matchExpressions: [
+        {
+          key: 'compliance.openshift.io/suite',
+          operator: 'In',
+          values: ['baseline-cis', 'baseline-tp-custom'],
+        },
+      ],
+    });
+    expect(ownedSuiteSelector(undefined, undefined)).toBeUndefined();
+    expect(ownedSuiteSelector([''], [''])).toBeUndefined();
   });
 
   // Suite labels come from untrusted cluster objects. Parsers must never throw,
@@ -130,9 +195,10 @@ describe('tailored suite ownership', () => {
       }
     }
   });
-  it('checkProfileLabel uppercases built-ins, keeps tailored names, dashes unknown', () => {
+  it('checkProfileLabel uses display titles for built-ins, keeps tailored names, dashes unknown', () => {
     expect(checkProfileLabel(lbl('baseline-cis'))).toBe('CIS');
     expect(checkProfileLabel(lbl('baseline-pci-dss'))).toBe('PCI-DSS');
+    expect(checkProfileLabel(lbl('baseline-nist-moderate'))).toBe('NIST 800-53 Moderate');
     expect(checkProfileLabel(lbl('baseline-tp-cis-custom'))).toBe('cis-custom');
     expect(checkProfileLabel(lbl('other'))).toBe('—');
     expect(checkProfileLabel(undefined)).toBe('—');

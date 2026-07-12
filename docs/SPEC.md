@@ -143,10 +143,12 @@ Responsibilities:
      Revisit when OLM v1 lands.
 2. **Baseline defaults** (G1, G2). Own a `ScanSetting`
    (`baseline`, schedule from `spec.schedule`, default `0 1 * * *`, 1Gi PV,
-   rotation 3) and one `ScanSettingBinding` per selected profile set,
-   mapping the CR's profile keys to real Profile names
+   rotation 3) and one `ScanSettingBinding` per selected profile set (and
+   tailored profile), mapping the CR's profile keys to real Profile names
    (`cis` → `ocp4-cis` + `ocp4-cis-node`, `stig` → `ocp4-stig` +
-   `ocp4-stig-node` + `rhcos4-stig`, etc.).
+   `ocp4-stig-node` + `rhcos4-stig`, etc.). An empty `spec.profiles` with
+   no `spec.tailoredProfiles` prunes all owned bindings and clears the score
+   (scanning disabled; CR and history retained).
 3. **Console plugin deployment** (G3): nginx Deployment (2 replicas with
    preferred pod anti-affinity; TLS on 9443, service-serving-cert mounted at
    `/var/serving-cert`), Service, `ConsolePlugin` CR in namespace
@@ -166,12 +168,14 @@ Responsibilities:
    (oldest first, capped at 30), newlyFailed/fixed since the previous
    scan, conditions (`Available` / `Progressing` / `Degraded` rollups
    plus detail: `ComplianceOperatorReady` from CSV phase Succeeded,
-   `ScanConfigured`, `ConsolePluginReady`; `Degraded` for owned Pending
-   PVCs). A lazy dynamic informer watches compliance CRs once their CRDs
-   exist (event-driven reconcile); a 1-minute requeue remains as fallback
-   until watches are up or if they fail. Owns the plugin
-   Deployment/Service. Deleting ClusterBaseline does **not** uninstall
-   the Compliance Operator.
+   `ScanConfigured`, `ScanStorageReady`, `ConsolePluginReady`; owned
+   Pending PVCs set `ScanStorageReady` False and roll up to `Degraded`
+   with reason `ScanStorageNotReady`). A lazy dynamic informer watches
+   compliance CRs once their CRDs exist (event-driven reconcile); a
+   poll requeue remains as fallback (1m steady, 15s while Progressing
+   or a remediation batch is Applying) until watches are up or if they
+   fail. Owns the plugin Deployment/Service. Deleting ClusterBaseline
+   does **not** uninstall the Compliance Operator.
 
 ### 4.2 API: `ClusterBaseline` CRD
 
@@ -187,7 +191,8 @@ metadata:
   name: cluster
 spec:
   profiles: [cis]              # enum keys: cis, pci-dss, nist-moderate,
-                               # nist-high, stig, nerc-cip, e8, bsi
+                               # nist-high, stig, nerc-cip, e8, bsi;
+                               # [] (and no tailoredProfiles) disables scanning
   tailoredProfiles: []         # names of TailoredProfiles in openshift-compliance
   schedule: "0 1 * * *"        # cron, passed to ScanSetting
   installComplianceOperator: Automatic # or Manual (string enum, not boolean)
@@ -237,9 +242,14 @@ NOT-APPLICABLE elsewhere) collapse to PASS or NOT-APPLICABLE; only a genuine
 PASS-vs-FAIL/ERROR node split stays INCONSISTENT. Residual INCONSISTENT, plus
 MANUAL, INFO, ERROR, WAIVED, and NOT-APPLICABLE, are excluded from the
 denominator in both modes. Per-profile `status.profiles[].history` (and tailored)
-uses the same mode as the headline score. Severity is read from the
-ComplianceCheckResult `.severity` field, with the
-`compliance.openshift.io/check-severity` label as fallback.
+uses the same mode as the headline score when each point is written. A
+`spec.scoring.mode` flip updates `status.score` immediately but does not rewrite
+completed history points under the new formula (late CheckResult refresh for the
+same `lastScanTime` is gated on the mode that wrote those points). Points on
+either side of a mode change may therefore be incomparable until the next scan
+appends a fresh snapshot. Severity is read from the ComplianceCheckResult
+`.severity` field, with the `compliance.openshift.io/check-severity` label as
+fallback.
 
 ### 4.3 Console plugin (`baseline-security-console-plugin`)
 
@@ -307,17 +317,21 @@ buttons (SDK `useAccessReview`), not errors.
 | UI | | `baseline-security-console-plugin` (TS/React) |
 | OLM packaging | | bundle + FBC catalog for both-in-one package |
 
-Net-new code is one small controller and one frontend. Everything
+Net-new code is a thin orchestration operator and one frontend. Everything
 security-critical (checks, scanner, remediation content) stays Red Hat-built
 and Red Hat-updated.
 
 ## 6. Security and RBAC
 
-- Operator ClusterRole: CRUD on `compliance.openshift.io` resources; create
-  Namespace/OperatorGroup/Subscription (scoped by resourceNames where OLM
-  allows); patch `consoles.operator.openshift.io/cluster`; own CRD full
-  access; Deployment/Service in its own namespace. No secrets access, no
-  node access, no exec.
+- Operator ClusterRole: get/list/watch Compliance Operator check results,
+  scans, and suites; create/update/delete ScanSetting and ScanSettingBindings;
+  patch ComplianceRemediations; get/list/patch/watch MachineConfigPools
+  (batch pause/resume); create Namespace/OperatorGroup/Subscription (scoped
+  by resourceNames where OLM allows); patch
+  `consoles.operator.openshift.io/cluster`; full access to the owned CRD;
+  Deployment/Service in its own namespace (console plugin); ConfigMaps for the
+  Observe → Dashboards score-trend object in `openshift-config-managed`.
+  No secrets access, no node access, no exec.
 - Plugin: no service account of consequence (nginx serves static files);
   every API call is the user's own token via the console proxy.
 - Aggregated ClusterRoles shipped for humans:
@@ -361,9 +375,9 @@ ComplianceAsCode/compliance-operator master, and npm dist-tags).
   mirroring works), OLM channel `alpha` (pre-1.0; `stable` is a later goal).
   File-based catalog (FBC) image for a CatalogSource; goal:
   community-operators submission once v1 is stable.
-- **Install UX**: OperatorHub → install → operator creates a default
-  `ClusterBaseline/cluster` if none exists (or console form; decide during
-  implementation, default-create is the zero-config goal, opt-out via env).
+- **Install UX**: OperatorHub → install → operator default-creates
+  `ClusterBaseline/cluster` (CIS) when none exists. Opt out with
+  `BASELINE_SECURITY_SKIP_DEFAULT_CR=true` on the CSV deployment.
 
 ## 9. Repo layout
 
@@ -384,16 +398,17 @@ openshift-baseline-security/
 │   ├── Makefile
 │   └── go.mod
 ├── console-plugin/                 # console-plugin-template shape
-│   ├── src/components/             # React tabs + cluster Overview item
-│   ├── src/{models,utils,scoring,status,names,cron,waivers,patches,links,results,remediation,report,baselineContext}.*
+│   ├── src/components/             # React tabs, BaselineContext, Overview item
+│   ├── src/{models,utils,scoring,status,names,cron,dates,waivers,patches,links,results,remediation,report,profiles,download,errors}.*
 │   ├── locales/en/
 │   ├── e2e/                        # Playwright live-console suite
 │   ├── console-extensions.json
 │   ├── package.json
 │   ├── webpack.config.ts
 │   └── Dockerfile
-├── docs/{SPEC,PATTERNS,STANDARDS,TEST-PLAN}.md
+├── docs/{SPEC,DESIGN-DECISIONS,PATTERNS,STANDARDS,TEST-PLAN}.md
 ├── CHANGELOG.md
+├── TODO.md
 ├── OWNERS
 └── LICENSE                         # Apache-2.0
 ```
@@ -417,8 +432,9 @@ same Makefile targets (`test`, `lint`, `docker-build`).
 - A default StorageClass. Compliance scans persist raw ARF results to a PVC
   (`ScanSetting.rawResultStorage`, 1Gi); without a default StorageClass the
   PVCs stay Pending and scans hang without any error from the Compliance
-  Operator. The operator surfaces this as a `Degraded` condition
-  (`ScanStoragePending`) on the ClusterBaseline. Verified on SNO: LVM
+  Operator. The operator surfaces this as detail condition
+  `ScanStorageReady` False (reason `ScanStoragePending`), which rolls up
+  to `Degraded` with reason `ScanStorageNotReady`. Verified on SNO: LVM
   Storage (LVMS) on a spare disk is sufficient.
 - Cluster reachability to an OLM catalog carrying `compliance-operator`
   (`redhat-operators` by default, `spec.complianceCatalogSource` to

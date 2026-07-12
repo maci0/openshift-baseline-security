@@ -1,8 +1,9 @@
 import * as React from 'react';
 import { useTranslation } from 'react-i18next';
 import { useK8sWatchResource } from '@openshift-console/dynamic-plugin-sdk';
+import { formatCount } from '../dates';
 import { ClusterBaseline, ClusterBaselineGVK } from '../models';
-import { clusterScore, scoreColor } from '../utils';
+import { clusterScore, scoreColor } from '../scoring';
 
 /**
  * Value for the "Compliance score" item added to the cluster Overview Details
@@ -10,7 +11,7 @@ import { clusterScore, scoreColor } from '../utils';
  * Compliance page. Renders nothing meaningful until the ClusterBaseline exists.
  */
 const ClusterScoreItem: React.FC = () => {
-  const { t } = useTranslation('plugin__baseline-security-console-plugin');
+  const { t, i18n } = useTranslation('plugin__baseline-security-console-plugin');
   const [baselines, loaded, error] = useK8sWatchResource<ClusterBaseline[]>({
     groupVersionKind: ClusterBaselineGVK,
     isList: true,
@@ -24,27 +25,29 @@ const ClusterScoreItem: React.FC = () => {
     );
   }
   if (error) {
+    // Distinct from loading "—": API/watch failures must not look like an empty score.
     return (
       <a href="/baseline-security" aria-label={t('Compliance score unavailable')}>
-        —
+        {t('Unavailable')}
       </a>
     );
   }
   const score = clusterScore(baselines);
+  if (score == null) {
+    return (
+      <a href="/baseline-security" aria-label={t('Compliance score not scanned')}>
+        {t('Not scanned')}
+      </a>
+    );
+  }
+  // Locale-aware digits/grouping so ar/fa/hi (and others) match console locale.
+  const scoreText = formatCount(score, i18n.language);
   return (
     <a
       href="/baseline-security"
-      aria-label={
-        score != null
-          ? t('Compliance score {{score}} of 100', { score })
-          : t('Compliance score not scanned')
-      }
+      aria-label={t('Compliance score {{score}} of 100', { score: scoreText })}
     >
-      {score != null ? (
-        <span style={{ color: scoreColor(score) }}>{t('{{score}} / 100', { score })}</span>
-      ) : (
-        t('Not scanned')
-      )}
+      <span style={{ color: scoreColor(score) }}>{t('{{score}} / 100', { score: scoreText })}</span>
     </a>
   );
 };

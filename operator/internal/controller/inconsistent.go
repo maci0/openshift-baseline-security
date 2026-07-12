@@ -22,23 +22,35 @@ const (
 //   - else at least one PASS                  -> PASS (passes where it applies)
 //   - else only NOT-APPLICABLE/SKIP           -> NOT-APPLICABLE
 //   - unknown/empty states                    -> INCONSISTENT (keep the raw signal)
+//
+// Hot path: multi-node pools can yield many INCONSISTENT CCRs per reconcile.
+// Walk annotations with bit flags (no map / Split allocations).
 func effectiveInconsistentStatus(item *unstructured.Unstructured) string {
-	states := inconsistentStates(item)
-	for state := range states {
-		switch state {
-		case "PASS", "FAIL", "ERROR", "NOT-APPLICABLE", "SKIP":
+	var hasPass, hasFail, hasError, hasNA, hasSkip, hasUnknown bool
+	visitInconsistentStates(item, func(st string) {
+		switch st {
+		case "PASS":
+			hasPass = true
+		case "FAIL":
+			hasFail = true
+		case "ERROR":
+			hasError = true
+		case "NOT-APPLICABLE":
+			hasNA = true
+		case "SKIP":
+			hasSkip = true
 		default:
 			// Future or malformed states must fail closed; otherwise UNKNOWN+PASS
 			// would be misreported as a benign PASS.
-			return "INCONSISTENT"
+			hasUnknown = true
 		}
-	}
+	})
 	switch {
-	case states["FAIL"] || states["ERROR"]:
+	case hasUnknown || hasFail || hasError:
 		return "INCONSISTENT"
-	case states["PASS"]:
+	case hasPass:
 		return "PASS"
-	case states["NOT-APPLICABLE"] || states["SKIP"]:
+	case hasNA || hasSkip:
 		return "NOT-APPLICABLE"
 	default:
 		return "INCONSISTENT"
@@ -48,18 +60,41 @@ func effectiveInconsistentStatus(item *unstructured.Unstructured) string {
 // inconsistentStates returns the set of per-node states of an INCONSISTENT check,
 // gathered from the inconsistent-source annotation and most-common-status.
 // Untrusted cluster data: tolerant of malformed values, never panics.
+// Used by fuzz tests; aggregateStatus uses effectiveInconsistentStatus (flags).
 func inconsistentStates(item *unstructured.Unstructured) map[string]bool {
-	ann := item.GetAnnotations()
 	states := map[string]bool{}
-	for _, s := range strings.Split(ann[inconsistentSourceAnn], ",") {
-		if i := strings.IndexByte(s, ':'); i >= 0 {
-			if st := strings.ToUpper(strings.TrimSpace(s[i+1:])); st != "" {
-				states[st] = true
+	visitInconsistentStates(item, func(st string) {
+		states[st] = true
+	})
+	return states
+}
+
+// visitInconsistentStates walks CO inconsistent annotations and calls fn with
+// each uppercased state token. Single-key annotation reads avoid GetAnnotations()
+// full-map copy; comma walk avoids strings.Split on multi-node pools.
+func visitInconsistentStates(item *unstructured.Unstructured, fn func(string)) {
+	raw := unstructuredAnnotation(item.Object, inconsistentSourceAnn)
+	start := 0
+	for start <= len(raw) {
+		comma := strings.IndexByte(raw[start:], ',')
+		end := len(raw)
+		if comma >= 0 {
+			end = start + comma
+		}
+		s := strings.TrimSpace(raw[start:end])
+		if s != "" {
+			if i := strings.IndexByte(s, ':'); i >= 0 {
+				if st := strings.ToUpper(strings.TrimSpace(s[i+1:])); st != "" {
+					fn(st)
+				}
 			}
 		}
+		if comma < 0 {
+			break
+		}
+		start = end + 1
 	}
-	if mc := strings.ToUpper(strings.TrimSpace(ann[mostCommonStatusAnn])); mc != "" {
-		states[mc] = true
+	if mc := strings.ToUpper(strings.TrimSpace(unstructuredAnnotation(item.Object, mostCommonStatusAnn))); mc != "" {
+		fn(mc)
 	}
-	return states
 }

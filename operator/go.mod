@@ -1,6 +1,6 @@
 module github.com/maci0/baseline-security-operator
 
-go 1.25.0
+go 1.25.9
 
 require (
 	github.com/go-logr/logr v1.4.3

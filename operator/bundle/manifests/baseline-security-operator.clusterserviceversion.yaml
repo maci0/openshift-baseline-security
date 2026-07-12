@@ -16,7 +16,7 @@ metadata:
     capabilities: Seamless Upgrades
     categories: Security
     containerImage: quay.io/openshift-baseline-security/baseline-security-operator:0.4.0
-    repository: https://github.com/maci0/baseline-security-operator
+    repository: https://github.com/maci0/openshift-baseline-security
     description: Baseline benchmark compliance scanning with a native console UI,
       built on the Red Hat Compliance Operator.
     features.operators.openshift.io/fips-compliant: "false"
@@ -51,7 +51,7 @@ spec:
     name: openshift-baseline-security
   links:
     - name: Source
-      url: https://github.com/maci0/baseline-security-operator
+      url: https://github.com/maci0/openshift-baseline-security
   # Install into openshift-baseline-security so RBAC subjects and the metrics
   # Service match the ServiceAccount namespace in the bundle manifests.
   installModes:
@@ -78,9 +78,14 @@ spec:
       permissions:
         - serviceAccountName: baseline-security-operator
           rules:
+            # create cannot use resourceNames; mutate only the LeaderElectionID lease.
             - apiGroups: [coordination.k8s.io]
               resources: [leases]
-              verbs: [get, list, watch, create, update, patch, delete]
+              verbs: [create]
+            - apiGroups: [coordination.k8s.io]
+              resources: [leases]
+              resourceNames: [baseline-security-operator-lock]
+              verbs: [get, update, patch, delete]
             - apiGroups: [""]
               resources: [events]
               verbs: [create, patch]
@@ -92,7 +97,7 @@ spec:
               verbs: [create, get, list, watch]
             - apiGroups: [""]
               resources: [configmaps]
-              verbs: [create, get, list, patch, update, watch]
+              verbs: [create, get, patch, update]
             - apiGroups: [""]
               resources: [services]
               verbs: [create, delete, get, list, patch, update, watch]
@@ -101,6 +106,9 @@ spec:
               verbs: [get, list, watch]
             - apiGroups: [apps]
               resources: [deployments]
+              verbs: [create, delete, get, list, patch, update, watch]
+            - apiGroups: [policy]
+              resources: [poddisruptionbudgets]
               verbs: [create, delete, get, list, patch, update, watch]
             - apiGroups: [baselinesecurity.io]
               resources: [clusterbaselines]
@@ -134,7 +142,7 @@ spec:
               verbs: [get, list, watch]
             - apiGroups: [operators.coreos.com]
               resources: [operatorgroups]
-              verbs: [create, get, list, watch]
+              verbs: [create, get, list, patch, update, watch]
             - apiGroups: [operators.coreos.com]
               resources: [subscriptions]
               verbs: [create, get, list, patch, update, watch]
@@ -148,6 +156,11 @@ spec:
         - name: baseline-security-operator
           spec:
             replicas: 2
+            strategy:
+              type: RollingUpdate
+              rollingUpdate:
+                maxUnavailable: 1
+                maxSurge: 1
             selector:
               matchLabels:
                 app: baseline-security-operator
@@ -157,6 +170,7 @@ spec:
                   app: baseline-security-operator
               spec:
                 serviceAccountName: baseline-security-operator
+                enableServiceLinks: false
                 securityContext:
                   runAsNonRoot: true
                   seccompProfile:
@@ -178,6 +192,7 @@ spec:
                       - --metrics-bind-address=:8443
                       - --metrics-secure=true
                       - --metrics-cert-dir=/var/run/metrics-certs
+                      - --health-probe-bind-address=:8081
                     env:
                       - name: RELATED_IMAGE_CONSOLE_PLUGIN
                         value: quay.io/openshift-baseline-security/baseline-security-console-plugin:0.4.0
@@ -187,13 +202,17 @@ spec:
                         protocol: TCP
                     securityContext:
                       allowPrivilegeEscalation: false
+                      privileged: false
                       capabilities:
                         drop: [ALL]
                       readOnlyRootFilesystem: true
+                      runAsNonRoot: true
                     volumeMounts:
                       - name: metrics-certs
                         mountPath: /var/run/metrics-certs
                         readOnly: true
+                      - name: tmp
+                        mountPath: /tmp
                     livenessProbe:
                       httpGet:
                         path: /healthz
@@ -217,12 +236,16 @@ spec:
                       limits:
                         cpu: 500m
                         memory: 256Mi
+                    terminationMessagePolicy: FallbackToLogsOnError
                 volumes:
                   - name: metrics-certs
                     secret:
                       secretName: baseline-security-operator-metrics-cert
                       optional: true
                       defaultMode: 0400
+                  - name: tmp
+                    emptyDir:
+                      sizeLimit: 64Mi
   relatedImages:
     - name: manager
       image: quay.io/openshift-baseline-security/baseline-security-operator:0.4.0

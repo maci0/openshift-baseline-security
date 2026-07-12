@@ -1,15 +1,25 @@
 bin/
 *.log
 
-# Not needed by any operator image build context.
+# Shared by operator/Dockerfile, bundle.Dockerfile, and catalog.Dockerfile.
+# Do not exclude bundle/ or catalog/: those contexts need them (COPY fails
+# otherwise). Operator image only COPYs api/cmd/internal so extra context is fine.
 test/
 hack/
 config/
-bundle/
-catalog/
 **/*_test.go
 internal/controller/testdata/
 Makefile
 .golangci.yml
 .dockerignore
 *.md
+# Keep secrets and VCS metadata out of the image build context.
+.env
+.env.*
+.git
+.gitignore
+# Local IDE / Python bytecode must not enter the context.
+.vscode/
+.idea/
+**/__pycache__/
+*.py[cod]

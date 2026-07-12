@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"os"
 	"strings"
@@ -43,6 +44,25 @@ func main() {
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 	setupLog := ctrl.Log.WithName("setup")
 
+	// Normalize flag strings so padding from shell/YAML does not change bind
+	// semantics or bypass loopback checks (e.g. " 0 " vs "0").
+	metricsAddr = strings.TrimSpace(metricsAddr)
+	probeAddr = strings.TrimSpace(probeAddr)
+	metricsCertDir = strings.TrimSpace(metricsCertDir)
+
+	// Empty BindAddress is not "disabled": controller-runtime maps it to
+	// ":8080" (all interfaces). Restore the flag default instead.
+	if metricsAddr == "" {
+		setupLog.Info("metrics-bind-address empty; using :8443")
+		metricsAddr = ":8443"
+	}
+	// Empty probe address disables the manager endpoints while the Deployment
+	// still probes :8081, so the pod never becomes Ready. Fail fast.
+	if probeAddr == "" {
+		setupLog.Error(errEmptyHealthProbeAddr, "health-probe-bind-address must not be empty (Deployment probes :8081)")
+		os.Exit(1)
+	}
+
 	if !secureMetrics && metricsAddr != "0" && !isLoopbackMetricsAddr(metricsAddr) {
 		setupLog.Info("refusing non-loopback insecure metrics; forcing metrics-secure=true",
 			"metricsBindAddress", metricsAddr)
@@ -51,8 +71,11 @@ func main() {
 
 	// Non-secret config only. RELATED_IMAGE value is logged as set/unset so a
 	// misdeployed pod is obvious without printing the image pull path.
-	relatedImageSet := os.Getenv("RELATED_IMAGE_CONSOLE_PLUGIN") != ""
-	skipDefaultCR := os.Getenv("BASELINE_SECURITY_SKIP_DEFAULT_CR") == "true"
+	relatedImage := strings.TrimSpace(os.Getenv("RELATED_IMAGE_CONSOLE_PLUGIN"))
+	relatedImageSet := relatedImage != ""
+	// Log only validity so registry paths never hit stdout.
+	relatedImageValid := relatedImageSet && controller.ValidRelatedImage(relatedImage)
+	skipDefaultCR := envTruthy("BASELINE_SECURITY_SKIP_DEFAULT_CR")
 	setupLog.Info("configuration",
 		"metricsBindAddress", metricsAddr,
 		"metricsSecure", secureMetrics,
@@ -60,10 +83,13 @@ func main() {
 		"healthProbeBindAddress", probeAddr,
 		"leaderElect", enableLeaderElection,
 		"relatedImageConsolePluginSet", relatedImageSet,
+		"relatedImageConsolePluginValid", relatedImageValid,
 		"skipDefaultClusterBaseline", skipDefaultCR,
 	)
 	if !relatedImageSet {
 		setupLog.Info("RELATED_IMAGE_CONSOLE_PLUGIN is unset; console plugin stays ImageMissing until the env is fixed")
+	} else if !relatedImageValid {
+		setupLog.Info("RELATED_IMAGE_CONSOLE_PLUGIN is set but not a valid image reference; console plugin stays ImageInvalid until the env is fixed")
 	}
 
 	metricsServerOptions := metricsserver.Options{
@@ -120,6 +146,9 @@ func main() {
 	}
 }
 
+// errEmptyHealthProbeAddr is logged when --health-probe-bind-address is empty.
+var errEmptyHealthProbeAddr = errors.New("empty health-probe-bind-address")
+
 // isLoopbackMetricsAddr is true for disabled ("0") or explicit
 // 127.0.0.1 / localhost binds. Empty is NOT safe: controller-runtime
 // defaults an empty BindAddress to ":8080" (all interfaces).
@@ -134,4 +163,15 @@ func isLoopbackMetricsAddr(addr string) bool {
 	// "[::1]:8443" is loopback; ":8443" binds all interfaces (not loopback).
 	host = strings.Trim(host, "[]")
 	return host == "127.0.0.1" || host == "localhost" || host == "::1"
+}
+
+// envTruthy is true for common affirmative env values (true/1/yes), after
+// trim and case-fold. Empty, "false", "0", and junk are false.
+func envTruthy(key string) bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(key))) {
+	case "1", "true", "yes":
+		return true
+	default:
+		return false
+	}
 }

@@ -12,6 +12,12 @@ metadata:
     app: baseline-security-operator
 spec:
   replicas: 2
+  # Keep one ready replica during rollout (matches 2-replica HA + anti-affinity).
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 1
   selector:
     matchLabels:
       app: baseline-security-operator
@@ -21,6 +27,8 @@ spec:
         app: baseline-security-operator
     spec:
       serviceAccountName: baseline-security-operator
+      # Avoid injecting KUBERNETES_* service env for every Service in the NS.
+      enableServiceLinks: false
       securityContext:
         runAsNonRoot: true
         seccompProfile:
@@ -39,27 +47,45 @@ spec:
         # rewrites both refs before apply. OLM installs use versioned CSV tags.
         - name: manager
           image: quay.io/openshift-baseline-security/baseline-security-operator:latest
+          # Base uses :latest; Always avoids a stale local digest after rebuild.
+          # make deploy with a versioned/digest ref still works (re-pull is fine).
+          imagePullPolicy: Always
           args:
             - --leader-elect
             - --metrics-bind-address=:8443
             - --metrics-secure=true
             - --metrics-cert-dir=/var/run/metrics-certs
+            # Must match liveness/readiness probe ports below (not only flag default).
+            - --health-probe-bind-address=:8081
           env:
+            # Image the operator deploys for the console plugin. OLM maps
+            # relatedImages; make deploy rewrites this from PLUGIN_IMG.
             - name: RELATED_IMAGE_CONSOLE_PLUGIN
               value: quay.io/openshift-baseline-security/baseline-security-console-plugin:latest
+            # Optional: set to "true" (also accepts 1/yes) to skip creating
+            # ClusterBaseline/cluster when none exist.
+            # - name: BASELINE_SECURITY_SKIP_DEFAULT_CR
+            #   value: "true"
           ports:
             - name: https-metrics
               containerPort: 8443
               protocol: TCP
           securityContext:
             allowPrivilegeEscalation: false
+            # Explicit false: do not rely on API default if a mutating webhook
+            # or prior hand-edit left Privileged set before this container replace.
+            privileged: false
             capabilities:
               drop: ["ALL"]
             readOnlyRootFilesystem: true
+            runAsNonRoot: true
           volumeMounts:
             - name: metrics-certs
               mountPath: /var/run/metrics-certs
               readOnly: true
+            # Writable scratch for GO/runtime temp with read-only rootfs.
+            - name: tmp
+              mountPath: /tmp
           livenessProbe:
             httpGet:
               path: /healthz
@@ -83,6 +109,8 @@ spec:
             limits:
               cpu: 500m
               memory: 256Mi
+          # Prefer logs when the process dies before writing /dev/termination-log.
+          terminationMessagePolicy: FallbackToLogsOnError
       volumes:
         - name: metrics-certs
           secret:
@@ -90,3 +118,21 @@ spec:
             optional: true
             # Private key must not be group/world-readable inside the pod.
             defaultMode: 0400
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
+---
+# Keep one replica during voluntary disruptions (drain/upgrade). Preferred
+# anti-affinity alone does not block eviction of both pods.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: baseline-security-operator
+  namespace: openshift-baseline-security
+  labels:
+    app: baseline-security-operator
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: baseline-security-operator

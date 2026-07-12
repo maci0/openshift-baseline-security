@@ -31,7 +31,8 @@ Legend: `[x]` done · `[ ]` planned · **(H/M/L)** rough value.
 ### Console plugin (React 18 / PatternFly 6 / SDK 4.22)
 - [x] Compliance page under **Administration**: Overview, Results,
       Remediations, Profiles (HorizontalNav), rescan button.
-- [x] Composition donut (Pass/Fail/Manual slices) + per-profile score badge.
+- [x] Composition donut (Pass/Fail/Manual/Info/Inconsistent/Error/Waived/N-A
+      slices) + per-profile score badge.
 - [x] Results: VirtualizedTable with status/severity/profile filters,
       human-readable titles, detail modal (description, instructions, link
       to the raw ComplianceCheckResult), CSV export of the filtered view.
@@ -44,16 +45,20 @@ Legend: `[x]` done · `[ ]` planned · **(H/M/L)** rough value.
       `baseline_security_checks{profile,status}`,
       `baseline_security_status_observed_timestamp_seconds` (HA newest
       publisher selection for alerts),
-      `baseline_security_remediation_batch_active`.
+      `baseline_security_remediation_batch_active`,
+      `baseline_security_last_scan_timestamp_seconds`,
+      `baseline_security_newly_failed`,
+      `baseline_security_condition{type}` (Available/Progressing/Degraded).
 - [x] PrometheusRule: `ComplianceScoreLow`, `ComplianceChecksFailing`,
       `ComplianceChecksInError`, `ComplianceStatusStale`,
-      `RemediationBatchStuck`.
+      `ComplianceScanStale`, `ComplianceRegressions`,
+      `RemediationBatchStuck`, `ClusterBaselineDegraded`.
 - [x] Aggregated `baseline-security-viewer` / `-admin` ClusterRoles.
 
 ### 0.3 additions
 - [x] TailoredProfile binding (`spec.tailoredProfiles`) + tailored results in
       score/status; scheduled next-run time; `relatedObjects` +
-      `hack/must-gather.sh`.
+      `operator/hack/must-gather.sh`.
 - [x] Prometheus metrics + PrometheusRule alerts.
 - [x] UI: composition donut, per-profile + tailored score cards, CSV export,
       check-resource deep-link, remediation rendered-object view + MCP-aware
@@ -102,8 +107,8 @@ Legend: `[x]` done · `[ ]` planned · **(H/M/L)** rough value.
 ### Operator / API
 - [x] **(M)** Watch compliance CRs (Scan/Remediation/CheckResult) via a lazy
       dynamic informer that starts once the CRDs register and tolerates
-      CRD-absent startup; events reconcile the singleton at once. The 1-minute
-      poll is kept as a fallback (strictly additive).
+      CRD-absent startup; events reconcile the singleton at once. Poll requeue
+      remains as fallback (1m steady, 15s while Progressing or batch Applying).
 
 ## Productization
 

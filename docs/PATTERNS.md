@@ -22,13 +22,20 @@ half shaped exactly like its standalone counterpart so a later split is
 API is `v1alpha1`. Consumer notes live in root `CHANGELOG.md` (Keep a Changelog).
 Version strings must match across `operator/Makefile` (`VERSION` /
 `PREV_VERSION` for the OLM `replaces` edge), the CSV
-(`bundle/manifests/baseline-security-operator.clusterserviceversion.yaml`), and
-`console-plugin/package.json` (`version` and `consolePlugin.version`).
+(`bundle/manifests/baseline-security-operator.clusterserviceversion.yaml`
+name/version/replaces/containerImage/image tags), `console-plugin/package.json`
+(`version` and `consolePlugin.version`), `CHANGELOG.md` (`## [VERSION]`,
+`## [PREV_VERSION]`, `## [Unreleased]`, and the `[VERSION]:` /
+`[Unreleased]: ...vVERSION...HEAD` compare footers), and root `README.md`
+(**Current release** and the upgrade-path chain ending at `VERSION`).
 `make verify-versions` (also run from `make bundle` and CI) enforces that.
-Never reuse a published CSV/image tag; OLM unpack caches make same-tag
-republishes serve stale content. Breaking behavior in 0.x is allowed in minor
-bumps but must be called out under Changed/Removed in the changelog with a
-migration note.
+Each published cut also needs an immutable git tag `vVERSION` (never
+force-moved) so changelog compare URLs resolve. Never reuse a published
+CSV/image tag; OLM unpack caches make same-tag republishes serve stale
+content. Breaking behavior in 0.x is allowed in minor bumps but must be
+called out under Changed/Removed in the changelog with a migration note.
+Only the latest 0.x line is supported (no backports); see CHANGELOG support
+window.
 
 **Pattern**: two models.
 - Payload components: `main` tracks the next OCP; `release-4.y` branches cut
@@ -76,11 +83,12 @@ answer. Bounded lists in status (no unbounded growth).
 
 **Here**: `ClusterBaseline/cluster` with CEL name enforcement, conditions
 with `observedGeneration` (`Available` / `Progressing` / `Degraded`
-rollups plus `ComplianceOperatorReady`, `ScanConfigured`,
-`ConsolePluginReady`), score + per-profile counts (suite-scoped to
-`baseline-<profile>` bindings), history capped at 30 (oldest first),
-printer columns Score / Last Scan. Manager and plugin Deployments use 2
-replicas with preferred pod anti-affinity; manager uses leader election.
+rollups plus detail `ComplianceOperatorReady`, `ScanConfigured`,
+`ScanStorageReady`, `ConsolePluginReady`), score + per-profile counts
+(suite-scoped to `baseline-<profile>` bindings), history capped at 30
+(oldest first), printer columns Score / Last Scan. Manager and plugin
+Deployments use 2 replicas with preferred pod anti-affinity; manager uses
+leader election.
 
 ## 5. Console dynamic plugin
 

@@ -2,6 +2,8 @@ package controller
 
 import (
 	"context"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -226,9 +228,222 @@ func TestConditionProgressing(t *testing.T) {
 	if conditionProgressing(&metav1.Condition{Status: metav1.ConditionFalse, Reason: "ImageMissing"}) {
 		t.Fatal("ImageMissing is permanent misconfig, not progress")
 	}
+	if conditionProgressing(&metav1.Condition{Status: metav1.ConditionFalse, Reason: "ImageInvalid"}) {
+		t.Fatal("ImageInvalid is permanent misconfig, not progress")
+	}
 	if conditionProgressing(&metav1.Condition{Status: metav1.ConditionFalse, Reason: "Unavailable"}) {
 		t.Fatal("Unavailable should not progress")
 	}
+}
+
+func TestValidRelatedImage(t *testing.T) {
+	for _, ref := range []string{
+		"nginx",
+		"quay.io/org/plugin:1.0",
+		"registry.example.com:5000/ns/img:tag",
+		"example.test/plugin@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+	} {
+		if !ValidRelatedImage(ref) {
+			t.Errorf("%q should be valid", ref)
+		}
+	}
+	for _, ref := range []string{
+		"",
+		"has space",
+		"bad!!!",
+		"cmd;inject",
+		"$(boom)",
+		"img%20name",
+		"img#frag",
+		`img\path`,
+		strings.Repeat("a", 1025),
+	} {
+		if ValidRelatedImage(ref) {
+			t.Errorf("%q should be invalid", ref)
+		}
+	}
+}
+
+// relatedImageConsolePlugin trims whitespace so a mis-set env (padding, empty
+// quotes) does not create a Deployment with an unpullable image ref.
+func TestRelatedImageConsolePluginTrim(t *testing.T) {
+	const key = "RELATED_IMAGE_CONSOLE_PLUGIN"
+	prev, had := os.LookupEnv(key)
+	t.Cleanup(func() {
+		if had {
+			_ = os.Setenv(key, prev)
+		} else {
+			_ = os.Unsetenv(key)
+		}
+	})
+
+	if err := os.Unsetenv(key); err != nil {
+		t.Fatal(err)
+	}
+	if got := relatedImageConsolePlugin(); got != "" {
+		t.Fatalf("unset env = %q, want empty", got)
+	}
+
+	if err := os.Setenv(key, "   "); err != nil {
+		t.Fatal(err)
+	}
+	if got := relatedImageConsolePlugin(); got != "" {
+		t.Fatalf("whitespace-only env = %q, want empty", got)
+	}
+
+	if err := os.Setenv(key, "  quay.io/org/plugin:1.0  "); err != nil {
+		t.Fatal(err)
+	}
+	if got := relatedImageConsolePlugin(); got != "quay.io/org/plugin:1.0" {
+		t.Fatalf("padded env = %q, want trimmed image", got)
+	}
+}
+
+// FuzzValidRelatedImage: RELATED_IMAGE_CONSOLE_PLUGIN is untrusted env text.
+// Must never panic; rejects empty, oversize, control chars, and shell/URL noise;
+// accepts only when at least one alnum is present and no forbidden metachar.
+func FuzzValidRelatedImage(f *testing.F) {
+	for _, seed := range []string{
+		"", "nginx", "quay.io/org/plugin:1.0", "has space", "cmd;inject",
+		"$(boom)", "img%20", "img#frag", `img\path`,
+		strings.Repeat("a", 1024), strings.Repeat("a", 1025),
+		"registry:5000/ns/img@sha256:dead", "!!!", "\x00img", "img\n",
+	} {
+		f.Add(seed)
+	}
+	// Bound work: oversize refs are a single reject path.
+	const maxSeed = 2048
+	f.Fuzz(func(t *testing.T, ref string) {
+		if len(ref) > maxSeed {
+			ref = ref[:maxSeed]
+		}
+		got := ValidRelatedImage(ref)
+		if ref == "" || len(ref) > 1024 {
+			if got {
+				t.Fatalf("empty/oversize accepted: len=%d", len(ref))
+			}
+			return
+		}
+		for _, r := range ref {
+			if r <= 0x20 || r == 0x7f {
+				if got {
+					t.Fatalf("control/space accepted: %q", ref)
+				}
+				return
+			}
+		}
+		if strings.ContainsAny(ref, "<>|;&$`\\\"'*?[]{}()!%#\\") {
+			if got {
+				t.Fatalf("metachar accepted: %q", ref)
+			}
+			return
+		}
+		hasAlnum := false
+		for _, r := range ref {
+			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+				hasAlnum = true
+				break
+			}
+		}
+		if got != hasAlnum {
+			t.Fatalf("ValidRelatedImage(%q) = %v, want %v", ref, got, hasAlnum)
+		}
+	})
+}
+
+// FuzzUnstructuredMetadataReads: CCR/remediation metadata maps are untrusted
+// cluster JSON. Labels/annotations may be map[string]string, map[string]any, or
+// the wrong type entirely. Helpers must never panic and must return "" on
+// missing/wrong types; string values round-trip when present.
+func FuzzUnstructuredMetadataReads(f *testing.F) {
+	f.Add("name", "suite-a", "ann-v", "label-v", byte(0))
+	f.Add("", "", "", "", byte(1))
+	f.Add("x", "baseline-cis", "k", "v", byte(2))
+	f.Add(strings.Repeat("n", 300), strings.Repeat("s", 300), "a", "l", byte(3))
+	f.Fuzz(func(t *testing.T, name, suite, annVal, labelVal string, shape byte) {
+		const max = 512
+		if len(name) > max {
+			name = name[:max]
+		}
+		if len(suite) > max {
+			suite = suite[:max]
+		}
+		if len(annVal) > max {
+			annVal = annVal[:max]
+		}
+		if len(labelVal) > max {
+			labelVal = labelVal[:max]
+		}
+
+		meta := map[string]any{}
+		if name != "" {
+			meta["name"] = name
+		}
+		// Exercise typed and untyped maps, plus deliberate type confusion.
+		switch shape % 4 {
+		case 0:
+			meta["labels"] = map[string]string{"compliance.openshift.io/suite": suite, "k": labelVal}
+			meta["annotations"] = map[string]string{"a": annVal}
+		case 1:
+			meta["labels"] = map[string]any{"compliance.openshift.io/suite": suite, "k": labelVal}
+			meta["annotations"] = map[string]any{"a": annVal}
+		case 2:
+			// Wrong types: must not panic; reads return "".
+			meta["labels"] = suite
+			meta["annotations"] = 42
+			meta["name"] = []any{name}
+		default:
+			// Non-string values inside map[string]any.
+			meta["labels"] = map[string]any{"compliance.openshift.io/suite": 7, "k": true}
+			meta["annotations"] = map[string]any{"a": map[string]any{"nested": annVal}}
+		}
+
+		obj := map[string]any{"metadata": meta}
+		// Never panic on any shape.
+		gotName := unstructuredName(obj)
+		gotLabel := unstructuredLabel(obj, "compliance.openshift.io/suite")
+		gotAnn := unstructuredAnnotation(obj, "a")
+		gotMissing := unstructuredLabel(obj, "does-not-exist")
+		if gotMissing != "" {
+			t.Fatalf("missing label returned %q", gotMissing)
+		}
+		// Empty / nil metadata.
+		if unstructuredName(nil) != "" || unstructuredLabel(nil, "k") != "" {
+			t.Fatal("nil object must yield empty reads")
+		}
+		if unstructuredName(map[string]any{}) != "" {
+			t.Fatal("empty object must yield empty name")
+		}
+
+		switch shape % 4 {
+		case 0, 1:
+			if name != "" && gotName != name {
+				t.Fatalf("name: got %q want %q", gotName, name)
+			}
+			if gotLabel != suite {
+				t.Fatalf("suite label: got %q want %q", gotLabel, suite)
+			}
+			if gotAnn != annVal {
+				t.Fatalf("annotation: got %q want %q", gotAnn, annVal)
+			}
+			// stringMapValue on typed map[string]string.
+			if shape%4 == 0 {
+				if v := stringMapValue(meta["labels"], "k"); v != labelVal {
+					t.Fatalf("stringMapValue typed: got %q want %q", v, labelVal)
+				}
+			}
+		case 2:
+			// name was a non-string; labels/annotations wrong type.
+			if gotName != "" || gotLabel != "" || gotAnn != "" {
+				t.Fatalf("wrong types must yield empty: name=%q label=%q ann=%q", gotName, gotLabel, gotAnn)
+			}
+		default:
+			// Non-string values inside any-maps: cast fails -> "".
+			if gotLabel != "" || gotAnn != "" {
+				t.Fatalf("non-string map values must yield empty: label=%q ann=%q", gotLabel, gotAnn)
+			}
+		}
+	})
 }
 
 func TestRequeueAfter(t *testing.T) {

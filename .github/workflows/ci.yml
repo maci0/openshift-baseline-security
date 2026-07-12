@@ -7,10 +7,11 @@ on:
     - cron: '0 3 * * *'
   workflow_dispatch:
 
-# Least privilege: jobs only need to read the repo. Secrets (e.g. E2E_KUBECONFIG)
-# remain available to steps that reference them.
+# Least privilege: read the repo; write Actions cache (setup-go/yarn + buildx).
+# Secrets (e.g. E2E_KUBECONFIG) remain available to steps that reference them.
 permissions:
   contents: read
+  actions: write
 
 # Cancel superseded runs on the same ref so PRs do not pile up queue time.
 concurrency:
@@ -33,16 +34,13 @@ jobs:
       - run: make test
       - run: make lint
       - run: go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 ./...
-      - name: install uv
-        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
-        with:
-          version: "0.11.21"
       - run: make test-alerts
       - name: verify generated files are current
         run: |
           make generate manifests
           git diff --exit-code
       - run: make verify-csv-rbac
+      - run: make verify-monitoring-bundle
       - run: make verify-versions
       - name: validate OLM bundle
         run: make bundle
@@ -57,10 +55,13 @@ jobs:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
-          node-version: 22
+          # Same major as package.json engines / .nvmrc (22.x; not a floating "latest").
+          node-version-file: console-plugin/.nvmrc
           cache: yarn
           cache-dependency-path: console-plugin/yarn.lock
-      - run: npm i -g corepack && corepack enable
+      # Node 22 ships corepack; do not npm i -g corepack (unpinned latest).
+      # package.json packageManager pins yarn@4.14.1; enable so that pin is honored.
+      - run: corepack enable
       - run: yarn install --immutable
       - run: yarn npm audit --all --recursive
       - run: yarn lint
@@ -111,16 +112,86 @@ jobs:
             exit 0
           fi
           umask 077
-          echo "$E2E_KUBECONFIG" | base64 -d > "$RUNNER_TEMP/kubeconfig"
-          export KUBECONFIG="$RUNNER_TEMP/kubeconfig"
+          kubeconfig="$RUNNER_TEMP/kubeconfig"
+          # Always remove the decoded kubeconfig, including on test failure.
+          trap 'rm -f "$kubeconfig"' EXIT
+          echo "$E2E_KUBECONFIG" | base64 -d > "$kubeconfig"
+          # Fail fast on a corrupt secret (bad base64 padding / non-YAML) before
+          # e2e spends minutes on API errors that look like cluster problems.
+          if ! kubectl --kubeconfig="$kubeconfig" config view --raw >/dev/null 2>&1; then
+            echo "E2E_KUBECONFIG did not decode to a valid kubeconfig" >&2
+            exit 1
+          fi
+          export KUBECONFIG="$kubeconfig"
           make test-e2e
 
   images:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     needs: [operator, console-plugin]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: operator
+            context: operator
+            file: operator/Dockerfile
+            tag: baseline-security-operator
+          - name: bundle
+            context: operator
+            file: operator/bundle.Dockerfile
+            tag: baseline-security-operator-bundle
+          - name: console-plugin
+            context: console-plugin
+            file: console-plugin/Dockerfile
+            tag: baseline-security-console-plugin
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-      - run: docker build -t baseline-security-operator operator/
-      - run: docker build -f operator/bundle.Dockerfile -t baseline-security-operator-bundle operator/
-      - run: docker build -t baseline-security-console-plugin console-plugin/
+      - uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+      # --pull: re-verify digest-pinned bases (runners may have a stale local tag).
+      # --provenance/--sbom false: attestations embed build metadata and make digests non-reproducible.
+      # GHA layer cache speeds rebuilds; scopes are per matrix image so caches do not collide.
+      - name: build ${{ matrix.name }}
+        run: |
+          docker buildx build --load --pull --provenance=false --sbom=false \
+            --cache-from type=gha,scope=${{ matrix.tag }} \
+            --cache-to type=gha,mode=max,scope=${{ matrix.tag }},ignore-error=true \
+            -f "${{ matrix.file }}" -t "${{ matrix.tag }}" "${{ matrix.context }}"
+      # Runtime images must not default to root (bundle is FROM scratch / unpacked, not executed).
+      - name: verify non-root USER
+        if: matrix.name == 'operator' || matrix.name == 'console-plugin'
+        run: |
+          user=$(docker image inspect -f '{{.Config.User}}' "${{ matrix.tag }}")
+          echo "Config.User=${user}"
+          test -n "${user}"
+          test "${user}" != "0"
+          test "${user}" != "root"
+          test "${user}" != "0:0"
+
+  # Catalog image depends on a local bundle image (opm render); not parallel with the matrix.
+  # Only needs operator checks (bundle/CSV live under operator/); plugin job is independent.
+  catalog:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: [operator]
+    defaults:
+      run:
+        working-directory: operator
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+      - name: build bundle then catalog
+        run: |
+          docker buildx build --load --pull --provenance=false --sbom=false \
+            --cache-from type=gha,scope=bundle \
+            --cache-to type=gha,mode=max,scope=bundle,ignore-error=true \
+            -f bundle.Dockerfile -t baseline-security-operator-bundle:ci .
+          make catalog-build BUNDLE_IMG=baseline-security-operator-bundle:ci CATALOG_IMG=baseline-security-operator-catalog:ci
+      - name: verify catalog non-root USER
+        run: |
+          user=$(docker image inspect -f '{{.Config.User}}' baseline-security-operator-catalog:ci)
+          echo "Config.User=${user}"
+          test -n "${user}"
+          test "${user}" != "0"
+          test "${user}" != "root"
+          test "${user}" != "0:0"

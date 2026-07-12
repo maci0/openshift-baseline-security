@@ -22,7 +22,7 @@ tests:
               severity: warning
             exp_annotations:
               summary: 'Cluster compliance score is below 80'
-              description: 'The baseline compliance score is 79 (threshold 80). Open Administration -> Compliance, filter Results by Fail, and review newlyFailed on the ClusterBaseline status. Check Degraded and ScanStorageReady conditions if the score is unexpectedly low.'
+              description: 'The baseline compliance score is 79 (threshold 80). Open Administration -> Compliance, filter Results by Fail, and review newlyFailed on the ClusterBaseline status. Check Degraded and ScanStorageReady conditions if the score is unexpectedly low. CLI: oc get clusterbaseline cluster -o yaml; operator/hack/must-gather.sh'
 
   # Score exactly at the threshold does not fire (expr is `< 80`).
   - interval: 1m
@@ -80,7 +80,7 @@ tests:
               severity: warning
             exp_annotations:
               summary: 'Compliance checks are failing'
-              description: '5 compliance check(s) are failing across the selected benchmark profiles. Open Administration -> Compliance -> Results (status=Fail). Compare status.newlyFailed vs fixed for regressions.'
+              description: '5 compliance check(s) are failing across the selected benchmark profiles. Open Administration -> Compliance -> Results (status=Fail). Compare status.newlyFailed vs fixed for regressions. CLI: oc get compliancecheckresults -n openshift-compliance'
 
   # Zero failing checks: no alert.
   - interval: 1m
@@ -114,7 +114,7 @@ tests:
               severity: warning
             exp_annotations:
               summary: 'Cluster compliance score is below 80'
-              description: 'The baseline compliance score is 70 (threshold 80). Open Administration -> Compliance, filter Results by Fail, and review newlyFailed on the ClusterBaseline status. Check Degraded and ScanStorageReady conditions if the score is unexpectedly low.'
+              description: 'The baseline compliance score is 70 (threshold 80). Open Administration -> Compliance, filter Results by Fail, and review newlyFailed on the ClusterBaseline status. Check Degraded and ScanStorageReady conditions if the score is unexpectedly low. CLI: oc get clusterbaseline cluster -o yaml; operator/hack/must-gather.sh'
 
   # ComplianceChecksInError fires on ERROR (not FAIL) after 30m.
   - interval: 1m
@@ -131,7 +131,7 @@ tests:
               severity: warning
             exp_annotations:
               summary: 'Compliance checks are in ERROR state'
-              description: '3 compliance check(s) are in ERROR (not merely FAIL). Inspect ComplianceCheckResult objects in openshift-compliance and Compliance Operator pod logs; ERROR often means a scan/runtime problem rather than a policy violation.'
+              description: '3 compliance check(s) are in ERROR (not merely FAIL). Inspect ComplianceCheckResult objects in openshift-compliance and Compliance Operator pod logs; ERROR often means a scan/runtime problem rather than a policy violation. CLI: oc logs -n openshift-compliance deploy/compliance-operator --tail=200'
 
   # Zero ERROR checks: no ComplianceChecksInError.
   - interval: 1m
@@ -158,7 +158,7 @@ tests:
               severity: critical
             exp_annotations:
               summary: 'Baseline security status metrics are stale'
-              description: 'ClusterBaseline metrics have not been published recently (or never). Check the baseline-security-operator Deployment and pod logs in openshift-baseline-security, leader election, and that user-workload monitoring scrapes the metrics ServiceMonitor.'
+              description: 'ClusterBaseline metrics have not been published recently (or never). Check the baseline-security-operator Deployment and pod logs in openshift-baseline-security, leader election, and that user-workload monitoring scrapes the metrics ServiceMonitor. CLI: oc -n openshift-baseline-security get pods,servicemonitor; oc -n openshift-baseline-security logs deploy/baseline-security-operator --tail=200'
 
   # Fresh timestamp: ComplianceStatusStale must not fire.
   # eval_time 16m => unix ~960; timestamp 900 => age 60s < 900s threshold.
@@ -186,7 +186,7 @@ tests:
               severity: critical
             exp_annotations:
               summary: 'Remediation batch has not completed'
-              description: 'A MachineConfigPool-paused remediation batch has been active for over 20m. Inspect ClusterBaseline status.remediationBatch and MachineConfigPool .spec.paused; resume pools if the operator cannot (operator logs mention resume failures). Unpausing without care may trigger node reboots.'
+              description: 'A MachineConfigPool-paused remediation batch has been active for over 20m. Inspect ClusterBaseline status.remediationBatch and MachineConfigPool .spec.paused; resume pools if the operator cannot (operator logs mention resume failures). Unpausing without care may trigger node reboots. CLI: oc get clusterbaseline cluster -o jsonpath=''{.status.remediationBatch}{"\n"}''; oc get mcp -o custom-columns=NAME:.metadata.name,PAUSED:.spec.paused'
 
   # No active batch: RemediationBatchStuck silent.
   - interval: 1m
@@ -215,7 +215,7 @@ tests:
               severity: warning
             exp_annotations:
               summary: 'ClusterBaseline is Degraded'
-              description: 'The ClusterBaseline Degraded condition has been True for 15m. Check status.conditions on ClusterBaseline/cluster (reason and message), operator logs in openshift-baseline-security, and related detail conditions (ComplianceOperatorReady, ScanConfigured, ScanStorageReady, ConsolePluginReady).'
+              description: 'The ClusterBaseline Degraded condition has been True for 15m. Check status.conditions on ClusterBaseline/cluster (reason and message), operator logs in openshift-baseline-security, and related detail conditions (ComplianceOperatorReady, ScanConfigured, ScanStorageReady, ConsolePluginReady). CLI: oc get clusterbaseline cluster -o jsonpath=''{range .status.conditions[*]}{.type}={.status} {.reason} {.message}{"\n"}{end}''; operator/hack/must-gather.sh'
 
   # Degraded=0: ClusterBaselineDegraded silent.
   - interval: 1m
@@ -248,4 +248,78 @@ tests:
               severity: warning
             exp_annotations:
               summary: 'ClusterBaseline is Degraded'
-              description: 'The ClusterBaseline Degraded condition has been True for 15m. Check status.conditions on ClusterBaseline/cluster (reason and message), operator logs in openshift-baseline-security, and related detail conditions (ComplianceOperatorReady, ScanConfigured, ScanStorageReady, ConsolePluginReady).'
+              description: 'The ClusterBaseline Degraded condition has been True for 15m. Check status.conditions on ClusterBaseline/cluster (reason and message), operator logs in openshift-baseline-security, and related detail conditions (ComplianceOperatorReady, ScanConfigured, ScanStorageReady, ConsolePluginReady). CLI: oc get clusterbaseline cluster -o jsonpath=''{range .status.conditions[*]}{.type}={.status} {.reason} {.message}{"\n"}{end}''; operator/hack/must-gather.sh'
+
+  # Last scan far older than 36h: ComplianceScanStale fires after for:1h.
+  # Use 1m samples (matches evaluation_interval) so series stay non-stale while
+  # for:1h accumulates. last_scan=100; condition true once time()>129700 (~36.03h).
+  # _xN expands to N minutes of constant samples (promtool expand syntax).
+  - interval: 1m
+    input_series:
+      - series: 'baseline_security_last_scan_timestamp_seconds{instance="op-1"}'
+        values: '100x2280'
+      - series: 'baseline_security_status_observed_timestamp_seconds{instance="op-1"}'
+        values: '200x2280'
+    alert_rule_test:
+      - eval_time: 38h
+        alertname: ComplianceScanStale
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: 'Last compliance scan is older than 36h'
+              description: 'status.lastScanTime is more than 36 hours old while metrics are still publishing. Check ComplianceSuites/Scans in openshift-compliance, ScanSetting schedule, and that profiles are selected. CLI: oc get clusterbaseline cluster -o jsonpath=''{.status.lastScanTime}{"\n"}{.spec.schedule}{"\n"}''; oc -n openshift-compliance get compliancesuites,compliancescans'
+
+  # Recent last scan: ComplianceScanStale silent.
+  # eval_time 38h => 136800; last_scan 130000 => age 6800s << 129600.
+  - interval: 1m
+    input_series:
+      - series: 'baseline_security_last_scan_timestamp_seconds{instance="op-1"}'
+        values: '130000x2280'
+      - series: 'baseline_security_status_observed_timestamp_seconds{instance="op-1"}'
+        values: '200x2280'
+    alert_rule_test:
+      - eval_time: 38h
+        alertname: ComplianceScanStale
+        exp_alerts: []
+
+  # Never scanned (timestamp 0): ComplianceScanStale silent (install grace).
+  - interval: 1m
+    input_series:
+      - series: 'baseline_security_last_scan_timestamp_seconds{instance="op-1"}'
+        values: '0x2280'
+      - series: 'baseline_security_status_observed_timestamp_seconds{instance="op-1"}'
+        values: '200x2280'
+    alert_rule_test:
+      - eval_time: 38h
+        alertname: ComplianceScanStale
+        exp_alerts: []
+
+  # New FAILs since previous scan: ComplianceRegressions after 30m.
+  - interval: 1m
+    input_series:
+      - series: 'baseline_security_newly_failed{instance="op-1"}'
+        values: '3x40'
+      - series: 'baseline_security_status_observed_timestamp_seconds{instance="op-1"}'
+        values: '100x40'
+    alert_rule_test:
+      - eval_time: 31m
+        alertname: ComplianceRegressions
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: 'New compliance check failures since last scan'
+              description: '3 check(s) newly failed versus the previous completed scan (status.newlyFailed). Open Administration -> Compliance Overview for the regressions list, or filter Results by Fail. CLI: oc get clusterbaseline cluster -o jsonpath=''{.status.newlyFailed}{"\n"}'''
+
+  # No regressions: ComplianceRegressions silent.
+  - interval: 1m
+    input_series:
+      - series: 'baseline_security_newly_failed{instance="op-1"}'
+        values: '0x40'
+      - series: 'baseline_security_status_observed_timestamp_seconds{instance="op-1"}'
+        values: '100x40'
+    alert_rule_test:
+      - eval_time: 31m
+        alertname: ComplianceRegressions
+        exp_alerts: []

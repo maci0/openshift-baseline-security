@@ -107,3 +107,19 @@ func TestEnsureOnceListErrorPropagates(t *testing.T) {
 		t.Fatal("list error must propagate so Start retries")
 	}
 }
+
+func TestIsPermanentDefaultCRError(t *testing.T) {
+	gvr := schema.GroupResource{Group: "baselinesecurity.io", Resource: "clusterbaselines"}
+	if !isPermanentDefaultCRError(apierrors.NewForbidden(gvr, "cluster", nil)) {
+		t.Fatal("Forbidden must be permanent")
+	}
+	if !isPermanentDefaultCRError(apierrors.NewUnauthorized("no token")) {
+		t.Fatal("Unauthorized must be permanent")
+	}
+	if isPermanentDefaultCRError(apierrors.NewServiceUnavailable("blip")) {
+		t.Fatal("ServiceUnavailable must not be permanent")
+	}
+	if isPermanentDefaultCRError(apierrors.NewAlreadyExists(gvr, "cluster")) {
+		t.Fatal("AlreadyExists must not be permanent")
+	}
+}

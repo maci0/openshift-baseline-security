@@ -22,9 +22,15 @@ context: |
     status PASS/FAIL/INFO/MANUAL/ERROR/NOT-APPLICABLE/INCONSISTENT. It has NO
     score and NO waiver/exception concept. Score and waivers are OUR aggregation
     only (ClusterBaseline.status.score, spec.waivers).
-  - score = pooled ratio SUM(PASS)*100 / (SUM(PASS)+SUM(FAIL)) over all owned
-    built-in + tailored suites. MANUAL/INFO/ERROR/INCONSISTENT/NOT-APPLICABLE and
-    waived FAILs are excluded from the denominator.
+  - Before scoring, benign INCONSISTENT (PASS where applicable, NOT-APPLICABLE
+    elsewhere) collapses to PASS or NOT-APPLICABLE; only PASS-vs-FAIL/ERROR
+    node splits stay INCONSISTENT. Waived FAILs move to the Waived bucket.
+  - score is a single pooled ratio across owned built-in + tailored suites
+    (not the mean of per-profile scores). Default Flat mode is
+    pass*100/(pass+fail) integer floor. SeverityWeighted multiplies each
+    PASS/FAIL by fixed weights (high=10, medium=5, low=2, unknown/info/missing=1)
+    before that ratio. Residual INCONSISTENT, MANUAL, INFO, ERROR, WAIVED, and
+    NOT-APPLICABLE are excluded from the denominator in both modes.
   - Node scans run per MachineConfigPool; results consolidate one
     ComplianceCheckResult per rule across nodes; disagreement -> INCONSISTENT with
     a compliance.openshift.io/inconsistent-source annotation.

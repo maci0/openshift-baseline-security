@@ -1,15 +1,16 @@
 import * as React from 'react';
-import { ClusterBaseline, ComplianceCheckResult } from './models';
-import Overview from './components/Overview';
-import ResultsTab from './components/ResultsTab';
-import RemediationsTab from './components/RemediationsTab';
-import ProfilesTab from './components/ProfilesTab';
+import { ClusterBaseline, ComplianceCheckResult } from '../models';
+import Overview from './Overview';
+import ResultsTab from './ResultsTab';
+import RemediationsTab from './RemediationsTab';
+import ProfilesTab from './ProfilesTab';
 
 export type BaselineContextValue = {
   baseline?: ClusterBaseline;
   loaded: boolean;
   // Single shared watch of ComplianceCheckResults (CompliancePage owns it).
   // Overview and Results re-use the list instead of opening parallel watches.
+  // Pre-filtered to baseline-owned suites so tabs do not re-scan foreign CCRs.
   checkResults?: ComplianceCheckResult[];
   checkResultsLoaded?: boolean;
   checkResultsError?: unknown;
@@ -38,11 +39,11 @@ export function ResultsRoute() {
 }
 
 export function RemediationsRoute() {
-  const { baseline } = React.useContext(BaselineContext);
-  return <RemediationsTab baseline={baseline} />;
+  const { baseline, loaded } = React.useContext(BaselineContext);
+  return <RemediationsTab baseline={baseline} baselineLoaded={loaded} />;
 }
 
 export function ProfilesRoute() {
-  const { baseline } = React.useContext(BaselineContext);
-  return <ProfilesTab baseline={baseline} />;
+  const { baseline, loaded } = React.useContext(BaselineContext);
+  return <ProfilesTab baseline={baseline} loaded={loaded} />;
 }

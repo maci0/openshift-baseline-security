@@ -28,7 +28,9 @@ func poolOfRemediation(rem unstructured.Unstructured) string {
 		return role
 	}
 	scan := rem.GetLabels()["compliance.openshift.io/scan-name"]
-	if i := strings.Index(scan, "-node-"); i >= 0 {
+	// LastIndex: tailored profile names may themselves contain "-node-"
+	// (mirrors operator poolFromRemediation).
+	if i := strings.LastIndex(scan, "-node-"); i >= 0 {
 		return scan[i+len("-node-"):]
 	}
 	return ""

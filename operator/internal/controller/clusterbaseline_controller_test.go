@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"maps"
 	"strings"
 	"testing"
 	"time"
@@ -412,8 +413,24 @@ func TestRemediationBatchDeduplicatesNamesAndPreservesQueuedRequest(t *testing.T
 		t.Fatalf("batch remediations = %v, want deduplicated [rem1]", got)
 	}
 	// A second request arriving during this batch must not be deleted when the
-	// first completes; it will start on the next reconcile.
-	cb.Annotations[batchApplyAnnotation] = "rem2"
+	// first completes; it will start on the next reconcile. Persist via the
+	// API (not only the in-memory map): finish re-Gets before clearing so a
+	// concurrent console patch is visible.
+	latest := &baselinev1alpha1.ClusterBaseline{}
+	if err := r.Get(ctx, types.NamespacedName{Name: cb.Name}, latest); err != nil {
+		t.Fatal(err)
+	}
+	ann := maps.Clone(latest.GetAnnotations())
+	if ann == nil {
+		ann = map[string]string{}
+	}
+	ann[batchApplyAnnotation] = "rem2"
+	latest.SetAnnotations(ann)
+	if err := r.Update(ctx, latest); err != nil {
+		t.Fatal(err)
+	}
+	cb.SetAnnotations(ann)
+	cb.SetResourceVersion(latest.GetResourceVersion())
 	gotRem := u(remediationGVK)
 	_ = r.Get(ctx, types.NamespacedName{Namespace: complianceNamespace, Name: "rem1"}, gotRem)
 	_ = unstructured.SetNestedField(gotRem.Object, "Applied", "status", "applicationState")
@@ -865,6 +882,31 @@ func TestRemediationBatchRemovedRequestRecoversWithoutStatus(t *testing.T) {
 	}
 }
 
+// Corrupt batch-started-at must fail closed (past epoch), not reset to "now"
+// which would extend grace and leave MCPs paused another full window.
+func TestEnsureBatchMetadataCorruptStartedAtFailClosed(t *testing.T) {
+	scheme := testScheme(t)
+	cb := newBatchCB()
+	cb.SetAnnotations(map[string]string{
+		batchStartedAtAnnotation: "not-a-timestamp",
+	})
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(cb).
+			WithStatusSubresource(&baselinev1alpha1.ClusterBaseline{}).Build(),
+		Scheme: scheme,
+	}
+	started, err := r.ensureBatchMetadata(context.Background(), cb, []string{"worker"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !batchPastGrace(started, time.Now()) {
+		t.Fatalf("corrupt started-at must be past grace, got %v", started)
+	}
+	if got := cb.Annotations[batchStartedAtAnnotation]; got == "not-a-timestamp" || got == "" {
+		t.Fatalf("corrupt annotation not rewritten: %q", got)
+	}
+}
+
 // TestEnsureComplianceDashboard: the operator creates the console-dashboard
 // ConfigMap in openshift-config-managed, labeled console.openshift.io/dashboard,
 // carrying the embedded Grafana-schema JSON and an owner ref for GC.
@@ -893,8 +935,18 @@ func TestEnsureComplianceDashboard(t *testing.T) {
 	if len(cm.OwnerReferences) != 1 || cm.OwnerReferences[0].UID != "test-uid" {
 		t.Fatalf("missing/incorrect owner ref: %+v", cm.OwnerReferences)
 	}
-	// Idempotent: a second reconcile must not error or duplicate.
+	// Idempotent: a second reconcile must not duplicate or mutate the CM.
 	r.ensureComplianceDashboard(ctx, cb)
+	list := &corev1.ConfigMapList{}
+	if err := r.List(ctx, list, client.InNamespace(dashboardNS)); err != nil {
+		t.Fatal(err)
+	}
+	if len(list.Items) != 1 {
+		t.Fatalf("second call duplicated dashboard: %d ConfigMaps in %s", len(list.Items), dashboardNS)
+	}
+	if got := list.Items[0].Data["baseline-security-compliance.json"]; got != json {
+		t.Fatalf("second call mutated dashboard JSON")
+	}
 }
 
 func TestApplyPluginContainerRemovesUnownedPodPayloads(t *testing.T) {
@@ -905,6 +957,7 @@ func TestApplyPluginContainerRemovesUnownedPodPayloads(t *testing.T) {
 		Containers:            []corev1.Container{{Name: "sidecar", Image: "unreviewed"}},
 		InitContainers:        []corev1.Container{{Name: "init", Image: "unreviewed"}},
 		Volumes:               []corev1.Volume{{Name: "host-data"}},
+		ImagePullSecrets:      []corev1.LocalObjectReference{{Name: "stolen-pull-secret"}},
 		HostNetwork:           true,
 		HostPID:               true,
 		HostIPC:               true,
@@ -922,6 +975,9 @@ func TestApplyPluginContainerRemovesUnownedPodPayloads(t *testing.T) {
 	}
 	if len(pod.InitContainers) != 0 {
 		t.Fatalf("unowned init containers survived reconcile: %+v", pod.InitContainers)
+	}
+	if len(pod.ImagePullSecrets) != 0 {
+		t.Fatalf("imagePullSecrets survived reconcile: %+v", pod.ImagePullSecrets)
 	}
 	if len(pod.Volumes) != 2 {
 		t.Fatalf("volumes = %+v, want serving-cert + tmp", pod.Volumes)
@@ -955,6 +1011,9 @@ func TestApplyPluginContainerRemovesUnownedPodPayloads(t *testing.T) {
 	}
 	if sc.AllowPrivilegeEscalation == nil || *sc.AllowPrivilegeEscalation {
 		t.Fatal("plugin container AllowPrivilegeEscalation must be false")
+	}
+	if sc.Privileged == nil || *sc.Privileged {
+		t.Fatal("plugin container Privileged must be false")
 	}
 	if pod.HostNetwork || pod.HostPID || pod.HostIPC || pod.ShareProcessNamespace != nil ||
 		pod.NodeName != "" || len(pod.NodeSelector) != 0 || len(pod.Tolerations) != 0 ||
@@ -993,6 +1052,9 @@ func TestEffectiveInconsistentStatus(t *testing.T) {
 	}{
 		{"pass-vs-na", "cluster0-node0:PASS", "NOT-APPLICABLE", "PASS"},
 		{"na-most-common-pass-source", "cluster0-node0:NOT-APPLICABLE", "PASS", "PASS"},
+		// All nodes agree PASS: must not stay INCONSISTENT (uniform result).
+		{"all-nodes-pass", "n0:PASS,n1:PASS,n2:PASS", "PASS", "PASS"},
+		{"all-nodes-pass-no-mc", "n0:PASS,n1:PASS", "", "PASS"},
 		{"all-na", "n0:NOT-APPLICABLE", "NOT-APPLICABLE", "NOT-APPLICABLE"},
 		{"real-fail-split", "n0:FAIL", "PASS", "INCONSISTENT"},
 		{"error-present", "n0:ERROR", "PASS", "INCONSISTENT"},
@@ -1270,6 +1332,99 @@ func TestAggregateStatusAllManualNilScore(t *testing.T) {
 	}
 }
 
+// TestAggregateStatusInfoOnlyNilScore: INFO is excluded from the score
+// denominator. An INFO-only profile must leave Score nil (not 0 or 100) so the
+// dashboard does not show a false success/failure color.
+func TestAggregateStatusInfoOnlyNilScore(t *testing.T) {
+	scheme := testScheme(t)
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(
+			checkResult("i1", "baseline-cis", "INFO"),
+			checkResult("i2", "baseline-cis", "INFO"),
+		).Build(),
+		Scheme: scheme,
+	}
+	cb := &baselinev1alpha1.ClusterBaseline{
+		Spec: baselinev1alpha1.ClusterBaselineSpec{Profiles: []baselinev1alpha1.ProfileKey{"cis"}},
+	}
+	if err := r.aggregateStatus(context.Background(), cb); err != nil {
+		t.Fatal(err)
+	}
+	if cb.Status.Score != nil {
+		t.Fatalf("score = %v, want nil for INFO-only", *cb.Status.Score)
+	}
+	if p := cb.Status.Profiles[0]; p.Info != 2 || p.Pass != 0 || p.Fail != 0 {
+		t.Fatalf("profile counts = %+v, want info=2 pass=0 fail=0", p)
+	}
+}
+
+// TestAggregateStatusErrorOnlyNilScore: ERROR is excluded from the score
+// denominator. An ERROR-only profile must leave Score nil (not 0) so a broken
+// content run is not reported as "0 / 100" failure.
+func TestAggregateStatusErrorOnlyNilScore(t *testing.T) {
+	scheme := testScheme(t)
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(
+			checkResult("e1", "baseline-cis", "ERROR"),
+			checkResult("e2", "baseline-cis", "ERROR"),
+		).Build(),
+		Scheme: scheme,
+	}
+	cb := &baselinev1alpha1.ClusterBaseline{
+		Spec: baselinev1alpha1.ClusterBaselineSpec{Profiles: []baselinev1alpha1.ProfileKey{"cis"}},
+	}
+	if err := r.aggregateStatus(context.Background(), cb); err != nil {
+		t.Fatal(err)
+	}
+	if cb.Status.Score != nil {
+		t.Fatalf("score = %v, want nil for ERROR-only", *cb.Status.Score)
+	}
+	if p := cb.Status.Profiles[0]; p.Error != 2 || p.Pass != 0 || p.Fail != 0 {
+		t.Fatalf("profile counts = %+v, want error=2 pass=0 fail=0", p)
+	}
+}
+
+// TestAggregateStatusLargeBenchmarkDominance: a large failing profile outweighs
+// a small perfect one in the pooled score, while per-profile cards keep their
+// own ratios. Guards against a mean-of-profiles refactor looking "mostly green".
+func TestAggregateStatusLargeBenchmarkDominance(t *testing.T) {
+	scheme := testScheme(t)
+	objs := make([]client.Object, 0, 12)
+	// Large CIS: 9 FAIL + 1 PASS = 10% per-profile.
+	for i := 0; i < 9; i++ {
+		objs = append(objs, checkResult(fmt.Sprintf("cis-f%d", i), "baseline-cis", "FAIL"))
+	}
+	objs = append(objs, checkResult("cis-p", "baseline-cis", "PASS"))
+	// Small STIG: 1 PASS = 100% per-profile.
+	objs = append(objs, checkResult("stig-p", "baseline-stig", "PASS"))
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(objs...).Build(),
+		Scheme: scheme,
+	}
+	cb := &baselinev1alpha1.ClusterBaseline{
+		Spec: baselinev1alpha1.ClusterBaselineSpec{
+			Profiles: []baselinev1alpha1.ProfileKey{"cis", "stig"},
+		},
+	}
+	if err := r.aggregateStatus(context.Background(), cb); err != nil {
+		t.Fatal(err)
+	}
+	// Pooled: 2 PASS / (2 PASS + 9 FAIL) = 18%, not mean(10, 100)=55.
+	if cb.Status.Score == nil || *cb.Status.Score != 18 {
+		t.Fatalf("pooled score = %v, want 18 (large CIS dominates)", cb.Status.Score)
+	}
+	byKey := map[baselinev1alpha1.ProfileKey]baselinev1alpha1.ProfileStatus{}
+	for _, p := range cb.Status.Profiles {
+		byKey[p.Key] = p
+	}
+	if p := byKey["cis"]; p.Pass != 1 || p.Fail != 9 {
+		t.Fatalf("cis counts = %+v, want 1/9", p)
+	}
+	if p := byKey["stig"]; p.Pass != 1 || p.Fail != 0 {
+		t.Fatalf("stig counts = %+v, want 1/0", p)
+	}
+}
+
 // TestAggregateStatusWaivers pins waiver semantics: a waived FAIL leaves the
 // pass/fail denominator (raising the score) and is reported in the Waived bucket
 // instead, so accepted risk is visible but not counted against compliance.
@@ -1319,6 +1474,52 @@ func TestAggregateStatusWaivers(t *testing.T) {
 	}
 	if p := cb.Status.Profiles[0]; p.Pass != 1 || p.Waived != 1 {
 		t.Fatalf("waiving a PASS changed counts: %+v", p)
+	}
+
+	// Waive every FAIL: denominator is pass/(pass+0) => 100. Foreign / empty
+	// waiver names must not invent matches or change the score.
+	cb.Spec.Waivers = []baselinev1alpha1.WaiverEntry{
+		{Name: "f1"},
+		{Name: "f2"},
+		{Name: "not-a-real-check"},
+		{Name: ""},
+	}
+	if err := r.aggregateStatus(context.Background(), cb); err != nil {
+		t.Fatal(err)
+	}
+	if cb.Status.Score == nil || *cb.Status.Score != 100 {
+		t.Fatalf("waive-all-fails score = %v, want 100", cb.Status.Score)
+	}
+	if p := cb.Status.Profiles[0]; p.Pass != 1 || p.Fail != 0 || p.Waived != 2 {
+		t.Fatalf("waive-all-fails counts = %+v, want pass=1 fail=0 waived=2", p)
+	}
+}
+
+// TestAggregateStatusAllFailsWaived: when every FAIL is waived and there is no
+// PASS, score is nil (no countable mass), not a false 0 or 100.
+func TestAggregateStatusAllFailsWaived(t *testing.T) {
+	scheme := testScheme(t)
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(
+			checkResult("f1", "baseline-cis", "FAIL"),
+			checkResult("f2", "baseline-cis", "FAIL"),
+		).Build(),
+		Scheme: scheme,
+	}
+	cb := &baselinev1alpha1.ClusterBaseline{
+		Spec: baselinev1alpha1.ClusterBaselineSpec{
+			Profiles: []baselinev1alpha1.ProfileKey{"cis"},
+			Waivers:  []baselinev1alpha1.WaiverEntry{{Name: "f1"}, {Name: "f2"}},
+		},
+	}
+	if err := r.aggregateStatus(context.Background(), cb); err != nil {
+		t.Fatal(err)
+	}
+	if cb.Status.Score != nil {
+		t.Fatalf("all-fails-waived score = %v, want nil", *cb.Status.Score)
+	}
+	if p := cb.Status.Profiles[0]; p.Pass != 0 || p.Fail != 0 || p.Waived != 2 {
+		t.Fatalf("all-fails-waived counts = %+v, want pass=0 fail=0 waived=2", p)
 	}
 }
 
@@ -1501,23 +1702,26 @@ func TestAggregateStatusClearsStaleScore(t *testing.T) {
 	}
 }
 
-func TestAggregateStatusPropagatesSuiteListError(t *testing.T) {
+func TestAggregateStatusPropagatesSuiteGetError(t *testing.T) {
 	scheme := testScheme(t)
 	forbidden := apierrors.NewForbidden(
 		schema.GroupResource{Group: suiteGVK.Group, Resource: "compliancesuites"},
-		"",
+		"baseline-cis",
 		nil,
 	)
 	r := &ClusterBaselineReconciler{
 		Client: fake.NewClientBuilder().WithScheme(scheme).
 			WithObjects(checkResult("p1", "baseline-cis", "PASS")).
 			WithInterceptorFuncs(interceptor.Funcs{
-				List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
-					gvk := list.GetObjectKind().GroupVersionKind()
-					if gvk.Group == suiteGVK.Group && gvk.Kind == suiteGVK.Kind+"List" {
-						return forbidden
+				// recordHistory fetches owned suites by name (not a full List).
+				Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+					if u, ok := obj.(*unstructured.Unstructured); ok {
+						gvk := u.GroupVersionKind()
+						if gvk.Group == suiteGVK.Group && gvk.Kind == suiteGVK.Kind && key.Name == "baseline-cis" {
+							return forbidden
+						}
 					}
-					return c.List(ctx, list, opts...)
+					return c.Get(ctx, key, obj, opts...)
 				},
 			}).Build(),
 		Scheme: scheme,
@@ -1526,7 +1730,7 @@ func TestAggregateStatusPropagatesSuiteListError(t *testing.T) {
 		Spec: baselinev1alpha1.ClusterBaselineSpec{Profiles: []baselinev1alpha1.ProfileKey{"cis"}},
 	}
 	if err := r.aggregateStatus(context.Background(), cb); err == nil {
-		t.Fatal("aggregateStatus swallowed ComplianceSuite list error")
+		t.Fatal("aggregateStatus swallowed ComplianceSuite get error")
 	}
 }
 
@@ -1584,6 +1788,69 @@ func TestAggregateStatusCRDsMissingClearsRegressionLists(t *testing.T) {
 	}
 	if cb.Status.Fixed != nil {
 		t.Fatalf("Fixed = %v, want nil", cb.Status.Fixed)
+	}
+}
+
+// TestAggregateStatusScanningDisabledClearsLiveDiff: empty profiles+tailored
+// disables scanning (bindings pruned elsewhere). Score and live regression
+// lists must clear so Overview/alerts do not keep stale NewlyFailed; history
+// and PreviousFailures stay for re-enable continuity.
+func TestAggregateStatusScanningDisabledClearsLiveDiff(t *testing.T) {
+	scheme := testScheme(t)
+	prev := int32(91)
+	last := metav1.NewTime(time.Date(2026, 7, 10, 1, 0, 0, 0, time.UTC))
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).Build(),
+		Scheme: scheme,
+	}
+	cb := &baselinev1alpha1.ClusterBaseline{
+		Spec: baselinev1alpha1.ClusterBaselineSpec{
+			Profiles:         nil,
+			TailoredProfiles: nil,
+			Schedule:         "0 1 * * *",
+		},
+		Status: baselinev1alpha1.ClusterBaselineStatus{
+			Score:            &prev,
+			LastScanTime:     &last,
+			NextScanTime:     &metav1.Time{Time: last.Add(24 * time.Hour)},
+			History:          []baselinev1alpha1.ScoreSnapshot{{Time: last, Score: 91}},
+			PreviousFailures: []string{"old-fail"},
+			DiffBaseFailures: []string{"older-fail"},
+			DiffBaseScanTime: &last,
+			NewlyFailed:      []string{"new-fail"},
+			Fixed:            []string{"was-fixed"},
+			Profiles: []baselinev1alpha1.ProfileStatus{
+				{Key: "cis", ResultCounts: baselinev1alpha1.ResultCounts{Pass: 10, Fail: 1}},
+			},
+		},
+	}
+	if err := r.aggregateStatus(context.Background(), cb); err != nil {
+		t.Fatal(err)
+	}
+	if cb.Status.Score != nil {
+		t.Fatalf("score = %v, want nil", *cb.Status.Score)
+	}
+	if cb.Status.NextScanTime != nil {
+		t.Fatalf("NextScanTime = %v, want nil when scanning disabled", cb.Status.NextScanTime)
+	}
+	if cb.Status.NewlyFailed != nil {
+		t.Fatalf("NewlyFailed = %v, want nil", cb.Status.NewlyFailed)
+	}
+	if cb.Status.Fixed != nil {
+		t.Fatalf("Fixed = %v, want nil", cb.Status.Fixed)
+	}
+	// Keep history and last-scan + prior fail snapshot for re-enable.
+	if len(cb.Status.History) != 1 || cb.Status.History[0].Score != 91 {
+		t.Fatalf("history = %v, want preserved", cb.Status.History)
+	}
+	if cb.Status.LastScanTime == nil || !cb.Status.LastScanTime.Equal(&last) {
+		t.Fatalf("LastScanTime = %v, want preserved", cb.Status.LastScanTime)
+	}
+	if got := cb.Status.PreviousFailures; len(got) != 1 || got[0] != "old-fail" {
+		t.Fatalf("PreviousFailures = %v, want preserved", got)
+	}
+	if len(cb.Status.Profiles) != 0 {
+		t.Fatalf("Profiles = %v, want empty", cb.Status.Profiles)
 	}
 }
 
@@ -1670,6 +1937,55 @@ func TestRecordHistoryEqualScanRefreshesProfileTrends(t *testing.T) {
 	}
 	if got := cb.Status.PreviousFailures; len(got) != 1 || got[0] != "late-fail" {
 		t.Fatalf("late failure snapshot = %v, want [late-fail]", got)
+	}
+	if got := cb.Annotations[historyScoringModeAnn]; got != string(baselinev1alpha1.ScoringFlat) {
+		t.Fatalf("history mode stamp = %q, want Flat", got)
+	}
+}
+
+// Equal-scan late refresh must not rewrite history under a different scoring
+// mode (status.score may still change in aggregateStatus; rings stay as written).
+func TestRecordHistoryEqualScanSkipsHistoryWhenScoringModeFlips(t *testing.T) {
+	scheme := testScheme(t)
+	end := time.Date(2026, 7, 9, 1, 0, 0, 0, time.UTC)
+	suite := completedSuite("baseline-cis", end)
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(suite).Build(),
+		Scheme: scheme,
+	}
+	last := metav1.NewTime(end)
+	cb := &baselinev1alpha1.ClusterBaseline{
+		ObjectMeta: metav1.ObjectMeta{
+			Annotations: map[string]string{historyScoringModeAnn: string(baselinev1alpha1.ScoringFlat)},
+		},
+		Spec: baselinev1alpha1.ClusterBaselineSpec{
+			Profiles: []baselinev1alpha1.ProfileKey{"cis"},
+			Scoring:  baselinev1alpha1.ScoringSpec{Mode: baselinev1alpha1.ScoringSeverityWeighted},
+		},
+		Status: baselinev1alpha1.ClusterBaselineStatus{
+			LastScanTime: &last,
+			History:      []baselinev1alpha1.ScoreSnapshot{{Time: last, Score: 50}},
+			Profiles: []baselinev1alpha1.ProfileStatus{{
+				Key: "cis", ResultCounts: baselinev1alpha1.ResultCounts{Pass: 3, Fail: 1},
+				History: []baselinev1alpha1.ScoreSnapshot{{Time: last, Score: 50}},
+			}},
+		},
+	}
+	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(90)), []string{"late-fail"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := cb.Status.History; len(got) != 1 || got[0].Score != 50 {
+		t.Fatalf("overall history rewritten under new mode: %+v", got)
+	}
+	if got := cb.Status.Profiles[0].History; len(got) != 1 || got[0].Score != 50 {
+		t.Fatalf("profile history rewritten under new mode: %+v", got)
+	}
+	// Failure baseline still advances so the next scan's diff stays correct.
+	if got := cb.Status.PreviousFailures; len(got) != 1 || got[0] != "late-fail" {
+		t.Fatalf("late failure snapshot = %v, want [late-fail]", got)
+	}
+	if got := cb.Annotations[historyScoringModeAnn]; got != string(baselinev1alpha1.ScoringFlat) {
+		t.Fatalf("mode stamp should stay Flat until a new scan writes history, got %q", got)
 	}
 }
 

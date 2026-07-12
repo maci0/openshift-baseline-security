@@ -11,10 +11,8 @@ rules:
   verbs:
   - create
   - get
-  - list
   - patch
   - update
-  - watch
 - apiGroups:
   - ""
   resources:
@@ -156,17 +154,21 @@ rules:
   - operators.coreos.com
   resources:
   - operatorgroups
+  - subscriptions
   verbs:
   - create
   - get
   - list
+  - patch
+  - update
   - watch
 - apiGroups:
-  - operators.coreos.com
+  - policy
   resources:
-  - subscriptions
+  - poddisruptionbudgets
   verbs:
   - create
+  - delete
   - get
   - list
   - patch

@@ -1,4 +1,5 @@
-import { Waiver } from './models';
+import { isValidCron } from './cron';
+import { TAILORED_PROFILE_MAX_ITEMS, WAIVER_MAX_ITEMS, Waiver } from './models';
 import { isValidK8sName, isValidTailoredProfileName } from './names';
 
 // Matches operator batchMaxRemediations so the console never sets an
@@ -22,6 +23,8 @@ export const tailoredProfileBindingPatch = (
   resourceVersion?: string,
 ) => {
   if (!isValidTailoredProfileName(name) || current?.includes(name)) return [];
+  // CRD MaxItems=32: refuse growth past the bound (replace/duplicate already no-op above).
+  if ((current?.length ?? 0) >= TAILORED_PROFILE_MAX_ITEMS) return [];
   const guard = resourceVersionTest(resourceVersion);
   return current != null
     ? [
@@ -32,11 +35,18 @@ export const tailoredProfileBindingPatch = (
     : [...guard, { op: 'add' as const, path: '/spec/tailoredProfiles', value: [name] }];
 };
 
-// JSON patch for spec.schedule (add when absent, replace when present).
-export const schedulePatch = (hasSchedule: boolean, cron: string) =>
-  hasSchedule
-    ? [{ op: 'replace' as const, path: '/spec/schedule', value: cron }]
-    : [{ op: 'add' as const, path: '/spec/schedule', value: cron }];
+// JSON patch for spec.schedule. Always uses `add` so missing, empty-string, and
+// already-set values all succeed (RFC 6902 add creates or replaces an object
+// member; matches remediationApplyPatch leaf handling for defaulted-absent
+// fields). Invalid cron yields no ops so CRD/controller rejection is not the
+// first failure mode. hasSchedule is retained for call-site compatibility.
+export const schedulePatch = (_hasSchedule: boolean, cron: string) => {
+  const value = cron.trim();
+  if (!isValidCron(value)) {
+    return [] as { op: 'add'; path: string; value: unknown }[];
+  }
+  return [{ op: 'add' as const, path: '/spec/schedule', value }];
+};
 
 // JSON patch setting the batch-apply annotation on the ClusterBaseline, which
 // the operator consumes to pause MachineConfigPools, apply the listed
@@ -82,6 +92,10 @@ export const remediationApplyPatch = (hasRemediation: boolean, automatic: boolea
     : [{ op: 'add' as const, path: '/spec/remediation', value: { apply } }];
 };
 
+// True when s parses as a date (metav1.Time-shaped ISO). Empty is handled by
+// callers; non-empty garbage must fail closed before apiserver admission.
+const isParseableTime = (s: string): boolean => !Number.isNaN(Date.parse(s));
+
 // JSON patch adding a waiver for a check. When the array is absent, create it;
 // when it exists (including empty after the last remove), append with "/-".
 // If the name is already waived, replace that entry (updates reason, avoids
@@ -95,7 +109,9 @@ export const addWaiverPatch = (waivers: Waiver[] | undefined | null, entry: Waiv
     !isValidK8sName(name) ||
     (entry.reason != null && entry.reason.length > 1024) ||
     (entry.requestedBy != null && entry.requestedBy.length > 253) ||
-    (entry.approvedBy != null && entry.approvedBy.length > 253)
+    (entry.approvedBy != null && entry.approvedBy.length > 253) ||
+    (entry.expiresAt != null && entry.expiresAt !== '' && !isParseableTime(entry.expiresAt)) ||
+    (entry.reviewBy != null && entry.reviewBy !== '' && !isParseableTime(entry.reviewBy))
   ) {
     return [] as { op: 'add' | 'replace' | 'test'; path: string; value: unknown }[];
   }
@@ -113,6 +129,10 @@ export const addWaiverPatch = (waivers: Waiver[] | undefined | null, entry: Waiv
         { op: 'test' as const, path: `/spec/waivers/${idx}/name`, value: name },
         { op: 'replace' as const, path: `/spec/waivers/${idx}`, value: clean },
       ];
+    }
+    // CRD MaxItems=256: refuse a new entry past the bound (replace still allowed).
+    if (waivers.length >= WAIVER_MAX_ITEMS) {
+      return [] as { op: 'add' | 'replace' | 'test'; path: string; value: unknown }[];
     }
     return [{ op: 'add' as const, path: '/spec/waivers/-', value: clean }];
   }

@@ -4,9 +4,16 @@ metadata:
   name: baseline-security-leader-election
   namespace: openshift-baseline-security
 rules:
+  # create cannot use resourceNames; get/update/patch/delete are limited to the
+  # LeaderElectionID lease (cmd/main.go: baseline-security-operator-lock).
+  # list/watch are not used by the lease resource lock.
   - apiGroups: [coordination.k8s.io]
     resources: [leases]
-    verbs: [get, list, watch, create, update, patch, delete]
+    verbs: [create]
+  - apiGroups: [coordination.k8s.io]
+    resources: [leases]
+    resourceNames: [baseline-security-operator-lock]
+    verbs: [get, update, patch, delete]
   - apiGroups: [""]
     resources: [events]
     verbs: [create, patch]
