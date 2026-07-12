@@ -244,6 +244,12 @@ func requeueAfter(cb *baselinev1alpha1.ClusterBaseline) time.Duration {
 
 // reconcileOwned drives every owned object and refreshes status fields.
 func (r *ClusterBaselineReconciler) reconcileOwned(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline) error {
+	// Remediation batch first: pause/resume/cancel/grace must not wait behind a
+	// hard failure in CO install, scan config, or plugin ensure. Otherwise an
+	// API blip on those steps leaves MachineConfigPools paused until it clears.
+	if err := r.applyRemediationBatch(ctx, cb); err != nil {
+		return fmt.Errorf("applying remediation batch: %w", err)
+	}
 	if err := r.ensureComplianceOperator(ctx, cb); err != nil {
 		return fmt.Errorf("ensuring compliance operator: %w", err)
 	}
@@ -255,9 +261,6 @@ func (r *ClusterBaselineReconciler) reconcileOwned(ctx context.Context, cb *base
 	}
 	if err := r.ensureComplianceDashboard(ctx, cb); err != nil {
 		return fmt.Errorf("ensuring compliance dashboard: %w", err)
-	}
-	if err := r.applyRemediationBatch(ctx, cb); err != nil {
-		return fmt.Errorf("applying remediation batch: %w", err)
 	}
 	if err := r.aggregateStatus(ctx, cb); err != nil {
 		return fmt.Errorf("aggregating status: %w", err)

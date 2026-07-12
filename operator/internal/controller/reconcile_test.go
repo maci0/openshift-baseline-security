@@ -125,6 +125,47 @@ func TestReconcileDeletionResumesBatchPools(t *testing.T) {
 	}
 }
 
+// TestReconcileOwnedBatchBeforeCOFailure: applyRemediationBatch runs before
+// ensureComplianceOperator so a hard CO API error cannot leave a new batch
+// unstarted (or an in-flight batch unserviced) while MCPs are/should be managed.
+func TestReconcileOwnedBatchBeforeCOFailure(t *testing.T) {
+	scheme := testScheme(t)
+	rem := nodeRemediation("rem1", "worker", "")
+	pool := machineConfigPool("worker")
+	cb := newCB("cis")
+	cb.SetAnnotations(map[string]string{batchApplyAnnotation: "rem1"})
+	// RELATED_IMAGE so plugin ensure does not soft-fail first for other reasons.
+	t.Setenv("RELATED_IMAGE_CONSOLE_PLUGIN", "example.test/plugin:test")
+	boom := apierrors.NewServiceUnavailable("subscription apiserver blip")
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).
+			WithObjects(cb, rem, pool).
+			WithStatusSubresource(&baselinev1alpha1.ClusterBaseline{}).
+			WithInterceptorFuncs(interceptor.Funcs{
+				Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+					if u, ok := obj.(*unstructured.Unstructured); ok && u.GroupVersionKind() == subscriptionGVK {
+						return boom
+					}
+					return c.Get(ctx, key, obj, opts...)
+				},
+			}).Build(),
+		Scheme: scheme,
+	}
+	err := r.reconcileOwned(context.Background(), cb)
+	if err == nil {
+		t.Fatal("expected CO ensure to fail after batch")
+	}
+	// Batch must have run first: pool paused and status.remediationBatch set.
+	if cb.Status.RemediationBatch == nil || cb.Status.RemediationBatch.Phase != "Applying" {
+		t.Fatalf("batch must start before CO failure: %+v (err=%v)", cb.Status.RemediationBatch, err)
+	}
+	gotPool := machineConfigPool("worker")
+	_ = r.Get(context.Background(), types.NamespacedName{Name: "worker"}, gotPool)
+	if paused, _, _ := unstructured.NestedBool(gotPool.Object, "spec", "paused"); !paused {
+		t.Fatal("worker pool must be paused even when CO ensure fails later")
+	}
+}
+
 // TestResumeBatchPoolsOnDeleteFromAnnotation: when status.remediationBatch is
 // missing but the batch-apply annotation remains, rediscover pools from remediations.
 func TestResumeBatchPoolsOnDeleteFromAnnotation(t *testing.T) {
