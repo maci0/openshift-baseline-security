@@ -10,6 +10,9 @@ const config: Configuration & { devServer?: DevServerConfiguration } = {
   mode: isProd ? 'production' : 'development',
   context: path.resolve(__dirname, 'src'),
   entry: {},
+  // Production: no persistent webpack cache (avoids host-local cache keys in outputs).
+  // Dev keeps an in-memory cache for rebuild speed.
+  cache: isProd ? false : { type: 'memory' },
   output: {
     path: path.resolve(__dirname, 'dist'),
     // contenthash: stable across rebuilds when file contents are unchanged (unlike [hash]).
@@ -33,6 +36,7 @@ const config: Configuration & { devServer?: DevServerConfiguration } = {
       },
     ],
   },
+  // No source maps in production artifacts (would embed paths / leak sources).
   devtool: isProd ? false : 'source-map',
   optimization: {
     // Deterministic ids keep chunk graphs stable across machines for the same inputs.

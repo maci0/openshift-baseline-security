@@ -28,10 +28,7 @@ import (
 // end-of-reconcile Status().Update fails (annotation gone, batch nil, no recovery).
 func (r *ClusterBaselineReconciler) applyRemediationBatch(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline) error {
 	batch := cb.Status.RemediationBatch
-	names := ""
-	if cb.Annotations != nil {
-		names = cb.Annotations[batchApplyAnnotation]
-	}
+	names := cb.Annotations[batchApplyAnnotation]
 
 	if batch == nil {
 		if strings.TrimSpace(names) == "" {
@@ -57,10 +54,12 @@ func (r *ClusterBaselineReconciler) applyRemediationBatch(ctx context.Context, c
 		// Drop race-deleted (NotFound) names so status only lists remediations we
 		// will actually apply. If none remain, clear the one-shot annotation
 		// instead of opening a fake batch that "succeeds" with no work.
+		// Build owned suites once for the whole list (up to batchMaxRemediations).
+		suites := ownedSuites(cb)
 		pools := map[string]bool{}
 		keep := make([]string, 0, len(list))
 		for _, name := range list {
-			rem, err := r.getBatchRemediation(ctx, cb, name)
+			rem, err := r.getBatchRemediation(ctx, name, suites)
 			if err != nil {
 				return err
 			}
@@ -80,15 +79,24 @@ func (r *ClusterBaselineReconciler) applyRemediationBatch(ctx context.Context, c
 			log.FromContext(ctx).Info("remediation batch skipped: no remediations found",
 				"name", cb.Name, "requested", list)
 			// Drop the one-shot request only (recovery keys were never written).
-			return r.clearBatchAnnotations(ctx, cb, true, nil, false)
+			if err := r.clearBatchAnnotations(ctx, cb, true, nil, false); err != nil {
+				return fmt.Errorf("clearing empty batch-apply annotation: %w", err)
+			}
+			return nil
 		}
+		requested := batchRemediationNames(names)
 		list = keep
 		poolList := slices.Sorted(maps.Keys(pools))
-		startedAt, err := r.ensureBatchMetadata(ctx, cb, poolList)
+		startedAt, err := r.ensureBatchMetadata(ctx, cb, poolList, requested, list)
 		if err != nil {
 			return err
 		}
 		owner := batchPauseOwner(cb)
+		newBatch := func(pools []string) *baselinev1alpha1.RemediationBatchStatus {
+			return &baselinev1alpha1.RemediationBatchStatus{
+				Phase: baselinev1alpha1.RemediationBatchPhaseApplying, Pools: pools, Remediations: list, StartedAt: startedAt, PauseOwner: owner,
+			}
+		}
 		// Pause first so all apply-triggered MachineConfig renders coalesce.
 		// On a mid-list failure, unpause what we already paused this attempt so
 		// a permanent error cannot leave a subset of pools paused with no batch.
@@ -100,31 +108,26 @@ func (r *ClusterBaselineReconciler) applyRemediationBatch(ctx context.Context, c
 				// can force resume instead of leaving pools paused forever while
 				// apply/pause keeps failing and status.remediationBatch stays nil.
 				if r.resumePoolsBestEffort(ctx, paused, owner, "failed to resume MachineConfigPool after pause failure") {
-					cb.Status.RemediationBatch = &baselinev1alpha1.RemediationBatchStatus{
-						Phase: baselinev1alpha1.RemediationBatchPhaseApplying, Pools: slices.Clone(paused), Remediations: list, StartedAt: startedAt, PauseOwner: owner,
-					}
+					cb.Status.RemediationBatch = newBatch(slices.Clone(paused))
 				}
-				return err
+				return fmt.Errorf("pausing MachineConfigPool %q for remediation batch: %w", p, err)
 			}
 			paused = append(paused, p)
 		}
 		for _, name := range list {
-			if err := r.applyOwnedRemediation(ctx, cb, name); err != nil {
+			// Reuse suites from validation (same membership for the whole batch).
+			if err := r.applyOwnedRemediation(ctx, cb, name, suites); err != nil {
 				// Resume any paused pools so a failure never leaves them paused.
 				if r.resumePoolsBestEffort(ctx, poolList, owner, "failed to resume MachineConfigPool after batch apply error") {
-					cb.Status.RemediationBatch = &baselinev1alpha1.RemediationBatchStatus{
-						Phase: baselinev1alpha1.RemediationBatchPhaseApplying, Pools: poolList, Remediations: list, StartedAt: startedAt, PauseOwner: owner,
-					}
+					cb.Status.RemediationBatch = newBatch(poolList)
 				}
-				return err
+				return fmt.Errorf("applying remediation %q in batch: %w", name, err)
 			}
 		}
 		// Keep the annotation until resume. status.remediationBatch is written by
 		// the end-of-reconcile Status().Update; if that fails, the annotation still
 		// drives a restart rather than orphaning paused pools.
-		cb.Status.RemediationBatch = &baselinev1alpha1.RemediationBatchStatus{
-			Phase: baselinev1alpha1.RemediationBatchPhaseApplying, Pools: poolList, Remediations: list, StartedAt: startedAt, PauseOwner: owner,
-		}
+		cb.Status.RemediationBatch = newBatch(poolList)
 		// Info: MCP pause is operationally sensitive; on-call needs a clear
 		// start marker in logs when investigating stuck paused pools.
 		logger.Info("remediation batch started",
@@ -141,10 +144,20 @@ func (r *ClusterBaselineReconciler) applyRemediationBatch(ctx context.Context, c
 	applied := true
 	anyApplying := false
 	var getErr error
+	// Names gone mid-batch (delete / CRDs uninstalled). Treated as done so resume
+	// is not blocked forever; collect for the finish log so reason=applied is not
+	// misread as "every listed remediation reached Applied".
+	var missing []string
 	for _, name := range batch.Remediations {
 		rem := u(remediationGVK)
 		if err := r.Get(ctx, types.NamespacedName{Namespace: complianceNamespace, Name: name}, rem); err != nil {
 			if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) {
+				// Info: silent skip leaves on-call unable to explain why a batch
+				// finished as applied/cancelled while listed remediations vanished
+				// (UI delete, GC, or compliance CRDs removed mid-batch).
+				log.FromContext(ctx).Info("remediation missing while waiting for batch; treating as done",
+					"remediation", name, "name", cb.Name, "notFound", apierrors.IsNotFound(err))
+				missing = append(missing, name)
 				continue
 			}
 			// Name every failure so a multi-rem batch requeue is actionable.
@@ -176,14 +189,14 @@ func (r *ClusterBaselineReconciler) applyRemediationBatch(ctx context.Context, c
 	if applied || pastGrace || cancelled {
 		for _, p := range batch.Pools {
 			if err := r.setMCPPaused(ctx, p, false, batch.PauseOwner); err != nil {
-				return err
+				return fmt.Errorf("resuming MachineConfigPool %q after batch: %w", p, err)
 			}
 		}
 		// Clear one-shot + recovery annotations after pools are resumed.
 		// Conflict retry: concurrent console patches must not leave the request
 		// annotation stuck (would re-enter Applying forever while pools are free).
 		if err := r.clearBatchAnnotations(ctx, cb, true, batch.Remediations, true); err != nil {
-			return err
+			return fmt.Errorf("clearing batch annotations after resume: %w", err)
 		}
 		reason := "applied"
 		if cancelled {
@@ -193,6 +206,7 @@ func (r *ClusterBaselineReconciler) applyRemediationBatch(ctx context.Context, c
 		}
 		// waitError: grace can force-resume while remediations were still unreadable;
 		// include it so on-call sees why Applied was never confirmed.
+		// missingRemediations: NotFound/NoMatch names treated as done (not Applied).
 		kv := []any{
 			"name", cb.Name,
 			"reason", reason,
@@ -201,6 +215,9 @@ func (r *ClusterBaselineReconciler) applyRemediationBatch(ctx context.Context, c
 		}
 		if getErr != nil {
 			kv = append(kv, "waitError", getErr.Error())
+		}
+		if len(missing) > 0 {
+			kv = append(kv, "missingRemediations", missing)
 		}
 		log.FromContext(ctx).Info("remediation batch finished", kv...)
 		cb.Status.RemediationBatch = nil

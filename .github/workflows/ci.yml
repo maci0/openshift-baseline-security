@@ -20,20 +20,30 @@ concurrency:
 
 jobs:
   operator:
-    runs-on: ubuntu-latest
+    # Pin the runner image; ubuntu-latest moves and changes tool defaults over time.
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
+    env:
+      # Match Makefile: refuse silent go.sum edits outside intentional module work.
+      GOFLAGS: -mod=readonly
     defaults:
       run:
         working-directory: operator
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          # contents:read already blocks push; do not leave a write-capable token on disk.
+          persist-credentials: false
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version-file: operator/go.mod
           cache-dependency-path: operator/go.sum
       - run: make test
+      # Release-shaped binary (CGO off, trimpath, stripped); image build is separate.
+      - run: make build
       - run: make lint
-      - run: go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 ./...
+      # Version pinned in operator/Makefile GOVULNCHECK_VERSION (single source).
+      - run: make govulncheck
       - run: make test-alerts
       - name: verify generated files are current
         run: |
@@ -42,49 +52,91 @@ jobs:
       - run: make verify-csv-rbac
       - run: make verify-monitoring-bundle
       - run: make verify-versions
+      - run: make verify-product-lockstep
       - name: validate OLM bundle
         run: make bundle
 
   console-plugin:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     defaults:
       run:
         working-directory: console-plugin
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
-          # Same major as package.json engines / .nvmrc (22.x; not a floating "latest").
+          # Exact patch from .nvmrc (matches digest-pinned ubi9/nodejs-22 in Dockerfile).
           node-version-file: console-plugin/.nvmrc
           cache: yarn
           cache-dependency-path: console-plugin/yarn.lock
       # Node 22 ships corepack; do not npm i -g corepack (unpinned latest).
-      # package.json packageManager pins yarn@4.14.1; enable so that pin is honored.
-      - run: corepack enable
+      # package.json packageManager is the single source for the Yarn version.
+      - run: |
+          corepack enable
+          yarn_pm=$(node -p "require('./package.json').packageManager")
+          test -n "$yarn_pm"
+          corepack prepare "${yarn_pm}" --activate
       - run: yarn install --immutable
-      - run: yarn npm audit --all --recursive
+      # Retry only transient registry/network errors. Real audit findings fail once.
+      - name: yarn npm audit
+        run: |
+          set -euo pipefail
+          out=""
+          for attempt in 1 2 3; do
+            set +e
+            out=$(yarn npm audit --all --recursive 2>&1)
+            rc=$?
+            set -e
+            printf '%s\n' "$out"
+            if [ "$rc" -eq 0 ]; then
+              exit 0
+            fi
+            # Yarn audit prints vulnerability tables for package issues; network
+            # failures look like fetch/ECONNRESET/503 without a findings header.
+            if printf '%s\n' "$out" | grep -qiE 'vulnerabilit|severity|moderate|high severity|critical severity|Package '; then
+              echo "yarn npm audit reported findings (not retrying)" >&2
+              exit "$rc"
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              exit "$rc"
+            fi
+            echo "yarn npm audit failed (attempt ${attempt}/3); retrying..." >&2
+            sleep $((attempt * 5))
+          done
       - run: yarn lint
       - run: yarn typecheck
       - run: yarn test
+      # SOURCE_DATE_EPOCH matches image/local production build (webpack/minifiers).
       - run: yarn build
+        env:
+          SOURCE_DATE_EPOCH: "0"
+          TZ: UTC
+          LC_ALL: C
 
   # Extended fuzzing is nightly/on-demand only: per-PR runs already execute the
   # saved seed corpus via `make test`, so found crashers are permanent regressions.
   fuzz:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     defaults:
       run:
         working-directory: operator
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version-file: operator/go.mod
           cache-dependency-path: operator/go.sum
+      # Match Makefile GOFLAGS: refuse silent go.sum edits outside `make` recipes.
       - run: go test -race ./...
+        env:
+          GOFLAGS: -mod=readonly
       - run: make fuzz
 
   # Live-cluster e2e, on demand only. Provide a base64-encoded kubeconfig for a
@@ -92,17 +144,25 @@ jobs:
   # without it the job skips instead of failing.
   e2e:
     if: github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 40
+    env:
+      GOFLAGS: -mod=readonly
     defaults:
       run:
         working-directory: operator
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version-file: operator/go.mod
           cache-dependency-path: operator/go.sum
+      # Pin kubectl for the secret validation step (not assumed present on the runner).
+      - uses: azure/setup-kubectl@829323503d1be3d00ca8346e5391ca0b07a9ab0d # v5.1.0
+        with:
+          version: v1.35.0
       - name: run Go e2e against the live cluster
         env:
           E2E_KUBECONFIG: ${{ secrets.E2E_KUBECONFIG }}
@@ -115,7 +175,11 @@ jobs:
           kubeconfig="$RUNNER_TEMP/kubeconfig"
           # Always remove the decoded kubeconfig, including on test failure.
           trap 'rm -f "$kubeconfig"' EXIT
-          echo "$E2E_KUBECONFIG" | base64 -d > "$kubeconfig"
+          if ! echo "$E2E_KUBECONFIG" | base64 -d > "$kubeconfig"; then
+            echo "E2E_KUBECONFIG is not valid base64" >&2
+            exit 1
+          fi
+          chmod 600 "$kubeconfig"
           # Fail fast on a corrupt secret (bad base64 padding / non-YAML) before
           # e2e spends minutes on API errors that look like cluster problems.
           if ! kubectl --kubeconfig="$kubeconfig" config view --raw >/dev/null 2>&1; then
@@ -126,7 +190,7 @@ jobs:
           make test-e2e
 
   images:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     needs: [operator, console-plugin]
     strategy:
@@ -147,13 +211,17 @@ jobs:
             tag: baseline-security-console-plugin
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
       - uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
       # --pull: re-verify digest-pinned bases (runners may have a stale local tag).
       # --provenance/--sbom false: attestations embed build metadata and make digests non-reproducible.
+      # SOURCE_DATE_EPOCH: BuildKit clamps timestamps for more reproducible digests.
       # GHA layer cache speeds rebuilds; scopes are per matrix image so caches do not collide.
       - name: build ${{ matrix.name }}
         run: |
           docker buildx build --load --pull --provenance=false --sbom=false \
+            --build-arg SOURCE_DATE_EPOCH=0 \
             --cache-from type=gha,scope=${{ matrix.tag }} \
             --cache-to type=gha,mode=max,scope=${{ matrix.tag }},ignore-error=true \
             -f "${{ matrix.file }}" -t "${{ matrix.tag }}" "${{ matrix.context }}"
@@ -167,26 +235,71 @@ jobs:
           test "${user}" != "0"
           test "${user}" != "root"
           test "${user}" != "0:0"
+      # Cheap post-build smoke: entrypoint/binary or labeled bundle package exists.
+      # Hardened run: no network, read-only rootfs, drop caps (local image only).
+      - name: smoke ${{ matrix.name }}
+        run: |
+          run_hardened() {
+            docker run --rm --network=none --read-only --tmpfs /tmp \
+              --cap-drop ALL --security-opt no-new-privileges:true "$@"
+          }
+          case "${{ matrix.name }}" in
+            operator)
+              run_hardened --entrypoint /usr/bin/manager "${{ matrix.tag }}" -h >/dev/null
+              ;;
+            console-plugin)
+              # Manifest is the console's load contract; non-empty rejects a blank COPY.
+              # No TLS certs in the image, so only filesystem checks (not nginx -t).
+              run_hardened --entrypoint test "${{ matrix.tag }}" -s /opt/app-root/src/plugin-manifest.json
+              ;;
+            bundle)
+              # FROM scratch: no shell; package label is the OLM identity.
+              pkg=$(docker image inspect -f '{{index .Config.Labels "operators.operatorframework.io.bundle.package.v1"}}' "${{ matrix.tag }}")
+              test "$pkg" = "baseline-security-operator"
+              ;;
+            *)
+              echo "unknown matrix name ${{ matrix.name }}" >&2
+              exit 1
+              ;;
+          esac
 
   # Catalog image depends on a local bundle image (opm render); not parallel with the matrix.
   # Only needs operator checks (bundle/CSV live under operator/); plugin job is independent.
+  # setup-go is required: make catalog-prepare -> make bundle -> make manifests uses go run controller-gen.
   catalog:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     needs: [operator]
+    env:
+      GOFLAGS: -mod=readonly
     defaults:
       run:
         working-directory: operator
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: operator/go.mod
+          cache-dependency-path: operator/go.sum
       - uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
       - name: build bundle then catalog
         run: |
+          # Validate + render catalog first (needs Go + digest-pinned tool images).
+          # Bundle image tag must match BUNDLE_IMG injected into catalog/bundle.yaml.
+          make catalog-prepare BUNDLE_IMG=baseline-security-operator-bundle:ci
+          # Share GHA cache scope with the images matrix bundle entry.
           docker buildx build --load --pull --provenance=false --sbom=false \
-            --cache-from type=gha,scope=bundle \
-            --cache-to type=gha,mode=max,scope=bundle,ignore-error=true \
+            --build-arg SOURCE_DATE_EPOCH=0 \
+            --cache-from type=gha,scope=baseline-security-operator-bundle \
+            --cache-to type=gha,mode=max,scope=baseline-security-operator-bundle,ignore-error=true \
             -f bundle.Dockerfile -t baseline-security-operator-bundle:ci .
-          make catalog-build BUNDLE_IMG=baseline-security-operator-bundle:ci CATALOG_IMG=baseline-security-operator-catalog:ci
+          docker buildx build --load --pull --provenance=false --sbom=false \
+            --build-arg SOURCE_DATE_EPOCH=0 \
+            --cache-from type=gha,scope=baseline-security-operator-catalog \
+            --cache-to type=gha,mode=max,scope=baseline-security-operator-catalog,ignore-error=true \
+            -f catalog.Dockerfile -t baseline-security-operator-catalog:ci .
       - name: verify catalog non-root USER
         run: |
           user=$(docker image inspect -f '{{.Config.User}}' baseline-security-operator-catalog:ci)
@@ -195,3 +308,35 @@ jobs:
           test "${user}" != "0"
           test "${user}" != "root"
           test "${user}" != "0:0"
+      - name: smoke catalog configs
+        run: |
+          # Precomputed FBC must be present and readable as the non-root USER.
+          docker run --rm --network=none --read-only --tmpfs /tmp \
+            --cap-drop ALL --security-opt no-new-privileges:true \
+            --user 1001 --entrypoint ls baseline-security-operator-catalog:ci \
+            /configs/package.yaml /configs/bundle.yaml
+
+  # Single required status check for branch protection (fuzz/e2e stay optional).
+  required:
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    needs: [operator, console-plugin, images, catalog]
+    steps:
+      - name: all required jobs passed
+        run: |
+          set -euo pipefail
+          failed=0
+          for pair in \
+            "operator=${{ needs.operator.result }}" \
+            "console-plugin=${{ needs.console-plugin.result }}" \
+            "images=${{ needs.images.result }}" \
+            "catalog=${{ needs.catalog.result }}"; do
+            name="${pair%%=*}"
+            result="${pair#*=}"
+            echo "${name}=${result}"
+            if [ "$result" != "success" ]; then
+              failed=1
+            fi
+          done
+          exit "$failed"

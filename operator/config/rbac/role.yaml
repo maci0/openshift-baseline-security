@@ -6,22 +6,21 @@ metadata:
 rules:
 - apiGroups:
   - ""
+  resourceNames:
+  - baseline-security-compliance-dashboard
   resources:
   - configmaps
   verbs:
-  - create
   - get
   - patch
   - update
 - apiGroups:
   - ""
   resources:
+  - configmaps
   - namespaces
   verbs:
   - create
-  - get
-  - list
-  - watch
 - apiGroups:
   - ""
   resources:
@@ -36,24 +35,38 @@ rules:
   - services
   verbs:
   - create
+  - list
+  - watch
+- apiGroups:
+  - ""
+  resourceNames:
+  - baseline-security-console-plugin
+  resources:
+  - services
+  verbs:
   - delete
   - get
-  - list
   - patch
   - update
-  - watch
 - apiGroups:
   - apps
   resources:
   - deployments
   verbs:
   - create
+  - list
+  - watch
+- apiGroups:
+  - apps
+  resourceNames:
+  - baseline-security-console-plugin
+  resources:
+  - deployments
+  verbs:
   - delete
   - get
-  - list
   - patch
   - update
-  - watch
 - apiGroups:
   - baselinesecurity.io
   resources:
@@ -102,7 +115,6 @@ rules:
   - compliance.openshift.io
   resources:
   - scansettingbindings
-  - scansettings
   verbs:
   - create
   - delete
@@ -112,17 +124,43 @@ rules:
   - update
   - watch
 - apiGroups:
+  - compliance.openshift.io
+  resources:
+  - scansettings
+  verbs:
+  - create
+  - list
+  - watch
+- apiGroups:
+  - compliance.openshift.io
+  resourceNames:
+  - baseline
+  resources:
+  - scansettings
+  verbs:
+  - delete
+  - get
+  - patch
+  - update
+- apiGroups:
   - console.openshift.io
   resources:
   - consoleplugins
   verbs:
   - create
+  - list
+  - watch
+- apiGroups:
+  - console.openshift.io
+  resourceNames:
+  - baseline-security-console-plugin
+  resources:
+  - consoleplugins
+  verbs:
   - delete
   - get
-  - list
   - patch
   - update
-  - watch
 - apiGroups:
   - machineconfiguration.openshift.io
   resources:
@@ -134,14 +172,14 @@ rules:
   - watch
 - apiGroups:
   - operator.openshift.io
+  resourceNames:
+  - cluster
   resources:
   - consoles
   verbs:
   - get
-  - list
   - patch
   - update
-  - watch
 - apiGroups:
   - operators.coreos.com
   resources:
@@ -157,20 +195,33 @@ rules:
   - subscriptions
   verbs:
   - create
+- apiGroups:
+  - operators.coreos.com
+  resourceNames:
+  - compliance-operator
+  resources:
+  - operatorgroups
+  - subscriptions
+  verbs:
   - get
-  - list
   - patch
   - update
-  - watch
 - apiGroups:
   - policy
   resources:
   - poddisruptionbudgets
   verbs:
   - create
+  - list
+  - watch
+- apiGroups:
+  - policy
+  resourceNames:
+  - baseline-security-console-plugin
+  resources:
+  - poddisruptionbudgets
+  verbs:
   - delete
   - get
-  - list
   - patch
   - update
-  - watch

@@ -1,7 +1,10 @@
 # OpenShift Baseline Security
 
-Design specification for the shipped 0.4.x line. Targets OpenShift Container
-Platform 4.22. Consumer release notes: [CHANGELOG.md](../CHANGELOG.md).
+Design specification for the product on `main` (0.4.x line plus work still under
+CHANGELOG **[Unreleased]**). Targets OpenShift Container Platform 4.22. What is
+in a published CSV/image tag is defined only by [CHANGELOG.md](../CHANGELOG.md)
+and the **Current release** line in the root README; do not assume every
+behavior here is in the last cut.
 
 ## 1. Summary
 
@@ -173,9 +176,10 @@ Responsibilities:
    with reason `ScanStorageNotReady`). A lazy dynamic informer watches
    compliance CRs once their CRDs exist (event-driven reconcile); a
    poll requeue remains as fallback (1m steady, 15s while Progressing
-   or a remediation batch is Applying) until watches are up or if they
-   fail. Owns the plugin Deployment/Service. Deleting ClusterBaseline
-   does **not** uninstall the Compliance Operator.
+   or a remediation batch is Applying; also shortens toward the soonest
+   active waiver `expiresAt`, floored at 1s) until watches are up or if
+   they fail. Owns the plugin Deployment/Service. Deleting
+   ClusterBaseline does **not** uninstall the Compliance Operator.
 
 ### 4.2 API: `ClusterBaseline` CRD
 
@@ -245,9 +249,10 @@ denominator in both modes. Per-profile `status.profiles[].history` (and tailored
 uses the same mode as the headline score when each point is written. A
 `spec.scoring.mode` flip updates `status.score` immediately but does not rewrite
 completed history points under the new formula (late CheckResult refresh for the
-same `lastScanTime` is gated on the mode that wrote those points). Points on
-either side of a mode change may therefore be incomparable until the next scan
-appends a fresh snapshot. Severity is read from the ComplianceCheckResult
+same `lastScanTime` is gated on the mode that wrote those points). The next
+completed scan under the new mode clears overall and per-profile history rings
+and appends a fresh snapshot so charts never mix Flat and SeverityWeighted
+values. Severity is read from the ComplianceCheckResult
 `.severity` field, with the `compliance.openshift.io/check-severity` label as
 fallback.
 
@@ -398,8 +403,9 @@ openshift-baseline-security/
 │   ├── Makefile
 │   └── go.mod
 ├── console-plugin/                 # console-plugin-template shape
-│   ├── src/components/             # React tabs, BaselineContext, Overview item
+│   ├── src/components/             # React tabs, BaselineContext, Overview item, UI feedback timing
 │   ├── src/{models,utils,scoring,status,names,cron,dates,waivers,patches,links,results,remediation,report,profiles,download,errors}.*
+│   │                               # domain modules; utils.ts is a re-export barrel for tests
 │   ├── locales/en/
 │   ├── e2e/                        # Playwright live-console suite
 │   ├── console-extensions.json
@@ -408,6 +414,7 @@ openshift-baseline-security/
 │   └── Dockerfile
 ├── docs/{SPEC,DESIGN-DECISIONS,PATTERNS,STANDARDS,TEST-PLAN}.md
 ├── CHANGELOG.md
+├── SECURITY.md                     # support window + vulnerability reporting
 ├── TODO.md
 ├── OWNERS
 └── LICENSE                         # Apache-2.0
@@ -424,7 +431,8 @@ same Makefile targets (`test`, `lint`, `docker-build`).
 | 0.1 | Operator: CO install/adopt + CIS default binding + status score. Plugin: dashboard + results list. | Done; verified e2e on SNO 4.22.0 (score 96 from 277 CIS results) |
 | 0.2 | Full profile catalog (G2), rescan button, OLM bundle + catalog. | Done; OLM install path verified on-cluster. community-operators submission pending |
 | 0.3 (S2) | Score history + trendline; tailored profiles; metrics/alerts. | Done (30-entry status ring + trend chart) |
-| 0.4 (S1 + expand-compliance-features) | Remediation gated apply + MCP-paused batch; waivers; scan diff; severity-weighted score; schedule/report UI; TailoredProfile authoring; dynamic informer; benign INCONSISTENT→PASS; Helm removed (OLM only). | Done; see CHANGELOG.md 0.4.0 |
+| 0.4 (S1 + expand-compliance-features) | Remediation gated apply + MCP-paused batch; waivers; scan diff; severity-weighted score; schedule/report UI; TailoredProfile authoring; benign INCONSISTENT→PASS; Helm removed (OLM only). | Done; see CHANGELOG.md 0.4.0 |
+| Post-0.4 (main / Unreleased) | Empty `spec.profiles: []` disables scanning; DNS-1123 `complianceCatalogSource`; raw-FAIL scan-diff; status list-type map-merge; HA-safe score/fail alerts; dynamic informer; post-0.4 metrics/alerts (see CHANGELOG **[Unreleased]**). | On `main`; not in published 0.4.0 tags |
 | Productization | Rename API group to openshift.io namespace, Dockerfile.rhel + ci-operator onboarding, split repos, Red Hat enhancement proposal referencing this spec. | Open |
 
 ## 11. Prerequisites

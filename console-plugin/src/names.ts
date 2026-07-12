@@ -1,3 +1,4 @@
+// K8s and TailoredProfile name validation (DNS-1123, CRD MaxLength bounds).
 const dns1123Subdomain =
   /^[a-z0-9](?:[-a-z0-9]*[a-z0-9])?(?:\.[a-z0-9](?:[-a-z0-9]*[a-z0-9])?)*$/;
 

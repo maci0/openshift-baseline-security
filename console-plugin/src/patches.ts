@@ -1,10 +1,31 @@
+// ClusterBaseline / TailoredProfile JSON patches (optimistic concurrency, fail-closed).
 import { isValidCron } from './cron';
 import { TAILORED_PROFILE_MAX_ITEMS, WAIVER_MAX_ITEMS, Waiver } from './models';
 import { isValidK8sName, isValidTailoredProfileName } from './names';
 
-// Matches operator batchMaxRemediations so the console never sets an
-// annotation the reconciler will reject for size.
+// Matches operator batchApplyAnnotation / batchMaxRemediations so the console
+// and reconciler cannot drift on key or size.
+export const BATCH_APPLY_ANNOTATION = 'baselinesecurity.io/batch-apply';
 const batchApplyMaxNames = 256;
+
+// True when the batch-apply annotation names at least one remediation.
+// Operator parity (batchRemediationNames / splitCSV): key presence alone is not
+// enough; empty, whitespace, or comma-only values are not a batch request.
+// Used so the Remediations UI does not stick on "in progress" for a stale empty key.
+export const batchApplyRequested = (
+  annotations?: Record<string, string> | null,
+): boolean => {
+  const raw = annotations?.[BATCH_APPLY_ANNOTATION];
+  if (typeof raw !== 'string' || !raw) {
+    return false;
+  }
+  for (const part of raw.split(',')) {
+    if (part.trim()) {
+      return true;
+    }
+  }
+  return false;
+};
 
 // Optimistic concurrency test op prepended to ClusterBaseline JSON patches.
 // Empty when resourceVersion is unknown (no guard rather than a false conflict).
@@ -67,11 +88,13 @@ export const batchApplyPatch = (hasAnnotations: boolean, names: string[]) => {
     return [] as { op: 'add'; path: string; value: unknown }[];
   }
   const value = list.join(',');
+  // JSON Pointer escapes "/" as "~1" in the nested annotation path.
+  const annPath = `/metadata/annotations/${BATCH_APPLY_ANNOTATION.replace(/\//g, '~1')}`;
   return hasAnnotations
     ? [
         {
           op: 'add' as const,
-          path: '/metadata/annotations/baselinesecurity.io~1batch-apply',
+          path: annPath,
           value,
         },
       ]
@@ -79,7 +102,7 @@ export const batchApplyPatch = (hasAnnotations: boolean, names: string[]) => {
         {
           op: 'add' as const,
           path: '/metadata/annotations',
-          value: { 'baselinesecurity.io/batch-apply': value },
+          value: { [BATCH_APPLY_ANNOTATION]: value },
         },
       ];
 };
@@ -92,9 +115,32 @@ export const remediationApplyPatch = (hasRemediation: boolean, automatic: boolea
     : [{ op: 'add' as const, path: '/spec/remediation', value: { apply } }];
 };
 
-// True when s parses as a date (metav1.Time-shaped ISO). Empty is handled by
-// callers; non-empty garbage must fail closed before apiserver admission.
-const isParseableTime = (s: string): boolean => !Number.isNaN(Date.parse(s));
+// metav1.Time JSON is RFC3339. Date.parse alone is too loose (e.g. "March 1,
+// 2026", locale MM/DD, calendar overflow like 2026-02-31) and would pass here
+// only to 422 at the apiserver, or worse accept a browser-overflowed day.
+// Require RFC3339 shape, a real calendar date, and a finite instant.
+const rfc3339TimeRe =
+  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
+const isParseableTime = (s: string): boolean => {
+  const m = rfc3339TimeRe.exec(s.trim());
+  if (!m) {
+    return false;
+  }
+  const year = Number(m[1]);
+  const month = Number(m[2]);
+  const day = Number(m[3]);
+  // UTC calendar check so 2026-02-31 cannot pass via Date overflow.
+  const cal = new Date(Date.UTC(year, month - 1, day));
+  if (
+    cal.getUTCFullYear() !== year ||
+    cal.getUTCMonth() !== month - 1 ||
+    cal.getUTCDate() !== day
+  ) {
+    return false;
+  }
+  const t = Date.parse(s.trim());
+  return !Number.isNaN(t);
+};
 
 // JSON patch adding a waiver for a check. When the array is absent, create it;
 // when it exists (including empty after the last remove), append with "/-".
@@ -103,13 +149,18 @@ const isParseableTime = (s: string): boolean => !Number.isNaN(Date.parse(s));
 // (not DNS-1123) yield no ops so CRD admission is not the first failure mode.
 export const addWaiverPatch = (waivers: Waiver[] | undefined | null, entry: Waiver) => {
   const name = entry.name;
+  // Trim optional text fields once: whitespace-only is empty; MaxLength is on
+  // the stored value so padding cannot smuggle past the bound after a later trim.
+  const reason = entry.reason?.trim() ?? '';
+  const requestedBy = entry.requestedBy?.trim() ?? '';
+  const approvedBy = entry.approvedBy?.trim() ?? '';
   // Match ClusterBaseline CRD bounds so over-long / malformed fields fail closed
   // here (empty ops) instead of only at apiserver admission.
   if (
     !isValidK8sName(name) ||
-    (entry.reason != null && entry.reason.length > 1024) ||
-    (entry.requestedBy != null && entry.requestedBy.length > 253) ||
-    (entry.approvedBy != null && entry.approvedBy.length > 253) ||
+    reason.length > 1024 ||
+    requestedBy.length > 253 ||
+    approvedBy.length > 253 ||
     (entry.expiresAt != null && entry.expiresAt !== '' && !isParseableTime(entry.expiresAt)) ||
     (entry.reviewBy != null && entry.reviewBy !== '' && !isParseableTime(entry.reviewBy))
   ) {
@@ -117,9 +168,9 @@ export const addWaiverPatch = (waivers: Waiver[] | undefined | null, entry: Waiv
   }
   // Drop empty optional fields so the stored entry stays minimal.
   const clean: Waiver = { name };
-  if (entry.reason) clean.reason = entry.reason;
-  if (entry.requestedBy) clean.requestedBy = entry.requestedBy;
-  if (entry.approvedBy) clean.approvedBy = entry.approvedBy;
+  if (reason) clean.reason = reason;
+  if (requestedBy) clean.requestedBy = requestedBy;
+  if (approvedBy) clean.approvedBy = approvedBy;
   if (entry.expiresAt) clean.expiresAt = entry.expiresAt;
   if (entry.reviewBy) clean.reviewBy = entry.reviewBy;
   if (waivers != null) {
@@ -140,11 +191,17 @@ export const addWaiverPatch = (waivers: Waiver[] | undefined | null, entry: Waiv
 };
 
 // JSON patch removing the waiver at index i (test-guards the name so a
-// concurrent reorder cannot delete the wrong entry).
-export const removeWaiverPatch = (index: number, name: string) => [
-  { op: 'test' as const, path: `/spec/waivers/${index}/name`, value: name },
-  { op: 'remove' as const, path: `/spec/waivers/${index}` },
-];
+// concurrent reorder cannot delete the wrong entry). Invalid index / empty name
+// yield no ops so a bad call site cannot emit a patch that always 404s.
+export const removeWaiverPatch = (index: number, name: string) => {
+  if (!Number.isInteger(index) || index < 0 || !name) {
+    return [] as { op: 'test' | 'remove'; path: string; value?: unknown }[];
+  }
+  return [
+    { op: 'test' as const, path: `/spec/waivers/${index}/name`, value: name },
+    { op: 'remove' as const, path: `/spec/waivers/${index}` },
+  ];
+};
 
 // JSON patch to trigger a Compliance Operator rescan. value must change each
 // click so a re-rescan is observed when the annotation already exists.
@@ -154,6 +211,12 @@ export const rescanPatch = (
   value: string,
   resourceVersion?: string,
 ) => {
+  // Empty/whitespace tokens are not observed as a change by CO and would make a
+  // successful patch look like a rescan when nothing useful was written.
+  const token = typeof value === 'string' ? value.trim() : '';
+  if (!token) {
+    return [] as { op: 'add' | 'test'; path: string; value: unknown }[];
+  }
   // A nested add cannot erase siblings. Guard only whole-map creation, where a
   // concurrent writer could otherwise have its newly-created map replaced.
   const guard = !hasAnnotations ? resourceVersionTest(resourceVersion) : [];
@@ -163,7 +226,7 @@ export const rescanPatch = (
         {
           op: 'add' as const,
           path: '/metadata/annotations/compliance.openshift.io~1rescan',
-          value,
+          value: token,
         },
       ]
     : [
@@ -171,7 +234,7 @@ export const rescanPatch = (
         {
           op: 'add' as const,
           path: '/metadata/annotations',
-          value: { 'compliance.openshift.io/rescan': value },
+          value: { 'compliance.openshift.io/rescan': token },
         },
       ];
 };

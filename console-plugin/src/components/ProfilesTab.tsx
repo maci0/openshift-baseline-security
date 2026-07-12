@@ -9,44 +9,53 @@ import {
   CardBody,
   CardHeader,
   CardTitle,
-  EmptyState,
-  EmptyStateBody,
+  Content,
+  Flex,
+  FlexItem,
   FormGroup,
   FormHelperText,
   Gallery,
   HelperText,
   HelperTextItem,
+  Label,
   Modal,
   ModalBody,
   ModalFooter,
   ModalHeader,
   PageSection,
   Skeleton,
+  Spinner,
   Split,
   SplitItem,
   Switch,
   TextArea,
   TextInput,
+  Title,
 } from '@patternfly/react-core';
 import {
   ClusterBaseline,
   ClusterBaselineModel,
+  COMPLIANCE_NAMESPACE,
   PROFILE_INFO,
   PROFILE_KEYS,
+  profileTitle,
   TAILORED_PROFILE_MAX_ITEMS,
   TailoredProfileModel,
 } from '../models';
+import { formatCount } from '../dates';
 import { errorMessage, isAlreadyExists } from '../errors';
 import { isValidK8sName, isValidTailoredProfileName } from '../names';
 import { resourceVersionTest, tailoredProfileBindingPatch } from '../patches';
 import { tailoredProfileManifest, toggledProfiles } from '../profiles';
+import BaselineNotConfigured from './BaselineNotConfigured';
 import { withDisabledTip } from './DisabledTip';
+import { SUCCESS_DISMISS_MS } from './feedback';
 
 const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = ({
   baseline,
   loaded = true,
 }) => {
-  const { t } = useTranslation('plugin__baseline-security-console-plugin');
+  const { t, i18n } = useTranslation('plugin__baseline-security-console-plugin');
   const [pending, setPending] = React.useState(false);
   // Which profile switch is mid-patch (for per-control loading feedback).
   const [pendingKey, setPendingKey] = React.useState<string | null>(null);
@@ -59,24 +68,59 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
     resource: 'clusterbaselines',
     verb: 'patch',
   });
-  const [canAuthor] = useAccessReview({
+  const [canAuthor, canAuthorLoading] = useAccessReview({
     group: 'compliance.openshift.io',
     resource: 'tailoredprofiles',
     verb: 'create',
-    namespace: 'openshift-compliance',
+    namespace: COMPLIANCE_NAMESPACE,
   });
   const [creating, setCreating] = React.useState(false);
+  // Name of the tailored profile pending unbind confirmation (null when closed).
+  const [unbinding, setUnbinding] = React.useState<string | null>(null);
+  // Built-in profile key pending "disable last / stop scanning" confirmation.
+  const [disablingLast, setDisablingLast] = React.useState<string | null>(null);
   const [tpName, setTpName] = React.useState('');
   const [tpExtends, setTpExtends] = React.useState('ocp4-cis');
   const [tpDisable, setTpDisable] = React.useState('');
   const tpNameRef = React.useRef<HTMLInputElement>(null);
+  const createButtonRef = React.useRef<HTMLButtonElement>(null);
+  // Track create sessions so Cancel/close can restore focus to the trigger (WCAG 2.4.3).
+  const wasCreating = React.useRef(false);
+  // Return focus to Unbind / profile switch when those confirm modals close.
+  const returnFocusRef = React.useRef<HTMLElement | null>(null);
+  const confirmModalWasOpen = React.useRef(false);
+  const anyConfirmModalOpen = !!unbinding || !!disablingLast;
 
-  // Focus the name field when the create modal opens (keyboard users).
+  // Focus the name field when the create modal opens; return it to the trigger when closing.
   React.useEffect(() => {
     if (creating) {
       tpNameRef.current?.focus();
+      wasCreating.current = true;
+    } else if (wasCreating.current) {
+      createButtonRef.current?.focus();
+      wasCreating.current = false;
     }
   }, [creating]);
+
+  // Restore focus to the control that opened unbind / disable-last confirms.
+  React.useEffect(() => {
+    if (anyConfirmModalOpen) {
+      confirmModalWasOpen.current = true;
+      return;
+    }
+    if (!confirmModalWasOpen.current) return;
+    confirmModalWasOpen.current = false;
+    const el = returnFocusRef.current;
+    returnFocusRef.current = null;
+    window.requestAnimationFrame(() => el?.focus?.());
+  }, [anyConfirmModalOpen]);
+
+  // Auto-dismiss success so enable/disable/create feedback does not stick forever.
+  React.useEffect(() => {
+    if (!success) return;
+    const id = window.setTimeout(() => setSuccess(null), SUCCESS_DISMISS_MS);
+    return () => window.clearTimeout(id);
+  }, [success]);
 
   const createTailored = async () => {
     const name = tpName.trim();
@@ -136,7 +180,11 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
         setError(
           t(
             'Tailored profile "{{name}}" was created but could not be bound (limit of {{max}} tailored profiles reached). Remove one, then retry.',
-            { name, max: TAILORED_PROFILE_MAX_ITEMS },
+            {
+              name,
+              max: TAILORED_PROFILE_MAX_ITEMS,
+              formattedMax: formatCount(TAILORED_PROFILE_MAX_ITEMS, i18n.language),
+            },
           ),
         );
         return;
@@ -165,6 +213,17 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
   const extendsValid =
     tpExtends.trim() === '' || isValidK8sName(tpExtends.trim());
 
+  // Cancel / backdrop close: drop draft fields so the next open is a clean form.
+  // Keep error: page-top alert can still show bind/create failures after close
+  // (e.g. profile created but not bound).
+  const closeCreateModal = () => {
+    if (pendingRef.current) return;
+    setCreating(false);
+    setTpName('');
+    setTpDisable('');
+    setTpExtends('ocp4-cis');
+  };
+
   const editDisabled = !canEdit || canEditLoading || pending;
   let editDisabledReason: string | undefined;
   if (!pending) {
@@ -175,34 +234,54 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
     }
   }
 
+  // True when turning off `key` would leave zero built-ins and zero tailored
+  // suites, which stops all compliance scanning.
+  const wouldStopScanning = (key: string, checked: boolean): boolean => {
+    if (checked || !baseline) return false;
+    const remaining = toggledProfiles(baseline.spec.profiles ?? [], key, false);
+    return remaining.length === 0 && (baseline.spec.tailoredProfiles?.length ?? 0) === 0;
+  };
+
   const toggle = async (key: string, checked: boolean) => {
     if (!baseline || pendingRef.current) return;
     // Empty is allowed: clearing every profile disables scanning.
-    const profiles = toggledProfiles(baseline.spec.profiles ?? [], key, checked);
+    const current = baseline.spec.profiles;
+    const profiles = toggledProfiles(current ?? [], key, checked);
     pendingRef.current = true;
     setPending(true);
     setPendingKey(key);
     setError(null);
     setSuccess(null);
     try {
+      // When profiles is absent (hand-edit / pre-default CR), use add rather
+      // than test+replace against [] (test on a missing path always 422s).
+      const profileOps =
+        current != null
+          ? [
+              { op: 'test' as const, path: '/spec/profiles', value: current },
+              { op: 'replace' as const, path: '/spec/profiles', value: profiles },
+            ]
+          : [{ op: 'add' as const, path: '/spec/profiles', value: profiles }];
       await k8sPatch({
         model: ClusterBaselineModel,
         resource: baseline,
-        // test op: reject the patch if another writer changed profiles since
-        // this render, instead of silently clobbering their change.
-        data: [
-          ...resourceVersionTest(baseline.metadata.resourceVersion),
-          { op: 'test', path: '/spec/profiles', value: baseline.spec.profiles ?? [] },
-          { op: 'replace', path: '/spec/profiles', value: profiles },
-        ],
+        // test op (when present): reject if another writer changed profiles.
+        data: [...resourceVersionTest(baseline.metadata.resourceVersion), ...profileOps],
       });
-      const title = t(PROFILE_INFO[key as (typeof PROFILE_KEYS)[number]].title);
+      setDisablingLast(null);
+      // profileTitle falls back safely for unexpected keys (no PROFILE_INFO throw).
+      const title = t(profileTitle(key));
       setSuccess(
         checked
           ? t('{{profile}} enabled. Scans will include this profile on the next run.', {
               profile: title,
             })
-          : t('{{profile}} disabled.', { profile: title }),
+          : profiles.length === 0 && (baseline.spec.tailoredProfiles?.length ?? 0) === 0
+            ? t(
+                '{{profile}} disabled. Scanning is off until you enable a profile.',
+                { profile: title },
+              )
+            : t('{{profile}} disabled.', { profile: title }),
       );
     } catch (e) {
       setError(errorMessage(e) ?? t('Failed to update profiles.'));
@@ -212,6 +291,53 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
       setPendingKey(null);
     }
   };
+
+  // Drop a name from spec.tailoredProfiles so scans stop including it. The
+  // TailoredProfile CR in openshift-compliance is left in place (unbind ≠ delete).
+  const unbindTailored = async (name: string) => {
+    if (!baseline || pendingRef.current) return;
+    const current = baseline.spec.tailoredProfiles;
+    if (!current?.includes(name)) {
+      setUnbinding(null);
+      return;
+    }
+    const next = current.filter((n) => n !== name);
+    pendingRef.current = true;
+    setPending(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      await k8sPatch({
+        model: ClusterBaselineModel,
+        resource: baseline,
+        data: [
+          ...resourceVersionTest(baseline.metadata.resourceVersion),
+          { op: 'test' as const, path: '/spec/tailoredProfiles', value: current },
+          { op: 'replace' as const, path: '/spec/tailoredProfiles', value: next },
+        ],
+      });
+      setUnbinding(null);
+      const scanningOff =
+        (baseline.spec.profiles?.length ?? 0) === 0 && next.length === 0;
+      setSuccess(
+        scanningOff
+          ? t(
+              'Tailored profile "{{name}}" unbound. Scanning is off until you enable a profile.',
+              { name },
+            )
+          : t('Tailored profile "{{name}}" unbound. It is no longer included in scans.', {
+              name,
+            }),
+      );
+    } catch (e) {
+      setError(errorMessage(e) ?? t('Failed to unbind tailored profile.'));
+    } finally {
+      pendingRef.current = false;
+      setPending(false);
+    }
+  };
+
+  const boundTailored = baseline?.spec.tailoredProfiles ?? [];
 
   if (!loaded) {
     return (
@@ -231,20 +357,15 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
   if (!baseline) {
     return (
       <PageSection>
-        <EmptyState titleText={t('Baseline not configured')} headingLevel="h2">
-          <EmptyStateBody>
-            {t(
-              'No ClusterBaseline resource found. Install the baseline-security operator and create a ClusterBaseline to start scanning.',
-            )}
-          </EmptyStateBody>
-        </EmptyState>
+        <BaselineNotConfigured />
       </PageSection>
     );
   }
 
   return (
     <PageSection>
-      {error && (
+      {/* Hide page-top error while a modal owns the same message. */}
+      {error && !unbinding && !disablingLast && !creating && (
         <Alert
           variant="danger"
           isInline
@@ -268,13 +389,16 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
           }
         />
       )}
-      {canAuthor && (
+      {/* Wait for SAR: other write gates use loading so the button does not
+          flash for viewers while useAccessReview is still resolving. */}
+      {canAuthor && !canAuthorLoading && (
         <Split hasGutter style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}>
           <SplitItem isFilled />
           <SplitItem>
             {withDisabledTip(
               editDisabled && editDisabledReason ? editDisabledReason : undefined,
               <Button
+                ref={createButtonRef}
                 variant="secondary"
                 isDisabled={editDisabled}
                 onClick={() => {
@@ -292,12 +416,7 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
       <Modal
         variant="medium"
         isOpen={creating}
-        onClose={() => {
-          // pendingRef: setPending is async; dismiss between pendingRef=true and
-          // re-render must not wipe the create form mid-request.
-          if (pendingRef.current) return;
-          setCreating(false);
-        }}
+        onClose={closeCreateModal}
         aria-labelledby="new-tp-title"
       >
         <ModalHeader title={t('New tailored profile')} labelId="new-tp-title" />
@@ -327,6 +446,11 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
               isRequired
               aria-invalid={!nameValid}
               aria-describedby={!nameValid ? 'tp-name-help' : undefined}
+              // Resource names are not prose: suppress spellcheck / managers.
+              spellCheck={false}
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="off"
             />
             {!nameValid && (
               <FormHelperText>
@@ -354,6 +478,10 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
               validated={extendsValid ? 'default' : 'error'}
               aria-invalid={!extendsValid}
               aria-describedby="tp-extends-help"
+              spellCheck={false}
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="off"
             />
             <FormHelperText>
               <HelperText id="tp-extends-help">
@@ -378,6 +506,8 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
               placeholder={t('ocp4-cis-...')}
               aria-label={t('Disable rules (one per line)')}
               aria-describedby="tp-disable-help"
+              spellCheck={false}
+              autoComplete="off"
             />
             <FormHelperText>
               <HelperText id="tp-disable-help">
@@ -401,14 +531,7 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
           >
             {t('Create and bind')}
           </Button>
-          <Button
-            variant="link"
-            isDisabled={pending}
-            onClick={() => {
-              if (pendingRef.current) return;
-              setCreating(false);
-            }}
-          >
+          <Button variant="link" isDisabled={pending} onClick={closeCreateModal}>
             {t('Cancel')}
           </Button>
         </ModalFooter>
@@ -417,30 +540,60 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
         {PROFILE_KEYS.map((key) => {
           const info = PROFILE_INFO[key];
           const enabled = baseline.spec.profiles?.includes(key) ?? false;
+          const updating = pendingKey === key;
           return (
             <Card key={key}>
               <CardHeader
                 actions={{
                   // Any profile can be toggled off, including the last one, which
-                  // disables scanning.
-                  actions: withDisabledTip(
-                    editDisabled && editDisabledReason ? editDisabledReason : undefined,
-                    <Switch
-                      id={`profile-${key}`}
-                      aria-label={
-                        pendingKey === key
-                          ? t('Updating {{profile}} profile', { profile: t(info.title) })
-                          : t('Enable {{profile}} profile', {
+                  // disables scanning. Spinner next to the switch so the busy
+                  // state is visible (not only aria-busy for assistive tech).
+                  actions: (
+                    <Flex
+                      gap={{ default: 'gapSm' }}
+                      alignItems={{ default: 'alignItemsCenter' }}
+                    >
+                      {updating && (
+                        <FlexItem>
+                          <Spinner
+                            size="md"
+                            aria-label={t('Updating {{profile}} profile', {
                               profile: t(info.title),
-                            })
-                      }
-                      aria-busy={pendingKey === key || undefined}
-                      isChecked={enabled}
-                      isDisabled={editDisabled}
-                      onChange={(_e, checked) => {
-                        void toggle(key, checked);
-                      }}
-                    />,
+                            })}
+                          />
+                        </FlexItem>
+                      )}
+                      <FlexItem>
+                        {withDisabledTip(
+                          editDisabled && editDisabledReason ? editDisabledReason : undefined,
+                          <Switch
+                            id={`profile-${key}`}
+                            aria-label={
+                              updating
+                                ? t('Updating {{profile}} profile', { profile: t(info.title) })
+                                : enabled
+                                ? t('Disable {{profile}} profile', { profile: t(info.title) })
+                                : t('Enable {{profile}} profile', { profile: t(info.title) })
+                            }
+                            aria-busy={updating || undefined}
+                            isChecked={enabled}
+                            isDisabled={editDisabled}
+                            onChange={(e, checked) => {
+                              // Accidental off of the last suite stops scanning;
+                              // confirm before patching so the switch is not a trap.
+                              if (wouldStopScanning(key, checked)) {
+                                returnFocusRef.current = e.currentTarget;
+                                setError(null);
+                                setSuccess(null);
+                                setDisablingLast(key);
+                                return;
+                              }
+                              void toggle(key, checked);
+                            }}
+                          />,
+                        )}
+                      </FlexItem>
+                    </Flex>
                   ),
                 }}
               >
@@ -451,6 +604,171 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
           );
         })}
       </Gallery>
+      <Modal
+        variant="small"
+        isOpen={!!disablingLast}
+        onClose={() => {
+          if (pendingRef.current) return;
+          setDisablingLast(null);
+        }}
+        aria-labelledby="disable-last-profile-title"
+      >
+        <ModalHeader
+          title={t('Turn off compliance scanning?')}
+          labelId="disable-last-profile-title"
+        />
+        <ModalBody>
+          {t(
+            'Disabling {{profile}} removes the last selected profile. Scheduled scans and rescan stop until you enable a profile again.',
+            {
+              profile: disablingLast ? t(profileTitle(disablingLast)) : '',
+            },
+          )}
+          {error && (
+            <Alert
+              variant="danger"
+              isInline
+              isLiveRegion
+              title={error}
+              style={{ marginTop: 'var(--pf-t--global--spacer--md)' }}
+            />
+          )}
+        </ModalBody>
+        <ModalFooter>
+          <Button
+            variant="danger"
+            isDisabled={editDisabled}
+            isLoading={pending}
+            onClick={() => {
+              if (disablingLast) void toggle(disablingLast, false);
+            }}
+          >
+            {t('Turn off scanning')}
+          </Button>
+          <Button
+            variant="link"
+            isDisabled={pending}
+            onClick={() => {
+              if (pendingRef.current) return;
+              setDisablingLast(null);
+            }}
+          >
+            {t('Cancel')}
+          </Button>
+        </ModalFooter>
+      </Modal>
+      {/* Bound tailored profiles: create alone was a dead end (no list, no
+          unbind). Surface membership and let admins stop scanning a suite
+          without deleting the TailoredProfile CR. */}
+      {boundTailored.length > 0 && (
+        <div style={{ marginTop: 'var(--pf-t--global--spacer--lg)' }}>
+          <Title headingLevel="h2" size="lg">
+            {t('Bound tailored profiles')}
+          </Title>
+          <Content component="p" style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}>
+            {t(
+              'These TailoredProfiles are included in scans. Unbind to stop scanning them; the resource in openshift-compliance is kept.',
+            )}
+          </Content>
+          <Gallery hasGutter minWidths={{ default: '330px' }}>
+            {boundTailored.map((name) => (
+              <Card key={name}>
+                <CardHeader
+                  actions={{
+                    actions: withDisabledTip(
+                      editDisabled && editDisabledReason ? editDisabledReason : undefined,
+                      <Button
+                        variant="link"
+                        isInline
+                        isDisabled={editDisabled}
+                        aria-label={t('Unbind tailored profile {{name}}', { name })}
+                        onClick={(e) => {
+                          returnFocusRef.current = e.currentTarget;
+                          setError(null);
+                          setSuccess(null);
+                          setUnbinding(name);
+                        }}
+                      >
+                        {t('Unbind')}
+                      </Button>,
+                    ),
+                    hasNoOffset: true,
+                  }}
+                >
+                  <CardTitle>
+                    {name}{' '}
+                    <Label isCompact color="blue">
+                      {t('Tailored')}
+                    </Label>
+                  </CardTitle>
+                </CardHeader>
+              </Card>
+            ))}
+          </Gallery>
+        </div>
+      )}
+      <Modal
+        variant="small"
+        isOpen={!!unbinding}
+        onClose={() => {
+          if (pendingRef.current) return;
+          setUnbinding(null);
+        }}
+        aria-labelledby="unbind-tp-title"
+      >
+        <ModalHeader title={t('Unbind tailored profile?')} labelId="unbind-tp-title" />
+        <ModalBody>
+          {t(
+            '"{{name}}" will no longer be included in compliance scans. The TailoredProfile resource is not deleted.',
+            { name: unbinding ?? '' },
+          )}
+          {baseline &&
+            (baseline.spec.profiles?.length ?? 0) === 0 &&
+            (baseline.spec.tailoredProfiles ?? []).filter((n) => n !== unbinding).length ===
+              0 && (
+              <Alert
+                variant="warning"
+                isInline
+                isLiveRegion
+                title={t('This is the last selected profile')}
+                style={{ marginTop: 'var(--pf-t--global--spacer--md)' }}
+              >
+                {t('Scheduled scans and rescan will stop until you enable a profile again.')}
+              </Alert>
+            )}
+          {error && (
+            <Alert
+              variant="danger"
+              isInline
+              isLiveRegion
+              title={error}
+              style={{ marginTop: 'var(--pf-t--global--spacer--md)' }}
+            />
+          )}
+        </ModalBody>
+        <ModalFooter>
+          <Button
+            variant="danger"
+            isDisabled={editDisabled}
+            isLoading={pending}
+            onClick={() => {
+              if (unbinding) void unbindTailored(unbinding);
+            }}
+          >
+            {t('Unbind')}
+          </Button>
+          <Button
+            variant="link"
+            isDisabled={pending}
+            onClick={() => {
+              if (pendingRef.current) return;
+              setUnbinding(null);
+            }}
+          >
+            {t('Cancel')}
+          </Button>
+        </ModalFooter>
+      </Modal>
     </PageSection>
   );
 };

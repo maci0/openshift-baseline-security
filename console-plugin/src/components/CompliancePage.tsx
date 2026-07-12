@@ -17,9 +17,11 @@ import {
   Content,
   Title,
 } from '@patternfly/react-core';
+import { DownloadIcon } from '@patternfly/react-icons';
 import {
   ClusterBaseline,
   ClusterBaselineGVK,
+  COMPLIANCE_NAMESPACE,
   ComplianceCheckResult,
   ComplianceCheckResultGVK,
   ComplianceScanGVK,
@@ -32,6 +34,7 @@ import { errorMessage } from '../errors';
 import { rescanPatch } from '../patches';
 import { buildReportHtml } from '../report';
 import { withDisabledTip } from './DisabledTip';
+import { SUCCESS_DISMISS_MS } from './feedback';
 import {
   BaselineContext,
   OverviewRoute,
@@ -87,7 +90,7 @@ const CompliancePage: React.FC = () => {
     return {
       groupVersionKind: ComplianceScanGVK,
       isList: true,
-      namespace: 'openshift-compliance',
+      namespace: COMPLIANCE_NAMESPACE,
       selector: suiteSel,
     };
   }, [loaded, suiteSel]);
@@ -98,7 +101,7 @@ const CompliancePage: React.FC = () => {
     return {
       groupVersionKind: ComplianceCheckResultGVK,
       isList: true,
-      namespace: 'openshift-compliance',
+      namespace: COMPLIANCE_NAMESPACE,
       selector: suiteSel,
     };
   }, [loaded, suiteSel]);
@@ -113,12 +116,28 @@ const CompliancePage: React.FC = () => {
   const rescanningRef = React.useRef(false);
   const [rescanError, setRescanError] = React.useState<string | null>(null);
   const [rescanStarted, setRescanStarted] = React.useState(false);
-  const [exportNotice, setExportNotice] = React.useState<string | null>(null);
+  // Success (popup-blocked download) is info; failure must be danger so it is
+  // not mistaken for a soft notice.
+  const [exportNotice, setExportNotice] = React.useState<{
+    message: string;
+    variant: 'info' | 'danger';
+  } | null>(null);
+  // Auto-dismiss non-error banners so rescan/export feedback does not stick.
+  React.useEffect(() => {
+    if (!rescanStarted || rescanError) return;
+    const id = window.setTimeout(() => setRescanStarted(false), SUCCESS_DISMISS_MS);
+    return () => window.clearTimeout(id);
+  }, [rescanStarted, rescanError]);
+  React.useEffect(() => {
+    if (!exportNotice || exportNotice.variant === 'danger') return;
+    const id = window.setTimeout(() => setExportNotice(null), SUCCESS_DISMISS_MS);
+    return () => window.clearTimeout(id);
+  }, [exportNotice]);
   const [canRescan, canRescanLoading] = useAccessReview({
     group: 'compliance.openshift.io',
     resource: 'compliancescans',
     verb: 'patch',
-    namespace: 'openshift-compliance',
+    namespace: COMPLIANCE_NAMESPACE,
   });
   const rescanWatchError = errorMessage(baselineError) ?? errorMessage(scansError);
   const watchError = rescanWatchError ?? errorMessage(checkResultsError);
@@ -129,6 +148,12 @@ const CompliancePage: React.FC = () => {
 
   const rescan = async () => {
     if (rescanningRef.current) return;
+    // Button is disabled when there are no scans; still refuse a no-op path so a
+    // race (scans unmounted mid-click) does not look like a successful rescan.
+    if (!ownedScans.length) {
+      setRescanError(t('No owned scans to rescan yet. Enable a profile first.'));
+      return;
+    }
     rescanningRef.current = true;
     setRescanning(true);
     setRescanError(null);
@@ -257,6 +282,7 @@ const CompliancePage: React.FC = () => {
                   exportDisabled ? exportDisabledReason : undefined,
                   <Button
                     variant="secondary"
+                    icon={<DownloadIcon />}
                     isDisabled={exportDisabled}
                     onClick={() => {
                       setExportNotice(null);
@@ -265,29 +291,43 @@ const CompliancePage: React.FC = () => {
                         const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
                         // Prefer a blob URL over document.write: no blank-window
                         // document mutation, and opener is dropped when available.
+                        // Revoke on every path: a throw after createObjectURL
+                        // must not leak the blob URL for the session.
                         const url = URL.createObjectURL(blob);
-                        const w = window.open(url, '_blank');
-                        if (w) {
-                          w.opener = null;
-                          // Keep the blob alive long enough for the tab to load.
-                          window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
-                        } else {
+                        try {
+                          // noopener: drop window.opener at open time (avoids a
+                          // race with post-open assignment on slow tabs).
+                          const w = window.open(url, '_blank', 'noopener,noreferrer');
+                          if (w) {
+                            w.opener = null;
+                            // Keep the blob alive long enough for the tab to load.
+                            window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+                          } else {
+                            URL.revokeObjectURL(url);
+                            // Popup blockers should not turn export into a silent no-op.
+                            downloadBlob(blob, 'compliance-report.html');
+                            setExportNotice({
+                              variant: 'info',
+                              message: t(
+                                'Report downloaded as compliance-report.html (popup was blocked).',
+                              ),
+                            });
+                          }
+                        } catch (openErr) {
                           URL.revokeObjectURL(url);
-                          // Popup blockers should not turn export into a silent no-op.
-                          downloadBlob(blob, 'compliance-report.html');
-                          setExportNotice(
-                            t('Report downloaded as compliance-report.html (popup was blocked).'),
-                          );
+                          throw openErr;
                         }
                       } catch (e) {
                         // DOM / serialization failures must not leave a blank click.
-                        setExportNotice(
-                          errorMessage(e) ?? t('Failed to export compliance report.'),
-                        );
+                        setExportNotice({
+                          variant: 'danger',
+                          message:
+                            errorMessage(e) ?? t('Failed to export compliance report.'),
+                        });
                       }
                     }}
                   >
-                    {t('Export report')}
+                    {t('Export HTML report')}
                   </Button>,
                 )}
               {withDisabledTip(
@@ -319,10 +359,10 @@ const CompliancePage: React.FC = () => {
         )}
         {exportNotice && (
           <Alert
-            variant="info"
+            variant={exportNotice.variant}
             isInline
             isLiveRegion
-            title={exportNotice}
+            title={exportNotice.message}
             style={{ marginTop: 'var(--pf-t--global--spacer--md)' }}
             actionClose={
               <AlertActionCloseButton

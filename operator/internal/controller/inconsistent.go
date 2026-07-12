@@ -60,7 +60,7 @@ func effectiveInconsistentStatus(item *unstructured.Unstructured) string {
 // inconsistentStates returns the set of per-node states of an INCONSISTENT check,
 // gathered from the inconsistent-source annotation and most-common-status.
 // Untrusted cluster data: tolerant of malformed values, never panics.
-// Used by fuzz tests; aggregateStatus uses effectiveInconsistentStatus (flags).
+// Used by unit tests; aggregateStatus uses effectiveInconsistentStatus (flags).
 func inconsistentStates(item *unstructured.Unstructured) map[string]bool {
 	states := map[string]bool{}
 	visitInconsistentStates(item, func(st string) {
@@ -70,10 +70,18 @@ func inconsistentStates(item *unstructured.Unstructured) map[string]bool {
 }
 
 // visitInconsistentStates walks CO inconsistent annotations and calls fn with
-// each uppercased state token. Single-key annotation reads avoid GetAnnotations()
-// full-map copy; comma walk avoids strings.Split on multi-node pools.
+// each uppercased state token. One metadata walk for both annotation keys
+// (avoids dual unstructuredAnnotation meta lookups on multi-INCONSISTENT
+// reconciles). Comma walk avoids strings.Split on multi-node pools.
 func visitInconsistentStates(item *unstructured.Unstructured, fn func(string)) {
-	raw := unstructuredAnnotation(item.Object, inconsistentSourceAnn)
+	meta := unstructuredMeta(item.Object)
+	var raw, mostCommon string
+	if meta != nil {
+		if anns, ok := meta["annotations"]; ok {
+			raw = stringMapValue(anns, inconsistentSourceAnn)
+			mostCommon = stringMapValue(anns, mostCommonStatusAnn)
+		}
+	}
 	start := 0
 	for start <= len(raw) {
 		comma := strings.IndexByte(raw[start:], ',')
@@ -84,7 +92,7 @@ func visitInconsistentStates(item *unstructured.Unstructured, fn func(string)) {
 		s := strings.TrimSpace(raw[start:end])
 		if s != "" {
 			if i := strings.IndexByte(s, ':'); i >= 0 {
-				if st := strings.ToUpper(strings.TrimSpace(s[i+1:])); st != "" {
+				if st := upperStatusToken(strings.TrimSpace(s[i+1:])); st != "" {
 					fn(st)
 				}
 			}
@@ -94,7 +102,28 @@ func visitInconsistentStates(item *unstructured.Unstructured, fn func(string)) {
 		}
 		start = end + 1
 	}
-	if mc := strings.ToUpper(strings.TrimSpace(unstructuredAnnotation(item.Object, mostCommonStatusAnn))); mc != "" {
+	if mc := upperStatusToken(strings.TrimSpace(mostCommon)); mc != "" {
 		fn(mc)
 	}
+}
+
+// upperStatusToken uppercases a CO status token without allocating when the
+// value is already a common uppercase enum (PASS/FAIL/…) or has no ASCII
+// lowercase letters. Multi-node INCONSISTENT annotations call this per node.
+func upperStatusToken(s string) string {
+	if s == "" {
+		return ""
+	}
+	switch s {
+	case "PASS", "FAIL", "ERROR", "SKIP", "INFO", "MANUAL", "INCONSISTENT",
+		"NOT-APPLICABLE", "WAIVED":
+		return s
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c >= 'a' && c <= 'z' {
+			return strings.ToUpper(s)
+		}
+	}
+	return s
 }

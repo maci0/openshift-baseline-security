@@ -7,9 +7,25 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/utils/ptr"
 )
+
+// preferredHostnameAntiAffinity spreads plugin pods across nodes (CONVENTIONS.md HA).
+func preferredHostnameAntiAffinity(labels map[string]string) *corev1.Affinity {
+	return &corev1.Affinity{
+		PodAntiAffinity: &corev1.PodAntiAffinity{
+			PreferredDuringSchedulingIgnoredDuringExecution: []corev1.WeightedPodAffinityTerm{{
+				Weight: 100,
+				PodAffinityTerm: corev1.PodAffinityTerm{
+					LabelSelector: &metav1.LabelSelector{MatchLabels: labels},
+					TopologyKey:   "kubernetes.io/hostname",
+				},
+			}},
+		},
+	}
+}
 
 // deploymentAvailable is true when the Deployment Available condition is True.
 // Missing condition is treated as not yet available.
@@ -46,7 +62,6 @@ func pluginDeploymentUnavailable(dep *appsv1.Deployment) bool {
 	if dep.Status.ReadyReplicas >= pluginReadyMin {
 		return false
 	}
-	timeout := pluginUnavailableGrace
 	for _, c := range dep.Status.Conditions {
 		if c.Type != appsv1.DeploymentAvailable {
 			continue
@@ -57,10 +72,10 @@ func pluginDeploymentUnavailable(dep *appsv1.Deployment) bool {
 		// Available False: time since it went down. Available True with zero
 		// ready pods is pathological; still time-box from the last transition
 		// so we do not Progress forever.
-		return time.Since(c.LastTransitionTime.Time) > timeout
+		return time.Since(c.LastTransitionTime.Time) > pluginUnavailableGrace
 	}
 	// No Available condition yet (brand-new object): use creation time.
-	return !dep.CreationTimestamp.IsZero() && time.Since(dep.CreationTimestamp.Time) > timeout
+	return !dep.CreationTimestamp.IsZero() && time.Since(dep.CreationTimestamp.Time) > pluginUnavailableGrace
 }
 
 // applyPluginContainer sets the plugin container, volume mounts, and volumes on the pod spec.
@@ -121,6 +136,11 @@ func applyPluginContainer(pod *corev1.PodSpec, image string) {
 			Privileged:   ptr.To(false),
 			Capabilities: &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
 			RunAsNonRoot: ptr.To(true),
+			// Container-level RuntimeDefault: Restricted PSS and audit tools that
+			// only inspect container SC still see seccomp even if pod SC is stripped.
+			SeccompProfile: &corev1.SeccompProfile{
+				Type: corev1.SeccompProfileTypeRuntimeDefault,
+			},
 			// nginx pid/logs/temp use /tmp (emptyDir); rootfs stays immutable.
 			ReadOnlyRootFilesystem: ptr.To(true),
 		},
@@ -137,28 +157,40 @@ func applyPluginContainer(pod *corev1.PodSpec, image string) {
 		},
 		// TCP only: the serving cert may be absent at first start, so HTTP
 		// probes would fail closed until service-ca mints the Secret.
+		// startupProbe owns the cold-start window (image pull lag, nginx
+		// init); liveness must not kill the pod before listen is ready.
+		// failureThreshold*periodSeconds = 2.5m (matches manager pattern).
+		StartupProbe: &corev1.Probe{
+			ProbeHandler: corev1.ProbeHandler{
+				TCPSocket: &corev1.TCPSocketAction{Port: intstr.FromInt32(9443)},
+			},
+			PeriodSeconds:    5,
+			TimeoutSeconds:   1,
+			SuccessThreshold: 1,
+			FailureThreshold: 30,
+		},
 		ReadinessProbe: &corev1.Probe{
 			ProbeHandler: corev1.ProbeHandler{
 				TCPSocket: &corev1.TCPSocketAction{Port: intstr.FromInt32(9443)},
 			},
-			InitialDelaySeconds: 5,
-			TimeoutSeconds:      1,
-			PeriodSeconds:       10,
-			SuccessThreshold:    1,
-			FailureThreshold:    3,
+			TimeoutSeconds:   1,
+			PeriodSeconds:    10,
+			SuccessThreshold: 1,
+			FailureThreshold: 3,
 		},
 		LivenessProbe: &corev1.Probe{
 			ProbeHandler: corev1.ProbeHandler{
 				TCPSocket: &corev1.TCPSocketAction{Port: intstr.FromInt32(9443)},
 			},
-			InitialDelaySeconds: 15,
-			TimeoutSeconds:      1,
-			PeriodSeconds:       20,
-			SuccessThreshold:    1,
-			FailureThreshold:    3,
+			TimeoutSeconds:   1,
+			PeriodSeconds:    20,
+			SuccessThreshold: 1,
+			FailureThreshold: 3,
 		},
-		TerminationMessagePath:   corev1.TerminationMessagePathDefault,
-		TerminationMessagePolicy: corev1.TerminationMessageReadFile,
+		TerminationMessagePath: corev1.TerminationMessagePathDefault,
+		// Prefer container logs when nginx dies before writing the termination file
+		// (matches the manager Deployment; ReadFile alone hides crash context).
+		TerminationMessagePolicy: corev1.TerminationMessageFallbackToLogsOnError,
 		VolumeMounts: []corev1.VolumeMount{
 			{Name: "serving-cert", MountPath: "/var/serving-cert", ReadOnly: true},
 			// Writable scratch for pid file and nginx temp paths (read-only rootfs).

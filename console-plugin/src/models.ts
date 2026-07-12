@@ -1,3 +1,5 @@
+// K8s types, GVKs, CRD-aligned constants, profile display metadata, and ownership
+// selectors. Keep MaxItems / ProfileKey values in lockstep with the operator API.
 import { K8sGroupVersionKind, K8sModel } from '@openshift-console/dynamic-plugin-sdk';
 
 // ProfileKey matches ClusterBaselineSpec.profiles CRD enum. Keep in lockstep with
@@ -46,14 +48,18 @@ export const PROFILE_INFO: Record<ProfileKey, { title: string; description: stri
   },
 };
 
-// O(1) membership for profileTitle / lockstep with PROFILE_KEYS.
+// O(1) membership for ProfileKey enum (lockstep with PROFILE_KEYS / CRD).
 const PROFILE_KEY_SET: ReadonlySet<string> = new Set(PROFILE_KEYS);
+
+// True when key is a known built-in ProfileKey (CRD enum). Shared by profileTitle
+// and toggledProfiles so membership checks cannot drift.
+export const isProfileKey = (key: string): key is ProfileKey => PROFILE_KEY_SET.has(key);
 
 // Human title for a built-in profile key (i18n source string). Unknown keys fall
 // back to uppercased key so Overview/filter stay readable for future enums.
 export const profileTitle = (key: string): string => {
-  if (PROFILE_KEY_SET.has(key)) {
-    return PROFILE_INFO[key as ProfileKey].title;
+  if (isProfileKey(key)) {
+    return PROFILE_INFO[key].title;
   }
   // CR status.profiles[].key is not runtime type-checked; coerce so a tampered
   // non-string key cannot throw on .toUpperCase.
@@ -67,6 +73,10 @@ export const WAIVER_MAX_ITEMS = 256;
 
 // Matches operator DefaultScanSchedule / CRD default for spec.schedule when empty.
 export const DEFAULT_SCAN_SCHEDULE = '0 1 * * *';
+
+// Compliance Operator install namespace (product default on OpenShift). Single
+// source for watches, access reviews, create payloads, and console deep-links.
+export const COMPLIANCE_NAMESPACE = 'openshift-compliance';
 
 export const ClusterBaselineGVK: K8sGroupVersionKind = {
   group: 'baselinesecurity.io',
@@ -167,8 +177,10 @@ export type ComplianceRemediation = {
 };
 
 // Score under the scoring mode active when the operator wrote the point.
-// Flat <-> SeverityWeighted flips do not rewrite prior points; charts may step
-// across a mode change until the next completed scan.
+// Flat <-> SeverityWeighted flips do not rewrite prior points under the new
+// formula; on the next completed scan under the new mode the operator clears
+// overall and per-profile rings and appends a fresh point so charts never mix
+// modes (ADR-008).
 export type ScoreSnapshot = { time: string; score: number };
 
 export type ResultCounts = {
@@ -242,9 +254,9 @@ export type ClusterBaseline = {
       name: string;
       namespace?: string;
     }[];
-    // Set when a prior completed scan exists for regression diff (operator
-    // internal bookkeeping exposed on the CR). Used by Overview empty-state
-    // copy so a second scan with a thin history ring is not "no prior scan".
+    // Operator-internal scan-diff bookkeeping (not a consumer contract; may
+    // change in 0.x). Overview only treats presence as "a prior scan exists"
+    // when history is still thin; prefer newlyFailed/fixed for regressions.
     diffBaseScanTime?: string;
     remediationBatch?: {
       phase: string;
@@ -257,6 +269,20 @@ export type ClusterBaseline = {
 };
 
 const SUITE_LABEL = 'compliance.openshift.io/suite';
+
+// CO label on scans / check results / remediations naming the scan that produced
+// the object. Shared by nodeScanPool and isNodeRemediation ("…-node-<pool>").
+export const SCAN_NAME_LABEL = 'compliance.openshift.io/scan-name';
+
+// MachineConfigPool suffix from a CO scan-name ("<profile>-node-<pool>"), or
+// null when not a node scan / empty pool. lastIndex so tailored names that
+// contain "-node-" still resolve to the final pool segment (operator parity).
+// Does not validate DNS-1123; isNodeRemediation applies isValidK8sName so batch
+// eligibility matches operator validMCPPoolName.
+export const nodePoolFromScanName = (scan: string): string | null => {
+  const i = scan.lastIndexOf('-node-');
+  return i < 0 ? null : scan.slice(i + '-node-'.length) || null;
+};
 
 /**
  * Display key encoded in a CO object's suite label for built-in profiles
@@ -309,6 +335,15 @@ export const suiteFilterKey = (
 };
 
 /**
+ * Human title for a suiteFilterKey id: built-in keys use profileTitle (i18n
+ * source string; pass through t() at render), tailored "tp-<name>" drops the
+ * prefix. Shared by Results chips/column and checkProfileLabel so display cannot
+ * drift between filter keys and label-derived titles.
+ */
+export const suiteFilterKeyTitle = (key: string): string =>
+  key.startsWith('tp-') ? key.slice(3) : profileTitle(key);
+
+/**
  * Suite label values this baseline owns ("baseline-<key>", "baseline-tp-<name>").
  * Used as a label selector so list watches do not pull foreign CO objects.
  */
@@ -316,17 +351,20 @@ export const ownedSuiteLabels = (
   profiles: readonly string[] | undefined,
   tailoredProfiles: readonly string[] | undefined,
 ): string[] => {
-  const out: string[] = [];
+  // Pre-size for typical multi-profile + tailored baselines (watch selector rebuild).
+  const out: string[] = new Array((profiles?.length ?? 0) + (tailoredProfiles?.length ?? 0));
+  let n = 0;
   for (const p of profiles ?? []) {
     if (p) {
-      out.push(`baseline-${p}`);
+      out[n++] = `baseline-${p}`;
     }
   }
   for (const name of tailoredProfiles ?? []) {
     if (name) {
-      out.push(`baseline-tp-${name}`);
+      out[n++] = `baseline-tp-${name}`;
     }
   }
+  out.length = n;
   return out;
 };
 
@@ -353,14 +391,11 @@ export const ownedSuiteSelector = (
  * Human label for a check's owning profile, for the Results Profile column:
  * built-in keys use profileTitle (i18n source string; pass through t() at render),
  * a tailored profile by its plain name, and an em dash when unknown.
+ * Parses the suite label once via suiteFilterKey (hot path: report FAIL rows).
  */
 export const checkProfileLabel = (labels: Record<string, string> | undefined): string => {
-  const tailored = suiteTailoredName(labels);
-  if (tailored !== undefined) {
-    return tailored;
-  }
-  const key = suiteProfileKey(labels);
-  return key ? profileTitle(key) : '—';
+  const key = suiteFilterKey(labels);
+  return key ? suiteFilterKeyTitle(key) : '—';
 };
 
 /** Profile / tailored name list: array (includes) or Set (has) for O(1) hot paths. */

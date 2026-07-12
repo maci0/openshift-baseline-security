@@ -31,14 +31,21 @@ spec:
     Gives the cluster an out-of-the-box compliance baseline: install, and the
     cluster continuously benchmarks itself against the CIS OpenShift Benchmark
     (optionally PCI-DSS, NIST 800-53, DISA STIG, NERC CIP, ACSC E8, BSI),
-    with results rendered natively in the OpenShift web console.
+    with results rendered natively in the OpenShift web console under
+    Administration → Compliance.
 
     The scan engine is the Red Hat Compliance Operator (installed automatically
     if absent). This operator adds zero-configuration defaults, score
-    aggregation, and an admin-console plugin: dashboard, filterable check
-    results, remediation apply, and profile selection.
+    aggregation (optional severity-weighted mode), waivers, scan regression
+    status, MachineConfigPool-paused batch remediation, and an admin-console
+    plugin: dashboard, filterable check results, remediation apply, profile
+    and TailoredProfile selection, and report export.
 
-    Requires a default StorageClass for scan result storage.
+    Maturity is alpha (SemVer 0.x): read Migration notes in the project
+    Changelog before upgrading between minor versions (breaking behavior may
+    land in minors until 1.0). Supported host is OpenShift 4.22 only
+    (minKubeVersion 1.35.0). Requires a default StorageClass for scan result
+    storage.
   maturity: alpha
   version: 0.4.0
   replaces: baseline-security-operator.v0.3.1
@@ -52,6 +59,8 @@ spec:
   links:
     - name: Source
       url: https://github.com/maci0/openshift-baseline-security
+    - name: Changelog
+      url: https://github.com/maci0/openshift-baseline-security/blob/main/CHANGELOG.md
   # Install into openshift-baseline-security so RBAC subjects and the metrics
   # Service match the ServiceAccount namespace in the bundle manifests.
   installModes:
@@ -92,24 +101,42 @@ spec:
       clusterPermissions:
         - serviceAccountName: baseline-security-operator
           rules:
+            # createIfMissing only; AlreadyExists is fine without get/list/watch.
             - apiGroups: [""]
               resources: [namespaces]
-              verbs: [create, get, list, watch]
+              verbs: [create]
             - apiGroups: [""]
               resources: [configmaps]
-              verbs: [create, get, patch, update]
+              verbs: [create]
+            - apiGroups: [""]
+              resources: [configmaps]
+              resourceNames: [baseline-security-compliance-dashboard]
+              verbs: [get, patch, update]
+            # Plugin Service (fixed name). create/list/watch unscoped; mutate scoped.
             - apiGroups: [""]
               resources: [services]
-              verbs: [create, delete, get, list, patch, update, watch]
+              verbs: [create, list, watch]
+            - apiGroups: [""]
+              resources: [services]
+              resourceNames: [baseline-security-console-plugin]
+              verbs: [get, delete, patch, update]
             - apiGroups: [""]
               resources: [persistentvolumeclaims]
               verbs: [get, list, watch]
             - apiGroups: [apps]
               resources: [deployments]
-              verbs: [create, delete, get, list, patch, update, watch]
+              verbs: [create, list, watch]
+            - apiGroups: [apps]
+              resources: [deployments]
+              resourceNames: [baseline-security-console-plugin]
+              verbs: [get, delete, patch, update]
             - apiGroups: [policy]
               resources: [poddisruptionbudgets]
-              verbs: [create, delete, get, list, patch, update, watch]
+              verbs: [create, list, watch]
+            - apiGroups: [policy]
+              resources: [poddisruptionbudgets]
+              resourceNames: [baseline-security-console-plugin]
+              verbs: [get, delete, patch, update]
             - apiGroups: [baselinesecurity.io]
               resources: [clusterbaselines]
               verbs: [create, get, list, patch, update, watch]
@@ -126,26 +153,49 @@ spec:
               resources: [complianceremediations]
               verbs: [get, list, watch, patch]
             - apiGroups: [compliance.openshift.io]
-              resources: [scansettingbindings, scansettings]
+              resources: [scansettingbindings]
               verbs: [create, delete, get, list, patch, update, watch]
+            # ScanSetting name is fixed (baseline); create/list/watch unscoped.
+            - apiGroups: [compliance.openshift.io]
+              resources: [scansettings]
+              verbs: [create, list, watch]
+            - apiGroups: [compliance.openshift.io]
+              resources: [scansettings]
+              resourceNames: [baseline]
+              verbs: [get, delete, patch, update]
             - apiGroups: [machineconfiguration.openshift.io]
               resources: [machineconfigpools]
               verbs: [get, list, watch, patch]
             - apiGroups: [console.openshift.io]
               resources: [consoleplugins]
-              verbs: [create, delete, get, list, patch, update, watch]
+              verbs: [create, list, watch]
+            - apiGroups: [console.openshift.io]
+              resources: [consoleplugins]
+              resourceNames: [baseline-security-console-plugin]
+              verbs: [get, delete, patch, update]
+            # Singleton consoles/cluster only (Get+Update for plugin registration).
             - apiGroups: [operator.openshift.io]
               resources: [consoles]
-              verbs: [get, list, patch, update, watch]
+              resourceNames: [cluster]
+              verbs: [get, patch, update]
             - apiGroups: [operators.coreos.com]
               resources: [clusterserviceversions]
               verbs: [get, list, watch]
+            # Fixed name compliance-operator; list/watch unused.
             - apiGroups: [operators.coreos.com]
               resources: [operatorgroups]
-              verbs: [create, get, list, patch, update, watch]
+              verbs: [create]
+            - apiGroups: [operators.coreos.com]
+              resources: [operatorgroups]
+              resourceNames: [compliance-operator]
+              verbs: [get, patch, update]
             - apiGroups: [operators.coreos.com]
               resources: [subscriptions]
-              verbs: [create, get, list, patch, update, watch]
+              verbs: [create]
+            - apiGroups: [operators.coreos.com]
+              resources: [subscriptions]
+              resourceNames: [compliance-operator]
+              verbs: [get, patch, update]
             - apiGroups: [authentication.k8s.io]
               resources: [tokenreviews]
               verbs: [create]
@@ -171,6 +221,7 @@ spec:
               spec:
                 serviceAccountName: baseline-security-operator
                 enableServiceLinks: false
+                terminationGracePeriodSeconds: 30
                 securityContext:
                   runAsNonRoot: true
                   seccompProfile:
@@ -196,6 +247,11 @@ spec:
                     env:
                       - name: RELATED_IMAGE_CONSOLE_PLUGIN
                         value: quay.io/openshift-baseline-security/baseline-security-console-plugin:0.4.0
+                      # Optional: set to "true" (also accepts 1/yes) to skip creating
+                      # ClusterBaseline/cluster when none exist. Must match envSkipDefaultCR
+                      # in cmd/main.go (BASELINE_SECURITY_SKIP_DEFAULT_CR).
+                      # - name: BASELINE_SECURITY_SKIP_DEFAULT_CR
+                      #   value: "true"
                     ports:
                       - name: https-metrics
                         containerPort: 8443
@@ -205,6 +261,8 @@ spec:
                       privileged: false
                       capabilities:
                         drop: [ALL]
+                      seccompProfile:
+                        type: RuntimeDefault
                       readOnlyRootFilesystem: true
                       runAsNonRoot: true
                     volumeMounts:
@@ -213,11 +271,17 @@ spec:
                         readOnly: true
                       - name: tmp
                         mountPath: /tmp
+                    startupProbe:
+                      httpGet:
+                        path: /healthz
+                        port: 8081
+                      periodSeconds: 10
+                      timeoutSeconds: 1
+                      failureThreshold: 30
                     livenessProbe:
                       httpGet:
                         path: /healthz
                         port: 8081
-                      initialDelaySeconds: 15
                       timeoutSeconds: 1
                       periodSeconds: 20
                       failureThreshold: 3
@@ -225,7 +289,6 @@ spec:
                       httpGet:
                         path: /readyz
                         port: 8081
-                      initialDelaySeconds: 5
                       timeoutSeconds: 1
                       periodSeconds: 10
                       failureThreshold: 3

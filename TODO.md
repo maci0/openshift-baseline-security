@@ -40,19 +40,12 @@ Legend: `[x]` done · `[ ]` planned · **(H/M/L)** rough value.
 - [x] `useAccessReview` gating on every write; TLS via service-serving cert.
 
 ### Observability
-- [x] Prometheus metrics on the secure endpoint:
+- [x] Prometheus metrics on the secure endpoint (published 0.3/0.4 surface):
       `baseline_security_compliance_score`,
-      `baseline_security_checks{profile,status}`,
-      `baseline_security_status_observed_timestamp_seconds` (HA newest
-      publisher selection for alerts),
-      `baseline_security_remediation_batch_active`,
-      `baseline_security_last_scan_timestamp_seconds`,
-      `baseline_security_newly_failed`,
-      `baseline_security_condition{type}` (Available/Progressing/Degraded).
-- [x] PrometheusRule: `ComplianceScoreLow`, `ComplianceChecksFailing`,
-      `ComplianceChecksInError`, `ComplianceStatusStale`,
-      `ComplianceScanStale`, `ComplianceRegressions`,
-      `RemediationBatchStuck`, `ClusterBaselineDegraded`.
+      `baseline_security_checks{profile,status}`.
+- [x] PrometheusRule (published 0.3/0.4): `ComplianceScoreLow`,
+      `ComplianceChecksFailing`. Further metrics/alerts are on main only
+      (see **On main** / CHANGELOG **[Unreleased]**).
 - [x] Aggregated `baseline-security-viewer` / `-admin` ClusterRoles.
 
 ### 0.3 additions
@@ -74,6 +67,23 @@ Legend: `[x]` done · `[ ]` planned · **(H/M/L)** rough value.
       (`yarn test-e2e`, also regenerates `docs/screenshots`).
 - [x] Full OLM install + upgrade verified on the SNO via the internal
       registry (no quay dependency).
+
+### On main (CHANGELOG [Unreleased], not in published 0.4.0 tags)
+- [x] Lazy dynamic informer on ComplianceScan/Remediation/CheckResult once
+      CRDs register; poll requeue remains (1m steady, 15s Progressing/batch,
+      shortens toward soonest active waiver expiry).
+- [x] Empty `spec.profiles: []` disables scanning; DNS-1123
+      `complianceCatalogSource`; raw-FAIL scan-diff (waivers do not clear
+      regressions); status list-type map-merge; HA-safe score/fail alerts.
+- [x] Metrics: `baseline_security_status_observed_timestamp_seconds`,
+      `baseline_security_remediation_batch_active`,
+      `baseline_security_condition`,
+      `baseline_security_last_scan_timestamp_seconds`,
+      `baseline_security_newly_failed`,
+      `baseline_security_remediation_batch_started_timestamp_seconds`.
+- [x] Alerts: `ComplianceChecksInError`, `ComplianceChecksInconsistent`,
+      `ComplianceStatusStale`, `RemediationBatchStuck`, `ClusterBaselineDegraded`,
+      `ComplianceScanStale`, `ComplianceRegressions`.
 
 ## 0.4 additions (openspec: expand-compliance-features)
 - [x] Waiver governance: expiry, requester/approver attribution; expired waivers
@@ -103,12 +113,6 @@ Legend: `[x]` done · `[ ]` planned · **(H/M/L)** rough value.
 ### Next up
 - [ ] **(H)** Push versioned images + bundle + catalog to quay.io; submit to
       community-operators once stable. Needs a quay robot token.
-
-### Operator / API
-- [x] **(M)** Watch compliance CRs (Scan/Remediation/CheckResult) via a lazy
-      dynamic informer that starts once the CRDs register and tolerates
-      CRD-absent startup; events reconcile the singleton at once. Poll requeue
-      remains as fallback (1m steady, 15s while Progressing or batch Applying).
 
 ## Productization
 

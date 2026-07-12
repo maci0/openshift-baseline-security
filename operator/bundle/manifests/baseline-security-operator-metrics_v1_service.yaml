@@ -8,6 +8,8 @@ metadata:
   annotations:
     service.beta.openshift.io/serving-cert-secret-name: baseline-security-operator-metrics-cert
 spec:
+  # Internal scrape only; never promote to LoadBalancer/NodePort by hand-edit.
+  type: ClusterIP
   ports:
     - name: https
       port: 8443

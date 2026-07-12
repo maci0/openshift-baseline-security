@@ -26,16 +26,22 @@ Version strings must match across `operator/Makefile` (`VERSION` /
 name/version/replaces/containerImage/image tags), `console-plugin/package.json`
 (`version` and `consolePlugin.version`), `CHANGELOG.md` (`## [VERSION]`,
 `## [PREV_VERSION]`, `## [Unreleased]`, and the `[VERSION]:` /
-`[Unreleased]: ...vVERSION...HEAD` compare footers), and root `README.md`
-(**Current release** and the upgrade-path chain ending at `VERSION`).
-`make verify-versions` (also run from `make bundle` and CI) enforces that.
-Each published cut also needs an immutable git tag `vVERSION` (never
-force-moved) so changelog compare URLs resolve. Never reuse a published
-CSV/image tag; OLM unpack caches make same-tag republishes serve stale
-content. Breaking behavior in 0.x is allowed in minor bumps but must be
-called out under Changed/Removed in the changelog with a migration note.
+`[Unreleased]: ...vVERSION...HEAD` compare footers), root `README.md`
+(**Current release** and the upgrade-path chain ending at `VERSION`), and
+`operator/catalog/package.yaml` channel entry (name + replaces) when that
+file is present after `make catalog-build`.
+`make verify-versions` (also run from `make bundle` and CI) enforces that,
+including a `### Migration notes` heading under `## [VERSION]`. After tags
+exist, `REQUIRE_GIT_TAGS=1 make verify-versions` also requires immutable
+`vVERSION` / `vPREV_VERSION` so changelog compare URLs cannot ship broken.
+Never reuse a published CSV/image tag; OLM unpack caches make same-tag
+republishes serve stale content. Breaking behavior in 0.x is allowed in
+minor bumps but must be called out under Changed/Removed in the changelog
+with a migration note (`make verify-versions` also requires Migration notes
+under **[Unreleased]** when that section has Changed/Removed bullets).
 Only the latest 0.x line is supported (no backports); see CHANGELOG support
-window.
+window and root `SECURITY.md`. Console host peer range is
+`@console/pluginAPI: >=4.22.0-0 <4.23.0-0` (matches `=v4.22`).
 
 **Pattern**: two models.
 - Payload components: `main` tracks the next OCP; `release-4.y` branches cut

@@ -1,6 +1,8 @@
 package controller
 
 import (
+	"math"
+	"math/bits"
 	"testing"
 
 	baselinev1alpha1 "github.com/maci0/baseline-security-operator/api/v1alpha1"
@@ -89,6 +91,35 @@ func TestScore(t *testing.T) {
 	}
 }
 
+// TestScore64Overflow: huge positive mass must not wrap into a nonsense ratio.
+// pass near MaxInt64 with a tiny fail used to overflow pass*100 and match a
+// wrong fuzzer oracle; both now fail closed or use 128-bit multiply.
+func TestScore64Overflow(t *testing.T) {
+	// Addition overflow: both large positive, sum wraps.
+	half := int64(1 << 62)
+	if s := score64(half, half); s != nil {
+		t.Fatalf("overflowing pass+fail must be nil, got %v", *s)
+	}
+	// pass*100 would overflow int64 but 128-bit path keeps a correct floor.
+	// pass = MaxInt64-1, fail = 1 => ratio just under 100.
+	big := int64(math.MaxInt64 - 1)
+	s := score64(big, 1)
+	if s == nil {
+		t.Fatal("large finite mass must score, not nil")
+	}
+	if *s < 99 || *s > 100 {
+		t.Fatalf("score64(MaxInt64-1, 1) = %d, want 99 or 100", *s)
+	}
+	// All-pass huge mass is still 100.
+	if s := score64(math.MaxInt64, 0); s == nil || *s != 100 {
+		t.Fatalf("score64(MaxInt64, 0) = %v, want 100", s)
+	}
+	// All-fail huge mass is still 0.
+	if s := score64(0, math.MaxInt64); s == nil || *s != 0 {
+		t.Fatalf("score64(0, MaxInt64) = %v, want 0", s)
+	}
+}
+
 func TestClampScore(t *testing.T) {
 	if clampScore(nil) != nil {
 		t.Fatal("nil stays nil")
@@ -137,7 +168,8 @@ func FuzzScore(f *testing.F) {
 }
 
 // FuzzScore64: severity-weighted totals are int64 sums over cluster checks.
-// Same invariants as score(): nil on non-positive totals, result in [0,100].
+// Same invariants as score(): nil on non-positive / overflowing totals, result
+// in [0,100]. Oracle uses 128-bit multiply (not wrapping pass*100).
 func FuzzScore64(f *testing.F) {
 	f.Add(int64(0), int64(0))
 	f.Add(int64(1), int64(0))
@@ -145,9 +177,25 @@ func FuzzScore64(f *testing.F) {
 	f.Add(int64(10), int64(5))
 	f.Add(int64(-1), int64(5))
 	f.Add(int64(1<<62), int64(1<<62))
+	f.Add(int64(math.MaxInt64-1), int64(1))
+	f.Add(int64(math.MaxInt64), int64(0))
 	f.Fuzz(func(t *testing.T, pass, fail int64) {
 		s := score64(pass, fail)
-		if pass < 0 || fail < 0 || pass+fail == 0 {
+		if pass < 0 || fail < 0 {
+			if s != nil {
+				t.Fatalf("expected nil for pass=%d fail=%d", pass, fail)
+			}
+			return
+		}
+		// Addition overflow: same guard as production.
+		if pass > 0 && fail > math.MaxInt64-pass {
+			if s != nil {
+				t.Fatalf("expected nil on add overflow pass=%d fail=%d", pass, fail)
+			}
+			return
+		}
+		total := pass + fail
+		if total == 0 {
 			if s != nil {
 				t.Fatalf("expected nil for pass=%d fail=%d", pass, fail)
 			}
@@ -159,10 +207,9 @@ func FuzzScore64(f *testing.F) {
 		if *s < 0 || *s > 100 {
 			t.Fatalf("score %d out of range", *s)
 		}
-		// When pass+fail can overflow int64 addition above, Go wraps; still
-		// require the returned ratio uses the same arithmetic as production.
-		want := int32(pass * 100 / (pass + fail))
-		if *s != want {
+		hi, lo := bits.Mul64(uint64(pass), 100)
+		want, _ := bits.Div64(hi, lo, uint64(total))
+		if uint64(*s) != want {
 			t.Fatalf("got %d want %d", *s, want)
 		}
 	})
@@ -179,20 +226,20 @@ func FuzzSeverityWeight(f *testing.F) {
 		w := severityWeight(sev)
 		switch sev {
 		case "high":
-			if w != 10 {
-				t.Fatalf("high weight = %d", w)
+			if w != severityWeightHigh {
+				t.Fatalf("high weight = %d, want %d", w, severityWeightHigh)
 			}
 		case "medium":
-			if w != 5 {
-				t.Fatalf("medium weight = %d", w)
+			if w != severityWeightMedium {
+				t.Fatalf("medium weight = %d, want %d", w, severityWeightMedium)
 			}
 		case "low":
-			if w != 2 {
-				t.Fatalf("low weight = %d", w)
+			if w != severityWeightLow {
+				t.Fatalf("low weight = %d, want %d", w, severityWeightLow)
 			}
 		default:
-			if w != 1 {
-				t.Fatalf("default weight for %q = %d", sev, w)
+			if w != severityWeightOther {
+				t.Fatalf("default weight for %q = %d, want %d", sev, w, severityWeightOther)
 			}
 		}
 	})

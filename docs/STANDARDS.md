@@ -77,14 +77,14 @@ Status conditions include the OpenShift rollup set
 `Available` / `Progressing` / `Degraded` rollups derived each reconcile,
 plus the detail conditions above. Manager and plugin Deployments run 2
 replicas with preferred pod anti-affinity and leader election on the
-manager. Resource requests plus bounded limits (manager 500m/256Mi,
-plugin 200m/128Mi). Metrics over HTTPS with
-authn/authz (`filters.WithAuthenticationAndAuthorization` on `:8443`),
-service-ca serving cert when present. Metrics scrape objects
+manager. Resource **requests** are low (manager 10m/64Mi, plugin 10m/32Mi);
+**limits** are bounded (manager 500m/256Mi, plugin 200m/128Mi). Metrics over
+HTTPS with authn/authz (`filters.WithAuthenticationAndAuthorization` on
+`:8443`), service-ca serving cert when present. Metrics scrape objects
 (ServiceMonitor, PrometheusRule, scraper SA/RBAC) live under
-`operator/config/prometheus/` and ship in the OLM bundle (inert until
-user-workload monitoring is enabled; apply the same path for non-OLM
-`make deploy`). OLM installs the deployment into
+`operator/config/prometheus/` and ship in the OLM bundle; non-OLM
+`make deploy` includes them via `config/default` (inert until
+user-workload monitoring is enabled). OLM installs the deployment into
 `openshift-baseline-security` with cluster-wide `AllNamespaces` scope so the
 cluster-scoped controller, metrics Service, and RBAC subjects all match their
 intended namespaces and watch scope.

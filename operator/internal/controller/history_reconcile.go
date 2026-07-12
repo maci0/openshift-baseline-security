@@ -30,7 +30,7 @@ import (
 // under a flipped Flat/SeverityWeighted formula.
 func (r *ClusterBaselineReconciler) stampHistoryScoringMode(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline) error {
 	mode := string(scoringMode(cb))
-	if cb.Annotations != nil && cb.Annotations[historyScoringModeAnn] == mode {
+	if cb.Annotations[historyScoringModeAnn] == mode {
 		return nil
 	}
 	// In-memory stamp first so this reconcile's historyModeMatches sees the mode
@@ -89,19 +89,24 @@ type completedSuiteRun struct {
 
 // completedSuiteTimes returns the member-scan completion range only when the
 // suite and every status entry are complete. ComplianceSuite is the transaction
-// boundary for a ScanSettingBinding; recording an individual scan would snapshot
-// a partial multi-scan run.
+// boundary for a ScanSettingBinding (ADR-015); recording an individual scan
+// would snapshot a partial multi-scan run.
 //
 // Untrusted cluster data: avoid unstructured.NestedSlice, which DeepCopyJSON-
 // panics on non-JSON types (e.g. int) that can appear in hand-built or partially
-// converted objects. Read the slice without copying and type-assert each entry.
+// converted objects. Direct map reads (no NestedString path walks) type-assert
+// each field; wrong types fail closed as incomplete.
 func completedSuiteTimes(suite *unstructured.Unstructured, now time.Time) (completedSuiteRun, bool) {
-	phase, _, err := unstructured.NestedString(suite.Object, "status", "phase")
-	if err != nil || phase != "DONE" {
+	statusObj, _ := suite.Object["status"].(map[string]any)
+	if statusObj == nil {
 		return completedSuiteRun{}, false
 	}
-	raw, found, err := unstructured.NestedFieldNoCopy(suite.Object, "status", "scanStatuses")
-	if err != nil || !found {
+	phase, _ := statusObj["phase"].(string)
+	if phase != "DONE" {
+		return completedSuiteRun{}, false
+	}
+	raw, ok := statusObj["scanStatuses"]
+	if !ok {
 		return completedSuiteRun{}, false
 	}
 	statuses, ok := raw.([]any)
@@ -114,14 +119,11 @@ func completedSuiteTimes(suite *unstructured.Unstructured, now time.Time) (compl
 		if !ok {
 			return completedSuiteRun{}, false
 		}
-		memberPhase, _, err := unstructured.NestedString(status, "phase")
-		if err != nil || memberPhase != "DONE" {
+		memberPhase, _ := status["phase"].(string)
+		if memberPhase != "DONE" {
 			return completedSuiteRun{}, false
 		}
-		ts, _, err := unstructured.NestedString(status, "endTimestamp")
-		if err != nil {
-			return completedSuiteRun{}, false
-		}
+		ts, _ := status["endTimestamp"].(string)
 		completed, ok := parseScanEndTimestamp(ts, now)
 		if !ok {
 			return completedSuiteRun{}, false
@@ -139,6 +141,8 @@ func completedSuiteTimes(suite *unstructured.Unstructured, now time.Time) (compl
 // recordHistory advances score history and scan-diff state when every owned
 // suite has a completed run. weights may be nil (Flat mode, or unit tests that
 // only care about overall history); per-profile rings then use pass/fail counts.
+// suites may be nil (rebuild via ownedSuites); aggregateStatus passes its map so
+// reconcile does not allocate the suite set twice.
 //
 // Suites are fetched by name (not a full namespace List) so foreign CO suites
 // never enter the hot path; expected set size is profiles + tailored (small).
@@ -148,8 +152,12 @@ func (r *ClusterBaselineReconciler) recordHistory(
 	s *int32,
 	currentFails []string,
 	weights *scoreWeights,
+	suites map[string]bool,
 ) error {
-	expectedSuites := ownedSuites(cb)
+	expectedSuites := suites
+	if expectedSuites == nil {
+		expectedSuites = ownedSuites(cb)
+	}
 	if len(expectedSuites) == 0 {
 		return nil
 	}
@@ -160,10 +168,31 @@ func (r *ClusterBaselineReconciler) recordHistory(
 		item := u(suiteGVK)
 		if err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: complianceNamespace}, item); err != nil {
 			if meta.IsNoMatchError(err) {
+				// CRDs absent mid-history (partial CO uninstall). CCR list may
+				// still have succeeded. Log only when a prior scan exists so a
+				// frozen LastScanTime is explainable without requeue spam when
+				// CO was never installed.
+				if cb.Status.LastScanTime != nil {
+					log.FromContext(ctx).Info("compliance suite CRDs absent; history not advanced",
+						"suite", name, "name", cb.Name)
+				}
 				return nil
 			}
 			// Suite not created yet: wait for a full completed generation.
+			// After a scan has completed, a missing suite freezes LastScanTime
+			// and can page ComplianceScanStale; without this log there is no
+			// operator-side marker (binding deleted, suite GC'd, name drift).
+			// Pre-first-scan NotFound stays quiet (normal CO create lag).
 			if apierrors.IsNotFound(err) {
+				// Once LastScanTime is set, a missing suite freezes history and can
+				// page ComplianceScanStale with no default-level marker. Rate-limit
+				// Info (see logHistoryStall) so requeue spam stays off while still
+				// leaving a production breadcrumb before the 36h alert.
+				if cb.Status.LastScanTime != nil {
+					r.logHistoryStall(ctx, "ComplianceSuite not found; history not advanced",
+						"suite", name, "name", cb.Name,
+						"lastScanTime", cb.Status.LastScanTime.UTC().Format(time.RFC3339))
+				}
 				return nil
 			}
 			return fmt.Errorf("getting ComplianceSuite %s/%s for history: %w", complianceNamespace, name, err)
@@ -173,9 +202,14 @@ func (r *ClusterBaselineReconciler) recordHistory(
 			// DONE with unreadable/missing/far-future endTimestamps never
 			// advances LastScanTime; ComplianceScanStale then pages with no
 			// log marker. Incomplete (still running) suites stay quiet.
-			if phase, _, err := unstructured.NestedString(item.Object, "status", "phase"); err == nil && phase == "DONE" {
-				log.FromContext(ctx).Info("ComplianceSuite DONE but scan endTimestamps incomplete or invalid; history not advanced",
-					"suite", name, "name", cb.Name)
+			// DONE with bad endTimestamps freezes LastScanTime until CO rewrites
+			// status. Rate-limit Info so production sees the stall without
+			// burying other signals on every requeue.
+			if statusObj, _ := item.Object["status"].(map[string]any); statusObj != nil {
+				if phase, _ := statusObj["phase"].(string); phase == "DONE" {
+					r.logHistoryStall(ctx, "ComplianceSuite DONE but scan endTimestamps incomplete or invalid; history not advanced",
+						"suite", name, "name", cb.Name)
+				}
 			}
 			return nil
 		}
@@ -221,7 +255,8 @@ func (r *ClusterBaselineReconciler) recordHistory(
 	if cb.Status.LastScanTime != nil {
 		// A DONE suite may still represent the previous scheduled run while another
 		// suite has already completed the next one. Advance only after every suite's
-		// newest member scan is newer than the prior global snapshot.
+		// oldest (earliest) member scan is newer than the prior global snapshot, so
+		// every member scan of every suite has moved past it.
 		for _, completed := range completedSuites {
 			if !completed.earliest.After(cb.Status.LastScanTime.Time) {
 				return nil
@@ -230,6 +265,13 @@ func (r *ClusterBaselineReconciler) recordHistory(
 	}
 	hadPreviousScan := cb.Status.LastScanTime != nil
 	cb.Status.LastScanTime = &last
+	// Mode flip since rings were written: drop prior points so charts never mix
+	// Flat and SeverityWeighted values. Late equal-scan refresh already refuses
+	// rewrite when the stamp mismatches; without this, one new scan would stamp
+	// the new mode and hide historyScoringModeMismatch while older points remain.
+	if !historyModeMatches(cb) {
+		clearHistoryRings(cb)
+	}
 	cb.Status.History = syncHistorySnapshot(cb.Status.History, last, s)
 	// A new scan completed: compute regressions vs the previous scan's failures,
 	// then snapshot the current failures for next time, and append a per-profile
@@ -251,14 +293,14 @@ func (r *ClusterBaselineReconciler) recordHistory(
 	// Info once per completed generation (typically daily): default log level has
 	// no other marker that LastScanTime advanced or that regressions were set.
 	// Correlates ComplianceRegressions / ComplianceScanStale with operator logs.
-	var score any
+	var scoreVal any
 	if s != nil {
-		score = *s
+		scoreVal = *s
 	}
 	log.FromContext(ctx).Info("compliance scan completed",
 		"name", cb.Name,
 		"lastScanTime", last.UTC().Format(time.RFC3339),
-		"score", score,
+		"score", scoreVal,
 		"fails", len(currentFails),
 		"newlyFailed", len(cb.Status.NewlyFailed),
 		"fixed", len(cb.Status.Fixed),
@@ -267,4 +309,23 @@ func (r *ClusterBaselineReconciler) recordHistory(
 	// Stamp the mode that produced these snapshots so a later mode flip cannot
 	// rewrite them via the equal-LastScanTime late-refresh path.
 	return r.stampHistoryScoringMode(ctx, cb)
+}
+
+// historyStallLogInterval is how often default-level Info may repeat for a
+// frozen LastScanTime (suite missing / bad endTimestamps). Shorter than the
+// ComplianceScanStale 36h alert so on-call has breadcrumbs; longer than the
+// 1m requeue so logs stay usable.
+const historyStallLogInterval = 30 * time.Minute
+
+// logHistoryStall always emits V(1), and Info at most every historyStallLogInterval.
+// Use when history cannot advance after a completed scan so production default
+// logs are not silent until ComplianceScanStale pages.
+func (r *ClusterBaselineReconciler) logHistoryStall(ctx context.Context, msg string, keysAndValues ...any) {
+	logger := log.FromContext(ctx)
+	logger.V(1).Info(msg, keysAndValues...)
+	if !r.lastHistoryStallLog.IsZero() && time.Since(r.lastHistoryStallLog) < historyStallLogInterval {
+		return
+	}
+	r.lastHistoryStallLog = time.Now()
+	logger.Info(msg, keysAndValues...)
 }

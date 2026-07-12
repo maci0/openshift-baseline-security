@@ -11,12 +11,16 @@ import {
   AlertActionCloseButton,
   Bullseye,
   Button,
+  ClipboardCopyButton,
   CodeBlock,
+  CodeBlockAction,
   CodeBlockCode,
   EmptyState,
   EmptyStateBody,
   Flex,
   FlexItem,
+  HelperText,
+  HelperTextItem,
   Label,
   Modal,
   ModalBody,
@@ -29,8 +33,16 @@ import {
 } from '@patternfly/react-core';
 import { Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table';
 import {
+  CheckCircleIcon,
+  ExclamationCircleIcon,
+  ExclamationTriangleIcon,
+  InProgressIcon,
+  MinusCircleIcon,
+} from '@patternfly/react-icons';
+import {
   ClusterBaseline,
   ClusterBaselineModel,
+  COMPLIANCE_NAMESPACE,
   ComplianceRemediation,
   ComplianceRemediationGVK,
   ComplianceRemediationModel,
@@ -38,25 +50,37 @@ import {
 } from '../models';
 import { formatCount } from '../dates';
 import { errorMessage } from '../errors';
-import { batchApplyPatch, remediationApplyPatch, resourceVersionTest } from '../patches';
+import {
+  batchApplyPatch,
+  batchApplyRequested,
+  remediationApplyPatch,
+  resourceVersionTest,
+} from '../patches';
 import {
   compareRemediationsForApplyOrder,
   isNodeRemediation,
   missingDependencySummary,
   remediationObjectText,
 } from '../remediation';
-import { withDisabledTip } from './DisabledTip';
+import BaselineNotConfigured from './BaselineNotConfigured';
+import { regionFocusProps, withDisabledTip } from './DisabledTip';
+import { SUCCESS_DISMISS_MS } from './feedback';
 
 // Stable empty list when the suite-scoped watch is inactive.
 const EMPTY_REMEDIATIONS: ComplianceRemediation[] = [];
 
-const stateColor: Record<string, React.ComponentProps<typeof Label>['color']> = {
-  Applied: 'green',
-  NotApplied: 'grey',
-  Error: 'red',
-  Outdated: 'orange',
-  MissingDependencies: 'orange',
+// Color + icon so state is not color-only (matches Results status labels).
+const stateStyle: Record<
+  string,
+  { color: React.ComponentProps<typeof Label>['color']; icon: React.ReactElement }
+> = {
+  Applied: { color: 'green', icon: <CheckCircleIcon /> },
+  NotApplied: { color: 'grey', icon: <MinusCircleIcon /> },
+  Error: { color: 'red', icon: <ExclamationCircleIcon /> },
+  Outdated: { color: 'orange', icon: <ExclamationTriangleIcon /> },
+  MissingDependencies: { color: 'orange', icon: <ExclamationTriangleIcon /> },
 };
+const defaultStateStyle = { color: 'grey' as const, icon: <MinusCircleIcon /> };
 
 // CR applicationState enums stay English for logic; only the Label text is localized.
 const stateDisplayTitle = (state: string, t: (k: string) => string): string => {
@@ -99,7 +123,7 @@ const RemediationsTab: React.FC<{
     return {
       groupVersionKind: ComplianceRemediationGVK,
       isList: true,
-      namespace: 'openshift-compliance',
+      namespace: COMPLIANCE_NAMESPACE,
       selector,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- content keys
@@ -111,17 +135,28 @@ const RemediationsTab: React.FC<{
   const [autoApplyConfirming, setAutoApplyConfirming] = React.useState(false);
   const [batchConfirming, setBatchConfirming] = React.useState(false);
   const [viewing, setViewing] = React.useState<ComplianceRemediation | null>(null);
+  // Copy-to-clipboard feedback for the rendered-object modal.
+  const [copied, setCopied] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
   // Sync guard: React state alone cannot block a second click before re-render.
   const busyRef = React.useRef(false);
+  // Return focus to the control that opened a confirm/view modal (WCAG 2.4.3).
+  const returnFocusRef = React.useRef<HTMLElement | null>(null);
+  const modalWasOpen = React.useRef(false);
   const [error, setError] = React.useState<string | null>(null);
   // Success feedback after modal close so apply/unapply/batch is not a silent no-op.
   const [success, setSuccess] = React.useState<string | null>(null);
+  // Auto-dismiss success so the banner does not stick after the user moves on.
+  React.useEffect(() => {
+    if (!success) return;
+    const id = window.setTimeout(() => setSuccess(null), SUCCESS_DISMISS_MS);
+    return () => window.clearTimeout(id);
+  }, [success]);
   const [canApply, canApplyLoading] = useAccessReview({
     group: 'compliance.openshift.io',
     resource: 'complianceremediations',
     verb: 'patch',
-    namespace: 'openshift-compliance',
+    namespace: COMPLIANCE_NAMESPACE,
   });
   const [canEditBaseline, canEditBaselineLoading] = useAccessReview({
     group: 'baselinesecurity.io',
@@ -129,12 +164,12 @@ const RemediationsTab: React.FC<{
     verb: 'patch',
   });
   const watchError = errorMessage(loadError);
+  // status.remediationBatch is the live batch; the annotation is the one-shot
+  // request (may exist before status persists). Empty/comma-only values do not
+  // start a batch on the operator and must not lock the UI as "in progress".
   const batchInProgress =
     baseline?.status?.remediationBatch != null ||
-    Object.prototype.hasOwnProperty.call(
-      baseline?.metadata.annotations ?? {},
-      'baselinesecurity.io/batch-apply',
-    );
+    batchApplyRequested(baseline?.metadata.annotations);
 
   // Selector already scopes to owned suites.
   const owned = remediations ?? EMPTY_REMEDIATIONS;
@@ -164,6 +199,15 @@ const RemediationsTab: React.FC<{
     [owned],
   );
 
+  // Node-remediation membership computed once (isNodeRemediation parses the
+  // scan-name label and runs a name regex). Reused by the reboot-warning gate,
+  // the batchable filter, and the per-row Kind badge so the list is not walked
+  // through isNodeRemediation 3-4x per render.
+  const nodeNames = React.useMemo(
+    () => new Set(owned.filter(isNodeRemediation).map((r) => r.metadata.name)),
+    [owned],
+  );
+
   // Node remediations that can be batch-applied: owned, not yet applied, not
   // blocked on dependencies, and not already Applied (re-batching an Applied
   // row during an unapply lag would re-set apply=true). Batching pauses the
@@ -171,13 +215,13 @@ const RemediationsTab: React.FC<{
   const batchable = React.useMemo(
     () =>
       ordered.filter((r) => {
-        if (r.spec.apply || !isNodeRemediation(r)) {
+        if (r.spec.apply || !nodeNames.has(r.metadata.name)) {
           return false;
         }
         const state = r.status?.applicationState;
         return state !== 'MissingDependencies' && state !== 'Applied';
       }),
-    [ordered],
+    [ordered, nodeNames],
   );
 
   const doBatchApply = () => {
@@ -255,7 +299,23 @@ const RemediationsTab: React.FC<{
     });
   };
 
-  const anyModalOpen = !!confirming || !!unapplying || batchConfirming || autoApplyConfirming;
+  // Include viewing so page-top alerts stay behind the object modal and errors
+  // (clipboard, etc.) render inside the open modal instead of under the backdrop.
+  const anyModalOpen =
+    !!confirming || !!unapplying || batchConfirming || autoApplyConfirming || !!viewing;
+
+  // Restore focus to the trigger when every remediations modal has closed.
+  React.useEffect(() => {
+    if (anyModalOpen) {
+      modalWasOpen.current = true;
+      return;
+    }
+    if (!modalWasOpen.current) return;
+    modalWasOpen.current = false;
+    const el = returnFocusRef.current;
+    returnFocusRef.current = null;
+    window.requestAnimationFrame(() => el?.focus?.());
+  }, [anyModalOpen]);
 
   const baselineEditDisabled =
     !baselineLoaded || !baseline || !canEditBaseline || canEditBaselineLoading || busy;
@@ -284,14 +344,18 @@ const RemediationsTab: React.FC<{
 
   return (
     <PageSection>
-      <Alert
-        variant="warning"
-        isInline
-        isLiveRegion
-        title={t(
-          'Node remediations render into MachineConfigs. Applying them triggers rolling node reboots.',
-        )}
-      />
+      {/* Only when node remediations exist: during loading / empty / platform-only
+          the reboot warning is irrelevant (or misleading) noise. */}
+      {nodeNames.size > 0 && (
+        <Alert
+          variant="warning"
+          isInline
+          isLiveRegion
+          title={t(
+            'Node remediations render into MachineConfigs. Applying them triggers rolling node reboots.',
+          )}
+        />
+      )}
       {watchError && (
         <Alert
           variant="danger"
@@ -344,7 +408,21 @@ const RemediationsTab: React.FC<{
       >
         <FlexItem>
           {batchInProgress ? (
-            <Label color="blue">{t('Batch apply in progress')}</Label>
+            // Label alone left admins unsure whether the batch was stuck or
+            // still running; explain the pause/resume behavior next to it.
+            // Icon + text so status is not color-only (matches Results labels).
+            <div>
+              <Label color="blue" icon={<InProgressIcon />}>
+                {t('Batch apply in progress')}
+              </Label>
+              <HelperText style={{ marginTop: 'var(--pf-t--global--spacer--xs)' }}>
+                <HelperTextItem>
+                  {t(
+                    'MachineConfigPools are paused while node remediations apply. This clears when the batch finishes.',
+                  )}
+                </HelperTextItem>
+              </HelperText>
+            </div>
           ) : batchable.length > 0 ? (
             withDisabledTip(
               baselineEditDisabled && baselineEditDisabledReason
@@ -353,7 +431,8 @@ const RemediationsTab: React.FC<{
               <Button
                 variant="secondary"
                 isDisabled={baselineEditDisabled}
-                onClick={() => {
+                onClick={(e) => {
+                  returnFocusRef.current = e.currentTarget;
                   setError(null);
                   setSuccess(null);
                   setBatchConfirming(true);
@@ -379,7 +458,13 @@ const RemediationsTab: React.FC<{
                 autoApplyConfirming || baseline?.spec.remediation?.apply === 'Automatic'
               }
               isDisabled={baselineEditDisabled}
-              onChange={onAutoApplyChange}
+              onChange={(e, checked) => {
+                // Capture the switch before the confirm modal steals focus.
+                if (checked) {
+                  returnFocusRef.current = e.currentTarget;
+                }
+                onAutoApplyChange(e, checked);
+              }}
             />,
           )}
         </FlexItem>
@@ -498,32 +583,50 @@ const RemediationsTab: React.FC<{
           />
         </Bullseye>
       ) : !baseline ? (
-        <EmptyState
-          titleText={t('Baseline not configured')}
-          headingLevel="h2"
-          style={{ marginTop: 'var(--pf-t--global--spacer--md)' }}
-        >
-          <EmptyStateBody>
-            {t(
-              'No ClusterBaseline resource found. Install the baseline-security operator and create a ClusterBaseline to start scanning.',
-            )}
-          </EmptyStateBody>
-        </EmptyState>
+        <BaselineNotConfigured style={{ marginTop: 'var(--pf-t--global--spacer--md)' }} />
       ) : owned.length === 0 ? (
-        <EmptyState
-          titleText={t('No remediations')}
-          headingLevel="h2"
-          style={{ marginTop: 'var(--pf-t--global--spacer--md)' }}
-        >
-          <EmptyStateBody>
-            {t('The Compliance Operator generates remediations for failing checks that can be auto-fixed. None are available yet; rescan after new failures appear.')}{' '}
-            <a href="/baseline-security/results">{t('Review check results')}</a>
-            {' · '}
-            <a href="/baseline-security/profiles">{t('Go to Profiles')}</a>
-          </EmptyStateBody>
-        </EmptyState>
+        (() => {
+          // Same dead-end as Results: "rescan after failures" is wrong when no
+          // profile is selected and scans will never run.
+          const scanningDisabled =
+            (baseline.spec.profiles?.length ?? 0) === 0 &&
+            (baseline.spec.tailoredProfiles?.length ?? 0) === 0;
+          return (
+            <EmptyState
+              titleText={
+                scanningDisabled ? t('Scanning is disabled') : t('No remediations')
+              }
+              headingLevel="h2"
+              style={{ marginTop: 'var(--pf-t--global--spacer--md)' }}
+            >
+              <EmptyStateBody>
+                {scanningDisabled ? (
+                  <>
+                    {t('No profiles are selected. Enable a profile to resume scanning.')}{' '}
+                    <a href="/baseline-security/profiles">{t('Go to Profiles')}</a>
+                  </>
+                ) : (
+                  <>
+                    {t(
+                      'The Compliance Operator generates remediations for failing checks that can be auto-fixed. None are available yet; rescan after new failures appear.',
+                    )}{' '}
+                    <a href="/baseline-security/results">{t('Review check results')}</a>
+                    {' · '}
+                    <a href="/baseline-security/profiles">{t('Go to Profiles')}</a>
+                  </>
+                )}
+              </EmptyStateBody>
+            </EmptyState>
+          );
+        })()
       ) : (
-        <div style={{ overflowX: 'auto' }} tabIndex={0} role="region" aria-label={t('Remediations')}>
+        <div
+          style={{ overflowX: 'auto' }}
+          tabIndex={0}
+          role="region"
+          aria-label={t('Remediations')}
+          {...regionFocusProps}
+        >
         <Table variant="compact" aria-label={t('Remediations')}>
           <Thead>
             <Tr>
@@ -537,27 +640,32 @@ const RemediationsTab: React.FC<{
           <Tbody>
             {ordered.map((rem) => {
               const state = rem.status?.applicationState ?? 'NotApplied';
-              const depsSummary = missingDependencySummary(rem);
+              const style = stateStyle[state] ?? defaultStateStyle;
+              // Only blocked rows read the dependency annotations; skip the
+              // split / JSON.parse (missingDependencySummary) and the Blocked
+              // tip interpolation on every other row on every render.
+              const isBlocked = state === 'MissingDependencies';
+              const depsSummary = isBlocked ? missingDependencySummary(rem) : '';
               const errorDetail = rem.status?.errorMessage?.trim();
-              const blockedTip = depsSummary
-                ? t(
-                    'Blocked: missing dependency {{deps}}. Apply its remediations first.',
-                    { deps: depsSummary },
-                  )
-                : t('Blocked: apply the prerequisite remediations first.');
               return (
                 <Tr key={rem.metadata.name}>
-                  <Td modifier="breakWord">{rem.metadata.name}</Td>
-                  <Td>
+                  <Td dataLabel={t('Remediation')} modifier="breakWord">
+                    {rem.metadata.name}
+                  </Td>
+                  <Td dataLabel={t('Kind')}>
                     {rem.spec.current?.object?.kind ?? '—'}
-                    {isNodeRemediation(rem) && (
+                    {nodeNames.has(rem.metadata.name) && (
                       <Label isCompact color="orange" style={{ marginInlineStart: 8 }}>
                         {t('reboots nodes')}
                       </Label>
                     )}
                   </Td>
-                  <Td>
-                    <Label isCompact color={stateColor[state] ?? 'grey'}>
+                  <Td dataLabel={t('State')}>
+                    <Label
+                      isCompact
+                      color={style.color}
+                      icon={style.icon}
+                    >
                       {stateDisplayTitle(state, t)}
                     </Label>
                     {state === 'MissingDependencies' && depsSummary && (
@@ -566,6 +674,7 @@ const RemediationsTab: React.FC<{
                           marginTop: 2,
                           fontSize: 'var(--pf-t--global--font--size--sm)',
                           color: 'var(--pf-t--global--text--color--subtle)',
+                          overflowWrap: 'anywhere',
                         }}
                       >
                         {depsSummary}
@@ -577,23 +686,29 @@ const RemediationsTab: React.FC<{
                           marginTop: 2,
                           fontSize: 'var(--pf-t--global--font--size--sm)',
                           color: 'var(--pf-t--global--text--color--subtle)',
+                          overflowWrap: 'anywhere',
                         }}
                       >
                         {errorDetail}
                       </div>
                     )}
                   </Td>
-                  <Td>
+                  <Td dataLabel={t('Object')}>
                     <Button
                       variant="link"
                       isInline
                       aria-label={t('View object for {{name}}', { name: rem.metadata.name })}
-                      onClick={() => setViewing(rem)}
+                      onClick={(e) => {
+                        returnFocusRef.current = e.currentTarget;
+                        setError(null);
+                        setCopied(false);
+                        setViewing(rem);
+                      }}
                     >
                       {t('View')}
                     </Button>
                   </Td>
-                  <Td>
+                  <Td dataLabel={t('Actions')}>
                     {rem.spec.apply ? (
                       withDisabledTip(
                         applyDisabled && applyDisabledReason ? applyDisabledReason : undefined,
@@ -602,7 +717,8 @@ const RemediationsTab: React.FC<{
                           isInline
                           isDisabled={applyDisabled}
                           aria-label={t('Unapply {{name}}', { name: rem.metadata.name })}
-                          onClick={() => {
+                          onClick={(e) => {
+                            returnFocusRef.current = e.currentTarget;
                             setError(null);
                             setSuccess(null);
                             setUnapplying(rem);
@@ -614,7 +730,16 @@ const RemediationsTab: React.FC<{
                     ) : state === 'MissingDependencies' ? (
                       // Blocked: applying now would fail; name the dependency so
                       // the admin knows which prerequisite to apply first.
-                      <Tooltip content={blockedTip}>
+                      <Tooltip
+                        content={
+                          depsSummary
+                            ? t(
+                                'Blocked: missing dependency {{deps}}. Apply its remediations first.',
+                                { deps: depsSummary },
+                              )
+                            : t('Blocked: apply the prerequisite remediations first.')
+                        }
+                      >
                         <Button
                           variant="link"
                           isInline
@@ -632,7 +757,8 @@ const RemediationsTab: React.FC<{
                           isInline
                           isDisabled={applyDisabled}
                           aria-label={t('Apply {{name}}', { name: rem.metadata.name })}
-                          onClick={() => {
+                          onClick={(e) => {
+                            returnFocusRef.current = e.currentTarget;
                             setError(null);
                             setSuccess(null);
                             setConfirming(rem);
@@ -689,7 +815,10 @@ const RemediationsTab: React.FC<{
         </ModalBody>
         <ModalFooter>
           <Button
-            variant="danger"
+            // Danger only when apply reboots nodes; platform remediations are not destructive.
+            variant={
+              confirming && isNodeRemediation(confirming) ? 'danger' : 'primary'
+            }
             isDisabled={busy || !canApply || canApplyLoading}
             isLoading={busy}
             onClick={() => {
@@ -699,7 +828,7 @@ const RemediationsTab: React.FC<{
                 if (await setApply(rem, true)) {
                   setConfirming(null);
                   setSuccess(
-                    t('Remediation applied. Run a rescan for results to update.'),
+                    t('Remediation applied. Use Rescan now above to refresh results.'),
                   );
                 }
               })();
@@ -734,6 +863,18 @@ const RemediationsTab: React.FC<{
             '{{name}} will stop being applied. A rescan is required afterwards for results to reflect the change.',
             { name: unapplying?.metadata.name },
           )}
+          {unapplying && isNodeRemediation(unapplying) && (
+            <Alert
+              variant="warning"
+              isInline
+              title={t('This is a node remediation')}
+              style={{ marginTop: 'var(--pf-t--global--spacer--md)' }}
+            >
+              {t(
+                'It renders into a MachineConfig; unapplying it reboots the affected nodes one by one.',
+              )}
+            </Alert>
+          )}
           {error && (
             <Alert
               variant="danger"
@@ -746,7 +887,10 @@ const RemediationsTab: React.FC<{
         </ModalBody>
         <ModalFooter>
           <Button
-            variant="secondary"
+            // Node unapply can reboot; match apply severity so the confirm is not understated.
+            variant={
+              unapplying && isNodeRemediation(unapplying) ? 'danger' : 'secondary'
+            }
             isDisabled={busy || !canApply || canApplyLoading}
             isLoading={busy}
             onClick={() => {
@@ -756,7 +900,7 @@ const RemediationsTab: React.FC<{
                 if (await setApply(rem, false)) {
                   setUnapplying(null);
                   setSuccess(
-                    t('Remediation unapplied. Run a rescan for results to update.'),
+                    t('Remediation unapplied. Use Rescan now above to refresh results.'),
                   );
                 }
               })();
@@ -779,7 +923,12 @@ const RemediationsTab: React.FC<{
       <Modal
         variant="medium"
         isOpen={!!viewing}
-        onClose={() => setViewing(null)}
+        onClose={() => {
+          setViewing(null);
+          setCopied(false);
+          // Clipboard errors already shown inline; do not leave them on the page.
+          setError(null);
+        }}
         aria-labelledby="remediation-object-title"
       >
         <ModalHeader
@@ -788,14 +937,78 @@ const RemediationsTab: React.FC<{
           description={viewing?.metadata.name}
         />
         <ModalBody>
-          <CodeBlock>
-            <CodeBlockCode>
-              {viewing ? remediationObjectText(viewing) || t('No rendered object.') : ''}
-            </CodeBlockCode>
-          </CodeBlock>
+          {error && (
+            <Alert
+              variant="danger"
+              isInline
+              isLiveRegion
+              title={error}
+              style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}
+              actionClose={
+                <AlertActionCloseButton
+                  aria-label={t('Close')}
+                  onClose={() => setError(null)}
+                />
+              }
+            />
+          )}
+          {(() => {
+            const objectText = viewing ? remediationObjectText(viewing) : '';
+            return (
+              <CodeBlock
+                actions={
+                  <CodeBlockAction>
+                    <ClipboardCopyButton
+                      id="remediation-object-copy"
+                      aria-label={copied ? t('Copied') : t('Copy to clipboard')}
+                      variant="plain"
+                      disabled={!objectText}
+                      exitDelay={copied ? 1500 : 600}
+                      onTooltipHidden={() => setCopied(false)}
+                      onClick={() => {
+                        // Only report "Copied" when the write actually succeeds:
+                        // clipboard is undefined on insecure origins and writeText
+                        // rejects when the document lacks focus / permission. The
+                        // object stays on-screen for manual selection either way.
+                        const write = navigator.clipboard?.writeText(objectText);
+                        if (!write) {
+                          setCopied(false);
+                          setError(t('Copy to clipboard is unavailable in this browser.'));
+                          return;
+                        }
+                        write.then(
+                          () => {
+                            setError(null);
+                            setCopied(true);
+                          },
+                          () => {
+                            setCopied(false);
+                            setError(t('Failed to copy to clipboard.'));
+                          },
+                        );
+                      }}
+                    >
+                      {copied ? t('Copied') : t('Copy to clipboard')}
+                    </ClipboardCopyButton>
+                  </CodeBlockAction>
+                }
+              >
+                <CodeBlockCode id="remediation-object-code">
+                  {objectText || t('No rendered object.')}
+                </CodeBlockCode>
+              </CodeBlock>
+            );
+          })()}
         </ModalBody>
         <ModalFooter>
-          <Button variant="link" onClick={() => setViewing(null)}>
+          <Button
+            variant="link"
+            onClick={() => {
+              setViewing(null);
+              setCopied(false);
+              setError(null);
+            }}
+          >
             {t('Close')}
           </Button>
         </ModalFooter>

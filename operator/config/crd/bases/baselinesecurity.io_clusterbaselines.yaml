@@ -55,6 +55,7 @@ spec:
                   complianceCatalogSource is the OLM CatalogSource providing the
                   compliance-operator package (override for OKD or disconnected clusters).
                   Must be a DNS-1123 subdomain (CatalogSource metadata.name).
+                  Empty/whitespace uses DefaultComplianceCatalogSource at reconcile (same as CRD default).
                 maxLength: 253
                 minLength: 1
                 pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
@@ -221,6 +222,9 @@ spec:
             description: ClusterBaselineStatus is the observed state.
             properties:
               complianceOperatorVersion:
+                description: |-
+                  complianceOperatorVersion is the adopted Compliance Operator CSV version
+                  string when a matching CSV is found; empty while CO is not yet installed.
                 maxLength: 128
                 type: string
               conditions:
@@ -303,13 +307,16 @@ spec:
                 description: |-
                   diffBaseScanTime identifies the lastScanTime whose diffBaseFailures apply.
                   It is nil for the first completed scan, which has no comparison baseline.
-                  Internal bookkeeping only; not a consumer contract.
+                  Internal bookkeeping only; not a consumer contract: shape and presence
+                  may change in 0.x without a major bump; use newlyFailed and fixed for
+                  user-facing regression views (and history length for "prior scan exists").
                 format: date-time
                 type: string
               fixed:
                 description: |-
                   fixed lists owned checks that were FAIL at the previous scan but are no
-                  longer FAIL now (improvements since last scan).
+                  longer FAIL now (improvements since last scan). A waived FAIL is still a
+                  FAIL outcome and does not appear here until the check actually PASSes.
                 items:
                   maxLength: 253
                   type: string
@@ -323,15 +330,21 @@ spec:
                   description: |-
                     ScoreSnapshot is one point of score history, recorded when a scan completes.
                     Score is under the scoring mode active at capture time (Flat or
-                    SeverityWeighted). Mode flips do not rewrite prior points; consecutive points
-                    may be incomparable across a mode change until the next completed scan.
+                    SeverityWeighted). Mode flips do not rewrite prior points under the new
+                    formula; on the next completed scan under the new mode the operator clears
+                    overall and per-profile history rings and writes a fresh point so charts never
+                    mix Flat and SeverityWeighted values (ADR-008).
                   properties:
                     score:
+                      description: score is 0-100 under the scoring mode active when
+                        the point was written.
                       format: int32
                       maximum: 100
                       minimum: 0
                       type: integer
                     time:
+                      description: time is when this score was recorded (typically
+                        the scan completion time).
                       format: date-time
                       type: string
                   required:
@@ -341,13 +354,20 @@ spec:
                 maxItems: 30
                 type: array
               lastScanTime:
+                description: |-
+                  lastScanTime is when the last completed scan finished (suite phase DONE).
+                  Nil until the first scan completes. Kept when scanning is disabled (empty
+                  profiles and tailored) so re-enable does not invent false regressions;
+                  the last-scan Prometheus gauge is suppressed while scanning is off.
                 format: date-time
                 type: string
               newlyFailed:
                 description: |-
                   newlyFailed lists owned checks that are FAIL now but were not FAIL at the
-                  previous completed scan (regressions since last scan). Bounded by fail count
-                  and hard-capped so a hostile status cannot brick Status().Update admission.
+                  previous completed scan (regressions since last scan). Waived FAILs still
+                  count as FAIL outcomes here (accepting risk is not a regression clear).
+                  Bounded by fail count and hard-capped so a hostile status cannot brick
+                  Status().Update admission.
                 items:
                   maxLength: 253
                   type: string
@@ -362,9 +382,10 @@ spec:
               previousFailures:
                 description: |-
                   previousFailures is the internal FAIL snapshot from the last completed scan,
-                  used to compute newlyFailed/fixed on the next scan. Not a consumer contract:
-                  shape and presence may change in 0.x without a major bump; use newlyFailed
-                  and fixed for user-facing regression views.
+                  used to compute newlyFailed/fixed on the next scan. Includes waived FAILs
+                  (score exclusion is separate). Not a consumer contract: shape and presence
+                  may change in 0.x without a major bump; use newlyFailed and fixed for
+                  user-facing regression views.
                 items:
                   maxLength: 253
                   type: string
@@ -379,10 +400,16 @@ spec:
                     profile key.
                   properties:
                     error:
+                      description: |-
+                        Error counts checks that could not be evaluated (CO status ERROR, or an
+                        empty/unknown raw status). Excluded from the score; still reported.
                       format: int32
                       minimum: 0
                       type: integer
                     fail:
+                      description: |-
+                        Fail counts checks that failed and are not actively waived. Used in the
+                        score denominator; waived FAILs are counted under Waived instead.
                       format: int32
                       minimum: 0
                       type: integer
@@ -393,15 +420,21 @@ spec:
                         description: |-
                           ScoreSnapshot is one point of score history, recorded when a scan completes.
                           Score is under the scoring mode active at capture time (Flat or
-                          SeverityWeighted). Mode flips do not rewrite prior points; consecutive points
-                          may be incomparable across a mode change until the next completed scan.
+                          SeverityWeighted). Mode flips do not rewrite prior points under the new
+                          formula; on the next completed scan under the new mode the operator clears
+                          overall and per-profile history rings and writes a fresh point so charts never
+                          mix Flat and SeverityWeighted values (ADR-008).
                         properties:
                           score:
+                            description: score is 0-100 under the scoring mode active
+                              when the point was written.
                             format: int32
                             maximum: 100
                             minimum: 0
                             type: integer
                           time:
+                            description: time is when this score was recorded (typically
+                              the scan completion time).
                             format: date-time
                             type: string
                         required:
@@ -427,9 +460,8 @@ spec:
                       minimum: 0
                       type: integer
                     key:
-                      description: |-
-                        ProfileKey identifies one of the profile sets shipped by the Compliance
-                        Operator content that this operator knows how to bind.
+                      description: key is the ProfileKey from spec.profiles this status
+                        row describes.
                       enum:
                       - cis
                       - pci-dss
@@ -441,14 +473,24 @@ spec:
                       - bsi
                       type: string
                     manual:
+                      description: |-
+                        Manual counts checks that require human review (CO status MANUAL).
+                        Excluded from the score; still reported so Overview totals match Results.
                       format: int32
                       minimum: 0
                       type: integer
                     notApplicable:
+                      description: |-
+                        NotApplicable counts checks that do not apply on this cluster (CO status
+                        NOT-APPLICABLE, SKIP, or benign INCONSISTENT collapsed to N/A). Excluded
+                        from the score.
                       format: int32
                       minimum: 0
                       type: integer
                     pass:
+                      description: |-
+                        Pass counts checks that passed (including benign INCONSISTENT collapsed
+                        to PASS). Used in the score numerator and denominator.
                       format: int32
                       minimum: 0
                       type: integer
@@ -493,16 +535,22 @@ spec:
                     by must-gather and support tooling.
                   properties:
                     group:
+                      description: group is the API group (empty for core resources).
                       maxLength: 253
                       type: string
                     name:
+                      description: name is the object metadata.name.
                       maxLength: 253
                       minLength: 1
                       type: string
                     namespace:
+                      description: namespace is set for namespaced objects; empty
+                        for cluster-scoped ones.
                       maxLength: 63
                       type: string
                     resource:
+                      description: resource is the plural resource name (for example,
+                        scansettings).
                       maxLength: 253
                       minLength: 1
                       type: string
@@ -576,10 +624,16 @@ spec:
                     one bound TailoredProfile.
                   properties:
                     error:
+                      description: |-
+                        Error counts checks that could not be evaluated (CO status ERROR, or an
+                        empty/unknown raw status). Excluded from the score; still reported.
                       format: int32
                       minimum: 0
                       type: integer
                     fail:
+                      description: |-
+                        Fail counts checks that failed and are not actively waived. Used in the
+                        score denominator; waived FAILs are counted under Waived instead.
                       format: int32
                       minimum: 0
                       type: integer
@@ -590,15 +644,21 @@ spec:
                         description: |-
                           ScoreSnapshot is one point of score history, recorded when a scan completes.
                           Score is under the scoring mode active at capture time (Flat or
-                          SeverityWeighted). Mode flips do not rewrite prior points; consecutive points
-                          may be incomparable across a mode change until the next completed scan.
+                          SeverityWeighted). Mode flips do not rewrite prior points under the new
+                          formula; on the next completed scan under the new mode the operator clears
+                          overall and per-profile history rings and writes a fresh point so charts never
+                          mix Flat and SeverityWeighted values (ADR-008).
                         properties:
                           score:
+                            description: score is 0-100 under the scoring mode active
+                              when the point was written.
                             format: int32
                             maximum: 100
                             minimum: 0
                             type: integer
                           time:
+                            description: time is when this score was recorded (typically
+                              the scan completion time).
                             format: date-time
                             type: string
                         required:
@@ -624,6 +684,9 @@ spec:
                       minimum: 0
                       type: integer
                     manual:
+                      description: |-
+                        Manual counts checks that require human review (CO status MANUAL).
+                        Excluded from the score; still reported so Overview totals match Results.
                       format: int32
                       minimum: 0
                       type: integer
@@ -634,10 +697,17 @@ spec:
                       pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
                       type: string
                     notApplicable:
+                      description: |-
+                        NotApplicable counts checks that do not apply on this cluster (CO status
+                        NOT-APPLICABLE, SKIP, or benign INCONSISTENT collapsed to N/A). Excluded
+                        from the score.
                       format: int32
                       minimum: 0
                       type: integer
                     pass:
+                      description: |-
+                        Pass counts checks that passed (including benign INCONSISTENT collapsed
+                        to PASS). Used in the score numerator and denominator.
                       format: int32
                       minimum: 0
                       type: integer

@@ -395,8 +395,23 @@ func TestEnsureComplianceOperatorManualDoesNotRewriteSource(t *testing.T) {
 }
 
 func TestDesiredComplianceCatalogSource(t *testing.T) {
-	if got := desiredComplianceCatalogSource(&baselinev1alpha1.ClusterBaseline{}); got != "redhat-operators" {
-		t.Fatalf("default = %q", got)
+	wantDefault := baselinev1alpha1.DefaultComplianceCatalogSource
+	if got := desiredComplianceCatalogSource(&baselinev1alpha1.ClusterBaseline{}); got != wantDefault {
+		t.Fatalf("default = %q, want %q", got, wantDefault)
+	}
+	// Whitespace-only must not create a junk Subscription source.
+	ws := &baselinev1alpha1.ClusterBaseline{
+		Spec: baselinev1alpha1.ClusterBaselineSpec{ComplianceCatalogSource: "  \t "},
+	}
+	if got := desiredComplianceCatalogSource(ws); got != wantDefault {
+		t.Fatalf("whitespace = %q, want default %q", got, wantDefault)
+	}
+	// Padding around a real name is stripped so a mis-set env/YAML pad still works.
+	pad := &baselinev1alpha1.ClusterBaseline{
+		Spec: baselinev1alpha1.ClusterBaselineSpec{ComplianceCatalogSource: "  okd-operators\n"},
+	}
+	if got := desiredComplianceCatalogSource(pad); got != "okd-operators" {
+		t.Fatalf("padded override = %q", got)
 	}
 	cb := &baselinev1alpha1.ClusterBaseline{
 		Spec: baselinev1alpha1.ClusterBaselineSpec{ComplianceCatalogSource: "okd-operators"},
@@ -573,7 +588,15 @@ func TestEnsureConsolePlugin(t *testing.T) {
 	lbClass := "example.test/external"
 	allocateNodePorts := true
 	hostileService := &corev1.Service{
-		ObjectMeta: metav1.ObjectMeta{Name: pluginName, Namespace: pluginNS},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      pluginName,
+			Namespace: pluginNS,
+			// Foreign annotations must be wiped (only serving-cert remains).
+			Annotations: map[string]string{
+				"external-dns.alpha.kubernetes.io/hostname":         "evil.example",
+				"service.beta.kubernetes.io/aws-load-balancer-type": "external",
+			},
+		},
 		Spec: corev1.ServiceSpec{
 			Type:                          corev1.ServiceTypeLoadBalancer,
 			ExternalIPs:                   []string{"203.0.113.10"},
@@ -652,6 +675,9 @@ func TestEnsureConsolePlugin(t *testing.T) {
 	if svc.Annotations["service.beta.openshift.io/serving-cert-secret-name"] != pluginName+"-cert" {
 		t.Fatal("serving-cert annotation missing")
 	}
+	if len(svc.Annotations) != 1 {
+		t.Fatalf("plugin Service annotations = %v, want only serving-cert", svc.Annotations)
+	}
 	if svc.Spec.Type != corev1.ServiceTypeClusterIP {
 		t.Fatalf("plugin Service type = %q, want ClusterIP", svc.Spec.Type)
 	}
@@ -713,6 +739,9 @@ func TestEnsureConsolePlugin(t *testing.T) {
 	csc := dep.Spec.Template.Spec.Containers[0].SecurityContext
 	if csc == nil || csc.ReadOnlyRootFilesystem == nil || !*csc.ReadOnlyRootFilesystem {
 		t.Fatal("plugin container ReadOnlyRootFilesystem required")
+	}
+	if csc.SeccompProfile == nil || csc.SeccompProfile.Type != corev1.SeccompProfileTypeRuntimeDefault {
+		t.Fatal("plugin container SeccompProfile RuntimeDefault required")
 	}
 	console := consoleCluster()
 	if err := r.Get(context.Background(), types.NamespacedName{Name: "cluster"}, console); err != nil {

@@ -24,6 +24,26 @@ func TestBindingName(t *testing.T) {
 	}
 }
 
+// TestNotIn pins set semantics shared with sortedDiff: unique sorted members
+// of a that are absent from b (duplicate names in a count once).
+func TestNotIn(t *testing.T) {
+	empty := map[string]bool{}
+	got := notIn([]string{"a", "a", "b", "c", "b"}, empty)
+	if len(got) != 3 || got[0] != "a" || got[1] != "b" || got[2] != "c" {
+		t.Fatalf("unique empty-b = %v, want [a b c]", got)
+	}
+	got = notIn([]string{"c", "a", "a", "b"}, map[string]bool{"a": true, "d": true})
+	if len(got) != 2 || got[0] != "b" || got[1] != "c" {
+		t.Fatalf("unique with b = %v, want [b c]", got)
+	}
+	if got := notIn(nil, empty); len(got) != 0 {
+		t.Fatalf("nil a = %v, want empty", got)
+	}
+	if got := notIn([]string{"x", "x"}, map[string]bool{"x": true}); len(got) != 0 {
+		t.Fatalf("all excluded = %v, want empty", got)
+	}
+}
+
 func TestOwnedSuites(t *testing.T) {
 	if len(ownedSuites(&baselinev1alpha1.ClusterBaseline{})) != 0 {
 		t.Fatal("empty profiles should yield empty suites")
@@ -68,6 +88,53 @@ func TestProfileKeyFromSuite(t *testing.T) {
 		if ok != c.ok || (ok && key != c.key) {
 			t.Errorf("profileKeyFromSuite(%q) = (%q,%v), want (%q,%v)", c.suite, key, ok, c.key, c.ok)
 		}
+	}
+}
+
+// TestSuiteRoutingDualMap: aggregate routes tailored first (tailoredNameFromSuite
+// before profileKeyFromSuite). A baseline-tp-* suite must never also parse as a
+// profile key, or dual byProfile/byTailored maps would double-count / clobber.
+func TestSuiteRoutingDualMap(t *testing.T) {
+	// Tailored suite: only the tailored parser accepts it.
+	name, tok := tailoredNameFromSuite("baseline-tp-custom")
+	key, pok := profileKeyFromSuite("baseline-tp-custom")
+	if !tok || name != "custom" {
+		t.Fatalf("tailoredNameFromSuite(baseline-tp-custom) = (%q,%v), want (custom,true)", name, tok)
+	}
+	if pok {
+		t.Fatalf("profileKeyFromSuite(baseline-tp-custom) ok, would clobber tailored bucket with key %q", key)
+	}
+	// Built-in suite: only the profile parser accepts it.
+	name, tok = tailoredNameFromSuite("baseline-cis")
+	key, pok = profileKeyFromSuite("baseline-cis")
+	if tok {
+		t.Fatalf("tailoredNameFromSuite(baseline-cis) ok with name %q, want reject", name)
+	}
+	if !pok || key != "cis" {
+		t.Fatalf("profileKeyFromSuite(baseline-cis) = (%q,%v), want (cis,true)", key, pok)
+	}
+	// Empty / malformed prefixes reject both sides (no silent default bucket).
+	for _, suite := range []string{"", "baseline-", "baseline-tp-", "other"} {
+		if _, ok := tailoredNameFromSuite(suite); ok {
+			t.Errorf("tailoredNameFromSuite(%q) unexpectedly ok", suite)
+		}
+		if _, ok := profileKeyFromSuite(suite); ok {
+			t.Errorf("profileKeyFromSuite(%q) unexpectedly ok", suite)
+		}
+	}
+	// Dual ownership map: both suite labels coexist without key collision.
+	cb := &baselinev1alpha1.ClusterBaseline{
+		Spec: baselinev1alpha1.ClusterBaselineSpec{
+			Profiles:         []baselinev1alpha1.ProfileKey{"cis"},
+			TailoredProfiles: []string{"custom"},
+		},
+	}
+	owned := ownedSuites(cb)
+	if !owned["baseline-cis"] || !owned["baseline-tp-custom"] {
+		t.Fatalf("ownedSuites = %v, want baseline-cis and baseline-tp-custom", owned)
+	}
+	if len(owned) != 2 {
+		t.Fatalf("ownedSuites size = %d, want 2 (no clobber)", len(owned))
 	}
 }
 
@@ -154,6 +221,39 @@ func TestClampHistory(t *testing.T) {
 	if fixed[0].Score != 0 || fixed[1].Score != 100 || fixed[2].Score != 50 {
 		t.Fatalf("score sanitize = %v,%v,%v", fixed[0].Score, fixed[1].Score, fixed[2].Score)
 	}
+}
+
+// TestClearHistoryRings: Flat <-> SeverityWeighted flips must drop all score
+// rings so MiniTrend / charts never mix formulas (ADR-008). Integration
+// coverage exists on the reconcile path; pin the pure helper so a no-op
+// regression cannot hide behind status-update mocks.
+func TestClearHistoryRings(t *testing.T) {
+	cb := &baselinev1alpha1.ClusterBaseline{
+		Status: baselinev1alpha1.ClusterBaselineStatus{
+			History: []baselinev1alpha1.ScoreSnapshot{{Score: 90}, {Score: 91}},
+			Profiles: []baselinev1alpha1.ProfileStatus{{
+				Key:     "cis",
+				History: []baselinev1alpha1.ScoreSnapshot{{Score: 80}},
+			}},
+			TailoredProfiles: []baselinev1alpha1.TailoredProfileStatus{{
+				Name:    "custom",
+				History: []baselinev1alpha1.ScoreSnapshot{{Score: 70}, {Score: 71}},
+			}},
+		},
+	}
+	clearHistoryRings(cb)
+	if cb.Status.History != nil {
+		t.Fatalf("overall history still set: %v", cb.Status.History)
+	}
+	if len(cb.Status.Profiles) != 1 || cb.Status.Profiles[0].History != nil {
+		t.Fatalf("profile history not cleared: %+v", cb.Status.Profiles)
+	}
+	if len(cb.Status.TailoredProfiles) != 1 || cb.Status.TailoredProfiles[0].History != nil {
+		t.Fatalf("tailored history not cleared: %+v", cb.Status.TailoredProfiles)
+	}
+	// Empty / nil rings are a no-op (must not panic on first-scan baselines).
+	clearHistoryRings(&baselinev1alpha1.ClusterBaseline{})
+	clearHistoryRings(cb)
 }
 
 func TestSanitizeStatusForUpdate(t *testing.T) {
@@ -324,6 +424,13 @@ func TestProfileNames(t *testing.T) {
 	if baselinev1alpha1.HistoryMax != 30 {
 		t.Fatalf("HistoryMax = %d, want 30 (CRD MaxItems)", baselinev1alpha1.HistoryMax)
 	}
+	// CRD kubebuilder defaults must stay in lockstep with API constants used at reconcile.
+	if baselinev1alpha1.DefaultScanSchedule != "0 1 * * *" {
+		t.Fatalf("DefaultScanSchedule = %q, want CRD schedule default", baselinev1alpha1.DefaultScanSchedule)
+	}
+	if baselinev1alpha1.DefaultComplianceCatalogSource != "redhat-operators" {
+		t.Fatalf("DefaultComplianceCatalogSource = %q, want CRD catalog default", baselinev1alpha1.DefaultComplianceCatalogSource)
+	}
 	if baselinev1alpha1.RemediationBatchPhaseApplying != "Applying" {
 		t.Fatalf("RemediationBatchPhaseApplying = %q", baselinev1alpha1.RemediationBatchPhaseApplying)
 	}
@@ -378,6 +485,13 @@ func FuzzMatchesAnyProfile(f *testing.F) {
 	for _, seed := range []string{"ocp4-cis", "ocp4-cis-node-master", "ocp4-cisx", "", "-", "ocp4-cis-", "ocp4-cis-extra"} {
 		f.Add(seed)
 	}
+	// Independent oracle: enumerate the exact suffixes accepted after "<profile>-".
+	// Do NOT call scanRoleSuffix here, or a wrong allow-list would agree on both
+	// sides and pass. Keep this set in sync with scanRoleSuffix in matching.go.
+	validSuffix := map[string]bool{
+		"worker": true, "master": true, "control-plane": true, "infra": true, "node": true,
+		"node-worker": true, "node-master": true, "node-control-plane": true, "node-infra": true,
+	}
 	f.Fuzz(func(t *testing.T, name string) {
 		got := matchesAnyProfile(name, profiles)
 		want := false
@@ -386,7 +500,7 @@ func FuzzMatchesAnyProfile(f *testing.F) {
 				want = true
 				break
 			}
-			if rest, ok := strings.CutPrefix(name, p+"-"); ok && scanRoleSuffix(rest) {
+			if rest, ok := strings.CutPrefix(name, p+"-"); ok && validSuffix[rest] {
 				want = true
 				break
 			}
@@ -789,18 +903,75 @@ func FuzzSyncFailureDiff(f *testing.F) {
 				t.Fatalf("fixed %q not in base", n)
 			}
 		}
-		// Sorted (notIn sorts).
-		for i := 1; i < len(cb.Status.NewlyFailed); i++ {
-			if cb.Status.NewlyFailed[i-1] > cb.Status.NewlyFailed[i] {
+		// Sorted unique (notIn / sortedDiff set semantics).
+		seenNew := map[string]bool{}
+		for i := 0; i < len(cb.Status.NewlyFailed); i++ {
+			n := cb.Status.NewlyFailed[i]
+			if seenNew[n] {
+				t.Fatalf("newlyFailed duplicate %q in %v", n, cb.Status.NewlyFailed)
+			}
+			seenNew[n] = true
+			if i > 0 && cb.Status.NewlyFailed[i-1] > n {
 				t.Fatalf("newlyFailed unsorted: %v", cb.Status.NewlyFailed)
 			}
 		}
-		for i := 1; i < len(cb.Status.Fixed); i++ {
-			if cb.Status.Fixed[i-1] > cb.Status.Fixed[i] {
+		seenFixed := map[string]bool{}
+		for i := 0; i < len(cb.Status.Fixed); i++ {
+			n := cb.Status.Fixed[i]
+			if seenFixed[n] {
+				t.Fatalf("fixed duplicate %q in %v", n, cb.Status.Fixed)
+			}
+			seenFixed[n] = true
+			if i > 0 && cb.Status.Fixed[i-1] > n {
 				t.Fatalf("fixed unsorted: %v", cb.Status.Fixed)
 			}
 		}
 	})
+}
+
+// TestSyncHistorySnapshot pins late-CCR refresh and nil-score drop behavior
+// (including the n==1 drop must return nil, not a shared empty slice that still
+// aliases capacity at the removed point).
+func TestSyncHistorySnapshot(t *testing.T) {
+	ts := metav1.NewTime(time.Unix(1_700_000_000, 0).UTC())
+	other := metav1.NewTime(ts.Add(-time.Hour))
+	score := int32(77)
+	// First point for a new scan.
+	got := syncHistorySnapshot(nil, ts, &score)
+	if len(got) != 1 || got[0].Score != 77 || !got[0].Time.Equal(&ts) {
+		t.Fatalf("append first = %+v", got)
+	}
+	// Same timestamp updates score in place.
+	score = 88
+	got = syncHistorySnapshot(got, ts, &score)
+	if len(got) != 1 || got[0].Score != 88 {
+		t.Fatalf("same-ts update = %+v", got)
+	}
+	// Nil score on sole matching point clears the ring (no alias of removed cap).
+	got = syncHistorySnapshot(got, ts, nil)
+	if got != nil {
+		t.Fatalf("n==1 nil drop = %v, want nil", got)
+	}
+	// Nil score when the last point is a different scan leaves history alone.
+	seed := []baselinev1alpha1.ScoreSnapshot{{Time: other, Score: 40}}
+	got = syncHistorySnapshot(seed, ts, nil)
+	if len(got) != 1 || got[0].Score != 40 {
+		t.Fatalf("nil on new ts must not drop prior: %+v", got)
+	}
+	// Same-ts nil drop with prior points copies and leaves earlier history.
+	two := []baselinev1alpha1.ScoreSnapshot{
+		{Time: other, Score: 40},
+		{Time: ts, Score: 50},
+	}
+	got = syncHistorySnapshot(two, ts, nil)
+	if len(got) != 1 || got[0].Score != 40 || !got[0].Time.Equal(&other) {
+		t.Fatalf("same-ts nil drop prior = %+v", got)
+	}
+	// Mutating the original two[1] must not affect got (copy after truncate).
+	two[1].Score = 99
+	if got[0].Score != 40 {
+		t.Fatal("truncated history aliases input after nil drop")
+	}
 }
 
 // FuzzSyncHistorySnapshot: late-arriving same-timestamp score updates and
@@ -1011,6 +1182,9 @@ func FuzzCheckSeverity(f *testing.F) {
 		want := field
 		if want == "" {
 			want = label
+		}
+		if want == "" {
+			want = "unknown"
 		}
 		if got != want {
 			t.Fatalf("checkSeverity field=%q label=%q got %q want %q", field, label, got, want)

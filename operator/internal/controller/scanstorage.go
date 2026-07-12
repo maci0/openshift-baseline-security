@@ -7,12 +7,17 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	baselinev1alpha1 "github.com/maci0/baseline-security-operator/api/v1alpha1"
 )
+
+// Grace before a still-Pending owned scan PVC is treated as stuck (no default
+// StorageClass). Brand-new PVCs are ignored so provisioning lag is not Degraded.
+const scanStoragePendingGrace = 2 * time.Minute
 
 // checkScanStorage sets the ScanStorageReady detail condition false when owned
 // scan PVCs stay Pending (no default StorageClass); the Degraded rollup
@@ -42,18 +47,24 @@ func (r *ClusterBaselineReconciler) checkScanStorage(ctx context.Context, cb *ba
 		if owned &&
 			pvc.Status.Phase == corev1.ClaimPending &&
 			!pvc.CreationTimestamp.IsZero() &&
-			time.Since(pvc.CreationTimestamp.Time) > 2*time.Minute {
+			time.Since(pvc.CreationTimestamp.Time) > scanStoragePendingGrace {
 			pending = append(pending, pvc.Name)
 		}
 	}
 	if len(pending) > 0 {
-		// Info: rolls up to Degraded; default logs must name the stuck PVCs so
-		// operators can fix StorageClass without only reading the CR condition.
-		log.FromContext(ctx).Info("scan storage PVCs pending",
-			"namespace", complianceNamespace, "pvcs", pending, "name", cb.Name)
-		setCond(cb, "ScanStorageReady", metav1.ConditionFalse, "ScanStoragePending",
-			fmt.Sprintf("PVC(s) %s/%s Pending >2m; need a default StorageClass",
-				complianceNamespace, strings.Join(pending, ", ")))
+		// Info once on transition (not every requeue): rolls up to Degraded;
+		// default logs must name the stuck PVCs so operators can fix StorageClass
+		// without only reading the CR condition. Steady-state spam is noise.
+		// Duration text from scanStoragePendingGrace so the message cannot drift
+		// from the grace constant (and TEST-PLAN "Pending >2m" row).
+		msg := fmt.Sprintf("PVC(s) %s/%s Pending >%dm; need a default StorageClass",
+			complianceNamespace, strings.Join(pending, ", "), int(scanStoragePendingGrace.Minutes()))
+		prev := meta.FindStatusCondition(cb.Status.Conditions, "ScanStorageReady")
+		setCond(cb, "ScanStorageReady", metav1.ConditionFalse, "ScanStoragePending", msg)
+		if prev == nil || prev.Status != metav1.ConditionFalse || prev.Reason != "ScanStoragePending" {
+			log.FromContext(ctx).Info("scan storage PVCs pending",
+				"namespace", complianceNamespace, "pvcs", pending, "name", cb.Name)
+		}
 		return nil
 	}
 	setCond(cb, "ScanStorageReady", metav1.ConditionTrue, "AsExpected", "")

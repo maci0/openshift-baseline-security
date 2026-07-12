@@ -4,6 +4,8 @@ coverage/
 .yarn/
 e2e/
 test-results/
+playwright-report/
+blob-report/
 **/*.test.ts
 **/*.test.tsx
 jest.config.cjs
@@ -14,6 +16,13 @@ eslint.config.mjs
 # Secrets and local env must never enter the build context.
 .env
 .env.*
+*.pem
+*.key
+*.p12
+*.pfx
+*kubeconfig*
+id_rsa*
+id_ed25519*
 .git
 .gitignore
 *.tsbuildinfo

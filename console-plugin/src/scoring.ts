@@ -1,3 +1,4 @@
+// Pass/fail and severity-weighted score math (lockstep with operator scoring).
 import {
   ClusterBaseline,
   ComplianceCheckResult,
@@ -42,11 +43,11 @@ export const clusterScore = (baselines?: ClusterBaseline[]): number | null => {
   return b?.status?.score ?? null;
 };
 
+const count = (n: number | undefined): number => n ?? 0;
+
 // Sum result counts across profiles (built-in + tailored) for the composition
 // donut, so its slices match the score, which includes all of them.
 // Mutates a single accumulator (no per-group intermediate objects).
-const count = (n: number | undefined): number => n ?? 0;
-
 export const aggregateCounts = (...groups: ResultCounts[]): ResultCounts => {
   const a: ResultCounts = {
     pass: 0,
@@ -71,26 +72,49 @@ export const aggregateCounts = (...groups: ResultCounts[]): ResultCounts => {
   return a;
 };
 
+// Score badge thresholds (danger below, warning mid, success at/above success).
+// Shared by scoreColor (CSS vars) and scoreLabelColor (PatternFly Label) so the
+// 60/90 bands cannot drift between the cluster Overview detail item and profile
+// cards. Intentionally distinct from ComplianceScoreLow (Prometheus <80): UI
+// color is more granular; paging stays less noisy (ADR-017).
+export const SCORE_DANGER_BELOW = 60;
+export const SCORE_SUCCESS_AT = 90;
+
 // PatternFly semantic status color token for a 0-100 score.
 export const scoreColor = (score?: number): string =>
-  score == null || Number.isNaN(score) || score < 60
+  score == null || Number.isNaN(score) || score < SCORE_DANGER_BELOW
     ? 'var(--pf-t--global--icon--color--status--danger--default)'
-    : score < 90
+    : score < SCORE_SUCCESS_AT
       ? 'var(--pf-t--global--icon--color--status--warning--default)'
       : 'var(--pf-t--global--icon--color--status--success--default)';
 
-// Severity weights for SeverityWeighted scoring. Must stay in lockstep with the
-// operator's severityWeight table (high=10, medium=5, low=2, else 1).
+// PatternFly Label color for a profile score (same bands as scoreColor).
+// Mirror scoreColor's NaN / threshold order so the two cannot diverge.
+export const scoreLabelColor = (score: number): 'green' | 'orange' | 'red' =>
+  Number.isNaN(score) || score < SCORE_DANGER_BELOW
+    ? 'red'
+    : score < SCORE_SUCCESS_AT
+      ? 'orange'
+      : 'green';
+// SeverityWeighted product weights (ADR-022). Named table; must stay equal to
+// operator severityWeightHigh/Medium/Low/Other (verify-product-lockstep).
+const SEVERITY_WEIGHT_HIGH = 10;
+const SEVERITY_WEIGHT_MEDIUM = 5;
+const SEVERITY_WEIGHT_LOW = 2;
+const SEVERITY_WEIGHT_OTHER = 1; // unknown, info, missing, unexpected casing
+
+// Severity weights for SeverityWeighted scoring. Case-sensitive product
+// contract (ADR-022): high/medium/low only; everything else is weight 1.
 export const severityWeight = (sev: string | undefined): number => {
   switch (sev) {
     case 'high':
-      return 10;
+      return SEVERITY_WEIGHT_HIGH;
     case 'medium':
-      return 5;
+      return SEVERITY_WEIGHT_MEDIUM;
     case 'low':
-      return 2;
+      return SEVERITY_WEIGHT_LOW;
     default:
-      return 1;
+      return SEVERITY_WEIGHT_OTHER;
   }
 };
 
@@ -153,15 +177,29 @@ export const profileScore = (
     // Prebuilt active-waiver set from Overview (one Set for all cards).
     activeWaived?: ReadonlySet<string>;
     now?: Date;
+    // Per-profile history ring (status.profiles[].history). Used only when
+    // SeverityWeighted and the CCR list is still empty so badges use the last
+    // operator-written weighted point instead of a flat pass/fail approximation.
+    history?: ReadonlyArray<{ score?: number }>;
   },
 ): number | null => {
   // profiles may be empty (tailored-only baseline); ownership still filters via
   // tailoredProfiles. results is required to recompute weights client-side.
   if (opts?.mode === 'SeverityWeighted' && opts.filterKey && opts.results) {
-    // Empty CCR list (watch still loading or suite has no results yet): use flat
-    // counts from status so Overview badges are not blank while status already
-    // has tallies. A loaded empty bucket after weighing still returns null below.
+    // Empty CCR list (watch still loading or suite has no results yet): prefer
+    // the latest history snapshot (operator wrote it under the weighted formula)
+    // so badges do not flash a flat pass/fail ratio while overall score is
+    // severity-weighted. Fall back to flat counts only when history is empty
+    // (first scan / no points yet). A loaded empty bucket after weighing still
+    // returns null below.
     if (opts.results.length === 0) {
+      const hist = opts.history;
+      if (hist && hist.length > 0) {
+        const last = hist[hist.length - 1]?.score;
+        if (typeof last === 'number' && Number.isFinite(last)) {
+          return Math.min(100, Math.max(0, Math.floor(last)));
+        }
+      }
       return flatProfileScore(counts.pass, counts.fail);
     }
     // Prefer a shared Set from the caller; otherwise build once for this score.
@@ -174,19 +212,23 @@ export const profileScore = (
     let wPass = 0;
     let wFail = 0;
     for (const r of opts.results) {
+      // metadata is typed as required but list watches can yield partial/tampered
+      // objects; optional-chain so Overview badges never throw mid-weigh.
+      const labels = r.metadata?.labels;
       if (
         !prefiltered &&
-        (!isOwnedByBaseline(r.metadata.labels, profileSet, tailoredSet) ||
-          suiteFilterKey(r.metadata.labels) !== opts.filterKey)
+        (!isOwnedByBaseline(labels, profileSet, tailoredSet) ||
+          suiteFilterKey(labels) !== opts.filterKey)
       ) {
         continue;
       }
+      // Severity only for score mass (PASS/FAIL). Skip label/field walks for
+      // MANUAL/INFO/ERROR/N-A/INCONSISTENT/waived FAIL (often the majority).
       const eff = effectiveStatus(r);
-      const sev = checkSeverity(r);
       if (eff === 'PASS') {
-        wPass += severityWeight(sev);
-      } else if (eff === 'FAIL' && !activeWaived.has(r.metadata.name)) {
-        wFail += severityWeight(sev);
+        wPass += severityWeight(checkSeverity(r));
+      } else if (eff === 'FAIL' && !activeWaived.has(r.metadata?.name ?? '')) {
+        wFail += severityWeight(checkSeverity(r));
       }
     }
     const total = wPass + wFail;

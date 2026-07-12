@@ -17,23 +17,30 @@ const defaultScanSchedule = baselinev1alpha1.DefaultScanSchedule
 
 var scanScheduleParser = cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
 
-func normalizedSchedule(schedule string) (string, error) {
-	// Whitespace-only is treated as unset so accidental "  " does not Degrade.
+// normalizeAndParseSchedule validates five-field cron and returns the
+// whitespace-normalized expression plus its parsed schedule (one Parse).
+// Whitespace-only is treated as unset so accidental "  " does not Degrade.
+// Compliance ScanSettings use standard five-field cron; descriptors such as
+// "@every 1s" are rejected so a spec.schedule value cannot create a scan storm.
+func normalizeAndParseSchedule(schedule string) (string, cron.Schedule, error) {
 	if strings.TrimSpace(schedule) == "" {
 		schedule = defaultScanSchedule
 	}
-	// Compliance ScanSettings use standard five-field cron. ParseStandard also
-	// accepts descriptors such as "@every 1s"; allowing those here would bypass
-	// the intended cadence and can create an unbounded scan storm.
 	fields := strings.Fields(schedule)
 	if len(fields) != 5 {
-		return "", fmt.Errorf("expected exactly 5 fields, found %d", len(fields))
+		return "", nil, fmt.Errorf("expected exactly 5 fields, found %d", len(fields))
 	}
 	schedule = strings.Join(fields, " ")
-	if _, err := scanScheduleParser.Parse(schedule); err != nil {
-		return "", fmt.Errorf("invalid cron schedule %q: %w", schedule, err)
+	sched, err := scanScheduleParser.Parse(schedule)
+	if err != nil {
+		return "", nil, fmt.Errorf("invalid cron schedule %q: %w", schedule, err)
 	}
-	return schedule, nil
+	return schedule, sched, nil
+}
+
+func normalizedSchedule(schedule string) (string, error) {
+	s, _, err := normalizeAndParseSchedule(schedule)
+	return s, err
 }
 
 // nextScanTime computes the next cron fire after now, or nil on an invalid
@@ -45,11 +52,7 @@ func normalizedSchedule(schedule string) (string, error) {
 // fire time. Using the process local zone would shift NextScanTime on a node
 // with TZ set and disagree with the actual scan.
 func nextScanTime(schedule string, now time.Time) *metav1.Time {
-	normalized, err := normalizedSchedule(schedule)
-	if err != nil {
-		return nil
-	}
-	sched, err := scanScheduleParser.Parse(normalized)
+	_, sched, err := normalizeAndParseSchedule(schedule)
 	if err != nil {
 		return nil
 	}

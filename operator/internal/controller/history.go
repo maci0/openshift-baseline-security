@@ -1,13 +1,22 @@
 package controller
 
 import (
+	"slices"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	baselinev1alpha1 "github.com/maci0/baseline-security-operator/api/v1alpha1"
 )
 
 func syncFailureDiff(cb *baselinev1alpha1.ClusterBaseline, currentFails, baseFailures []string) {
+	// Production lists are sorted (aggregate sorts currentFails; PreviousFailures /
+	// DiffBaseFailures are clones). Two-pointer set-diff avoids two maps over
+	// multi-thousand FAIL names on every completed-scan / late-CCR refresh.
+	if slices.IsSorted(currentFails) && slices.IsSorted(baseFailures) {
+		cb.Status.NewlyFailed = sortedDiff(currentFails, baseFailures)
+		cb.Status.Fixed = sortedDiff(baseFailures, currentFails)
+		return
+	}
 	base := make(map[string]bool, len(baseFailures))
 	for _, name := range baseFailures {
 		base[name] = true
@@ -18,6 +27,19 @@ func syncFailureDiff(cb *baselinev1alpha1.ClusterBaseline, currentFails, baseFai
 	}
 	cb.Status.NewlyFailed = notIn(currentFails, base)
 	cb.Status.Fixed = notIn(baseFailures, current)
+}
+
+// clearHistoryRings drops overall and per-profile score history. Used when the
+// scoring formula changes so rings never mix Flat and SeverityWeighted points
+// (MiniTrend / Score trend charts; ADR-008).
+func clearHistoryRings(cb *baselinev1alpha1.ClusterBaseline) {
+	cb.Status.History = nil
+	for i := range cb.Status.Profiles {
+		cb.Status.Profiles[i].History = nil
+	}
+	for i := range cb.Status.TailoredProfiles {
+		cb.Status.TailoredProfiles[i].History = nil
+	}
 }
 
 // appendHistoryRing appends a snapshot and keeps at most max entries (oldest first).
@@ -50,28 +72,6 @@ func syncHistorySnapshot(
 		return hist
 	}
 	return appendHistoryRing(hist, t, *s, historyMax)
-}
-
-// checkSeverity returns a ComplianceCheckResult severity for weighting. Prefer
-// the typed .severity field (CO source of truth on the CR); fall back to the
-// check-severity label CO also sets for selection. Uses unstructuredLabel so
-// the SeverityWeighted CCR hot path does not copy the full labels map via
-// GetLabels on every PASS/FAIL result.
-func checkSeverity(item *unstructured.Unstructured) string {
-	if sev, ok := item.Object["severity"].(string); ok && sev != "" {
-		return sev
-	}
-	return unstructuredLabel(item.Object, checkSeverityLabel)
-}
-
-// profileBucketScore is the score recorded for one profile's history ring.
-// When SeverityWeighted and weights are present, uses the same weight table as
-// status.score; otherwise flat pass/(pass+fail) from ResultCounts.
-func profileBucketScore(pass, fail int32, w weightedSum, mode baselinev1alpha1.ScoringMode, haveWeights bool) *int32 {
-	if mode == baselinev1alpha1.ScoringSeverityWeighted && haveWeights {
-		return score64(w.pass, w.fail)
-	}
-	return score(pass, fail)
 }
 
 func syncProfileHistory(cb *baselinev1alpha1.ClusterBaseline, t metav1.Time, weights *scoreWeights) {

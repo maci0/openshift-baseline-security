@@ -51,10 +51,28 @@ func ownedSuites(cb *baselinev1alpha1.ClusterBaseline) map[string]bool {
 	return s
 }
 
+// activeWaivers returns names of non-expired waivers on the baseline. Empty names
+// are dropped (corrupt entries never match). Matches aggregateStatus expiry:
+// ExpiresAt is inactive once !After(now).
+func activeWaivers(cb *baselinev1alpha1.ClusterBaseline, now time.Time) map[string]bool {
+	waived := make(map[string]bool, len(cb.Spec.Waivers))
+	for _, w := range cb.Spec.Waivers {
+		if w.Name == "" {
+			continue
+		}
+		if w.ExpiresAt != nil && !w.ExpiresAt.After(now) {
+			continue
+		}
+		waived[w.Name] = true
+	}
+	return waived
+}
+
 // countOwnedResults tallies live ComplianceCheckResults by status across every
 // suite this baseline owns: the ground truth the operator's status should match.
-// Uses the effective status so a benign INCONSISTENT collapses exactly as the
-// operator does; otherwise the ground truth would disagree by construction.
+// Mirrors aggregateStatus: benign INCONSISTENT collapse, SKIP→NOT-APPLICABLE,
+// and FAIL+active-waiver→WAIVED. Without waiver exclusion the flat score oracle
+// would disagree with status.score whenever any check is waived.
 func countOwnedResults(ctx context.Context, c client.Client, cb *baselinev1alpha1.ClusterBaseline) (map[string]int, error) {
 	list := &unstructured.UnstructuredList{}
 	list.SetGroupVersionKind(checkResultGVK.GroupVersion().WithKind(checkResultGVK.Kind + "List"))
@@ -62,24 +80,33 @@ func countOwnedResults(ctx context.Context, c client.Client, cb *baselinev1alpha
 		return nil, err
 	}
 	owned := ownedSuites(cb)
+	waived := activeWaivers(cb, time.Now())
 	counts := map[string]int{}
 	for i := range list.Items {
 		suite := list.Items[i].GetLabels()[suiteLabel]
 		if !owned[suite] {
 			continue
 		}
-		counts[effectiveCheckStatus(&list.Items[i])]++
+		status := effectiveCheckStatus(&list.Items[i])
+		if status == "FAIL" && waived[list.Items[i].GetName()] {
+			status = "WAIVED"
+		}
+		counts[status]++
 	}
 	return counts, nil
 }
 
 // effectiveCheckStatus mirrors the operator: a benign INCONSISTENT (PASS where it
 // applies, NOT-APPLICABLE elsewhere) collapses to PASS / NOT-APPLICABLE, while a
-// genuine PASS-vs-FAIL split stays INCONSISTENT. The e2e ground truth must apply
-// the same rule as the controller or the two disagree by construction.
+// genuine PASS-vs-FAIL split stays INCONSISTENT. Top-level SKIP is folded into
+// NOT-APPLICABLE (operator ResultCounts). The e2e ground truth must apply the
+// same rule as the controller or the two disagree by construction.
 func effectiveCheckStatus(item *unstructured.Unstructured) string {
 	status, _, _ := unstructured.NestedString(item.Object, "status")
 	if status != "INCONSISTENT" {
+		if status == "SKIP" {
+			return "NOT-APPLICABLE"
+		}
 		return status
 	}
 	ann := item.GetAnnotations()

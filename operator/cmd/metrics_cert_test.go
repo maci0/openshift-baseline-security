@@ -5,8 +5,10 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	certutil "k8s.io/client-go/util/cert"
@@ -112,6 +114,39 @@ func TestIsLoopbackMetricsAddr(t *testing.T) {
 	}
 }
 
+func TestValidateListenAddr(t *testing.T) {
+	for _, a := range []string{":8443", "127.0.0.1:8081", "[::1]:8443", "0.0.0.0:8443"} {
+		if err := validateListenAddr(a, false); err != nil {
+			t.Fatalf("%q should be valid: %v", a, err)
+		}
+	}
+	if err := validateListenAddr("0", true); err != nil {
+		t.Fatalf("0 with disableOK should be valid: %v", err)
+	}
+	for _, a := range []string{"", "0", "bogus", "127.0.0.1", ":0", ":65536", "host:notaport", "[::1]"} {
+		if err := validateListenAddr(a, false); err == nil {
+			t.Fatalf("%q should be invalid", a)
+		}
+	}
+	if err := validateListenAddr("0", false); err == nil {
+		t.Fatal("0 without disableOK should be invalid (probe cannot use metrics disable)")
+	}
+}
+
+func TestValidateMetricsCertDir(t *testing.T) {
+	if err := validateMetricsCertDir(""); err != nil {
+		t.Fatalf("empty should be valid (self-signed only): %v", err)
+	}
+	if err := validateMetricsCertDir("/var/run/metrics-certs"); err != nil {
+		t.Fatalf("absolute path should be valid: %v", err)
+	}
+	for _, d := range []string{"metrics-certs", "./certs", "var/run/metrics-certs", "certs/"} {
+		if err := validateMetricsCertDir(d); err == nil {
+			t.Fatalf("%q should be rejected (relative)", d)
+		}
+	}
+}
+
 func TestEnvTruthy(t *testing.T) {
 	for _, v := range []string{"true", "TRUE", " True ", "1", "yes", "YES"} {
 		t.Setenv("BASELINE_SECURITY_SKIP_DEFAULT_CR", v)
@@ -204,6 +239,45 @@ func TestMetricsCertProviderConcurrentLoad(t *testing.T) {
 		} else if certs[i] != first {
 			t.Fatal("concurrent load produced multiple certificate pointers for one fingerprint")
 		}
+	}
+}
+
+// A failed under-lock re-read must not install a stale outer parse over a cert
+// that a concurrent handshake already published (re-read !ok used to fall through).
+func TestMetricsCertProviderRereadFailureKeepsCachedCert(t *testing.T) {
+	dir := t.TempDir()
+	writeTestPair(t, dir)
+	p := &metricsCertProvider{certDir: dir}
+	seeded, err := p.GetCertificate(nil)
+	if err != nil || seeded == nil {
+		t.Fatalf("seed: cert=%v err=%v", seeded, err)
+	}
+	p.mu.Lock()
+	seededFP := p.fingerprint
+	p.mu.Unlock()
+
+	// New on-disk pair so the outer read is a cache miss and parse runs.
+	writeTestPair(t, dir)
+	var reads atomic.Int32
+	p.readPair = func(certPath, keyPath string) ([]byte, []byte, [32]byte, bool) {
+		n := reads.Add(1)
+		certPEM, keyPEM, fp, ok := readCertPair(certPath, keyPath)
+		if n == 1 {
+			// Outer read succeeds (new content).
+			return certPEM, keyPEM, fp, ok
+		}
+		// Under-lock re-read fails (transient projection blip).
+		return nil, nil, [32]byte{}, false
+	}
+	got, err := p.GetCertificate(nil)
+	if err != nil || got != seeded {
+		t.Fatalf("reread failure replaced cache: got=%p want=%p err=%v", got, seeded, err)
+	}
+	p.mu.Lock()
+	cachedFP := p.fingerprint
+	p.mu.Unlock()
+	if cachedFP != seededFP {
+		t.Fatal("cache fingerprint changed after failed re-read")
 	}
 }
 
@@ -333,5 +407,80 @@ func FuzzIsLoopbackMetricsAddr(f *testing.F) {
 		if got != want {
 			t.Fatalf("isLoopbackMetricsAddr(%q) = %v, want %v (host=%q)", addr, got, want, host)
 		}
+	})
+}
+
+// FuzzValidateMetricsCertDir: --metrics-cert-dir is operator config (Deployment
+// args). Empty is valid (self-signed only); absolute paths are valid; relative
+// paths are always rejected so CWD-dependent dirs cannot slip through.
+func FuzzValidateMetricsCertDir(f *testing.F) {
+	for _, seed := range []string{
+		"", "/", "/var/run/metrics-certs", "/tmp/x",
+		"metrics-certs", "./certs", "var/run/metrics-certs", "certs/",
+		"//absolute-looking", "C:\\windows", "\\relative",
+		"/", strings.Repeat("a", 400),
+	} {
+		f.Add(seed)
+	}
+	f.Fuzz(func(t *testing.T, dir string) {
+		if len(dir) > 1024 {
+			dir = dir[:1024]
+		}
+		err := validateMetricsCertDir(dir)
+		if dir == "" {
+			if err != nil {
+				t.Fatalf("empty must be valid: %v", err)
+			}
+			return
+		}
+		if filepath.IsAbs(dir) {
+			if err != nil {
+				t.Fatalf("absolute %q must be valid: %v", dir, err)
+			}
+			return
+		}
+		if err == nil {
+			t.Fatalf("relative %q must be rejected", dir)
+		}
+	})
+}
+
+// FuzzValidateListenAddr: --metrics-bind-address / --health-probe-bind-address
+// come from Deployment args and must never panic. Valid host:port (1-65535) is
+// accepted; "0" only when disableOK (metrics). Empty and garbage always fail.
+func FuzzValidateListenAddr(f *testing.F) {
+	for _, seed := range []string{
+		"", "0", ":8443", "127.0.0.1:8081", "[::1]:8443", "0.0.0.0:8443",
+		"bogus", "127.0.0.1", ":0", ":65536", "host:notaport", "[::1]",
+		":::8443", "127.0.0.1:8443:extra", " :8443", "127.0.0.1:",
+		":1", ":65535", "localhost:0", "localhost:65536",
+	} {
+		f.Add(seed, true)
+		f.Add(seed, false)
+	}
+	f.Fuzz(func(t *testing.T, addr string, disableOK bool) {
+		if len(addr) > 512 {
+			addr = addr[:512]
+		}
+		err := validateListenAddr(addr, disableOK)
+		if disableOK && addr == "0" {
+			if err != nil {
+				t.Fatalf(`"0" with disableOK must be valid: %v`, err)
+			}
+			return
+		}
+		if err == nil {
+			// Accepted: host:port with numeric port in 1..65535.
+			_, port, splitErr := net.SplitHostPort(addr)
+			if splitErr != nil {
+				t.Fatalf("accepted but SplitHostPort failed: addr=%q err=%v", addr, splitErr)
+			}
+			p, atoiErr := strconv.Atoi(port)
+			if atoiErr != nil || p < 1 || p > 65535 {
+				t.Fatalf("accepted invalid port: addr=%q port=%q", addr, port)
+			}
+		}
+		// Rejected path: only assert no panic (err non-nil). No further shape.
+		_ = err
 	})
 }

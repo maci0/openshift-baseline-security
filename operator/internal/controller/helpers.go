@@ -7,12 +7,9 @@ import (
 	"slices"
 	"time"
 
-	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	baselinev1alpha1 "github.com/maci0/baseline-security-operator/api/v1alpha1"
@@ -21,31 +18,47 @@ import (
 // requeueAfter picks the poll cadence. Steady state is 1m; any Progressing
 // rollup and an in-flight remediation batch use 15s so cancel/grace/Applied are
 // not stuck behind a full minute when the dynamic informer is lagging or not yet up.
+// Active waiver expiry also shortens the poll so accepted-risk drops from the
+// score without waiting for the full steady interval (ADR-005).
 func requeueAfter(cb *baselinev1alpha1.ClusterBaseline) time.Duration {
-	const fast = 15 * time.Second
-	const slow = time.Minute
-	if progressing := meta.FindStatusCondition(cb.Status.Conditions, "Progressing"); progressing != nil && progressing.Status == metav1.ConditionTrue {
-		return fast
-	}
-	if cb.Status.RemediationBatch != nil {
-		return fast
-	}
-	return slow
+	return requeueAfterAt(cb, time.Now())
 }
 
-// preferredHostnameAntiAffinity spreads pods across nodes (CONVENTIONS.md HA).
-func preferredHostnameAntiAffinity(labels map[string]string) *corev1.Affinity {
-	return &corev1.Affinity{
-		PodAntiAffinity: &corev1.PodAntiAffinity{
-			PreferredDuringSchedulingIgnoredDuringExecution: []corev1.WeightedPodAffinityTerm{{
-				Weight: 100,
-				PodAffinityTerm: corev1.PodAffinityTerm{
-					LabelSelector: &metav1.LabelSelector{MatchLabels: labels},
-					TopologyKey:   "kubernetes.io/hostname",
-				},
-			}},
-		},
+// requeueAfterAt is requeueAfter with an injected clock so unit tests can pin
+// waiver-expiry shortening without wall-clock lag under load.
+func requeueAfterAt(cb *baselinev1alpha1.ClusterBaseline, now time.Time) time.Duration {
+	const fast = 15 * time.Second
+	const slow = time.Minute
+	d := slow
+	progressing := meta.FindStatusCondition(cb.Status.Conditions, "Progressing")
+	if (progressing != nil && progressing.Status == metav1.ConditionTrue) || cb.Status.RemediationBatch != nil {
+		d = fast
 	}
+	if until := nearestWaiverExpiry(cb, now); until > 0 && until < d {
+		// Floor at 1s so clock skew / near-zero expiry cannot hot-loop.
+		if until < time.Second {
+			return time.Second
+		}
+		return until
+	}
+	return d
+}
+
+// nearestWaiverExpiry is the duration until the soonest still-active waiver
+// expires, or 0 when none. Expired and open-ended entries are ignored.
+func nearestWaiverExpiry(cb *baselinev1alpha1.ClusterBaseline, now time.Time) time.Duration {
+	var soonest time.Duration
+	for i := range cb.Spec.Waivers {
+		exp := cb.Spec.Waivers[i].ExpiresAt
+		if exp == nil || !exp.After(now) {
+			continue
+		}
+		d := exp.Sub(now)
+		if soonest == 0 || d < soonest {
+			soonest = d
+		}
+	}
+	return soonest
 }
 
 func createIfMissing(ctx context.Context, c client.Client, obj client.Object) error {
@@ -60,76 +73,10 @@ func createIfMissing(ctx context.Context, c client.Client, obj client.Object) er
 	return nil
 }
 
-func u(gvk schema.GroupVersionKind) *unstructured.Unstructured {
-	o := &unstructured.Unstructured{}
-	o.SetGroupVersionKind(gvk)
-	return o
-}
-
-func uList(gvk schema.GroupVersionKind) *unstructured.UnstructuredList {
-	l := &unstructured.UnstructuredList{}
-	l.SetGroupVersionKind(gvk.GroupVersion().WithKind(gvk.Kind + "List"))
-	return l
-}
-
-// stringMapValue reads key from a JSON-decoded map (map[string]any) or a
-// typed map[string]string without allocating a full copy.
-func stringMapValue(m any, key string) string {
-	switch labels := m.(type) {
-	case map[string]any:
-		s, _ := labels[key].(string)
-		return s
-	case map[string]string:
-		return labels[key]
-	default:
-		return ""
-	}
-}
-
-// unstructuredMeta returns the metadata map without NestedMap path walks.
-// Nil obj or missing/wrong-type metadata yields nil (callers treat as empty).
-func unstructuredMeta(obj map[string]any) map[string]any {
-	if obj == nil {
-		return nil
-	}
-	meta, _ := obj["metadata"].(map[string]any)
-	return meta
-}
-
-// unstructuredLabel reads one metadata label. Prefer this over GetLabels() on
-// multi-thousand CCR hot paths: GetLabels copies the entire label map.
-func unstructuredLabel(obj map[string]any, key string) string {
-	meta := unstructuredMeta(obj)
-	if meta == nil {
-		return ""
-	}
-	return stringMapValue(meta["labels"], key)
-}
-
-// unstructuredAnnotation reads one metadata annotation without GetAnnotations()
-// full-map copy (same cost concern as GetLabels).
-func unstructuredAnnotation(obj map[string]any, key string) string {
-	meta := unstructuredMeta(obj)
-	if meta == nil {
-		return ""
-	}
-	return stringMapValue(meta["annotations"], key)
-}
-
-// unstructuredName returns metadata.name without NestedString path walks.
-func unstructuredName(obj map[string]any) string {
-	meta := unstructuredMeta(obj)
-	if meta == nil {
-		return ""
-	}
-	s, _ := meta["name"].(string)
-	return s
-}
-
-// relatedObjects lists the resources this baseline owns or drives, for
-// must-gather / support tooling.
-func relatedObjects(cb *baselinev1alpha1.ClusterBaseline) []baselinev1alpha1.ObjectRef {
-	suites := ownedSuites(cb)
+// relatedObjectsFromSuites lists the resources this baseline owns or drives
+// (must-gather / support tooling) from an already-built owned suite map so
+// reconcile does not allocate ownedSuites twice.
+func relatedObjectsFromSuites(suites map[string]bool) []baselinev1alpha1.ObjectRef {
 	// Cap at fixed refs + suite count so the slice does not thrash under multi-profile.
 	refs := make([]baselinev1alpha1.ObjectRef, 0, 4+len(suites))
 	refs = append(refs,

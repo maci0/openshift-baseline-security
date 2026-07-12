@@ -2,9 +2,11 @@ import {
   checkProfileLabel,
   filterOwnedByBaseline,
   isOwnedByBaseline,
+  nodePoolFromScanName,
   ownedSuiteLabels,
   ownedSuiteSelector,
   suiteFilterKey,
+  suiteFilterKeyTitle,
   suiteProfileKey,
   suiteTailoredName,
 } from './models';
@@ -123,6 +125,14 @@ describe('tailored suite ownership', () => {
     expect(ownedSuiteLabels([''], [''])).toEqual([]);
   });
 
+  it('nodePoolFromScanName uses the last -node- segment', () => {
+    expect(nodePoolFromScanName('ocp4-cis-node-worker')).toBe('worker');
+    expect(nodePoolFromScanName('custom-node-profile-node-master')).toBe('master');
+    expect(nodePoolFromScanName('ocp4-cis')).toBeNull();
+    expect(nodePoolFromScanName('ocp4-cis-node-')).toBeNull();
+    expect(nodePoolFromScanName('')).toBeNull();
+  });
+
   it('ownedSuiteSelector wraps labels for CO list watches (or undefined when empty)', () => {
     expect(ownedSuiteSelector(['cis'], ['custom'])).toEqual({
       matchExpressions: [
@@ -202,6 +212,13 @@ describe('tailored suite ownership', () => {
     expect(checkProfileLabel(lbl('baseline-tp-cis-custom'))).toBe('cis-custom');
     expect(checkProfileLabel(lbl('other'))).toBe('—');
     expect(checkProfileLabel(undefined)).toBe('—');
+  });
+  it('suiteFilterKeyTitle matches checkProfileLabel for known filter keys', () => {
+    expect(suiteFilterKeyTitle('cis')).toBe('CIS');
+    expect(suiteFilterKeyTitle('tp-cis-custom')).toBe('cis-custom');
+    expect(suiteFilterKeyTitle(suiteFilterKey(lbl('baseline-stig'))!)).toBe(
+      checkProfileLabel(lbl('baseline-stig')),
+    );
   });
   it('isOwnedByBaseline recognizes bound tailored profiles', () => {
     expect(isOwnedByBaseline(lbl('baseline-tp-custom'), ['cis'], ['custom'])).toBe(true);

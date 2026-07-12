@@ -15,6 +15,14 @@ import (
 	baselinev1alpha1 "github.com/maci0/baseline-security-operator/api/v1alpha1"
 )
 
+// Owned ScanSetting product defaults (ADR-023). Not CR fields: zero-config
+// scans match Compliance Operator teaching defaults. verify-product-lockstep
+// does not need these (console does not set ScanSetting leaves).
+const (
+	scanResultStorageSize     = "1Gi"
+	scanResultStorageRotation = int64(3)
+)
+
 func (r *ClusterBaselineReconciler) ensureScanConfig(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline) error {
 	// Validate schedule first, but still reconcile ScanSetting fields other than
 	// schedule and all bindings so a bad cron does not freeze profile/tp or
@@ -40,6 +48,7 @@ func (r *ClusterBaselineReconciler) ensureScanConfig(ctx context.Context, cb *ba
 		} else if !found || existing == "" {
 			ss.Object["schedule"] = defaultScanSchedule
 		}
+		// Both control-plane and worker pools (ADR-023); SNO still has both roles.
 		ss.Object["roles"] = []any{"worker", "master"}
 		// Set only the storage leaves we own; preserve server-defaulted siblings
 		// (e.g. pvAccessModes) so this does not diff on every reconcile.
@@ -52,8 +61,8 @@ func (r *ClusterBaselineReconciler) ensureScanConfig(ctx context.Context, cb *ba
 		if storage == nil {
 			storage = map[string]any{}
 		}
-		storage["size"] = "1Gi"
-		storage["rotation"] = int64(3)
+		storage["size"] = scanResultStorageSize
+		storage["rotation"] = scanResultStorageRotation
 		ss.Object["rawResultStorage"] = storage
 		ss.Object["autoApplyRemediations"] = autoApply
 		ss.Object["autoUpdateRemediations"] = autoApply
@@ -68,43 +77,20 @@ func (r *ClusterBaselineReconciler) ensureScanConfig(ctx context.Context, cb *ba
 	}
 
 	for _, key := range cb.Spec.Profiles {
-		binding := u(bindingGVK)
-		binding.SetName(bindingName(key))
-		binding.SetNamespace(complianceNamespace)
-		_, err := controllerutil.CreateOrUpdate(ctx, r.Client, binding, func() error {
-			names := key.ProfileNames()
-			profiles := make([]any, 0, len(names))
-			for _, p := range names {
-				profiles = append(profiles, map[string]any{
-					"apiGroup": "compliance.openshift.io/v1alpha1", "kind": "Profile", "name": p,
-				})
-			}
-			binding.Object["profiles"] = profiles
-			binding.Object["settingsRef"] = map[string]any{
-				"apiGroup": "compliance.openshift.io/v1alpha1", "kind": "ScanSetting", "name": scanSettingName,
-			}
-			return controllerutil.SetControllerReference(cb, binding, r.Scheme)
-		})
-		if err != nil {
-			return fmt.Errorf("ensuring ScanSettingBinding %s/%s: %w", complianceNamespace, binding.GetName(), err)
+		names := key.ProfileNames()
+		profiles := make([]any, 0, len(names))
+		for _, p := range names {
+			profiles = append(profiles, complianceRef("Profile", p))
+		}
+		if err := r.ensureScanBinding(ctx, cb, bindingName(key), profiles); err != nil {
+			return err
 		}
 	}
 
 	for _, name := range cb.Spec.TailoredProfiles {
-		binding := u(bindingGVK)
-		binding.SetName(tailoredBindingName(name))
-		binding.SetNamespace(complianceNamespace)
-		_, err := controllerutil.CreateOrUpdate(ctx, r.Client, binding, func() error {
-			binding.Object["profiles"] = []any{map[string]any{
-				"apiGroup": "compliance.openshift.io/v1alpha1", "kind": "TailoredProfile", "name": name,
-			}}
-			binding.Object["settingsRef"] = map[string]any{
-				"apiGroup": "compliance.openshift.io/v1alpha1", "kind": "ScanSetting", "name": scanSettingName,
-			}
-			return controllerutil.SetControllerReference(cb, binding, r.Scheme)
-		})
-		if err != nil {
-			return fmt.Errorf("ensuring ScanSettingBinding %s/%s: %w", complianceNamespace, binding.GetName(), err)
+		profiles := []any{complianceRef("TailoredProfile", name)}
+		if err := r.ensureScanBinding(ctx, cb, tailoredBindingName(name), profiles); err != nil {
+			return err
 		}
 	}
 
@@ -128,13 +114,16 @@ func (r *ClusterBaselineReconciler) ensureScanConfig(ctx context.Context, cb *ba
 	}
 	if invalidScheduleMessage != "" {
 		msg := fmt.Sprintf("spec.schedule %q is not a valid standard cron schedule: %s", cb.Spec.Schedule, invalidScheduleMessage)
+		// Info once on transition: InvalidSchedule rolls up to Degraded but leaves
+		// last-good cron on the ScanSetting. Without this log, on-call only sees a
+		// generic Degraded reason until the 15m alert (and may miss the bad cron
+		// text if the condition message was truncated). Do not re-log every requeue.
+		prev := meta.FindStatusCondition(cb.Status.Conditions, "ScanConfigured")
 		setCond(cb, "ScanConfigured", metav1.ConditionFalse, "InvalidSchedule", msg)
-		// Info: InvalidSchedule rolls up to Degraded but leaves last-good cron
-		// on the ScanSetting; without this log, on-call only sees a generic
-		// Degraded reason until the 15m alert (and may miss the bad cron text
-		// if the condition message was truncated).
-		log.FromContext(ctx).Info("invalid scan schedule; keeping last-good cron on ScanSetting",
-			"name", cb.Name, "schedule", cb.Spec.Schedule, "error", invalidScheduleMessage)
+		if prev == nil || prev.Status != metav1.ConditionFalse || prev.Reason != "InvalidSchedule" {
+			log.FromContext(ctx).Info("invalid scan schedule; keeping last-good cron on ScanSetting",
+				"name", cb.Name, "schedule", cb.Spec.Schedule, "error", invalidScheduleMessage)
+		}
 		return nil
 	}
 	// No profiles and no tailored profiles: scanning is intentionally disabled.
@@ -145,5 +134,30 @@ func (r *ClusterBaselineReconciler) ensureScanConfig(ctx context.Context, cb *ba
 		return nil
 	}
 	setCond(cb, "ScanConfigured", metav1.ConditionTrue, "BindingsCreated", "")
+	return nil
+}
+
+// complianceRef builds a compliance.openshift.io object reference as used in
+// ScanSettingBinding profiles/settingsRef entries.
+func complianceRef(kind, name string) map[string]any {
+	return map[string]any{
+		"apiGroup": "compliance.openshift.io/v1alpha1", "kind": kind, "name": name,
+	}
+}
+
+// ensureScanBinding creates or updates a single ScanSettingBinding pointing the
+// given profile refs at the shared ScanSetting, owned by cb.
+func (r *ClusterBaselineReconciler) ensureScanBinding(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline, name string, profileRefs []any) error {
+	binding := u(bindingGVK)
+	binding.SetName(name)
+	binding.SetNamespace(complianceNamespace)
+	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, binding, func() error {
+		binding.Object["profiles"] = profileRefs
+		binding.Object["settingsRef"] = complianceRef("ScanSetting", scanSettingName)
+		return controllerutil.SetControllerReference(cb, binding, r.Scheme)
+	})
+	if err != nil {
+		return fmt.Errorf("ensuring ScanSettingBinding %s/%s: %w", complianceNamespace, name, err)
+	}
 	return nil
 }

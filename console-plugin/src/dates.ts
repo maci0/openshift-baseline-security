@@ -11,26 +11,53 @@ export const localDateInputValue = (d: Date = new Date()): string => {
   return `${y}-${m}-${day}`;
 };
 
+// Module-level: form/display paths call date parse/format repeatedly; avoid
+// re-binding pattern objects on every keystroke or waiver-expiry tick.
+const localDateOnlyRe = /^(\d{4})-(\d{2})-(\d{2})$/;
+const localDateOnlyTestRe = /^\d{4}-\d{2}-\d{2}$/;
+
+// Parse YYYY-MM-DD as a local calendar day. Rejects invalid calendar dates
+// (e.g. 2026-02-31). Shared by end-of-day deadlines and display formatting so
+// timezone edge cases live in one place. `new Date('YYYY-MM-DD')` is UTC midnight
+// and must not be used for calendar dates.
+const parseLocalDateOnly = (value: string): Date | null => {
+  const match = localDateOnlyRe.exec(value);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const d = new Date(0);
+  d.setFullYear(year, month - 1, day);
+  d.setHours(0, 0, 0, 0);
+  if (d.getFullYear() !== year || d.getMonth() !== month - 1 || d.getDate() !== day) {
+    return null;
+  }
+  return d;
+};
+
 // A date-only deadline remains active through the selected local calendar day.
 // Parsing YYYY-MM-DD directly as a Date means UTC midnight, which can expire it
 // before that day starts locally and display as the previous day in some zones.
 export const dateInputEndOfDayIso = (value: string): string | undefined => {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
-  if (!match) return undefined;
-  const year = Number(match[1]);
-  const month = Number(match[2]);
-  const day = Number(match[3]);
-  const deadline = new Date(0);
-  deadline.setFullYear(year, month - 1, day);
-  deadline.setHours(23, 59, 59, 999);
-  if (
-    deadline.getFullYear() !== year ||
-    deadline.getMonth() !== month - 1 ||
-    deadline.getDate() !== day
-  ) {
-    return undefined;
+  const d = parseLocalDateOnly(value);
+  if (!d) return undefined;
+  d.setHours(23, 59, 59, 999);
+  return d.toISOString();
+};
+
+// Epoch ms for a waiver expiresAt string. A date-only YYYY-MM-DD is treated as
+// end of that local calendar day (matching dateInputEndOfDayIso, the value the
+// picker writes), so a hand-edited date-only expiry agrees with how it displays
+// via formatLocalDate instead of expiring at UTC midnight (up to ~24h early for
+// UTC+ users). Returns NaN when unparseable, so callers' Number.isNaN guards hold.
+export const expiresAtMs = (iso: string): number => {
+  if (localDateOnlyTestRe.test(iso)) {
+    const d = parseLocalDateOnly(iso);
+    if (!d) return NaN;
+    d.setHours(23, 59, 59, 999);
+    return d.getTime();
   }
-  return deadline.toISOString();
+  return new Date(iso).getTime();
 };
 
 // Intl APIs expect BCP 47 tags (en-US). Some stacks pass underscore form (en_US);
@@ -54,34 +81,11 @@ const parsedLocalDate = (iso: string): Date | null => {
   return Number.isNaN(d.getTime()) ? null : d;
 };
 
-// Date-only YYYY-MM-DD as a local calendar day. `new Date('YYYY-MM-DD')` is UTC
-// midnight, which formats as the previous day in western zones (and is wrong for
-// a calendar date that was never a UTC instant). Invalid calendar days (e.g.
-// 2026-02-31) return null so callers keep the raw string.
-const parsedDateOnlyLocal = (iso: string): Date | null => {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
-  if (!match) return null;
-  const year = Number(match[1]);
-  const month = Number(match[2]);
-  const day = Number(match[3]);
-  const d = new Date(0);
-  d.setFullYear(year, month - 1, day);
-  d.setHours(0, 0, 0, 0);
-  if (
-    d.getFullYear() !== year ||
-    d.getMonth() !== month - 1 ||
-    d.getDate() !== day
-  ) {
-    return null;
-  }
-  return d;
-};
-
 export const formatLocalDate = (iso: string, locale?: string): string => {
   // Date-only: local calendar day only (never fall through to Date('YYYY-MM-DD'),
   // which is UTC midnight and overflows invalid days like 2026-02-31).
-  if (/^\d{4}-\d{2}-\d{2}$/.test(iso)) {
-    const local = parsedDateOnlyLocal(iso);
+  if (localDateOnlyTestRe.test(iso)) {
+    const local = parseLocalDateOnly(iso);
     return local ? local.toLocaleDateString(safeLocale(locale)) : iso;
   }
   const d = parsedLocalDate(iso);
@@ -95,5 +99,15 @@ export const formatLocalDateTime = (iso: string, locale?: string): string => {
 
 // Locale-aware integer/count display (grouping separators, native digits).
 // safeLocale already rejects invalid tags so toLocaleString does not throw.
+// Non-finite values (NaN / ±Infinity from corrupt CR scores) return empty so
+// the UI never paints the English literals "NaN" or "Infinity".
 export const formatCount = (n: number, locale?: string): string =>
-  n.toLocaleString(safeLocale(locale));
+  Number.isFinite(n) ? n.toLocaleString(safeLocale(locale)) : '';
+
+// Chart / axis date label from a Date or epoch ms. Invalid instants return
+// empty (Victory would otherwise paint the English "Invalid Date" string).
+// Locale is validated the same way as formatLocalDate.
+export const formatChartDate = (value: Date | number, locale?: string): string => {
+  const d = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString(safeLocale(locale));
+};

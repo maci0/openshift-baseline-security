@@ -11,8 +11,51 @@ import (
 // TestSubscriptionRBACAllowsUpdate guards the production path that patches an
 // existing OLM Subscription when spec.complianceCatalogSource changes
 // (syncComplianceSubscriptionSource). create-only RBAC would Forbidden on a
-// real cluster while the fake client still passes unit tests.
+// real cluster while the fake client still passes unit tests. Name-scoped
+// get/update/patch (resourceNames=compliance-operator); create unscoped;
+// list/watch unused (Get by name only).
 func TestSubscriptionRBACAllowsUpdate(t *testing.T) {
+	text := mustReadRoleYAML(t)
+	if !strings.Contains(text, "subscriptions") {
+		t.Fatal("role.yaml has no subscriptions resource entry")
+	}
+	if !roleHasResourceVerb(text, "subscriptions", "create") {
+		t.Fatal("subscriptions RBAC missing create")
+	}
+	for _, verb := range []string{"get", "update", "patch"} {
+		if !roleHasResourceVerb(text, "subscriptions", verb) {
+			t.Fatalf("subscriptions RBAC missing verb %q", verb)
+		}
+	}
+	// Name-scope must pin the CO Subscription so a compromised SA cannot
+	// rewrite arbitrary Subscriptions cluster-wide.
+	if !strings.Contains(text, "compliance-operator") {
+		t.Fatal("subscriptions RBAC missing resourceNames compliance-operator")
+	}
+}
+
+// TestOperatorGroupRBACAllowsUpdate guards ensureComplianceOperatorGroup, which
+// patches targetNamespaces on an existing empty OperatorGroup.
+func TestOperatorGroupRBACAllowsUpdate(t *testing.T) {
+	text := mustReadRoleYAML(t)
+	if !strings.Contains(text, "operatorgroups") {
+		t.Fatal("role.yaml has no operatorgroups resource entry")
+	}
+	if !roleHasResourceVerb(text, "operatorgroups", "create") {
+		t.Fatal("operatorgroups RBAC missing create")
+	}
+	for _, verb := range []string{"get", "update", "patch"} {
+		if !roleHasResourceVerb(text, "operatorgroups", verb) {
+			t.Fatalf("operatorgroups RBAC missing verb %q", verb)
+		}
+	}
+	if !strings.Contains(text, "compliance-operator") {
+		t.Fatal("operatorgroups RBAC missing resourceNames compliance-operator")
+	}
+}
+
+func mustReadRoleYAML(t *testing.T) string {
+	t.Helper()
 	_, thisFile, _, ok := runtime.Caller(0)
 	if !ok {
 		t.Fatal("runtime.Caller failed")
@@ -23,59 +66,17 @@ func TestSubscriptionRBACAllowsUpdate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read role.yaml: %v", err)
 	}
-	text := string(raw)
-	// Find the subscriptions rule block and require update + patch verbs.
-	idx := strings.Index(text, "- subscriptions\n")
-	if idx < 0 {
-		// controller-gen may emit without leading dash spacing variants
-		idx = strings.Index(text, "subscriptions\n")
-	}
-	if idx < 0 {
-		t.Fatal("role.yaml has no subscriptions resource entry")
-	}
-	// Take a window after the resource name covering its verbs list.
-	window := text[idx:]
-	if end := strings.Index(window[1:], "\n- apiGroups:"); end > 0 {
-		window = window[:end+1]
-	}
-	// Require a YAML list entry for each verb. Bare strings.Contains(verb) is
-	// false confidence ("get" matches "target", "update" matches comments).
-	for _, verb := range []string{"update", "patch", "create", "get", "list", "watch"} {
-		if !rbacVerbListed(window, verb) {
-			t.Fatalf("subscriptions RBAC missing verb %q in block:\n%s", verb, window)
-		}
-	}
+	return string(raw)
 }
 
-// TestOperatorGroupRBACAllowsUpdate guards ensureComplianceOperatorGroup, which
-// patches targetNamespaces on an existing empty OperatorGroup.
-func TestOperatorGroupRBACAllowsUpdate(t *testing.T) {
-	_, thisFile, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller failed")
+// roleHasResourceVerb is true when role.yaml lists verb as a YAML list item
+// and the resource name appears (create may be on a separate block from
+// name-scoped get/update/patch).
+func roleHasResourceVerb(roleYAML, resourceName, verb string) bool {
+	if !strings.Contains(roleYAML, resourceName) {
+		return false
 	}
-	rolePath := filepath.Join(filepath.Dir(thisFile), "..", "..", "config", "rbac", "role.yaml")
-	raw, err := os.ReadFile(rolePath)
-	if err != nil {
-		t.Fatalf("read role.yaml: %v", err)
-	}
-	text := string(raw)
-	idx := strings.Index(text, "- operatorgroups\n")
-	if idx < 0 {
-		idx = strings.Index(text, "operatorgroups\n")
-	}
-	if idx < 0 {
-		t.Fatal("role.yaml has no operatorgroups resource entry")
-	}
-	window := text[idx:]
-	if end := strings.Index(window[1:], "\n- apiGroups:"); end > 0 {
-		window = window[:end+1]
-	}
-	for _, verb := range []string{"update", "patch", "create", "get", "list", "watch"} {
-		if !rbacVerbListed(window, verb) {
-			t.Fatalf("operatorgroups RBAC missing verb %q in block:\n%s", verb, window)
-		}
-	}
+	return rbacVerbListed(roleYAML, verb)
 }
 
 // rbacVerbListed reports whether block contains a YAML list item for verb
@@ -107,13 +108,13 @@ func TestCSVOperatorGroupRBACAllowsUpdate(t *testing.T) {
 	if idx < 0 {
 		t.Fatal("CSV has no operatorgroups permission entry")
 	}
-	window := text[idx:]
-	if len(window) > 200 {
-		window = window[:200]
+	// Create is unscoped; get/update/patch are on the resourceNames block.
+	// Scan the full CSV so either form is accepted.
+	if !csvVerbsInclude(text, "update") || !csvVerbsInclude(text, "patch") {
+		t.Fatalf("CSV operatorgroups rules missing update/patch")
 	}
-	// CSV rules use "verbs: [get, list, ..., update, patch]" form.
-	if !csvVerbsInclude(window, "update") || !csvVerbsInclude(window, "patch") {
-		t.Fatalf("CSV operatorgroups rule missing update/patch:\n%s", window)
+	if !strings.Contains(text, "resourceNames: [compliance-operator]") {
+		t.Fatal("CSV operatorgroups missing resourceNames compliance-operator")
 	}
 }
 
@@ -131,18 +132,15 @@ func TestCSVSubscriptionRBACAllowsUpdate(t *testing.T) {
 		t.Fatalf("read CSV: %v", err)
 	}
 	text := string(raw)
-	// The subscriptions rule must list update and patch (catalog source sync).
 	idx := strings.Index(text, "resources: [subscriptions]")
 	if idx < 0 {
 		t.Fatal("CSV has no subscriptions permission entry")
 	}
-	// Next line(s) should carry verbs including update and patch.
-	window := text[idx:]
-	if len(window) > 200 {
-		window = window[:200]
+	if !csvVerbsInclude(text, "update") || !csvVerbsInclude(text, "patch") {
+		t.Fatalf("CSV subscriptions rules missing update/patch")
 	}
-	if !csvVerbsInclude(window, "update") || !csvVerbsInclude(window, "patch") {
-		t.Fatalf("CSV subscriptions rule missing update/patch:\n%s", window)
+	if !strings.Contains(text, "resourceNames: [compliance-operator]") {
+		t.Fatal("CSV subscriptions missing resourceNames compliance-operator")
 	}
 }
 

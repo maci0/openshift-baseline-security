@@ -52,7 +52,7 @@ than a copied date.
 |---|---|---|---|
 | 0 Fast local correctness | CI `ci.yml`, every PR/push | see latest Actions run on `main` | gating |
 | 1 Generated/build artifacts | CI `ci.yml` (`make bundle`, `yarn build`) | see latest Actions run | gating |
-| 2 Hardening (`-race`, fuzz) | manual / nightly (not yet automated) | 2026-07-11 (see live log: race + fuzz) | pass |
+| 2 Hardening (`-race`, fuzz) | CI `ci.yml` job `fuzz` on schedule + workflow_dispatch; seeds also run under `make test` | see latest scheduled Actions run | gating (nightly) |
 | 3 API admission (envtest) | manual (not yet automated) | envtest harness not yet run; live informer/batch rows below reuse this label | — |
 | 4 Live OpenShift (Go e2e + Playwright) | manual, logged below | 2026-07-11 | pass |
 | 5 Release / supply chain | manual (pre-release) | not yet run | — |
@@ -283,8 +283,8 @@ per-node annotation) when nodes disagree.
       exist, results go empty; Available stays true if CO ready; no panic.
 - [ ] **Max-length tailored name (51 chars)**: admission accepts; suite label
       `baseline-tp-…` stays a valid label value (63-char budget).
-- [ ] **Metrics label `tp:<name>`**: publishMetrics emits tailored series
-      (`TestPublishMetrics` partial; assert `tp:` prefix explicitly).
+- [x] **Metrics label `tp:<name>`**: publishMetrics emits tailored series
+      (`TestPublishMetrics` asserts `tp:custom` pass/fail labels).
 
 ## D. Operator install lifecycle
 
@@ -461,8 +461,12 @@ an accepted risk neither inflates nor tanks the score.
       against synthetic metric values (`make test-alerts`, promtool, no cluster):
       score 79 fires, 80 does not, `-1` sentinel never fires, HA dup pods dedup
       to value 5, fail=0 no alert (`config/prometheus/testdata/alerts_test.yaml`).
-- [ ] **Profile removed from spec**: old `{profile,status}` series do not linger
-      after `publishMetrics` Reset (unit assert CollectAndCount / label set).
+- [x] **Profile removed from spec**: old `{profile,status}` series are deleted
+      via set-then-delete (not GaugeVec.Reset) so scrapers never see an empty
+      gap (`TestPublishMetricsDropsRemovedProfile` CollectAndCount).
+- [x] **Remediation batch started-at gauge**: tracks
+      `status.remediationBatch.startedAt`, clears when the batch ends
+      (`TestPublishMetricsBatchStartedTimestamp`).
 - [ ] **ServiceMonitor scrape**: with UWM + scraper SA token, metrics endpoint
       returns 200 and includes custom gauges (live or kind).
 
@@ -872,8 +876,9 @@ page.
 - [ ] **Fail count goes 5→0**: ComplianceChecksFailing clears after `for: 1h`
       window; no sticky alert from a demoted leader process (process exit on
       leader loss is the safety net; assert in runbook).
-- [ ] **Profile removed while fails remain on disk**: gauges Reset; alert series
-      for that profile disappear after scrape interval.
+- [x] **Profile removed while fails remain on disk**: check series for that
+      profile are deleted on the next publish (set-then-delete, unit
+      `TestPublishMetricsDropsRemovedProfile`); live scrape lag is one interval.
 - [ ] **Cardinality bomb**: enabling all 8 profiles + N tailored does not create
       unbounded metric label sets (fixed status enum × profile set only).
 - [ ] **Scrape interval vs reconcile**: 30s scrape + 60s requeue still shows

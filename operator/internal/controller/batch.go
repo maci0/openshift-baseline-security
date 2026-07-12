@@ -60,25 +60,35 @@ func batchPastGrace(started metav1.Time, now time.Time) bool {
 // no pool, so its apply would reboot the node uncoalesced.
 // Role labels and scan-name suffixes are untrusted cluster data; non-DNS1123
 // values are dropped so they never enter batch pool lists or MCP Get calls.
+//
+// Untrusted / partial objects: avoid unstructured.NestedMap, which DeepCopyJSON-
+// panics on non-JSON types (e.g. int) that can appear in hand-built or partially
+// converted maps. NestedFieldNoCopy + type assert matches completedSuiteTimes.
 func poolFromRemediation(rem *unstructured.Unstructured) string {
-	obj, _, err := unstructured.NestedMap(rem.Object, "spec", "current", "object")
+	raw, found, err := unstructured.NestedFieldNoCopy(rem.Object, "spec", "current", "object")
 	// Wrong-type object: ignore it and fall through to the scan-name label.
-	if err == nil && obj != nil {
-		kind, _, _ := unstructured.NestedString(obj, "kind")
-		// Only reject known non-node kinds. Missing/empty kind still allows the
-		// scan-name fallback so a partially rendered MachineConfig does not
-		// skip MCP pause during batch apply.
-		if kind != "" && kind != "MachineConfig" {
-			return ""
-		}
-		if kind == "MachineConfig" {
-			if role, _, _ := unstructured.NestedString(obj, "metadata", "labels", "machineconfiguration.openshift.io/role"); role != "" {
-				return validMCPPoolName(role)
+	if err == nil && found {
+		if obj, ok := raw.(map[string]any); ok {
+			kind, _, _ := unstructured.NestedString(obj, "kind")
+			// Only reject known non-node kinds. Missing/empty kind still allows the
+			// scan-name fallback so a partially rendered MachineConfig does not
+			// skip MCP pause during batch apply.
+			if kind != "" && kind != "MachineConfig" {
+				return ""
+			}
+			if kind == "MachineConfig" {
+				// Direct label read: NestedString path-walk is unnecessary for one key
+				// (batch path can hit 256 remediations).
+				if meta, _ := obj["metadata"].(map[string]any); meta != nil {
+					if role := stringMapValue(meta["labels"], "machineconfiguration.openshift.io/role"); role != "" {
+						return validMCPPoolName(role)
+					}
+				}
 			}
 		}
 	}
 	// Single-key read: GetLabels copies the whole map (batch path can hit 256 remediations).
-	scan := unstructuredLabel(rem.Object, "compliance.openshift.io/scan-name")
+	scan := unstructuredLabel(rem.Object, scanNameLabel)
 	if i := strings.LastIndex(scan, "-node-"); i >= 0 {
 		return validMCPPoolName(scan[i+len("-node-"):])
 	}

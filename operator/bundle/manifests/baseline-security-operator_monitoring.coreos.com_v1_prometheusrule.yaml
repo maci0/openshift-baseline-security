@@ -12,9 +12,11 @@ spec:
       rules:
         - alert: ComplianceScoreLow
           # -1 is the "no score yet" sentinel; only alert on a real low score.
-          # Only the leader updates gauges. Select the replica with the newest
-          # observation timestamp so an old leader's stale value cannot mask a
-          # lower score after failover.
+          # Threshold 80 is intentionally higher than console score color bands
+          # (danger <60, success >=90) so paging is less noisy than the UI
+          # (ADR-017). Only the leader updates gauges. Select the replica with
+          # the newest observation timestamp so an old leader's stale value
+          # cannot mask a lower score after failover.
           expr: >-
             max(baseline_security_compliance_score
               and on(instance) topk(1, baseline_security_status_observed_timestamp_seconds)) >= 0
@@ -65,6 +67,25 @@ spec:
               Compliance Operator pod logs; ERROR often means a scan/runtime
               problem rather than a policy violation.
               CLI: oc logs -n openshift-compliance deploy/compliance-operator --tail=200
+        - alert: ComplianceChecksInconsistent
+          # Genuine multi-node PASS-vs-FAIL split after benign NOT-APPLICABLE
+          # collapse. Distinct from FAIL (policy) and ERROR (scan runtime).
+          # 1h for: absorbs rolling-update / MCP reboot windows.
+          expr: >-
+            sum(baseline_security_checks{status="inconsistent"}
+              and on(instance) topk(1, baseline_security_status_observed_timestamp_seconds)) > 0
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: Compliance checks are INCONSISTENT across nodes
+            description: >-
+              {{ $value }} compliance check(s) report genuine multi-node drift
+              (PASS on some nodes, FAIL on others after benign NOT-APPLICABLE
+              collapse). Open Administration -> Compliance -> Results (status
+              Inconsistent) and inspect per-node sources on the check detail.
+              CLI: oc get compliancecheckresults -n openshift-compliance
+              -l compliance.openshift.io/check-status=INCONSISTENT
         - alert: ComplianceStatusStale
           # Operator stopped publishing (crash loop, stuck reconcile, scrape
           # only from a demoted replica that never aggregated). Timestamp 0 is
@@ -128,7 +149,8 @@ spec:
               operator/hack/must-gather.sh
         - alert: ComplianceScanStale
           # Default schedule is daily (0 1 * * *). 36h allows one missed run plus
-          # slack for long scans; 0 means never scanned (install grace, skip).
+          # slack for long scans. Gauge 0 means never scanned or scanning disabled
+          # (empty profiles/tailored); the > 0 guard skips those cases.
           # Operator publish freshness (ComplianceStatusStale) can stay green while
           # the Compliance Operator stops producing completed scans.
           # Select the newest publisher's last_scan (same HA pattern as score/checks).

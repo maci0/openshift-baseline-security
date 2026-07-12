@@ -16,6 +16,13 @@ Makefile
 # Keep secrets and VCS metadata out of the image build context.
 .env
 .env.*
+*.pem
+*.key
+*.p12
+*.pfx
+*kubeconfig*
+id_rsa*
+id_ed25519*
 .git
 .gitignore
 # Local IDE / Python bytecode must not enter the context.

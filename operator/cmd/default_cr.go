@@ -30,8 +30,10 @@ func (d *defaultClusterBaseline) Start(ctx context.Context) error {
 	if !d.Cache.WaitForCacheSync(ctx) {
 		// Shutdown is normal (ctx cancelled). A live context with failed sync is
 		// unexpected and would leave the cluster without the zero-config CR.
-		if err := ctx.Err(); err != nil {
+		select {
+		case <-ctx.Done():
 			return nil
+		default:
 		}
 		d.Log.Error(errCacheNotSynced, "cache did not sync; skipping default ClusterBaseline creation")
 		return nil
@@ -40,12 +42,21 @@ func (d *defaultClusterBaseline) Start(ctx context.Context) error {
 	// leave the cluster without the zero-config CR until restart. Permanent
 	// auth failures stop immediately: retrying Forbidden forever only spams
 	// logs and cannot succeed until RBAC is fixed and the pod restarts.
+	// Rate-limit Error logs (first failure, then every ~1m) so a sticky API
+	// outage does not fill the log stream every 10s with the same stack.
+	var attempt int
 	for {
 		if err := d.ensureOnce(ctx); err == nil {
 			return nil
 		} else if isPermanentDefaultCRError(err) {
 			d.Log.Error(err, "permanent error creating default ClusterBaseline; not retrying")
 			return nil
+		} else {
+			attempt++
+			if attempt == 1 || attempt%6 == 0 {
+				d.Log.Error(err, "default ClusterBaseline ensure failed; will retry",
+					"attempt", attempt)
+			}
 		}
 		timer := time.NewTimer(10 * time.Second)
 		select {
@@ -66,7 +77,7 @@ func isPermanentDefaultCRError(err error) bool {
 func (d *defaultClusterBaseline) ensureOnce(ctx context.Context) error {
 	list := &baselinev1alpha1.ClusterBaselineList{}
 	if err := d.Client.List(ctx, list); err != nil {
-		d.Log.Error(err, "listing ClusterBaselines for default creation")
+		// Caller (Start) rate-limits Error logs on retries; avoid double-logging.
 		return err
 	}
 	if len(list.Items) > 0 {
@@ -78,11 +89,10 @@ func (d *defaultClusterBaseline) ensureOnce(ctx context.Context) error {
 	}
 	err := d.Client.Create(ctx, cb)
 	if err != nil && !apierrors.IsAlreadyExists(err) {
-		d.Log.Error(err, "creating default ClusterBaseline")
 		return err
 	}
 	if err == nil {
-		d.Log.Info("created default ClusterBaseline", "name", "cluster", "profiles", []string{"cis"})
+		d.Log.Info("created default ClusterBaseline", "name", "cluster", "profiles", []string{string(baselinev1alpha1.ProfileCIS)})
 	}
 	return nil
 }

@@ -40,14 +40,26 @@ func (r *ClusterBaselineReconciler) aggregateStatus(ctx context.Context, cb *bas
 			return fmt.Errorf("building check-result suite selector: %w", err)
 		}
 		sel := labels.NewSelector().Add(*req)
+		// UnsafeDisableDeepCopy: the loop below is strictly read-only (reads
+		// status/labels/name/severity, appends only string names, never mutates
+		// item.Object nor retains an *item pointer past the iteration), so the
+		// cache can hand back shared pointers instead of deep-copying thousands
+		// of large CCRs (description/instructions/rationale) on every reconcile.
 		if err := r.List(ctx, list, client.InNamespace(complianceNamespace),
-			client.MatchingLabelsSelector{Selector: sel}); err != nil {
+			client.MatchingLabelsSelector{Selector: sel},
+			client.UnsafeDisableDeepCopy); err != nil {
 			if meta.IsNoMatchError(err) {
 				// CRDs gone: do not leave a stale score/profile rollup on the CR.
-				// Info (not Error): expected during CO uninstall; still log so
-				// a sudden score drop is explainable from operator logs.
-				log.FromContext(ctx).Info("compliance CRDs absent; cleared score/history rollup",
-					"name", cb.Name)
+				// Info once when we actually clear data (not every requeue while
+				// CRDs stay missing): expected during CO uninstall, but a sudden
+				// score drop must still be explainable from operator logs.
+				hadRollup := cb.Status.Score != nil || len(cb.Status.Profiles) > 0 ||
+					len(cb.Status.TailoredProfiles) > 0 || cb.Status.LastScanTime != nil ||
+					len(cb.Status.History) > 0
+				if hadRollup {
+					log.FromContext(ctx).Info("compliance CRDs absent; cleared score/history rollup",
+						"name", cb.Name)
+				}
 				cb.Status.Score = nil
 				cb.Status.Profiles = nil
 				cb.Status.TailoredProfiles = nil
@@ -60,7 +72,7 @@ func (r *ClusterBaselineReconciler) aggregateStatus(ctx context.Context, cb *bas
 				cb.Status.NewlyFailed = nil
 				cb.Status.Fixed = nil
 				// Keep relatedObjects in sync with desired ownership even when CO is absent.
-				cb.Status.RelatedObjects = relatedObjects(cb)
+				cb.Status.RelatedObjects = relatedObjectsFromSuites(suites)
 				return nil
 			}
 			return fmt.Errorf("listing ComplianceCheckResults in %s: %w", complianceNamespace, err)
@@ -86,7 +98,7 @@ func (r *ClusterBaselineReconciler) aggregateStatus(ctx context.Context, cb *bas
 	var pass, fail int32
 	var wPass, wFail int64 // severity-weighted totals (pooled)
 	// Severity weights are only consumed when scoring.mode is SeverityWeighted;
-	// skip NestedString severity lookups and map churn on the default Flat path.
+	// skip per-result severity lookups and map churn on the default Flat path.
 	weighted := cb.Spec.Scoring.Mode == baselinev1alpha1.ScoringSeverityWeighted
 	var weights *scoreWeights
 	if weighted {
@@ -95,7 +107,6 @@ func (r *ClusterBaselineReconciler) aggregateStatus(ctx context.Context, cb *bas
 			tailored: make(map[string]weightedSum, len(byTailored)),
 		}
 	}
-	var currentFails []string
 	// tally routes one check result's status into the counts and the score.
 	// INFO is counted (excluded from score) so Overview totals match Results.
 	// SKIP is folded into NotApplicable (CO: check skipped for this system).
@@ -162,7 +173,7 @@ func (r *ClusterBaselineReconciler) aggregateStatus(ctx context.Context, cb *bas
 	// every iteration when multi-profile scans yield thousands of results.
 	// Pre-size currentFails for typical fail rates so append does not thrash
 	// under multi-profile FAIL-heavy scans (thousands of CCRs).
-	currentFails = make([]string, 0, len(list.Items)/8+1)
+	currentFails := make([]string, 0, len(list.Items)/8+1)
 	for i := range list.Items {
 		item := &list.Items[i]
 		// Single label key reads: GetLabels() copies the whole map per call and
@@ -203,12 +214,19 @@ func (r *ClusterBaselineReconciler) aggregateStatus(ctx context.Context, cb *bas
 		// the pass/fail denominator into the Waived bucket. If a waived check later passes it
 		// counts as PASS again (self-healing), so a stale waiver never silently
 		// depresses the score; the admin can still remove it from the UI.
+		//
+		// Scan-diff (newlyFailed/fixed) still tracks the raw FAIL outcome: accepting
+		// risk must not appear as Fixed or drop a regression. Score and ResultCounts
+		// use the Waived bucket; previousFailures/diffBase use the FAIL name set.
 		name := unstructuredName(item.Object)
-		if status == "FAIL" && waived[name] {
+		rawFail := status == "FAIL"
+		if rawFail && name != "" && waived[name] {
 			status = "WAIVED"
 		}
 		tally(rc, status)
-		if status == "FAIL" {
+		// Empty names never match waivers and must not enter scan-diff lists
+		// (newlyFailed/fixed deep-links and alerts would be meaningless).
+		if rawFail && name != "" {
 			currentFails = append(currentFails, name)
 		}
 		if weighted {
@@ -247,7 +265,8 @@ func (r *ClusterBaselineReconciler) aggregateStatus(ctx context.Context, cb *bas
 	}
 	// Fill deterministic status fields before history so a scan-list failure
 	// still leaves a coherent rollup on the error-path status update.
-	cb.Status.RelatedObjects = relatedObjects(cb)
+	// Reuse suites from the CCR selector (avoids a second ownedSuites alloc).
+	cb.Status.RelatedObjects = relatedObjectsFromSuites(suites)
 	// No profiles and no tailored profiles: scanning is intentionally off.
 	// Clear live regression display and next-scan (nothing will fire without
 	// bindings). Keep History, LastScanTime, and PreviousFailures so re-enable
@@ -260,5 +279,6 @@ func (r *ClusterBaselineReconciler) aggregateStatus(ctx context.Context, cb *bas
 		return nil
 	}
 	cb.Status.NextScanTime = nextScanTime(cb.Spec.Schedule, time.Now())
-	return r.recordHistory(ctx, cb, cb.Status.Score, currentFails, weights)
+	// Reuse suites already built for the CCR selector (avoids a second ownedSuites).
+	return r.recordHistory(ctx, cb, cb.Status.Score, currentFails, weights, suites)
 }

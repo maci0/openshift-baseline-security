@@ -27,6 +27,7 @@ import {
   rescanPatch,
   resultsHref,
   scoreColor,
+  scoreLabelColor,
   severityWeight,
   checkSeverity,
   flatProfileScore,
@@ -38,22 +39,24 @@ import {
   isValidCron,
   schedulePatch,
   batchApplyPatch,
+  batchApplyRequested,
   buildReportHtml,
   tailoredProfileManifest,
   tailoredProfileBindingPatch,
-  isValidK8sName,
-  isValidTailoredProfileName,
   isAlreadyExists,
   changedChecks,
+  changedChecksMany,
   dateInputEndOfDayIso,
   localDateInputValue,
   formatLocalDate,
   formatLocalDateTime,
   formatCount,
+  formatChartDate,
   profileTitle,
   downloadBlob,
 } from './utils';
 import { ClusterBaseline, ComplianceCheckResult, ComplianceRemediation, ResultCounts } from './models';
+import { isValidK8sName, isValidTailoredProfileName } from './names';
 
 const result = (name: string, description?: string): ComplianceCheckResult =>
   ({ metadata: { name, namespace: 'ns' }, description }) as ComplianceCheckResult;
@@ -78,6 +81,24 @@ describe('checkTitle', () => {
     expect(checkTitle(result('fallback'))).toBe('fallback');
     expect(checkTitle(result('fallback', ''))).toBe('fallback');
     expect(checkTitle(result('fallback', '\n\n'))).toBe('fallback');
+  });
+  // Missing/non-string metadata.name must still yield a non-empty title so
+  // Results rows and CSV cells never render undefined.
+  it('falls back to unknown when name is missing or non-string', () => {
+    expect(
+      checkTitle({ metadata: { name: '', namespace: 'ns' } } as ComplianceCheckResult),
+    ).toBe('unknown');
+    expect(
+      checkTitle({
+        metadata: { name: 42 as unknown as string, namespace: 'ns' },
+      } as ComplianceCheckResult),
+    ).toBe('unknown');
+    expect(
+      checkTitle({
+        metadata: {} as ComplianceCheckResult['metadata'],
+        description: 'Title only',
+      } as ComplianceCheckResult),
+    ).toBe('Title only');
   });
   it('fuzz: never throws and never returns empty', () => {
     for (let i = 0; i < 2000; i++) {
@@ -127,8 +148,16 @@ describe('toggledProfiles', () => {
   });
   it('refuses adds past CRD MaxItems=8', () => {
     const full = ['cis', 'pci-dss', 'nist-moderate', 'nist-high', 'stig', 'nerc-cip', 'e8', 'bsi'];
+    // 'extra' is also not a ProfileKey enum value; either bound fails closed.
     expect(toggledProfiles(full, 'extra', true)).toEqual(full);
     expect(toggledProfiles(full, 'cis', false)).toEqual(full.filter((k) => k !== 'cis'));
+  });
+  it('refuses unknown ProfileKey values (CRD enum fail-closed)', () => {
+    expect(toggledProfiles(['cis'], 'extra', true)).toEqual(['cis']);
+    expect(toggledProfiles(['cis'], 'CIS', true)).toEqual(['cis']);
+    expect(toggledProfiles(['cis'], '', true)).toEqual(['cis']);
+    // Remove still filters by exact key match (unknown keys can be stripped).
+    expect(toggledProfiles(['cis', 'bogus'], 'bogus', false)).toEqual(['cis']);
   });
   it('fuzz: never duplicates when adding; removing the missing key is a no-op', () => {
     const keys = ['cis', 'stig', 'e8', 'bsi', 'pci-dss'];
@@ -143,6 +172,32 @@ describe('toggledProfiles', () => {
       if (checked) {
         expect(next).toContain(key);
       }
+    }
+  });
+  // Toggle involution: enable X then disable X returns the prior set when the
+  // add was allowed (not at MaxItems, key not already present). Disable then
+  // re-enable restores membership when the set was non-empty after remove.
+  it('fuzz: enable then disable is involution when the add is accepted', () => {
+    const keys = ['cis', 'stig', 'e8', 'bsi', 'pci-dss', 'nerc-cip', 'nist-high', 'nist-moderate'];
+    for (let i = 0; i < 2000; i++) {
+      const n = i % 8; // 0..7 so an add can succeed under MaxItems=8
+      const current = keys.slice(0, n);
+      const key = keys[i % keys.length];
+      if (current.includes(key)) {
+        // Already present: enable is a no-op; disable then re-enable restores.
+        const without = toggledProfiles(current, key, false);
+        expect(without).not.toContain(key);
+        expect(toggledProfiles(without, key, true).sort()).toEqual([...current].sort());
+        continue;
+      }
+      const added = toggledProfiles(current, key, true);
+      if (added.length === current.length) {
+        // MaxItems refused the add; leave current unchanged.
+        expect(added).toEqual(current);
+        continue;
+      }
+      expect(added).toContain(key);
+      expect(toggledProfiles(added, key, false).sort()).toEqual([...current].sort());
     }
   });
 });
@@ -214,6 +269,20 @@ describe('rescanPatch', () => {
         op: 'add',
         path: '/metadata/annotations/compliance.openshift.io~1rescan',
         value: 't4',
+      },
+    ]);
+  });
+  it('is a no-op for empty or whitespace-only tokens', () => {
+    expect(rescanPatch(true, '')).toEqual([]);
+    expect(rescanPatch(false, '   ')).toEqual([]);
+    expect(rescanPatch(true, '\t', '99')).toEqual([]);
+  });
+  it('trims the rescan token before writing', () => {
+    expect(rescanPatch(true, '  t5  ')).toEqual([
+      {
+        op: 'add',
+        path: '/metadata/annotations/compliance.openshift.io~1rescan',
+        value: 't5',
       },
     ]);
   });
@@ -296,6 +365,26 @@ describe('formatCount', () => {
   it('accepts underscore locale tags and invalid tags without throwing', () => {
     expect(formatCount(42, 'en_US')).toMatch(/42/);
     expect(() => formatCount(42, '!!')).not.toThrow();
+  });
+  it('returns empty for non-finite values (no English NaN/Infinity)', () => {
+    expect(formatCount(NaN, 'en-US')).toBe('');
+    expect(formatCount(Infinity, 'en-US')).toBe('');
+    expect(formatCount(-Infinity, 'de-DE')).toBe('');
+  });
+});
+
+describe('formatChartDate', () => {
+  it('formats a valid Date with the given locale', () => {
+    const d = new Date(2026, 6, 12, 15, 30, 0);
+    expect(formatChartDate(d, 'en-US')).toMatch(/2026/);
+    expect(formatChartDate(d.getTime(), 'en_US')).toMatch(/2026/);
+  });
+  it('returns empty for invalid instants (no English Invalid Date)', () => {
+    expect(formatChartDate(new Date(NaN), 'en-US')).toBe('');
+    expect(formatChartDate(Number.NaN, 'en-US')).toBe('');
+  });
+  it('does not throw on invalid locale tags', () => {
+    expect(() => formatChartDate(new Date(0), '!!')).not.toThrow();
   });
 });
 
@@ -400,6 +489,25 @@ describe('scoreColor', () => {
   });
 });
 
+// scoreLabelColor uses the same 60/90 bands as scoreColor (PatternFly Label tokens).
+describe('scoreLabelColor', () => {
+  it.each([
+    [0, 'red'],
+    [59, 'red'],
+    [60, 'orange'],
+    [89, 'orange'],
+    [90, 'green'],
+    [100, 'green'],
+    // NaN comparisons are false: must not paint green/orange (same band as scoreColor danger).
+    [Number.NaN, 'red'],
+    // Non-finite extremes: only >=90 is green; -Infinity is red, +Infinity is green.
+    [Number.NEGATIVE_INFINITY, 'red'],
+    [Number.POSITIVE_INFINITY, 'green'],
+  ])('score %p -> %s', (score, color) => {
+    expect(scoreLabelColor(score)).toBe(color);
+  });
+});
+
 describe('errorMessage', () => {
   it('returns null for empty values', () => {
     expect(errorMessage(null)).toBeNull();
@@ -412,6 +520,41 @@ describe('errorMessage', () => {
   });
   it('handles message-bearing objects (k8s / HttpError shapes)', () => {
     expect(errorMessage({ message: 'forbidden' })).toBe('forbidden');
+  });
+  // Console HttpError often has message "Conflict" while Status text is on .json.
+  it('prefers Kubernetes Status message on .json over generic HTTP phrases', () => {
+    const httpErr = Object.assign(new Error('Conflict'), {
+      name: 'HttpError',
+      code: 409,
+      json: { message: 'tailoredprofiles "x" already exists', reason: 'AlreadyExists' },
+    });
+    expect(errorMessage(httpErr)).toBe('tailoredprofiles "x" already exists');
+    expect(
+      errorMessage({
+        message: 'Conflict',
+        json: { message: 'the object has been modified' },
+      }),
+    ).toBe('the object has been modified');
+    // Specific top-level message still wins over json.
+    expect(
+      errorMessage({
+        message: 'custom detail',
+        json: { message: 'status body' },
+      }),
+    ).toBe('custom detail');
+  });
+  // Bare objects stringify to "[object Object]", which is useless in Alerts;
+  // return null so callers fall back to a translated fail message.
+  it('returns null for message-less plain objects (not "[object Object]")', () => {
+    expect(errorMessage({})).toBeNull();
+    expect(errorMessage({ code: 409 })).toBeNull();
+    expect(errorMessage({ message: '' })).toBeNull();
+    expect(errorMessage({ message: 42 })).toBeNull();
+  });
+  it('still stringifies arrays, numbers, and booleans', () => {
+    expect(errorMessage(123)).toBe('123');
+    expect(errorMessage(true)).toBe('true');
+    expect(errorMessage([1, 2])).toBe('1,2');
   });
   it('never throws on hostile values (null-proto, throwing toString, symbol)', () => {
     const hostile: unknown[] = [
@@ -466,6 +609,34 @@ describe('effectiveScoringMode / historyScoringModeMismatch', () => {
         spec: { profiles: ['cis'], scoring: { mode: 'SeverityWeighted' } },
       }),
     ).toBe('SeverityWeighted');
+  });
+
+  // Annotation is hand-editable CR metadata; unknown stamps and modes must not throw.
+  it('fuzz: historyScoringModeMismatch never throws; empty stamp is not a mismatch', () => {
+    for (let i = 0; i < 500; i++) {
+      const stamp =
+        i % 4 === 0 ? undefined : i % 4 === 1 ? '' : i % 4 === 2 ? 'Flat' : randomString(i % 16);
+      const mode: 'Flat' | 'SeverityWeighted' | undefined =
+        i % 3 === 0 ? undefined : i % 3 === 1 ? 'Flat' : 'SeverityWeighted';
+      const baseline = {
+        metadata: {
+          name: 'cluster',
+          annotations: stamp === undefined ? undefined : { [HISTORY_SCORING_MODE_ANN]: stamp },
+        },
+        spec: {
+          profiles: ['cis' as const],
+          scoring: mode ? { mode } : undefined,
+        },
+      };
+      const mismatch = historyScoringModeMismatch(baseline);
+      expect(typeof mismatch).toBe('boolean');
+      if (!stamp) {
+        expect(mismatch).toBe(false);
+      }
+      // effectiveScoringMode collapses anything except SeverityWeighted to Flat.
+      const effective = effectiveScoringMode(baseline);
+      expect(effective === 'Flat' || effective === 'SeverityWeighted').toBe(true);
+    }
   });
 
   it('detects history points stamped under a different scoring mode', () => {
@@ -609,6 +780,43 @@ describe('severityWeight / profileScore', () => {
     expect(flatProfileScore(Number.NaN, 1)).toBeNull();
     expect(flatProfileScore(1, Number.POSITIVE_INFINITY)).toBeNull();
   });
+  // Untrusted / hand-edited ResultCounts: score is null or in [0,100], never NaN.
+  // Oracle matches operator score(): floor(pass*100/(pass+fail)) for non-neg finite.
+  it('fuzz: flatProfileScore is null or [0,100] for arbitrary mass', () => {
+    const samples: Array<[number | undefined, number | undefined]> = [
+      [0, 0],
+      [1, 0],
+      [0, 1],
+      [2, 1],
+      [-1, 5],
+      [5, -1],
+      [Number.NaN, 1],
+      [1, Number.POSITIVE_INFINITY],
+      [Number.MAX_SAFE_INTEGER, 1],
+      [undefined, undefined],
+    ];
+    for (let i = 0; i < 2000; i++) {
+      const pass =
+        i < samples.length ? samples[i][0] : Math.floor(fuzzRand() * 1e6) - 1e3;
+      const fail =
+        i < samples.length ? samples[i][1] : Math.floor(fuzzRand() * 1e6) - 1e3;
+      let got: number | null = null;
+      expect(() => {
+        got = flatProfileScore(pass, fail);
+      }).not.toThrow();
+      if (got === null) {
+        continue;
+      }
+      expect(Number.isFinite(got)).toBe(true);
+      expect(got).toBeGreaterThanOrEqual(0);
+      expect(got).toBeLessThanOrEqual(100);
+      const p = pass ?? 0;
+      const f = fail ?? 0;
+      if (Number.isFinite(p) && Number.isFinite(f) && p >= 0 && f >= 0 && p + f > 0) {
+        expect(got).toBe(Math.floor((p * 100) / (p + f)));
+      }
+    }
+  });
   it('profileScore uses flat counts by default', () => {
     expect(profileScore({ pass: 1, fail: 1 })).toBe(50);
   });
@@ -626,6 +834,19 @@ describe('severityWeight / profileScore', () => {
         },
       ),
     ).toBe(75);
+    // Prefer last history point (operator weighted) over flat when present.
+    expect(
+      profileScore(
+        { pass: 1, fail: 1 },
+        {
+          mode: 'SeverityWeighted',
+          filterKey: 'cis',
+          results: [],
+          profiles: ['cis'],
+          history: [{ score: 83 }, { score: 90 }],
+        },
+      ),
+    ).toBe(90);
     // Loaded path with no countable mass still null (not a false flat score).
     expect(
       profileScore(
@@ -924,17 +1145,81 @@ describe('resultsCsv', () => {
     const csv = resultsCsv([r('s1', 'SKIP', 'low', 'Skipped rule')]);
     expect(csvLines(csv)[1]).toBe('s1,Skipped rule,NOT-APPLICABLE,low,false');
   });
+  // Missing/non-string status must not throw (csvCell used to call .replace on
+  // undefined) and must export ERROR so the row matches operator ResultCounts.
+  it('tolerates missing status and exports ERROR (operator tally parity)', () => {
+    const missing = {
+      metadata: { name: 'orphan', namespace: 'ns' },
+      severity: 'low',
+      description: 'No status field',
+    } as unknown as ComplianceCheckResult;
+    expect(() => resultsCsv([missing])).not.toThrow();
+    expect(csvLines(resultsCsv([missing]))[1]).toBe(
+      'orphan,No status field,ERROR,low,false',
+    );
+  });
+  // Partial list items (no metadata) must not abort CSV export.
+  it('tolerates missing metadata on a result row', () => {
+    const bare = { status: 'PASS', severity: 'low' } as unknown as ComplianceCheckResult;
+    expect(() => resultsCsv([bare])).not.toThrow();
+    expect(csvLines(resultsCsv([bare]))[1]).toBe(',unknown,PASS,low,false');
+  });
   it('fuzz: valid CSV (quotes balanced) for arbitrary CR text', () => {
     const rand = () =>
       Array.from({ length: Math.floor(fuzzRand() * 40) }, () =>
         String.fromCharCode(Math.floor(fuzzRand() * 128)),
       ).join('');
+    // Formula-looking prefixes (CWE-1236) that must be neutralized with a leading '.
+    const formulaSeeds = ['=cmd', '+SUM(1)', '-1', '@import', '|DDE', '\tTab', '\rCR', ' =eq', '\uFF1Dfull'];
+    const formulaRe = /^\s*[=+\-@|\t\r\n\uFF1D\uFF0B\uFF0D\uFF20\u2212]/;
     for (let i = 0; i < 2000; i++) {
-      const csv = resultsCsv([r(rand(), 'FAIL', 'high', rand())]);
+      const name = i < formulaSeeds.length ? formulaSeeds[i] : rand();
+      const title = i % 3 === 0 ? formulaSeeds[i % formulaSeeds.length] : rand();
+      const csv = resultsCsv([r(name, 'FAIL', 'high', title)]);
       expect(typeof csv).toBe('string');
       expect(csv.startsWith('\uFEFF')).toBe(true);
       // Total double-quotes are even (all escapes balanced).
       expect((csv.match(/"/g) ?? []).length % 2).toBe(0);
+      // Five columns: name,title,status,severity,waived (header + one data row).
+      const lines = csv.replace(/^\uFEFF/, '').split('\r\n');
+      expect(lines).toHaveLength(2);
+      // RFC 4180: split on commas outside quotes.
+      const cols: string[] = [];
+      let cell = '';
+      let inQ = false;
+      for (let j = 0; j < lines[1].length; j++) {
+        const ch = lines[1][j];
+        if (ch === '"') {
+          inQ = !inQ;
+          cell += ch;
+        } else if (ch === ',' && !inQ) {
+          cols.push(cell);
+          cell = '';
+        } else {
+          cell += ch;
+        }
+      }
+      cols.push(cell);
+      expect(cols).toHaveLength(5);
+      // No NULs survive export (can truncate cells in spreadsheet tools).
+      expect(csv).not.toContain('\0');
+      // Unquote RFC 4180 cells (outer quotes + doubled inner quotes).
+      const unquote = (c: string): string => {
+        if (c.length >= 2 && c.startsWith('"') && c.endsWith('"')) {
+          return c.slice(1, -1).replace(/""/g, '"');
+        }
+        return c;
+      };
+      // Formula-looking name / rendered title must be apostrophe-prefixed in the row.
+      const renderedTitle = checkTitle(r(name, 'FAIL', 'high', title));
+      const nameClean = String(name ?? '').replace(/\0/g, '');
+      const titleClean = String(renderedTitle ?? '').replace(/\0/g, '');
+      if (formulaRe.test(nameClean) && nameClean.length > 0) {
+        expect(unquote(cols[0]).startsWith("'")).toBe(true);
+      }
+      if (formulaRe.test(titleClean) && titleClean.length > 0) {
+        expect(unquote(cols[1]).startsWith("'")).toBe(true);
+      }
     }
   });
 });
@@ -1031,6 +1316,20 @@ describe('inconsistentSources', () => {
       'compliance.openshift.io/most-common-status': ' NOT-APPLICABLE ',
     }))).toBe('PASS');
   });
+  // Lockstep with effectiveStatus / operator: odd casing must still map to labels.
+  it('uppercases status tokens (matches effectiveStatus collapse)', () => {
+    const { sources, mostCommon } = inconsistentSources(
+      withAnn({
+        'compliance.openshift.io/inconsistent-source': 'n0:pass,n1:fail',
+        'compliance.openshift.io/most-common-status': ' not-applicable ',
+      }),
+    );
+    expect(sources).toEqual([
+      { node: 'n0', status: 'PASS' },
+      { node: 'n1', status: 'FAIL' },
+    ]);
+    expect(mostCommon).toBe('NOT-APPLICABLE');
+  });
   it('fuzz: never throws for arbitrary annotation strings', () => {
     for (let i = 0; i < 1000; i++) {
       const { sources } = inconsistentSources(
@@ -1082,91 +1381,22 @@ describe('changedChecks', () => {
       }
     }
   });
-});
-
-describe('isValidK8sName', () => {
-  it('accepts valid RFC1123 subdomain names', () => {
-    expect(isValidK8sName('cis-custom')).toBe(true);
-    expect(isValidK8sName('a')).toBe(true);
-    expect(isValidK8sName('ocp4.cis.1')).toBe(true);
-  });
-  it('rejects invalid names', () => {
-    expect(isValidK8sName('')).toBe(false);
-    expect(isValidK8sName('My Profile')).toBe(false);
-    expect(isValidK8sName('UPPER')).toBe(false);
-    expect(isValidK8sName('-lead')).toBe(false);
-    expect(isValidK8sName('trail-')).toBe(false);
-    expect(isValidK8sName('a..b')).toBe(false);
-    expect(isValidK8sName('a.-b')).toBe(false);
-    expect(isValidK8sName('a-.b')).toBe(false);
-    expect(isValidK8sName('a'.repeat(254))).toBe(false);
-  });
-  // Free-form TailoredProfile / resource names typed in the console; never throw,
-  // and a true result must satisfy length + RFC1123 shape (no uppercase, no ends).
-  it('fuzz: never throws; true implies length and shape invariants', () => {
-    for (let i = 0; i < 2000; i++) {
-      const name =
-        i % 5 === 0
-          ? randomString(i % 80)
-          : i % 5 === 1
-            ? 'a'.repeat(i % 260)
-            : i % 5 === 2
-              ? `x${'-'.repeat(i % 10)}y`
-              : i % 5 === 3
-                ? ''
-                : `name-${i}`;
-      let ok: boolean;
-      expect(() => {
-        ok = isValidK8sName(name);
-      }).not.toThrow();
-      expect(typeof ok!).toBe('boolean');
-      if (ok!) {
-        expect(name.length).toBeGreaterThan(0);
-        expect(name.length).toBeLessThanOrEqual(253);
-        expect(name).toMatch(/^[a-z0-9]/);
-        expect(name).toMatch(/[a-z0-9]$/);
-        expect(name).not.toMatch(/[A-Z_\s]/);
-      }
-    }
-  });
-});
-
-describe('isValidTailoredProfileName', () => {
-  it('accepts names that fit baseline-tp-<name> label budget (51 chars)', () => {
-    expect(isValidTailoredProfileName('cis-custom')).toBe(true);
-    expect(isValidTailoredProfileName('a'.repeat(51))).toBe(true);
-  });
-  it('rejects names longer than the ClusterBaseline tailoredProfiles MaxLength', () => {
-    // isValidK8sName would accept 52 alphanumerics; suite label would exceed 63.
-    expect(isValidK8sName('a'.repeat(52))).toBe(true);
-    expect(isValidTailoredProfileName('a'.repeat(52))).toBe(false);
-  });
-  it('rejects the same shape invalids as isValidK8sName', () => {
-    expect(isValidTailoredProfileName('')).toBe(false);
-    expect(isValidTailoredProfileName('UPPER')).toBe(false);
-    expect(isValidTailoredProfileName('-x')).toBe(false);
-    expect(isValidTailoredProfileName('a..b')).toBe(false);
-  });
-  // suite label is "baseline-tp-<name>" (63 char k8s label budget => name <= 51).
-  it('fuzz: never throws; true implies k8s name and len <= 51', () => {
-    for (let i = 0; i < 2000; i++) {
-      const name =
-        i % 4 === 0
-          ? randomString(i % 60)
-          : i % 4 === 1
-            ? 'a'.repeat(i % 60)
-            : i % 4 === 2
-              ? `tp-${i}`
-              : '';
-      let ok: boolean;
-      expect(() => {
-        ok = isValidTailoredProfileName(name);
-      }).not.toThrow();
-      if (ok!) {
-        expect(name.length).toBeLessThanOrEqual(51);
-        expect(isValidK8sName(name)).toBe(true);
-      }
-    }
+  it('changedChecksMany indexes multiple lists in one pass', () => {
+    const results = [
+      res('a', 'Title A'),
+      res('b', 'Title B'),
+      res('c', 'Title C'),
+    ];
+    const [nf, fx] = changedChecksMany(
+      [
+        ['a', 'missing'],
+        ['c', ''],
+      ],
+      results,
+    );
+    expect(nf.map((x) => x.title)).toEqual(['Title A', 'missing']);
+    expect(fx.map((x) => x.title)).toEqual(['Title C']);
+    expect(changedChecksMany([undefined, []], results)).toEqual([[], []]);
   });
 });
 
@@ -1184,6 +1414,33 @@ describe('isAlreadyExists', () => {
     named.name = 'AlreadyExists';
     expect(isAlreadyExists(named)).toBe(true);
   });
+  // Console SDK HttpError: name is "HttpError", reason lives on .json (Status body).
+  // Message may be the generic "Conflict" status text while reason is AlreadyExists.
+  it('detects console HttpError with Status reason on .json', () => {
+    const httpAlready = Object.assign(new Error('Conflict'), {
+      name: 'HttpError',
+      code: 409,
+      json: {
+        reason: 'AlreadyExists',
+        message: 'tailoredprofiles.compliance.openshift.io "x" already exists',
+      },
+    });
+    expect(isAlreadyExists(httpAlready)).toBe(true);
+    const httpConflict = Object.assign(new Error('Conflict'), {
+      name: 'HttpError',
+      code: 409,
+      json: { reason: 'Conflict', message: 'the object has been modified' },
+    });
+    expect(isAlreadyExists(httpConflict)).toBe(false);
+    // Nested json on a plain object (serialized error shape).
+    expect(
+      isAlreadyExists({
+        code: 409,
+        message: 'Conflict',
+        json: { reason: 'AlreadyExists', message: 'foo already exists' },
+      }),
+    ).toBe(true);
+  });
   it('is false for Conflict (also HTTP 409) and other errors', () => {
     // Bare 409 is ambiguous (AlreadyExists vs Conflict); do not guess.
     expect(isAlreadyExists({ code: 409 })).toBe(false);
@@ -1194,6 +1451,72 @@ describe('isAlreadyExists', () => {
     expect(isAlreadyExists('forbidden')).toBe(false);
     expect(isAlreadyExists(null)).toBe(false);
   });
+  // Untrusted watch/fetch error shapes (partial Status, throwing getters) must
+  // never throw; create-retry classification cannot become a second failure mode.
+  it('fuzz: never throws; always returns boolean', () => {
+    const hostile: unknown[] = [
+      null,
+      undefined,
+      '',
+      'already exists',
+      'forbidden',
+      409,
+      true,
+      Symbol('s'),
+      Object.create(null),
+      {
+        get reason() {
+          throw new Error('getter boom');
+        },
+      },
+      {
+        get message() {
+          throw new Error('msg boom');
+        },
+      },
+      {
+        get json() {
+          throw new Error('json boom');
+        },
+      },
+      {
+        reason: 'AlreadyExists',
+        get message() {
+          throw new Error('nested');
+        },
+      },
+      Object.assign(new Error('Conflict'), {
+        name: 'HttpError',
+        json: {
+          get reason() {
+            throw new Error('json.reason');
+          },
+        },
+      }),
+    ];
+    for (let i = 0; i < 2000; i++) {
+      const pool: unknown[] = [
+        ...hostile,
+        randomString(i % 40),
+        { reason: i % 3 === 0 ? 'AlreadyExists' : randomString(i % 12) },
+        { code: 409, reason: randomString(i % 10), message: randomString(i % 24) },
+        { message: i % 5 === 0 ? 'foo already exists' : randomString(i % 20) },
+        new Error(i % 4 === 0 ? 'x already exists' : randomString(i % 16)),
+        Object.assign(new Error('Conflict'), {
+          name: 'HttpError',
+          code: 409,
+          json: { reason: i % 2 === 0 ? 'AlreadyExists' : 'Conflict', message: randomString(i % 18) },
+        }),
+        { json: { reason: 'AlreadyExists', message: randomString(i % 10) } },
+        [randomString(i % 8)],
+      ];
+      let out: boolean | undefined;
+      expect(() => {
+        out = isAlreadyExists(pool[i % pool.length]);
+      }).not.toThrow();
+      expect(typeof out).toBe('boolean');
+    }
+  });
 });
 
 describe('effectiveStatus', () => {
@@ -1203,6 +1526,16 @@ describe('effectiveStatus', () => {
   it('passes through a non-inconsistent status unchanged', () => {
     expect(effectiveStatus({ status: 'FAIL', metadata: {} })).toBe('FAIL');
     expect(effectiveStatus({ status: 'PASS', metadata: {} })).toBe('PASS');
+  });
+  // Operator tally maps unknown/empty status to ERROR; UI/CSV must match so a
+  // missing field is not a blank filter chip or a thrown CSV export.
+  it('maps empty or non-string status to ERROR (operator tally parity)', () => {
+    expect(effectiveStatus({ status: '', metadata: {} })).toBe('ERROR');
+    expect(effectiveStatus({ status: undefined as unknown as string, metadata: {} })).toBe(
+      'ERROR',
+    );
+    expect(effectiveStatus({ status: null as unknown as string, metadata: {} })).toBe('ERROR');
+    expect(effectiveStatus({ status: 42 as unknown as string, metadata: {} })).toBe('ERROR');
   });
   // Operator ResultCounts fold SKIP into notApplicable; Overview N/A deep-links
   // and the Results filter must match that bucket.
@@ -1380,6 +1713,18 @@ describe('remediation helpers', () => {
         }),
       ),
     ).toBe(false);
+    // Operator validMCPPoolName: non-DNS-1123 pool suffix is not a batch target.
+    expect(
+      isNodeRemediation(
+        rem(undefined, undefined, {
+          metadata: {
+            name: 'r',
+            namespace: 'openshift-compliance',
+            labels: { 'compliance.openshift.io/scan-name': 'ocp4-cis-node-UPPER' },
+          },
+        }),
+      ),
+    ).toBe(false);
     // Known non-MachineConfig kind wins over a node-looking scan-name.
     expect(
       isNodeRemediation(
@@ -1402,7 +1747,10 @@ describe('remediation helpers', () => {
   it('remediationObjectText does not throw on circular rendered objects', () => {
     const circular: Record<string, unknown> = { kind: 'MachineConfig' };
     circular.self = circular;
-    expect(remediationObjectText(rem('MachineConfig', circular))).toBe('');
+    // Non-empty marker: UI must not show the same empty state as missing object.
+    expect(remediationObjectText(rem('MachineConfig', circular))).toBe(
+      '/* unserializable remediation object */',
+    );
   });
   // openspec guided-remediation: MissingDependencies must name the dependency.
   it('missingDependencySummary reads depends-on, depends-on-obj, and unset-value', () => {
@@ -1498,7 +1846,7 @@ describe('remediation helpers', () => {
       };
       const out = remediationObjectText(rem('X', obj));
       expect(typeof out).toBe('string');
-      expect(typeof missingDependencySummary(rem('X', obj))).toBe('object'); // null
+      expect(missingDependencySummary(rem('X', obj))).toBeNull();
     }
   });
   it('fuzz: missingDependencySummary never throws on hostile annotations', () => {
@@ -1519,6 +1867,67 @@ describe('remediation helpers', () => {
       );
       expect(summary === null || typeof summary === 'string').toBe(true);
     }
+  });
+  // Kind + scan-name are untrusted CO fields; reboot/batch eligibility must not throw.
+  it('fuzz: isNodeRemediation never throws; non-MachineConfig kind is never node', () => {
+    for (let i = 0; i < 500; i++) {
+      const kind =
+        i % 7 === 0 ? 'MachineConfig' : i % 7 === 1 ? '' : randomString(i % 12);
+      const scan =
+        i % 5 === 0
+          ? `ocp4-cis-node-${randomString((i % 8) + 1)}`
+          : randomString(i % 20);
+      const out = isNodeRemediation(
+        rem(kind || undefined, undefined, {
+          metadata: {
+            name: 'r',
+            namespace: 'ns',
+            labels: { 'compliance.openshift.io/scan-name': scan },
+          },
+        }),
+      );
+      expect(typeof out).toBe('boolean');
+      if (kind && kind !== 'MachineConfig') {
+        expect(out).toBe(false);
+      }
+    }
+  });
+  it('fuzz: compareRemediationsForApplyOrder is antisymmetric and total', () => {
+    for (let i = 0; i < 200; i++) {
+      const a = rem(undefined, undefined, {
+        metadata: { name: randomString((i % 10) + 1), namespace: 'ns' },
+        status: {
+          applicationState: i % 3 === 0 ? 'MissingDependencies' : 'NotApplied',
+        },
+      });
+      const b = rem(undefined, undefined, {
+        metadata: { name: randomString((i % 10) + 1), namespace: 'ns' },
+        status: {
+          applicationState: i % 5 === 0 ? 'MissingDependencies' : 'NotApplied',
+        },
+      });
+      const ab = compareRemediationsForApplyOrder(a, b);
+      const ba = compareRemediationsForApplyOrder(b, a);
+      expect(Number.isFinite(ab)).toBe(true);
+      expect(Number.isFinite(ba)).toBe(true);
+      if (ab === 0) {
+        expect(ba).toBe(0);
+      } else {
+        expect(Math.sign(ab)).toBe(-Math.sign(ba));
+      }
+      expect(compareRemediationsForApplyOrder(a, a)).toBe(0);
+    }
+  });
+  // Partial list-watch items must not throw mid-sort.
+  it('compareRemediationsForApplyOrder tolerates missing names', () => {
+    const a = rem(undefined, undefined, {
+      metadata: { name: undefined as unknown as string, namespace: 'ns' },
+    });
+    const b = rem(undefined, undefined, {
+      metadata: { name: 'b', namespace: 'ns' },
+    });
+    expect(() => compareRemediationsForApplyOrder(a, b)).not.toThrow();
+    expect(Number.isFinite(compareRemediationsForApplyOrder(a, b))).toBe(true);
   });
 });
 
@@ -1644,6 +2053,11 @@ describe('waivers', () => {
         [{ name: 'f1' }],
       ),
     ).toBe('WAIVED');
+    // Prebuilt Set path (Results/CSV hot path): same FAIL→WAIVED mapping.
+    const set = new Set(['f1']);
+    expect(resultFilterStatus({ metadata: { name: 'f1' }, status: 'FAIL' }, set)).toBe('WAIVED');
+    expect(resultFilterStatus({ metadata: { name: 'f2' }, status: 'FAIL' }, set)).toBe('FAIL');
+    expect(resultFilterStatus({ metadata: { name: 'f1' }, status: 'PASS' }, set)).toBe('PASS');
   });
   // Filter chips use effective status: a benign INCONSISTENT is not "INCONSISTENT".
   it('resultFilterStatus collapses benign INCONSISTENT before filtering', () => {
@@ -1665,6 +2079,60 @@ describe('waivers', () => {
     expect(
       resultFilterStatus({ metadata: { name: 's1' }, status: 'SKIP' }),
     ).toBe('NOT-APPLICABLE');
+  });
+  // Untrusted CCR status/annotations + waiver names: filter chips must never throw;
+  // FAIL+active-waiver maps to WAIVED; SKIP folds to NOT-APPLICABLE.
+  it('fuzz: resultFilterStatus never throws; WAIVED only for FAIL with active waiver', () => {
+    const statuses = [
+      'PASS',
+      'FAIL',
+      'ERROR',
+      'MANUAL',
+      'INFO',
+      'SKIP',
+      'NOT-APPLICABLE',
+      'INCONSISTENT',
+      '',
+    ];
+    for (let i = 0; i < 1500; i++) {
+      const status = statuses[i % statuses.length];
+      const name = i % 4 === 0 ? randomString(i % 24) : `chk-${i % 17}`;
+      const waivers =
+        i % 5 === 0
+          ? undefined
+          : i % 5 === 1
+            ? new Set<string>([name, `other-${i}`])
+            : [{ name }, { name: `other-${i}`, expiresAt: randomString(i % 12) }];
+      const r = {
+        status,
+        metadata: {
+          name,
+          annotations: {
+            'compliance.openshift.io/inconsistent-source':
+              i % 3 === 0 ? randomString(i % 36) : `n0:${statuses[i % statuses.length]}`,
+            'compliance.openshift.io/most-common-status':
+              i % 2 === 0 ? randomString(i % 10) : 'PASS',
+          },
+        },
+      };
+      let got: string;
+      expect(() => {
+        got = resultFilterStatus(r, waivers as never);
+      }).not.toThrow();
+      expect(typeof got!).toBe('string');
+      if (status === 'SKIP') {
+        expect(got!).toBe('NOT-APPLICABLE');
+      } else if (status === '') {
+        // Empty status maps to ERROR (operator tally parity).
+        expect(got!).toBe('ERROR');
+      } else if (status !== 'INCONSISTENT' && status !== 'FAIL') {
+        expect(got!).toBe(status);
+      }
+      if (got! === 'WAIVED') {
+        // Only FAIL+active waiver may produce WAIVED.
+        expect(effectiveStatus(r)).toBe('FAIL');
+      }
+    }
   });
   it('resultsHref FAIL deep-link is distinct from WAIVED', () => {
     expect(resultsHref('FAIL')).toContain('rowFilter-result-status=FAIL');
@@ -1725,6 +2193,21 @@ describe('waivers', () => {
         value: [{ name: 'chk2', reason: 'risk', approvedBy: 'bob' }],
       },
     ]);
+    // Whitespace-only optional text is empty; surrounding whitespace is trimmed.
+    expect(
+      addWaiverPatch(undefined, {
+        name: 'chk3',
+        reason: '  padded  ',
+        requestedBy: '   ',
+        approvedBy: '\t',
+      }),
+    ).toEqual([
+      {
+        op: 'add',
+        path: '/spec/waivers',
+        value: [{ name: 'chk3', reason: 'padded' }],
+      },
+    ]);
   });
   it('addWaiverPatch replaces an existing entry instead of duplicating', () => {
     expect(addWaiverPatch([{ name: 'chk', reason: 'old' }], { name: 'chk', reason: 'new' })).toEqual(
@@ -1753,10 +2236,17 @@ describe('waivers', () => {
       { op: 'add', path: '/spec/waivers', value: [{ name: 'a'.repeat(253) }] },
     ]);
   });
-  // expiresAt/reviewBy must be parseable (metav1.Time); garbage fails closed.
+  // expiresAt/reviewBy must be RFC3339 (metav1.Time); free-form Date.parse
+  // successes and invalid calendar days fail closed before admission.
   it('addWaiverPatch is a no-op for unparseable expiresAt or reviewBy', () => {
     expect(addWaiverPatch(undefined, { name: 'chk', expiresAt: 'not-a-date' })).toEqual([]);
     expect(addWaiverPatch(undefined, { name: 'chk', reviewBy: 'tomorrow' })).toEqual([]);
+    expect(addWaiverPatch(undefined, { name: 'chk', expiresAt: 'March 1, 2026' })).toEqual([]);
+    expect(addWaiverPatch(undefined, { name: 'chk', expiresAt: '01/02/2026' })).toEqual([]);
+    expect(addWaiverPatch(undefined, { name: 'chk', expiresAt: '2026-01-01' })).toEqual([]);
+    expect(addWaiverPatch(undefined, { name: 'chk', expiresAt: '2026-02-31T00:00:00Z' })).toEqual(
+      [],
+    );
     expect(
       addWaiverPatch(undefined, { name: 'chk', expiresAt: '2027-01-01T00:00:00Z' }),
     ).toEqual([
@@ -1764,6 +2254,15 @@ describe('waivers', () => {
         op: 'add',
         path: '/spec/waivers',
         value: [{ name: 'chk', expiresAt: '2027-01-01T00:00:00Z' }],
+      },
+    ]);
+    expect(
+      addWaiverPatch(undefined, { name: 'chk', reviewBy: '2027-06-15T23:59:59.999Z' }),
+    ).toEqual([
+      {
+        op: 'add',
+        path: '/spec/waivers',
+        value: [{ name: 'chk', reviewBy: '2027-06-15T23:59:59.999Z' }],
       },
     ]);
   });
@@ -1855,6 +2354,13 @@ describe('waivers', () => {
       { op: 'remove', path: '/spec/waivers/2' },
     ]);
   });
+  // Fail closed: a bad call site must not emit a patch that always 404s.
+  it('removeWaiverPatch is a no-op for invalid index or empty name', () => {
+    expect(removeWaiverPatch(-1, 'chk')).toEqual([]);
+    expect(removeWaiverPatch(1.5, 'chk')).toEqual([]);
+    expect(removeWaiverPatch(NaN, 'chk')).toEqual([]);
+    expect(removeWaiverPatch(0, '')).toEqual([]);
+  });
   it('fuzz: addWaiverPatch carries the name when DNS-1123 valid', () => {
     for (let i = 0; i < 500; i++) {
       // Force a valid DNS-1123 subdomain so we exercise the happy path; invalid
@@ -1874,6 +2380,55 @@ describe('waivers', () => {
     // Invalid shapes must stay no-ops.
     for (const bad of ['', 'Bad_Name', 'A'.repeat(10), 'has space']) {
       expect(addWaiverPatch(undefined, { name: bad })).toEqual([]);
+    }
+  });
+  // expiresAt/reviewBy free-text must fail closed: unparseable times never ship
+  // a patch that would 422 at admission; emitted times stay RFC3339-shaped.
+  it('fuzz: addWaiverPatch rejects unparseable expiresAt/reviewBy', () => {
+    const rfc3339 =
+      /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
+    for (let i = 0; i < 1000; i++) {
+      const name = `chk-${i}`;
+      const expiresAt =
+        i % 7 === 0
+          ? undefined
+          : i % 7 === 1
+            ? '2027-01-01T00:00:00Z'
+            : i % 7 === 2
+              ? '2026-02-31T00:00:00Z'
+              : i % 7 === 3
+                ? 'March 1, 2026'
+                : i % 7 === 4
+                  ? '2026-01-01'
+                  : i % 7 === 5
+                    ? ''
+                    : randomString(i % 48);
+      const reviewBy =
+        i % 5 === 0
+          ? undefined
+          : i % 5 === 1
+            ? '2027-06-15T23:59:59.999Z'
+            : i % 5 === 2
+              ? 'tomorrow'
+              : i % 5 === 3
+                ? '01/02/2026'
+                : randomString(i % 32);
+      let patch: ReturnType<typeof addWaiverPatch>;
+      expect(() => {
+        patch = addWaiverPatch(undefined, { name, expiresAt, reviewBy });
+      }).not.toThrow();
+      if (patch!.length === 0) {
+        continue;
+      }
+      const last = patch![patch!.length - 1];
+      const v = last.value as { expiresAt?: string; reviewBy?: string };
+      const entry = Array.isArray(v) ? (v as { expiresAt?: string; reviewBy?: string }[])[0] : v;
+      if (entry.expiresAt) {
+        expect(entry.expiresAt).toMatch(rfc3339);
+      }
+      if (entry.reviewBy) {
+        expect(entry.reviewBy).toMatch(rfc3339);
+      }
     }
   });
 });
@@ -2086,6 +2641,58 @@ describe('batchApplyPatch', () => {
   });
 });
 
+// Operator treats empty / comma-only batch-apply values as no request; key presence alone is not enough.
+describe('batchApplyRequested', () => {
+  const key = 'baselinesecurity.io/batch-apply';
+  it('is false when missing, empty, whitespace, or comma-only', () => {
+    expect(batchApplyRequested(undefined)).toBe(false);
+    expect(batchApplyRequested(null)).toBe(false);
+    expect(batchApplyRequested({})).toBe(false);
+    expect(batchApplyRequested({ [key]: '' })).toBe(false);
+    expect(batchApplyRequested({ [key]: '   ' })).toBe(false);
+    expect(batchApplyRequested({ [key]: ',, , ' })).toBe(false);
+  });
+  it('is true when any non-empty remediation name token is present', () => {
+    expect(batchApplyRequested({ [key]: 'a' })).toBe(true);
+    expect(batchApplyRequested({ [key]: ' a , b ' })).toBe(true);
+    expect(batchApplyRequested({ [key]: ',,rem-1,' })).toBe(true);
+  });
+  // Annotation value is CR-editable; must never throw and true only when a
+  // non-empty comma token exists after trim (operator batchRemediationNames).
+  it('fuzz: never throws; true iff a non-empty token exists', () => {
+    for (let i = 0; i < 1000; i++) {
+      const raw =
+        i % 6 === 0
+          ? undefined
+          : i % 6 === 1
+            ? null
+            : i % 6 === 2
+              ? {}
+              : i % 6 === 3
+                ? { [key]: '' }
+                : i % 6 === 4
+                  ? { [key]: ',, ,\t,' }
+                  : { [key]: randomString(i % 64) + (i % 3 === 0 ? ',rem' : '') };
+      let got: boolean;
+      expect(() => {
+        got = batchApplyRequested(raw as never);
+      }).not.toThrow();
+      expect(typeof got!).toBe('boolean');
+      if (raw == null || typeof raw !== 'object') {
+        expect(got!).toBe(false);
+        continue;
+      }
+      const val = (raw as Record<string, unknown>)[key];
+      if (typeof val !== 'string') {
+        expect(got!).toBe(false);
+        continue;
+      }
+      const hasToken = val.split(',').some((p) => p.trim());
+      expect(got!).toBe(hasToken);
+    }
+  });
+});
+
 describe('buildReportHtml', () => {
   const cb = {
     metadata: { name: 'cluster' },
@@ -2253,10 +2860,10 @@ describe('tailoredProfileManifest', () => {
     expect(spec.disableRules.map((r) => r.name)).toEqual(['r1', 'r2']);
     expect(spec.enableRules.map((r) => r.name)).toEqual(['r3']);
   });
-  it('drops non-DNS-1123 rule names and falls back invalid extends', () => {
+  it('drops non-DNS-1123 rule names; empty extends defaults to ocp4-cis', () => {
     const m = tailoredProfileManifest(
       'x',
-      'not a profile!!!',
+      '',
       ['ok-rule', 'bad name', '../x', 'ok-rule', ''],
       ['also-ok', 'has spaces'],
     );
@@ -2264,6 +2871,12 @@ describe('tailoredProfileManifest', () => {
     expect(spec.extends).toBe('ocp4-cis');
     expect(spec.disableRules?.map((r) => r.name)).toEqual(['ok-rule']);
     expect(spec.enableRules?.map((r) => r.name)).toEqual(['also-ok']);
+  });
+  it('refuses invalid base profile extends (no silent CIS substitution)', () => {
+    expect(() => tailoredProfileManifest('x', 'not a profile!!!', [])).toThrow(
+      /invalid base profile name/,
+    );
+    expect(() => tailoredProfileManifest('x', '../evil', [])).toThrow(/invalid base profile name/);
   });
   it('refuses invalid metadata.name (path-shaped / over-long / empty)', () => {
     expect(() => tailoredProfileManifest('../x', 'ocp4-cis', [])).toThrow(/invalid TailoredProfile name/);
@@ -2280,6 +2893,61 @@ describe('tailoredProfileManifest', () => {
     expect((m.metadata as { name: string }).name).toBe('cis-custom');
     expect((m.spec as { title: string }).title).toBe('cis-custom');
   });
+  // Form free-text (name, extends, rule lists) is untrusted. Invalid inputs must
+  // throw a typed Error (fail closed) or produce a DNS-1123-only create payload.
+  it('fuzz: invalid names throw; accepted payloads stay DNS-1123 and kind-correct', () => {
+    const seeds = [
+      '',
+      '../x',
+      'has spaces',
+      'a'.repeat(52),
+      'ok-name',
+      'ocp4-cis',
+      'rule-1',
+      '!!!',
+      'UPPER',
+      'ends-',
+      '-starts',
+    ];
+    for (let i = 0; i < 1000; i++) {
+      const name =
+        i < seeds.length ? seeds[i] : i % 4 === 0 ? `tp-${i}` : randomString(i % 60);
+      const extendsBase =
+        i % 5 === 0 ? 'ocp4-cis' : i % 7 === 0 ? '' : randomString(i % 40);
+      const rules = [
+        i % 3 === 0 ? `rule-${i}` : randomString(i % 20),
+        '../x',
+        'has spaces',
+        '',
+        seeds[i % seeds.length],
+      ];
+      let threw = false;
+      let m: Record<string, unknown> | undefined;
+      try {
+        m = tailoredProfileManifest(name, extendsBase, rules, rules);
+      } catch (e) {
+        threw = true;
+        expect(e).toBeInstanceOf(Error);
+        expect((e as Error).message).toMatch(/invalid (TailoredProfile|base profile) name/);
+      }
+      if (!threw) {
+        expect(m).toBeDefined();
+        expect(m!.kind).toBe('TailoredProfile');
+        expect(m!.apiVersion).toBe('compliance.openshift.io/v1alpha1');
+        const metaName = (m!.metadata as { name: string }).name;
+        expect(isValidTailoredProfileName(metaName)).toBe(true);
+        const spec = m!.spec as {
+          extends: string;
+          enableRules?: { name: string }[];
+          disableRules?: { name: string }[];
+        };
+        expect(isValidK8sName(spec.extends)).toBe(true);
+        for (const r of [...(spec.enableRules ?? []), ...(spec.disableRules ?? [])]) {
+          expect(isValidK8sName(r.name)).toBe(true);
+        }
+      }
+    }
+  });
 });
 
 // downloadBlob is DOM-only; mock the minimal browser surface so we can assert
@@ -2288,6 +2956,7 @@ describe('downloadBlob', () => {
   type AnchorStub = {
     href: string;
     download: string;
+    rel: string;
     style: { display: string };
     click: jest.Mock;
     remove: jest.Mock;
@@ -2302,6 +2971,7 @@ describe('downloadBlob', () => {
     const anchor: AnchorStub = {
       href: '',
       download: '',
+      rel: '',
       style: { display: '' },
       click: jest.fn(),
       remove: jest.fn(),
@@ -2348,6 +3018,8 @@ describe('downloadBlob', () => {
       expect(dom.anchor.download).toBe('______etc_passwd');
       expect(dom.anchor.download).not.toContain('/');
       expect(dom.anchor.download).not.toContain('..');
+      // Defense in depth when a browser ignores the download attribute.
+      expect(dom.anchor.rel).toBe('noopener noreferrer');
       expect(dom.createObjectURL).toHaveBeenCalledTimes(1);
       expect(dom.anchor.click).toHaveBeenCalledTimes(1);
       expect(dom.revokeObjectURL).toHaveBeenCalledWith('blob:mock-url');
@@ -2367,6 +3039,9 @@ describe('downloadBlob', () => {
       // BIDI override must not spoof extension direction (e.g. exe.gpj\\u202E).
       ['safe\u202Eexe.csv', 'safe_exe.csv'],
       ['a\u200E\u2066b.csv', 'a__b.csv'],
+      // Zero-width / BOM must not hide path segments or extension spoofing.
+      ['a\u200Bb.csv', 'a_b.csv'],
+      ['x\uFEFFy.csv', 'x_y.csv'],
     ];
     for (const [input, want] of cases) {
       const dom = installDom();
@@ -2400,6 +3075,46 @@ describe('downloadBlob', () => {
       expect(dom.revokeObjectURL).toHaveBeenCalledWith('blob:mock-url');
     } finally {
       dom.restore();
+    }
+  });
+
+  // Filename is sometimes CR-derived (export name). Sanitization must never throw
+  // and must strip path/control/BIDI noise that could bias the browser save path.
+  it('fuzz: download filename is non-empty, capped, and free of path/control/BIDI', () => {
+    const seeds = [
+      '',
+      '.',
+      '..',
+      '../../../etc/passwd',
+      'a/b\\c:d',
+      'safe\u202Eexe.csv',
+      'a\u200E\u2066b.csv',
+      'a'.repeat(300),
+      'report\0.csv',
+      'ok.csv',
+    ];
+    for (let i = 0; i < 500; i++) {
+      const name =
+        i < seeds.length
+          ? seeds[i]
+          : randomString(i % 80) + (i % 7 === 0 ? '/../' : '') + (i % 5 === 0 ? '\u202E' : '');
+      const dom = installDom();
+      try {
+        expect(() => downloadBlob(new Blob(['x']), name)).not.toThrow();
+        const d = dom.anchor.download;
+        expect(typeof d).toBe('string');
+        expect(d.length).toBeGreaterThan(0);
+        expect(d.length).toBeLessThanOrEqual(200);
+        expect(d).not.toContain('/');
+        expect(d).not.toContain('\\');
+        expect(d).not.toContain('..');
+        expect(d).not.toMatch(/[\0-\x1f\x7f]/);
+        expect(d).not.toMatch(/[\u200B-\u200D\u200E\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/);
+        expect(dom.anchor.rel).toBe('noopener noreferrer');
+        expect(dom.revokeObjectURL).toHaveBeenCalledWith('blob:mock-url');
+      } finally {
+        dom.restore();
+      }
     }
   });
 });

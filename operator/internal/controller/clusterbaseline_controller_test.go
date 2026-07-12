@@ -98,8 +98,8 @@ func completedSuite(name string, ends ...time.Time) *unstructured.Unstructured {
 // TestPoolFromRemediation: prefer the MachineConfig role label, fall back to the
 // scan-name label ("<profile>-node-<pool>") when the CO leaves the role empty,
 // and return "" for a non-node remediation.
-// TestEnqueueSingleton: any watched compliance-CR event maps to a reconcile of
-// the ClusterBaseline singleton "cluster".
+// TestEnqueueSingleton: owned/unknown suite labels map to the ClusterBaseline
+// singleton "cluster"; foreign suite labels and namespaces do not.
 func TestEnqueueSingleton(t *testing.T) {
 	obj := &unstructured.Unstructured{}
 	obj.SetNamespace(complianceNamespace)
@@ -107,6 +107,18 @@ func TestEnqueueSingleton(t *testing.T) {
 	if len(reqs) != 1 || reqs[0].Name != "cluster" || reqs[0].Namespace != "" {
 		t.Fatalf("enqueueSingleton = %+v, want one request Name=cluster", reqs)
 	}
+	// Owned suite label still enqueues.
+	obj.SetLabels(map[string]string{suiteLabel: "baseline-cis"})
+	if got := enqueueSingleton(context.Background(), obj); len(got) != 1 || got[0].Name != "cluster" {
+		t.Fatalf("owned suite enqueued = %+v, want Name=cluster", got)
+	}
+	// Foreign suite label (other binding in the same namespace) is dropped so
+	// multi-tenant CO churn does not force CCR list walks every event.
+	obj.SetLabels(map[string]string{suiteLabel: "someone-elses-suite"})
+	if got := enqueueSingleton(context.Background(), obj); len(got) != 0 {
+		t.Fatalf("foreign suite enqueued singleton: %+v", got)
+	}
+	obj.SetLabels(nil)
 	obj.SetNamespace("unrelated")
 	if got := enqueueSingleton(context.Background(), obj); len(got) != 0 {
 		t.Fatalf("foreign namespace enqueued singleton: %+v", got)
@@ -274,6 +286,58 @@ func TestRemediationBatchAllMissingClearsAnnotation(t *testing.T) {
 	}
 	if got.Annotations[batchApplyAnnotation] != "" {
 		t.Fatalf("annotation not cleared: %v", got.Annotations)
+	}
+}
+
+// TestRemediationBatchPartialMissingFinishClears: a batch that drops a NotFound
+// target at open must still clear its request annotation when it finishes.
+// Regression: the open path rewrites the one-shot request to the surviving set
+// so the finish-path exact match fires; otherwise the annotation would persist,
+// reopening the batch every reconcile and thrashing MachineConfigPool pause.
+func TestRemediationBatchPartialMissingFinishClears(t *testing.T) {
+	scheme := testScheme(t)
+	rem := nodeRemediation("rem1", "worker")
+	pool := machineConfigPool("worker")
+	cb := newBatchCB()
+	cb.SetAnnotations(map[string]string{batchApplyAnnotation: "rem1,gone"})
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).
+			WithObjects(cb, rem, pool).
+			WithStatusSubresource(&baselinev1alpha1.ClusterBaseline{}).Build(),
+		Scheme: scheme,
+	}
+	ctx := context.Background()
+
+	// Open: "gone" is dropped; batch lists only rem1 and the request annotation
+	// is normalized to the surviving set so finish can match it.
+	if err := r.applyRemediationBatch(ctx, cb); err != nil {
+		t.Fatal(err)
+	}
+	if cb.Status.RemediationBatch == nil {
+		t.Fatal("partial batch did not open")
+	}
+	if got := cb.Annotations[batchApplyAnnotation]; got != "rem1" {
+		t.Fatalf("request annotation not normalized to surviving set: %q", got)
+	}
+
+	// Mark Applied, then finish: pool resumes and annotation clears (no reopen).
+	gotRem := &unstructured.Unstructured{}
+	gotRem.SetGroupVersionKind(remediationGVK)
+	_ = r.Get(ctx, types.NamespacedName{Namespace: complianceNamespace, Name: "rem1"}, gotRem)
+	_ = unstructured.SetNestedField(gotRem.Object, "Applied", "status", "applicationState")
+	_ = r.Update(ctx, gotRem)
+	if err := r.applyRemediationBatch(ctx, cb); err != nil {
+		t.Fatal(err)
+	}
+	if cb.Status.RemediationBatch != nil {
+		t.Fatalf("batch not cleared after Applied: %+v", cb.Status.RemediationBatch)
+	}
+	got := &baselinev1alpha1.ClusterBaseline{}
+	if err := r.Get(ctx, types.NamespacedName{Name: "cluster"}, got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Annotations[batchApplyAnnotation] != "" {
+		t.Fatalf("request annotation not cleared after finish (would reopen batch): %v", got.Annotations)
 	}
 }
 
@@ -895,7 +959,7 @@ func TestEnsureBatchMetadataCorruptStartedAtFailClosed(t *testing.T) {
 			WithStatusSubresource(&baselinev1alpha1.ClusterBaseline{}).Build(),
 		Scheme: scheme,
 	}
-	started, err := r.ensureBatchMetadata(context.Background(), cb, []string{"worker"})
+	started, err := r.ensureBatchMetadata(context.Background(), cb, []string{"worker"}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1015,6 +1079,9 @@ func TestApplyPluginContainerRemovesUnownedPodPayloads(t *testing.T) {
 	if sc.Privileged == nil || *sc.Privileged {
 		t.Fatal("plugin container Privileged must be false")
 	}
+	if sc.SeccompProfile == nil || sc.SeccompProfile.Type != corev1.SeccompProfileTypeRuntimeDefault {
+		t.Fatal("plugin container SeccompProfile RuntimeDefault required")
+	}
 	if pod.HostNetwork || pod.HostPID || pod.HostIPC || pod.ShareProcessNamespace != nil ||
 		pod.NodeName != "" || len(pod.NodeSelector) != 0 || len(pod.Tolerations) != 0 ||
 		pod.RuntimeClassName != nil || pod.Priority != nil || pod.ActiveDeadlineSeconds != nil {
@@ -1025,6 +1092,26 @@ func TestApplyPluginContainerRemovesUnownedPodPayloads(t *testing.T) {
 	}
 	if pod.Containers[0].ImagePullPolicy != corev1.PullIfNotPresent {
 		t.Fatalf("imagePullPolicy = %q, want IfNotPresent", pod.Containers[0].ImagePullPolicy)
+	}
+	if pod.Containers[0].TerminationMessagePolicy != corev1.TerminationMessageFallbackToLogsOnError {
+		t.Fatalf("TerminationMessagePolicy = %q, want FallbackToLogsOnError", pod.Containers[0].TerminationMessagePolicy)
+	}
+	// startupProbe owns cold start; liveness must not use InitialDelaySeconds alone.
+	c0 := pod.Containers[0]
+	if c0.StartupProbe == nil || c0.StartupProbe.TCPSocket == nil || c0.StartupProbe.FailureThreshold != 30 {
+		t.Fatalf("StartupProbe = %+v, want TCP :9443 failureThreshold 30", c0.StartupProbe)
+	}
+	if c0.ReadinessProbe == nil {
+		t.Fatal("ReadinessProbe required")
+	}
+	if c0.ReadinessProbe.InitialDelaySeconds != 0 {
+		t.Fatalf("ReadinessProbe InitialDelaySeconds = %d, want 0 (startupProbe owns delay)", c0.ReadinessProbe.InitialDelaySeconds)
+	}
+	if c0.LivenessProbe == nil {
+		t.Fatal("LivenessProbe required")
+	}
+	if c0.LivenessProbe.InitialDelaySeconds != 0 {
+		t.Fatalf("LivenessProbe InitialDelaySeconds = %d, want 0 (startupProbe owns delay)", c0.LivenessProbe.InitialDelaySeconds)
 	}
 	applyPluginContainer(pod, "example.test/plugin:latest")
 	if pod.Containers[0].ImagePullPolicy != corev1.PullAlways {
@@ -1061,6 +1148,10 @@ func TestEffectiveInconsistentStatus(t *testing.T) {
 		{"unknown-with-pass", "n0:FUTURE-STATE", "PASS", "INCONSISTENT"},
 		{"malformed-empty", "garbage,,:", "", "INCONSISTENT"},
 		{"skip-only", "n0:SKIP", "SKIP", "NOT-APPLICABLE"},
+		// No annotations at all: nothing to collapse, keep raw INCONSISTENT.
+		{"empty-annotations", "", "", "INCONSISTENT"},
+		// CO may emit mixed case / padded tokens; collapse is case-insensitive.
+		{"case-and-space", " n0 : pass ", " not-applicable ", "PASS"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -1203,6 +1294,38 @@ func TestAggregateStatusWaiverExpiry(t *testing.T) {
 	}
 }
 
+// TestAggregateStatusEmptyFailName: a FAIL with empty metadata.name still tallies
+// in ResultCounts but must not enter scan-diff failure lists (empty names never
+// match waivers and produce useless newlyFailed/fixed entries).
+func TestAggregateStatusEmptyFailName(t *testing.T) {
+	scheme := testScheme(t)
+	emptyName := checkResult("placeholder", "baseline-cis", "FAIL")
+	emptyName.SetName("")
+	suite := completedSuite("baseline-cis", time.Date(2026, 7, 11, 1, 0, 0, 0, time.UTC))
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(
+			checkResult("p1", "baseline-cis", "PASS"),
+			emptyName,
+			checkResult("f1", "baseline-cis", "FAIL"),
+			suite,
+		).Build(),
+		Scheme: scheme,
+	}
+	cb := &baselinev1alpha1.ClusterBaseline{
+		Spec: baselinev1alpha1.ClusterBaselineSpec{Profiles: []baselinev1alpha1.ProfileKey{"cis"}},
+	}
+	if err := r.aggregateStatus(context.Background(), cb); err != nil {
+		t.Fatal(err)
+	}
+	if p := cb.Status.Profiles[0]; p.Pass != 1 || p.Fail != 2 {
+		t.Fatalf("counts = pass=%d fail=%d, want pass=1 fail=2 (empty name still tallies)", p.Pass, p.Fail)
+	}
+	// First completed scan: no regressions, but PreviousFailures must omit "".
+	if got := cb.Status.PreviousFailures; len(got) != 1 || got[0] != "f1" {
+		t.Fatalf("PreviousFailures = %v, want [f1] (empty name omitted)", got)
+	}
+}
+
 // TestAggregateStatusSeverityWeighted: weighted mode weights FAILs by severity,
 // so 1 high PASS (10) + 1 low FAIL (2) scores 83, vs flat 1/2 = 50.
 func TestAggregateStatusSeverityWeighted(t *testing.T) {
@@ -1246,6 +1369,11 @@ func TestCheckSeverityPrefersField(t *testing.T) {
 	u2.SetLabels(map[string]string{checkSeverityLabel: "medium"})
 	if got := checkSeverity(u2); got != "medium" {
 		t.Fatalf("checkSeverity label-only = %q, want medium", got)
+	}
+	// Missing field and label: "unknown" (console checkSeverity lockstep).
+	u3 := checkResult("z", "baseline-cis", "FAIL")
+	if got := checkSeverity(u3); got != "unknown" {
+		t.Fatalf("checkSeverity empty = %q, want unknown", got)
 	}
 }
 
@@ -1540,7 +1668,7 @@ func TestRecordHistoryRegression(t *testing.T) {
 		},
 	}
 	// Current scan fails a,b (a persists, b new); c was fixed.
-	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(90)), []string{"a", "b"}, nil); err != nil {
+	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(90)), []string{"a", "b"}, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if got := cb.Status.NewlyFailed; len(got) != 1 || got[0] != "b" {
@@ -1564,7 +1692,7 @@ func TestRecordHistoryFirstScanHasNoFalseRegressions(t *testing.T) {
 	cb := &baselinev1alpha1.ClusterBaseline{
 		Spec: baselinev1alpha1.ClusterBaselineSpec{Profiles: []baselinev1alpha1.ProfileKey{"cis"}},
 	}
-	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(50)), []string{"initial-fail"}, nil); err != nil {
+	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(50)), []string{"initial-fail"}, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if len(cb.Status.NewlyFailed) != 0 || len(cb.Status.Fixed) != 0 {
@@ -1601,7 +1729,7 @@ func TestRecordHistoryWaitsForEverySuiteGeneration(t *testing.T) {
 
 	// CIS has completed the new run, but PCI-DSS still reports the prior run.
 	// A partial aggregate must not become a history point or regression diff.
-	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(40)), []string{"partial-fail"}, nil); err != nil {
+	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(40)), []string{"partial-fail"}, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if !cb.Status.LastScanTime.Equal(&previous) || len(cb.Status.History) != 1 {
@@ -1620,7 +1748,7 @@ func TestRecordHistoryWaitsForEverySuiteGeneration(t *testing.T) {
 	if err := r.Update(context.Background(), freshPCI); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(80)), []string{"final-fail"}, nil); err != nil {
+	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(80)), []string{"final-fail"}, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if cb.Status.LastScanTime == nil || !cb.Status.LastScanTime.Time.Equal(newPCIEnd) {
@@ -1656,7 +1784,7 @@ func TestRecordHistoryWaitsForEveryMemberScan(t *testing.T) {
 			History:      []baselinev1alpha1.ScoreSnapshot{{Time: previous, Score: 90}},
 		},
 	}
-	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(50)), nil, nil); err != nil {
+	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(50)), nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if !cb.Status.LastScanTime.Equal(&previous) || len(cb.Status.History) != 1 {
@@ -1672,7 +1800,7 @@ func TestRecordHistoryWaitsForEveryMemberScan(t *testing.T) {
 	if err := r.Update(context.Background(), fresh); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(75)), nil, nil); err != nil {
+	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(75)), nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if cb.Status.LastScanTime == nil || !cb.Status.LastScanTime.Time.Equal(finalEnd) {
@@ -1873,7 +2001,7 @@ func TestRecordHistoryRing(t *testing.T) {
 			Score: int32(i),
 		})
 	}
-	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(77)), nil, nil); err != nil {
+	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(77)), nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if len(cb.Status.History) != 30 {
@@ -1890,7 +2018,7 @@ func TestRecordHistoryRing(t *testing.T) {
 		t.Fatalf("LastScanTime = %v, foreign scan leaked into history", cb.Status.LastScanTime)
 	}
 	before := len(cb.Status.History)
-	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(88)), nil, nil); err != nil {
+	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(88)), nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if len(cb.Status.History) != before {
@@ -1926,7 +2054,7 @@ func TestRecordHistoryEqualScanRefreshesProfileTrends(t *testing.T) {
 			}},
 		},
 	}
-	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(80)), []string{"late-fail"}, nil); err != nil {
+	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(80)), []string{"late-fail"}, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if got := cb.Status.Profiles[0].History; len(got) != 1 || got[0].Score != 75 {
@@ -1940,6 +2068,99 @@ func TestRecordHistoryEqualScanRefreshesProfileTrends(t *testing.T) {
 	}
 	if got := cb.Annotations[historyScoringModeAnn]; got != string(baselinev1alpha1.ScoringFlat) {
 		t.Fatalf("history mode stamp = %q, want Flat", got)
+	}
+}
+
+// New scan after a Flat -> SeverityWeighted flip must drop prior ring points so
+// charts never mix formulas, then write a single fresh snapshot under the new mode.
+func TestRecordHistoryNewScanClearsHistoryWhenScoringModeFlips(t *testing.T) {
+	scheme := testScheme(t)
+	previous := time.Date(2026, 7, 8, 1, 0, 0, 0, time.UTC)
+	end := time.Date(2026, 7, 9, 1, 0, 0, 0, time.UTC)
+	suite := completedSuite("baseline-cis", end)
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(suite).Build(),
+		Scheme: scheme,
+	}
+	prev := metav1.NewTime(previous)
+	cb := &baselinev1alpha1.ClusterBaseline{
+		ObjectMeta: metav1.ObjectMeta{
+			Annotations: map[string]string{historyScoringModeAnn: string(baselinev1alpha1.ScoringFlat)},
+		},
+		Spec: baselinev1alpha1.ClusterBaselineSpec{
+			Profiles: []baselinev1alpha1.ProfileKey{"cis"},
+			Scoring:  baselinev1alpha1.ScoringSpec{Mode: baselinev1alpha1.ScoringSeverityWeighted},
+		},
+		Status: baselinev1alpha1.ClusterBaselineStatus{
+			LastScanTime: &prev,
+			History: []baselinev1alpha1.ScoreSnapshot{
+				{Time: prev, Score: 90},
+				{Time: prev, Score: 80},
+			},
+			Profiles: []baselinev1alpha1.ProfileStatus{{
+				Key: "cis", ResultCounts: baselinev1alpha1.ResultCounts{Pass: 9, Fail: 1},
+				History: []baselinev1alpha1.ScoreSnapshot{{Time: prev, Score: 90}},
+			}},
+			PreviousFailures: []string{"old-fail"},
+		},
+	}
+	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(70)), []string{"new-fail"}, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := cb.Status.History; len(got) != 1 || got[0].Score != 70 {
+		t.Fatalf("overall history after mode flip = %+v, want single score 70", got)
+	}
+	if got := cb.Status.Profiles[0].History; len(got) != 1 || got[0].Score != 90 {
+		// Flat pass/fail from counts when weights nil: 9/(9+1)=90.
+		t.Fatalf("profile history after mode flip = %+v, want single score 90", got)
+	}
+	if got := cb.Annotations[historyScoringModeAnn]; got != string(baselinev1alpha1.ScoringSeverityWeighted) {
+		t.Fatalf("mode stamp = %q, want SeverityWeighted", got)
+	}
+}
+
+// Waived FAILs stay in the scan-diff failure set so accepting risk is not
+// reported as Fixed (score still uses the Waived bucket).
+func TestAggregateStatusWaivedFailStaysInFailureDiff(t *testing.T) {
+	scheme := testScheme(t)
+	end := time.Date(2026, 7, 9, 1, 0, 0, 0, time.UTC)
+	suite := completedSuite("baseline-cis", end)
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(
+			suite,
+			checkResult("p1", "baseline-cis", "PASS"),
+			checkResult("f1", "baseline-cis", "FAIL"),
+			checkResult("f2", "baseline-cis", "FAIL"),
+		).Build(),
+		Scheme: scheme,
+	}
+	prev := metav1.NewTime(end.Add(-24 * time.Hour))
+	cb := &baselinev1alpha1.ClusterBaseline{
+		Spec: baselinev1alpha1.ClusterBaselineSpec{
+			Profiles: []baselinev1alpha1.ProfileKey{"cis"},
+			Waivers:  []baselinev1alpha1.WaiverEntry{{Name: "f2", Reason: "accepted"}},
+		},
+		Status: baselinev1alpha1.ClusterBaselineStatus{
+			LastScanTime:     &prev,
+			PreviousFailures: []string{"f1", "f2"},
+		},
+	}
+	if err := r.aggregateStatus(context.Background(), cb); err != nil {
+		t.Fatal(err)
+	}
+	// Score excludes waived f2: 1 pass / 1 fail = 50.
+	if cb.Status.Score == nil || *cb.Status.Score != 50 {
+		t.Fatalf("score = %v, want 50", cb.Status.Score)
+	}
+	if p := cb.Status.Profiles[0]; p.Fail != 1 || p.Waived != 1 {
+		t.Fatalf("counts = %+v, want fail=1 waived=1", p)
+	}
+	// Diff vs previous scan: both f1 and f2 still "fail outcomes"; Fixed empty.
+	if len(cb.Status.Fixed) != 0 {
+		t.Fatalf("Fixed = %v, want empty (waived is not fixed)", cb.Status.Fixed)
+	}
+	if got := cb.Status.PreviousFailures; len(got) != 2 || got[0] != "f1" || got[1] != "f2" {
+		t.Fatalf("PreviousFailures = %v, want [f1 f2] including waived", got)
 	}
 }
 
@@ -1971,7 +2192,7 @@ func TestRecordHistoryEqualScanSkipsHistoryWhenScoringModeFlips(t *testing.T) {
 			}},
 		},
 	}
-	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(90)), []string{"late-fail"}, nil); err != nil {
+	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(90)), []string{"late-fail"}, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if got := cb.Status.History; len(got) != 1 || got[0].Score != 50 {
@@ -2006,7 +2227,7 @@ func TestRecordHistoryEqualScanCorrectsLateFailureDiff(t *testing.T) {
 		},
 	}
 	// The suite event arrives while only part of the new result set is visible.
-	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(90)), []string{"persistent"}, nil); err != nil {
+	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(90)), []string{"persistent"}, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if got := cb.Status.Fixed; len(got) != 1 || got[0] != "fixed" {
@@ -2014,7 +2235,7 @@ func TestRecordHistoryEqualScanCorrectsLateFailureDiff(t *testing.T) {
 	}
 	// A late CheckResult event for the same completed suite must recompute against
 	// the prior scan, not against the first partial view of this scan.
-	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(80)), []string{"late", "persistent"}, nil); err != nil {
+	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(80)), []string{"late", "persistent"}, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if got := cb.Status.NewlyFailed; len(got) != 1 || got[0] != "late" {
@@ -2037,7 +2258,7 @@ func TestRecordHistoryNoOwnedSuites(t *testing.T) {
 	cb := &baselinev1alpha1.ClusterBaseline{
 		Spec: baselinev1alpha1.ClusterBaselineSpec{Profiles: []baselinev1alpha1.ProfileKey{"cis"}},
 	}
-	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(50)), nil, nil); err != nil {
+	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(50)), nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if cb.Status.LastScanTime != nil || len(cb.Status.History) != 0 {
@@ -2065,7 +2286,7 @@ func TestRecordHistoryDoesNotRewind(t *testing.T) {
 			},
 		},
 	}
-	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(10)), nil, nil); err != nil {
+	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(10)), nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if !cb.Status.LastScanTime.Equal(&newer) {
@@ -2088,7 +2309,7 @@ func TestRecordHistoryIgnoresFarFutureEndTimestamp(t *testing.T) {
 	cb := &baselinev1alpha1.ClusterBaseline{
 		Spec: baselinev1alpha1.ClusterBaselineSpec{Profiles: []baselinev1alpha1.ProfileKey{"cis"}},
 	}
-	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(50)), nil, nil); err != nil {
+	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(50)), nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if cb.Status.LastScanTime != nil || len(cb.Status.History) != 0 {
@@ -2114,7 +2335,7 @@ func TestRecordHistoryAppendsWhenScoreAppearsLater(t *testing.T) {
 			LastScanTime: &last,
 		},
 	}
-	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(80)), nil, nil); err != nil {
+	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(80)), nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if len(cb.Status.History) != 1 || cb.Status.History[0].Score != 80 {

@@ -31,6 +31,11 @@ const HistoryMax = 30
 // and the console DEFAULT_SCAN_SCHEDULE constant.
 const DefaultScanSchedule = "0 1 * * *"
 
+// DefaultComplianceCatalogSource is used when ClusterBaselineSpec.complianceCatalogSource
+// is empty or whitespace-only. Keep in lockstep with the kubebuilder default on
+// ComplianceCatalogSource.
+const DefaultComplianceCatalogSource = "redhat-operators"
+
 // RemediationBatchPhaseApplying is the only phase written on
 // status.remediationBatch while MachineConfigPools are paused for a batch apply.
 // Absence of remediationBatch means idle; there is no terminal phase.
@@ -120,6 +125,7 @@ type ClusterBaselineSpec struct {
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`
 	// +optional
+	// Empty/whitespace uses DefaultComplianceCatalogSource at reconcile (same as CRD default).
 	ComplianceCatalogSource string `json:"complianceCatalogSource,omitempty"`
 
 	// console configures the console plugin deployment.
@@ -215,17 +221,27 @@ type ConsoleSpec struct {
 }
 
 // ResultCounts holds check-result tallies shared by profile status types.
+// Only Pass and Fail enter the score denominator (after waivers and benign
+// INCONSISTENT collapse); the other buckets are reported for UI totals.
 type ResultCounts struct {
+	// Pass counts checks that passed (including benign INCONSISTENT collapsed
+	// to PASS). Used in the score numerator and denominator.
 	// +kubebuilder:validation:Minimum=0
 	Pass int32 `json:"pass"`
+	// Fail counts checks that failed and are not actively waived. Used in the
+	// score denominator; waived FAILs are counted under Waived instead.
 	// +kubebuilder:validation:Minimum=0
 	Fail int32 `json:"fail"`
+	// Manual counts checks that require human review (CO status MANUAL).
+	// Excluded from the score; still reported so Overview totals match Results.
 	// +kubebuilder:validation:Minimum=0
 	Manual int32 `json:"manual"`
 	// Info counts informational checks (CO status INFO). Excluded from the
 	// score like Manual; still reported so Overview totals match Results.
 	// +kubebuilder:validation:Minimum=0
 	Info int32 `json:"info"`
+	// Error counts checks that could not be evaluated (CO status ERROR, or an
+	// empty/unknown raw status). Excluded from the score; still reported.
 	// +kubebuilder:validation:Minimum=0
 	Error int32 `json:"error"`
 	// Inconsistent counts checks that remain INCONSISTENT after benign collapse
@@ -238,12 +254,16 @@ type ResultCounts struct {
 	// (accepted risk). Excluded from the pass/fail denominator.
 	// +kubebuilder:validation:Minimum=0
 	Waived int32 `json:"waived"`
+	// NotApplicable counts checks that do not apply on this cluster (CO status
+	// NOT-APPLICABLE, SKIP, or benign INCONSISTENT collapsed to N/A). Excluded
+	// from the score.
 	// +kubebuilder:validation:Minimum=0
 	NotApplicable int32 `json:"notApplicable"`
 }
 
 // ProfileStatus summarizes check results for one selected profile key.
 type ProfileStatus struct {
+	// key is the ProfileKey from spec.profiles this status row describes.
 	Key ProfileKey `json:"key"`
 	// profileNames are the Compliance Operator Profile names bound for this key.
 	// +optional
@@ -275,15 +295,19 @@ type TailoredProfileStatus struct {
 // ObjectRef points at a cluster resource this baseline owns or drives; consumed
 // by must-gather and support tooling.
 type ObjectRef struct {
+	// group is the API group (empty for core resources).
 	// +optional
 	// +kubebuilder:validation:MaxLength=253
 	Group string `json:"group,omitempty"`
+	// resource is the plural resource name (for example, scansettings).
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=253
 	Resource string `json:"resource"`
+	// name is the object metadata.name.
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=253
 	Name string `json:"name"`
+	// namespace is set for namespaced objects; empty for cluster-scoped ones.
 	// +optional
 	// +kubebuilder:validation:MaxLength=63
 	Namespace string `json:"namespace,omitempty"`
@@ -318,10 +342,14 @@ type RemediationBatchStatus struct {
 
 // ScoreSnapshot is one point of score history, recorded when a scan completes.
 // Score is under the scoring mode active at capture time (Flat or
-// SeverityWeighted). Mode flips do not rewrite prior points; consecutive points
-// may be incomparable across a mode change until the next completed scan.
+// SeverityWeighted). Mode flips do not rewrite prior points under the new
+// formula; on the next completed scan under the new mode the operator clears
+// overall and per-profile history rings and writes a fresh point so charts never
+// mix Flat and SeverityWeighted values (ADR-008).
 type ScoreSnapshot struct {
+	// time is when this score was recorded (typically the scan completion time).
 	Time metav1.Time `json:"time"`
+	// score is 0-100 under the scoring mode active when the point was written.
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=100
 	Score int32 `json:"score"`
@@ -349,11 +377,17 @@ type ClusterBaselineStatus struct {
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=100
 	Score *int32 `json:"score,omitempty"`
+	// lastScanTime is when the last completed scan finished (suite phase DONE).
+	// Nil until the first scan completes. Kept when scanning is disabled (empty
+	// profiles and tailored) so re-enable does not invent false regressions;
+	// the last-scan Prometheus gauge is suppressed while scanning is off.
 	// +optional
 	LastScanTime *metav1.Time `json:"lastScanTime,omitempty"`
 	// nextScanTime is the next scheduled scan, derived from spec.schedule.
 	// +optional
 	NextScanTime *metav1.Time `json:"nextScanTime,omitempty"`
+	// complianceOperatorVersion is the adopted Compliance Operator CSV version
+	// string when a matching CSV is found; empty while CO is not yet installed.
 	// +optional
 	// +kubebuilder:validation:MaxLength=128
 	ComplianceOperatorVersion string `json:"complianceOperatorVersion,omitempty"`
@@ -378,24 +412,28 @@ type ClusterBaselineStatus struct {
 	// +kubebuilder:validation:MaxItems=64
 	RelatedObjects []ObjectRef `json:"relatedObjects,omitempty"`
 	// newlyFailed lists owned checks that are FAIL now but were not FAIL at the
-	// previous completed scan (regressions since last scan). Bounded by fail count
-	// and hard-capped so a hostile status cannot brick Status().Update admission.
+	// previous completed scan (regressions since last scan). Waived FAILs still
+	// count as FAIL outcomes here (accepting risk is not a regression clear).
+	// Bounded by fail count and hard-capped so a hostile status cannot brick
+	// Status().Update admission.
 	// +optional
 	// +listType=set
 	// +kubebuilder:validation:MaxItems=4096
 	// +kubebuilder:validation:items:MaxLength=253
 	NewlyFailed []string `json:"newlyFailed,omitempty"`
 	// fixed lists owned checks that were FAIL at the previous scan but are no
-	// longer FAIL now (improvements since last scan).
+	// longer FAIL now (improvements since last scan). A waived FAIL is still a
+	// FAIL outcome and does not appear here until the check actually PASSes.
 	// +optional
 	// +listType=set
 	// +kubebuilder:validation:MaxItems=4096
 	// +kubebuilder:validation:items:MaxLength=253
 	Fixed []string `json:"fixed,omitempty"`
 	// previousFailures is the internal FAIL snapshot from the last completed scan,
-	// used to compute newlyFailed/fixed on the next scan. Not a consumer contract:
-	// shape and presence may change in 0.x without a major bump; use newlyFailed
-	// and fixed for user-facing regression views.
+	// used to compute newlyFailed/fixed on the next scan. Includes waived FAILs
+	// (score exclusion is separate). Not a consumer contract: shape and presence
+	// may change in 0.x without a major bump; use newlyFailed and fixed for
+	// user-facing regression views.
 	// +optional
 	// +listType=set
 	// +kubebuilder:validation:MaxItems=4096
@@ -412,7 +450,9 @@ type ClusterBaselineStatus struct {
 	DiffBaseFailures []string `json:"diffBaseFailures,omitempty"`
 	// diffBaseScanTime identifies the lastScanTime whose diffBaseFailures apply.
 	// It is nil for the first completed scan, which has no comparison baseline.
-	// Internal bookkeeping only; not a consumer contract.
+	// Internal bookkeeping only; not a consumer contract: shape and presence
+	// may change in 0.x without a major bump; use newlyFailed and fixed for
+	// user-facing regression views (and history length for "prior scan exists").
 	// +optional
 	DiffBaseScanTime *metav1.Time `json:"diffBaseScanTime,omitempty"`
 	// remediationBatch tracks an in-progress MachineConfigPool-paused batch apply.

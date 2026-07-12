@@ -4,6 +4,7 @@ package e2e
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -18,6 +19,8 @@ import (
 // This validates the whole aggregation path against ground truth on a real
 // cluster, not a fake client: if the operator miscounts a status bucket, drops a
 // suite, or the score math drifts, this fails.
+// Flat-mode only: SeverityWeighted needs per-check severity mass and is covered
+// by operator unit/fuzz tests. Waived FAILs are excluded via countOwnedResults.
 func TestScoreMatchesLiveCheckResults(t *testing.T) {
 	ctx := context.Background()
 	c := newClient(t)
@@ -27,6 +30,11 @@ func TestScoreMatchesLiveCheckResults(t *testing.T) {
 	}
 	if cb.Status.Score == nil {
 		t.Skip("no score yet")
+	}
+	if cb.Spec.Scoring.Mode == baselinev1alpha1.ScoringSeverityWeighted {
+		// Flat recompute would match by coincidence on uniform severity and give
+		// false confidence; skip rather than reimplement the weight table here.
+		t.Skip("SeverityWeighted score needs weighted mass; covered by unit tests")
 	}
 	counts, err := countOwnedResults(ctx, c, cb)
 	if err != nil {
@@ -38,15 +46,16 @@ func TestScoreMatchesLiveCheckResults(t *testing.T) {
 	}
 	want := int32(int64(pass) * 100 / int64(pass+fail))
 	if *cb.Status.Score != want {
-		t.Fatalf("status.score=%d, recomputed from live results=%d (pass=%d fail=%d)",
-			*cb.Status.Score, want, pass, fail)
+		t.Fatalf("status.score=%d, recomputed from live results=%d (pass=%d fail=%d waived=%d)",
+			*cb.Status.Score, want, pass, fail, counts["WAIVED"])
 	}
-	t.Logf("score=%d verified against %d PASS / %d FAIL live results", want, pass, fail)
+	t.Logf("score=%d verified against %d PASS / %d FAIL live results (waived=%d)",
+		want, pass, fail, counts["WAIVED"])
 }
 
 // TestPerProfileCountsMatchLive asserts each per-profile status bucket equals the
 // live result counts for that profile's suite, including the multi-node
-// INCONSISTENT bucket. Pins that no status is silently dropped.
+// INCONSISTENT bucket and waived FAILs. Pins that no status is silently dropped.
 func TestPerProfileCountsMatchLive(t *testing.T) {
 	ctx := context.Background()
 	c := newClient(t)
@@ -60,15 +69,20 @@ func TestPerProfileCountsMatchLive(t *testing.T) {
 	if err := c.List(ctx, list, client.InNamespace(complianceNamespace)); err != nil {
 		t.Fatal(err)
 	}
-	// suite label -> status -> count, using the effective status so a benign
-	// INCONSISTENT collapses exactly as the operator counts it.
+	// suite label -> status -> count, using the same effective status + waiver
+	// rules as the operator (FAIL+waiver -> WAIVED, not Fail).
+	waived := activeWaivers(cb, time.Now())
 	bySuite := map[string]map[string]int{}
 	for i := range list.Items {
 		suite := list.Items[i].GetLabels()[suiteLabel]
 		if bySuite[suite] == nil {
 			bySuite[suite] = map[string]int{}
 		}
-		bySuite[suite][effectiveCheckStatus(&list.Items[i])]++
+		status := effectiveCheckStatus(&list.Items[i])
+		if status == "FAIL" && waived[list.Items[i].GetName()] {
+			status = "WAIVED"
+		}
+		bySuite[suite][status]++
 	}
 
 	total := 0
@@ -76,11 +90,12 @@ func TestPerProfileCountsMatchLive(t *testing.T) {
 		suite := "baseline-" + string(p.Key)
 		live := bySuite[suite]
 		if int(p.Pass) != live["PASS"] || int(p.Fail) != live["FAIL"] ||
-			int(p.Inconsistent) != live["INCONSISTENT"] {
-			t.Errorf("profile %s: status pass=%d fail=%d inconsistent=%d, live pass=%d fail=%d inconsistent=%d",
-				p.Key, p.Pass, p.Fail, p.Inconsistent, live["PASS"], live["FAIL"], live["INCONSISTENT"])
+			int(p.Inconsistent) != live["INCONSISTENT"] || int(p.Waived) != live["WAIVED"] {
+			t.Errorf("profile %s: status pass=%d fail=%d inconsistent=%d waived=%d, live pass=%d fail=%d inconsistent=%d waived=%d",
+				p.Key, p.Pass, p.Fail, p.Inconsistent, p.Waived,
+				live["PASS"], live["FAIL"], live["INCONSISTENT"], live["WAIVED"])
 		}
-		total += int(p.Pass) + int(p.Fail) + int(p.Inconsistent)
+		total += int(p.Pass) + int(p.Fail) + int(p.Inconsistent) + int(p.Waived)
 	}
 	if total == 0 {
 		t.Error("no per-profile results tallied")
@@ -317,6 +332,7 @@ func TestWaiverExcludesCheck(t *testing.T) {
 // TestRemediationsQueryable asserts the operator's ownership boundary holds for
 // remediations: any ComplianceRemediation labeled with one of our suites is
 // owned; foreign ones are ignored. Also confirms the CRD is reachable.
+// Previously only logged counts (always-pass false confidence).
 func TestRemediationsQueryable(t *testing.T) {
 	ctx := context.Background()
 	c := newClient(t)
@@ -330,11 +346,47 @@ func TestRemediationsQueryable(t *testing.T) {
 		t.Fatalf("list remediations: %v", err)
 	}
 	owned := ownedSuites(cb)
-	var mine int
-	for i := range list.Items {
-		if owned[list.Items[i].GetLabels()[suiteLabel]] {
-			mine++
+	// Ownership map must track every selected profile/tailored name.
+	for _, k := range cb.Spec.Profiles {
+		if !owned["baseline-"+string(k)] {
+			t.Fatalf("ownedSuites missing baseline-%s for selected profile", k)
 		}
 	}
-	t.Logf("%d owned remediations of %d total in namespace", mine, len(list.Items))
+	for _, n := range cb.Spec.TailoredProfiles {
+		if !owned["baseline-tp-"+n] {
+			t.Fatalf("ownedSuites missing baseline-tp-%s for tailored profile", n)
+		}
+	}
+	if owned[""] {
+		t.Fatal("empty suite label must never be owned")
+	}
+	var mine, foreign, unlabeled int
+	for i := range list.Items {
+		suite := list.Items[i].GetLabels()[suiteLabel]
+		if owned[suite] {
+			mine++
+			// Owned suites are always baseline-<profile> or baseline-tp-<name>.
+			if !strings.HasPrefix(suite, "baseline-") {
+				t.Errorf("owned remediation %q has non-baseline suite %q", list.Items[i].GetName(), suite)
+			}
+			continue
+		}
+		if suite == "" {
+			unlabeled++
+			continue
+		}
+		foreign++
+		// Deselected or hand-made suite: must not appear in ownedSuites.
+		if strings.HasPrefix(suite, "baseline-") {
+			for _, k := range cb.Spec.Profiles {
+				if suite == "baseline-"+string(k) {
+					t.Errorf("remediation %q suite %q is selected but not owned", list.Items[i].GetName(), suite)
+				}
+			}
+		}
+	}
+	if len(cb.Spec.Profiles)+len(cb.Spec.TailoredProfiles) > 0 && len(owned) == 0 {
+		t.Fatal("ownedSuites empty despite selected profiles")
+	}
+	t.Logf("%d owned, %d foreign, %d unlabeled of %d remediations", mine, foreign, unlabeled, len(list.Items))
 }

@@ -29,6 +29,9 @@ spec:
       serviceAccountName: baseline-security-operator
       # Avoid injecting KUBERNETES_* service env for every Service in the NS.
       enableServiceLinks: false
+      # Explicit drain window (kube default is 30s); matches plugin pods so
+      # leader election and nginx can finish in-flight work on SIGTERM.
+      terminationGracePeriodSeconds: 30
       securityContext:
         runAsNonRoot: true
         seccompProfile:
@@ -63,7 +66,8 @@ spec:
             - name: RELATED_IMAGE_CONSOLE_PLUGIN
               value: quay.io/openshift-baseline-security/baseline-security-console-plugin:latest
             # Optional: set to "true" (also accepts 1/yes) to skip creating
-            # ClusterBaseline/cluster when none exist.
+            # ClusterBaseline/cluster when none exist. Must match envSkipDefaultCR
+            # in cmd/main.go (BASELINE_SECURITY_SKIP_DEFAULT_CR).
             # - name: BASELINE_SECURITY_SKIP_DEFAULT_CR
             #   value: "true"
           ports:
@@ -77,6 +81,10 @@ spec:
             privileged: false
             capabilities:
               drop: ["ALL"]
+            # Container-level RuntimeDefault so Restricted PSS / audits that only
+            # inspect container SC still see seccomp (pod SC already sets it).
+            seccompProfile:
+              type: RuntimeDefault
             readOnlyRootFilesystem: true
             runAsNonRoot: true
           volumeMounts:
@@ -86,11 +94,20 @@ spec:
             # Writable scratch for GO/runtime temp with read-only rootfs.
             - name: tmp
               mountPath: /tmp
+          # Allow slow cold start (CRDs, leader election, image pull lag) without
+          # liveness killing the process. failureThreshold*periodSeconds = 5m.
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: 8081
+            periodSeconds: 10
+            timeoutSeconds: 1
+            failureThreshold: 30
           livenessProbe:
             httpGet:
               path: /healthz
               port: 8081
-            initialDelaySeconds: 15
+            # startupProbe owns the initial window; keep a short period once live.
             timeoutSeconds: 1
             periodSeconds: 20
             failureThreshold: 3
@@ -98,7 +115,7 @@ spec:
             httpGet:
               path: /readyz
               port: 8081
-            initialDelaySeconds: 5
+            # After startup succeeds, fail closed quickly if the process stalls.
             timeoutSeconds: 1
             periodSeconds: 10
             failureThreshold: 3

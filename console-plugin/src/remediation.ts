@@ -1,17 +1,20 @@
-import { ComplianceRemediation } from './models';
+// Remediation kind detection, object rendering, dependency summaries, apply order.
+import { ComplianceRemediation, nodePoolFromScanName, SCAN_NAME_LABEL } from './models';
+import { isValidK8sName } from './names';
 
 // CO annotations naming unmet remediation dependencies (see compliance-operator
 // RemediationDependencyAnnotation / RemediationObjectDependencyAnnotation).
 const dependsOnAnn = 'compliance.openshift.io/depends-on';
 const dependsOnObjAnn = 'compliance.openshift.io/depends-on-obj';
 const unsetValueAnn = 'compliance.openshift.io/unset-value';
-const scanNameLabel = 'compliance.openshift.io/scan-name';
 
 // A node remediation renders into a MachineConfig; applying it reboots nodes.
 // Prefer the rendered object kind; when kind is empty, fall back to the scan-name
 // label the same way the operator's poolFromRemediation does ("…-node-<pool>"),
 // so reboot warnings and batch eligibility stay accurate for partially rendered
-// remediations. A known non-MachineConfig kind is never treated as node.
+// remediations. Pool suffix must be DNS-1123 (operator validMCPPoolName) so the
+// UI does not mark batch-eligible remediations the controller cannot pause.
+// A known non-MachineConfig kind is never treated as node.
 export const isNodeRemediation = (rem: ComplianceRemediation): boolean => {
   const kind = rem.spec.current?.object?.kind;
   if (kind === 'MachineConfig') {
@@ -20,14 +23,15 @@ export const isNodeRemediation = (rem: ComplianceRemediation): boolean => {
   if (kind) {
     return false;
   }
-  const scan = rem.metadata.labels?.[scanNameLabel] ?? '';
-  const i = scan.lastIndexOf('-node-');
-  return i >= 0 && scan.slice(i + '-node-'.length).length > 0;
+  const pool = nodePoolFromScanName(rem.metadata.labels?.[SCAN_NAME_LABEL] ?? '');
+  return pool != null && isValidK8sName(pool);
 };
 
 // Pretty-printed rendered object for the remediation detail view.
 // Untrusted CR data: JSON.stringify can throw on circular graphs or non-JSON
 // values (e.g. bigint). Never let that crash the remediations detail modal.
+// Unserializable objects return a non-empty marker so the UI does not collapse
+// them into the same "No rendered object" empty state as a missing object.
 export const remediationObjectText = (rem: ComplianceRemediation): string => {
   const obj = rem.spec.current?.object;
   if (!obj) {
@@ -36,7 +40,7 @@ export const remediationObjectText = (rem: ComplianceRemediation): string => {
   try {
     return JSON.stringify(obj, null, 2);
   } catch {
-    return '';
+    return '/* unserializable remediation object */';
   }
 };
 
@@ -78,7 +82,8 @@ export const missingDependencySummary = (rem: ComplianceRemediation): string | n
           const nsPrefix = ns ? `${ns}/` : '';
           parts.push(kind ? `${kind} ${nsPrefix}${name}`.trim() : `${nsPrefix}${name}`);
         }
-      } else if (rawObj) {
+      } else {
+        // Non-array JSON (object/string/number): surface raw so the admin can act.
         parts.push(rawObj);
       }
     } catch {
@@ -103,7 +108,8 @@ export const missingDependencySummary = (rem: ComplianceRemediation): string | n
 
 // Sort key for guided remediation: applyable remediations first so prerequisite
 // fixes appear above MissingDependencies rows (openspec guided-remediation).
-// Stable by name within each group.
+// Stable by name within each group. Names are untrusted list-watch data: coerce
+// so a partial/tampered item cannot throw mid-sort.
 export const compareRemediationsForApplyOrder = (
   a: ComplianceRemediation,
   b: ComplianceRemediation,
@@ -114,5 +120,7 @@ export const compareRemediationsForApplyOrder = (
   if (d !== 0) {
     return d;
   }
-  return a.metadata.name.localeCompare(b.metadata.name);
+  const an = typeof a.metadata?.name === 'string' ? a.metadata.name : '';
+  const bn = typeof b.metadata?.name === 'string' ? b.metadata.name : '';
+  return an.localeCompare(bn);
 };

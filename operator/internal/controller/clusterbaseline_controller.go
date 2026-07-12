@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -38,6 +39,8 @@ const (
 	dashboardName      = "baseline-security-compliance-dashboard"
 	suiteLabel         = "compliance.openshift.io/suite"
 	checkSeverityLabel = "compliance.openshift.io/check-severity"
+	// CO scan that produced a check result / remediation (node pool fallback).
+	scanNameLabel = "compliance.openshift.io/scan-name"
 	// historyMax aliases the API constant so ring clamps stay CRD-aligned.
 	historyMax = baselinev1alpha1.HistoryMax
 	// Grace before a not-ready Compliance Operator install rolls up to Degraded
@@ -70,33 +73,60 @@ var (
 type ClusterBaselineReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
+
+	// lastHistoryStallLog rate-limits default-level Info when history cannot
+	// advance after a completed scan (suite missing / incomplete endTimestamps).
+	// V(1) alone leaves production logs silent until ComplianceScanStale (36h).
+	// Single-threaded reconcile (singleton + leader-elected) so no mutex.
+	lastHistoryStallLog time.Time
 }
 
 // +kubebuilder:rbac:groups=baselinesecurity.io,resources=clusterbaselines,verbs=get;list;watch;create;update;patch
 // +kubebuilder:rbac:groups=baselinesecurity.io,resources=clusterbaselines/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=baselinesecurity.io,resources=clusterbaselines/finalizers,verbs=update
-// +kubebuilder:rbac:groups=compliance.openshift.io,resources=scansettings;scansettingbindings,verbs=get;list;watch;create;update;patch;delete
+// ScanSetting name is fixed (scanSettingName); bindings are profile-derived so
+// they stay unscoped. Create cannot use resourceNames (apiserver limitation).
+// +kubebuilder:rbac:groups=compliance.openshift.io,resources=scansettings,verbs=create;list;watch
+// +kubebuilder:rbac:groups=compliance.openshift.io,resources=scansettings,resourceNames=baseline,verbs=get;update;patch;delete
+// +kubebuilder:rbac:groups=compliance.openshift.io,resources=scansettingbindings,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=compliance.openshift.io,resources=compliancecheckresults;compliancescans;compliancesuites,verbs=get;list;watch
 // +kubebuilder:rbac:groups=compliance.openshift.io,resources=complianceremediations,verbs=get;list;watch;patch
 // +kubebuilder:rbac:groups=machineconfiguration.openshift.io,resources=machineconfigpools,verbs=get;list;watch;patch
-// Subscriptions need update/patch so complianceCatalogSource can be synced after
-// the initial createIfMissing (OKD / disconnected catalog moves).
-// +kubebuilder:rbac:groups=operators.coreos.com,resources=subscriptions,verbs=get;list;watch;create;update;patch
-// OperatorGroups need update/patch so targetNamespaces stays scoped to
+// Subscriptions: fixed name compliance-operator; update/patch for catalog sync.
+// Create cannot use resourceNames; list/watch unused (Get by name only).
+// +kubebuilder:rbac:groups=operators.coreos.com,resources=subscriptions,verbs=create
+// +kubebuilder:rbac:groups=operators.coreos.com,resources=subscriptions,resourceNames=compliance-operator,verbs=get;update;patch
+// OperatorGroups: fixed name; update/patch so targetNamespaces stays scoped to
 // openshift-compliance after create (empty OG installs CO cluster-wide).
-// +kubebuilder:rbac:groups=operators.coreos.com,resources=operatorgroups,verbs=get;list;watch;create;update;patch
+// +kubebuilder:rbac:groups=operators.coreos.com,resources=operatorgroups,verbs=create
+// +kubebuilder:rbac:groups=operators.coreos.com,resources=operatorgroups,resourceNames=compliance-operator,verbs=get;update;patch
 // +kubebuilder:rbac:groups=operators.coreos.com,resources=clusterserviceversions,verbs=get;list;watch
-// +kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch;create
-// +kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create;update;patch;delete
-// ConfigMaps: the console score-trend dashboard in openshift-config-managed.
+// Namespaces: createIfMissing only (AlreadyExists is fine); no get/list/watch.
+// +kubebuilder:rbac:groups="",resources=namespaces,verbs=create
+// Plugin Service (fixed name). Create cannot use resourceNames; list/watch for
+// Owns() informers; get/update/patch/delete name-scoped so a compromised SA
+// cannot mutate arbitrary Services cluster-wide.
+// +kubebuilder:rbac:groups="",resources=services,verbs=create;list;watch
+// +kubebuilder:rbac:groups="",resources=services,resourceNames=baseline-security-console-plugin,verbs=get;update;patch;delete
+// ConfigMaps: only the console score-trend dashboard (fixed name). Create cannot
+// be name-scoped by RBAC (apiserver limitation); get/update/patch are so a
+// compromised SA cannot overwrite arbitrary ConfigMaps cluster-wide.
 // Get/CreateOrUpdate only (no informer watch); list/watch not required.
-// +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;create;update;patch
+// +kubebuilder:rbac:groups="",resources=configmaps,verbs=create
+// +kubebuilder:rbac:groups="",resources=configmaps,resourceNames=baseline-security-compliance-dashboard,verbs=get;update;patch
 // +kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;watch
-// +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
-// Plugin HA: keep one ready pod during voluntary disruptions (drain/upgrade).
-// +kubebuilder:rbac:groups=policy,resources=poddisruptionbudgets,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=console.openshift.io,resources=consoleplugins,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=operator.openshift.io,resources=consoles,verbs=get;list;watch;update;patch
+// Plugin Deployment (fixed name). list/watch for Owns(); mutate name-scoped.
+// +kubebuilder:rbac:groups=apps,resources=deployments,verbs=create;list;watch
+// +kubebuilder:rbac:groups=apps,resources=deployments,resourceNames=baseline-security-console-plugin,verbs=get;update;patch;delete
+// Plugin HA PDB (fixed name): keep one ready pod during voluntary disruptions.
+// +kubebuilder:rbac:groups=policy,resources=poddisruptionbudgets,verbs=create;list;watch
+// +kubebuilder:rbac:groups=policy,resources=poddisruptionbudgets,resourceNames=baseline-security-console-plugin,verbs=get;update;patch;delete
+// ConsolePlugin CR (fixed name).
+// +kubebuilder:rbac:groups=console.openshift.io,resources=consoleplugins,verbs=create;list;watch
+// +kubebuilder:rbac:groups=console.openshift.io,resources=consoleplugins,resourceNames=baseline-security-console-plugin,verbs=get;update;patch;delete
+// Console operator config is a singleton (name=cluster). Get/Update only; no
+// list/watch. Name-scope so a compromised SA cannot mutate other Console CRs.
+// +kubebuilder:rbac:groups=operator.openshift.io,resources=consoles,resourceNames=cluster,verbs=get;update;patch
 
 func (r *ClusterBaselineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
@@ -183,37 +213,60 @@ func (r *ClusterBaselineReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	// Posture fields for incident reconstruction without scraping metrics/CR.
 	// Degraded at Info (default level): rollup failures (ScanStorage, InstallStalled,
 	// InvalidSchedule, plugin) succeed reconcile and would otherwise be silent until
-	// the 15m ClusterBaselineDegraded alert. Healthy success stays V(1) to avoid 1m noise.
-	var score any
+	// the 15m ClusterBaselineDegraded alert.
+	// Available=False without Progressing is also Info: Manual/CRDsMissing/NotInstalled
+	// never set Degraded, so without this log operators only notice via CR conditions.
+	// Healthy success and normal install Progress stay V(1) to avoid 1m/15s noise.
+	var scoreVal any
 	if cb.Status.Score != nil {
-		score = *cb.Status.Score
+		scoreVal = *cb.Status.Score
+	}
+	var lastScan any
+	if cb.Status.LastScanTime != nil && !cb.Status.LastScanTime.IsZero() {
+		lastScan = cb.Status.LastScanTime.UTC().Format(time.RFC3339)
 	}
 	failN, errN, inconsistentN := 0, 0, 0
+	addCounts := func(c baselinev1alpha1.ResultCounts) {
+		failN += int(c.Fail)
+		errN += int(c.Error)
+		inconsistentN += int(c.Inconsistent)
+	}
 	for _, p := range cb.Status.Profiles {
-		// ResultCounts is embedded (inline); use promoted fields (staticcheck QF1008).
-		failN += int(p.Fail)
-		errN += int(p.Error)
-		inconsistentN += int(p.Inconsistent)
+		addCounts(p.ResultCounts)
 	}
 	for _, tp := range cb.Status.TailoredProfiles {
-		failN += int(tp.Fail)
-		errN += int(tp.Error)
-		inconsistentN += int(tp.Inconsistent)
+		addCounts(tp.ResultCounts)
 	}
+	available := condTrue(cb, "Available")
+	progressing := condTrue(cb, "Progressing")
+	degraded := condTrue(cb, "Degraded")
 	keysAndValues := []any{
 		"name", cb.Name,
-		"score", score,
+		"generation", cb.Generation,
+		"score", scoreVal,
 		"fail", failN,
 		"error", errN,
 		"inconsistent", inconsistentN,
 		"newlyFailed", len(cb.Status.NewlyFailed),
-		"available", condTrue(cb, "Available"),
-		"degraded", condTrue(cb, "Degraded"),
+		"lastScanTime", lastScan,
+		"available", available,
+		"progressing", progressing,
+		"degraded", degraded,
 		"batchActive", cb.Status.RemediationBatch != nil,
 	}
 	if c := meta.FindStatusCondition(cb.Status.Conditions, "Degraded"); c != nil && c.Status == metav1.ConditionTrue {
 		logger.Info("reconciled with Degraded condition",
 			append(keysAndValues, "reason", c.Reason, "message", c.Message)...)
+	} else if !available && !progressing {
+		// Prefer the detail that blocks Available (CO or scan) for on-call triage.
+		reason, message := "NotReady", ""
+		if c := meta.FindStatusCondition(cb.Status.Conditions, "ComplianceOperatorReady"); c != nil && c.Status != metav1.ConditionTrue {
+			reason, message = c.Reason, c.Message
+		} else if c := meta.FindStatusCondition(cb.Status.Conditions, "ScanConfigured"); c != nil && c.Status != metav1.ConditionTrue {
+			reason, message = c.Reason, c.Message
+		}
+		logger.Info("reconciled not Available",
+			append(keysAndValues, "reason", reason, "message", message)...)
 	} else {
 		logger.V(1).Info("reconciled", keysAndValues...)
 	}
@@ -279,10 +332,28 @@ func (r *ClusterBaselineReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	})
 }
 
-// enqueueSingleton maps any compliance-CR event to a reconcile of the
+// enqueueSingleton maps a compliance-CR event to a reconcile of the
 // ClusterBaseline singleton, coalesced by the workqueue.
+//
+// When a suite label is present and not baseline-owned ("baseline-…"), skip the
+// event. Foreign ScanSettingBindings in openshift-compliance can produce many
+// thousands of CCR/scan/remediation updates; those never enter aggregateStatus
+// (suite selector) but would still force a full CCR list walk every time. Missing
+// suite labels still enqueue (suites themselves, partial objects, deletes).
+//
+// Dynamic informers deliver *unstructured.Unstructured; read the suite label
+// without GetLabels() (full map copy per event) so foreign-suite storms stay cheap.
 func enqueueSingleton(_ context.Context, obj client.Object) []reconcile.Request {
 	if obj.GetNamespace() != complianceNamespace {
+		return nil
+	}
+	var suite string
+	if u, ok := obj.(*unstructured.Unstructured); ok {
+		suite = unstructuredLabel(u.Object, suiteLabel)
+	} else if labels := obj.GetLabels(); labels != nil {
+		suite = labels[suiteLabel]
+	}
+	if suite != "" && !strings.HasPrefix(suite, "baseline-") {
 		return nil
 	}
 	return []reconcile.Request{{NamespacedName: types.NamespacedName{Name: "cluster"}}}

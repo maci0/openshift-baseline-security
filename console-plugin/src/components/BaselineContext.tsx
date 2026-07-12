@@ -1,3 +1,15 @@
+// Page shell context and HorizontalNav route wrappers.
+//
+// Component map (where UI work should go):
+//   CompliancePage.tsx   - page entry, watches, rescan/export actions
+//   BaselineContext.tsx  - shared CR/CCR context + route components
+//   Overview.tsx         - score, schedule, composition, history
+//   ResultsTab.tsx       - check results table, waive, CSV
+//   RemediationsTab.tsx  - remediation list, apply/batch
+//   ProfilesTab.tsx      - built-in + tailored profile management
+//   ClusterScoreItem.tsx - cluster Overview details score item
+//   DisabledTip.tsx      - tooltip wrapper for disabled controls
+//   feedback.ts          - shared success-banner dismiss timing
 import * as React from 'react';
 import { ClusterBaseline, ComplianceCheckResult } from '../models';
 import Overview from './Overview';

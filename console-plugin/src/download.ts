@@ -6,8 +6,9 @@
 const safeDownloadName = (filename: string): string => {
   const cleaned = filename
     .replace(/[/\\:\0-\x1f\x7f]/g, '_')
-    // BIDI / isolate controls (U+200E–U+200F, U+202A–U+202E, U+2066–U+2069).
-    .replace(/[\u200E\u200F\u202A-\u202E\u2066-\u2069]/g, '_')
+    // BIDI / isolate controls (U+200E–U+200F, U+202A–U+202E, U+2066–U+2069)
+    // and zero-width / BOM (U+200B–U+200D, U+FEFF) that can spoof extensions.
+    .replace(/[\u200B-\u200D\u200E\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g, '_')
     .replace(/\.\./g, '_')
     .replace(/^\.+/, '_')
     .trim()
@@ -24,6 +25,8 @@ export const downloadBlob = (blob: Blob, filename: string): void => {
     const a = document.createElement('a');
     a.href = url;
     a.download = safeDownloadName(filename);
+    // No navigation target, but set rel in case a browser ignores download.
+    a.rel = 'noopener noreferrer';
     a.style.display = 'none';
     document.body.appendChild(a);
     a.click();

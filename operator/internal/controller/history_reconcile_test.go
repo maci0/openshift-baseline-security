@@ -104,3 +104,25 @@ func FuzzCompletedSuiteTimesTypeConfusion(f *testing.F) {
 		}
 	})
 }
+
+// logHistoryStall must advance lastHistoryStallLog on first call and suppress
+// default-level repeats until historyStallLogInterval elapses (V(1) still fires).
+func TestLogHistoryStallRateLimit(t *testing.T) {
+	r := &ClusterBaselineReconciler{}
+	ctx := t.Context()
+	r.logHistoryStall(ctx, "stall a", "k", "v")
+	if r.lastHistoryStallLog.IsZero() {
+		t.Fatal("first stall log should set lastHistoryStallLog")
+	}
+	first := r.lastHistoryStallLog
+	r.logHistoryStall(ctx, "stall b", "k", "v")
+	if !r.lastHistoryStallLog.Equal(first) {
+		t.Fatal("second stall within interval must not move lastHistoryStallLog")
+	}
+	// Simulate interval elapsed without sleeping.
+	r.lastHistoryStallLog = time.Now().Add(-historyStallLogInterval - time.Second)
+	r.logHistoryStall(ctx, "stall c", "k", "v")
+	if !r.lastHistoryStallLog.After(first) {
+		t.Fatal("stall after interval should refresh lastHistoryStallLog")
+	}
+}

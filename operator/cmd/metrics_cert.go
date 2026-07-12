@@ -3,13 +3,13 @@ package main
 import (
 	"crypto/sha256"
 	"crypto/tls"
-	"log"
 	"net"
 	"os"
 	"path/filepath"
 	"sync"
 
 	certutil "k8s.io/client-go/util/cert"
+	ctrl "sigs.k8s.io/controller-runtime"
 )
 
 // metricsCertProvider loads service-ca certs from certDir when present and
@@ -31,6 +31,9 @@ type metricsCertProvider struct {
 	// parse failure does not spam every TLS handshake.
 	badFingerprint [sha256.Size]byte
 	loggedBad      bool
+
+	// readPair overrides on-disk reads (tests only). Production leaves nil.
+	readPair func(certPath, keyPath string) ([]byte, []byte, [sha256.Size]byte, bool)
 }
 
 func readCertPair(certPath, keyPath string) ([]byte, []byte, [sha256.Size]byte, bool) {
@@ -51,6 +54,13 @@ func readCertPair(certPath, keyPath string) ([]byte, []byte, [sha256.Size]byte, 
 	return certPEM, keyPEM, fingerprint, true
 }
 
+func (p *metricsCertProvider) loadCertPair(certPath, keyPath string) ([]byte, []byte, [sha256.Size]byte, bool) {
+	if p.readPair != nil {
+		return p.readPair(certPath, keyPath)
+	}
+	return readCertPair(certPath, keyPath)
+}
+
 func (p *metricsCertProvider) GetCertificate(_ *tls.ClientHelloInfo) (*tls.Certificate, error) {
 	// One retry when disk rotates between read and install so a slow parse of an
 	// older pair cannot overwrite a newer cert installed by a concurrent handshake.
@@ -63,7 +73,7 @@ func (p *metricsCertProvider) GetCertificate(_ *tls.ClientHelloInfo) (*tls.Certi
 		if p.certDir != "" {
 			certPath := filepath.Join(p.certDir, "tls.crt")
 			keyPath := filepath.Join(p.certDir, "tls.key")
-			certPEM, keyPEM, fingerprint, haveFiles = readCertPair(certPath, keyPath)
+			certPEM, keyPEM, fingerprint, haveFiles = p.loadCertPair(certPath, keyPath)
 		}
 
 		// Cache hit: same on-disk content as last successful load.
@@ -88,22 +98,31 @@ func (p *metricsCertProvider) GetCertificate(_ *tls.ClientHelloInfo) (*tls.Certi
 				}
 				// Stale-parse guard: re-read under the lock so we never install an
 				// older parse over a different fingerprint that is still (or now)
-				// on disk after a concurrent rotation.
+				// on disk after a concurrent rotation. A re-read failure must not
+				// fall through to install either: a concurrent handshake may have
+				// published a newer pair while our parse of an older read was in
+				// flight, and overwriting it would leave the cache on rotated-out
+				// material until the next successful load.
 				if p.certDir != "" {
-					_, _, currentFP, ok := readCertPair(
+					_, _, currentFP, ok := p.loadCertPair(
 						filepath.Join(p.certDir, "tls.crt"),
 						filepath.Join(p.certDir, "tls.key"),
 					)
-					if ok && currentFP != fingerprint {
+					if !ok || currentFP != fingerprint {
 						if p.cert != nil {
-							// Cache holds something else (often the concurrent winner).
+							// Cache holds something else (often the concurrent winner),
+							// or disk is briefly unreadable: keep last known-good.
 							c := p.cert
 							p.mu.Unlock()
 							return c, nil
 						}
-						p.mu.Unlock()
-						// Empty cache and disk moved: re-read/parse once.
-						continue
+						if ok {
+							// Empty cache and disk moved: re-read/parse once.
+							p.mu.Unlock()
+							continue
+						}
+						// Empty cache and re-read failed: install this parse so
+						// metrics TLS still has a cert (best effort).
 					}
 				}
 				p.cert = &pair
@@ -122,8 +141,12 @@ func (p *metricsCertProvider) GetCertificate(_ *tls.ClientHelloInfo) (*tls.Certi
 				p.loggedBad = true
 				p.badFingerprint = fingerprint
 				p.mu.Unlock()
-				log.Printf("metrics TLS: failed to parse cert/key in %s: %v; using previous or self-signed",
-					p.certDir, err)
+				// Structured (not stdlib log): matches operator zap fields so log
+				// aggregation can filter metrics-cert failures with the rest of
+				// the process. Still once-per-corrupt-content (sticky fingerprint).
+				ctrl.Log.WithName("metrics-cert").Error(err,
+					"failed to parse metrics TLS cert/key; using previous or self-signed",
+					"certDir", p.certDir)
 			} else {
 				p.mu.Unlock()
 			}
@@ -168,6 +191,11 @@ func metricsTLSOpts(certDir string) []func(*tls.Config) {
 			// cannot reopen TLS 1.0/1.1 on the metrics endpoint.
 			c.MinVersion = tls.VersionTLS12
 			c.GetCertificate = p.GetCertificate
+			// Disable HTTP/2 on the metrics endpoint: it mitigates the Rapid
+			// Reset stream-multiplexing DoS (CVE-2023-44487, CVE-2023-39325)
+			// at the protocol layer, before the authn/authz filter runs.
+			// Prometheus scrapes over HTTP/1.1, so this is functionally inert.
+			c.NextProtos = []string{"http/1.1"}
 		},
 	}
 }

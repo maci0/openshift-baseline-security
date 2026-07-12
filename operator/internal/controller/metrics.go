@@ -6,8 +6,6 @@ import (
 
 	baselinev1alpha1 "github.com/maci0/baseline-security-operator/api/v1alpha1"
 	"github.com/prometheus/client_golang/prometheus"
-	"k8s.io/apimachinery/pkg/api/meta"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/metrics"
 )
 
@@ -39,9 +37,11 @@ var (
 		Name: "baseline_security_condition",
 		Help: "ClusterBaseline rollup condition: 1 if True, 0 if False or absent. Labels: type (Available|Progressing|Degraded).",
 	}, []string{"type"})
-	// Last completed scan (status.lastScanTime). 0 when never scanned / CR gone.
-	// Distinct from statusObservedTimestamp (operator publish freshness): scans
-	// can stop while the reconciler keeps republishing a stale score.
+	// Last completed scan (status.lastScanTime). 0 when never scanned, CR gone,
+	// or scanning disabled (empty profiles+tailored): ComplianceScanStale must
+	// not page when the admin turned scanning off. Distinct from
+	// statusObservedTimestamp (operator publish freshness): scans can stop
+	// while the reconciler keeps republishing a stale score.
 	lastScanTimestamp = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "baseline_security_last_scan_timestamp_seconds",
 		Help: "Unix timestamp of the last completed compliance scan (status.lastScanTime). 0 when never scanned or when scanning is disabled (no profiles/tailored selected).",
@@ -146,9 +146,8 @@ func publishMetrics(cb *baselinev1alpha1.ClusterBaseline) {
 	}
 
 	for _, typ := range publishedConditionTypes {
-		c := meta.FindStatusCondition(cb.Status.Conditions, typ)
 		v := 0.0
-		if c != nil && c.Status == metav1.ConditionTrue {
+		if condTrue(cb, typ) {
 			v = 1.0
 		}
 		conditionStatus.WithLabelValues(typ).Set(v)

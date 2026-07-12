@@ -130,6 +130,7 @@ func (r *ClusterBaselineReconciler) setMCPPaused(ctx context.Context, pool strin
 
 func (r *ClusterBaselineReconciler) ensureBatchMetadata(
 	ctx context.Context, cb *baselinev1alpha1.ClusterBaseline, pools []string,
+	requested, kept []string,
 ) (metav1.Time, error) {
 	desiredPools := strings.Join(uniqueSortedStrings(pools), ",")
 	var started metav1.Time
@@ -157,7 +158,7 @@ func (r *ClusterBaselineReconciler) ensureBatchMetadata(
 				// can leave MachineConfigPools paused another full window).
 				// Fail closed with a stable past epoch so batchPastGrace fires.
 				started = metav1.NewTime(time.Unix(1, 0).UTC())
-				annotations[batchStartedAtAnnotation] = started.Time.Format(time.RFC3339Nano)
+				annotations[batchStartedAtAnnotation] = started.Format(time.RFC3339Nano)
 				changed = true
 				// Info: early grace-forced resume is surprising without this
 				// marker (hand-edit / truncated annotation).
@@ -167,12 +168,28 @@ func (r *ClusterBaselineReconciler) ensureBatchMetadata(
 		}
 		if started.IsZero() {
 			started = metav1.Now()
-			annotations[batchStartedAtAnnotation] = started.Time.UTC().Format(time.RFC3339Nano)
+			annotations[batchStartedAtAnnotation] = started.UTC().Format(time.RFC3339Nano)
 			changed = true
 		}
 		if annotations[batchPoolsAnnotation] != desiredPools {
 			annotations[batchPoolsAnnotation] = desiredPools
 			changed = true
+		}
+		// A partial batch (NotFound targets dropped at open) must rewrite the
+		// one-shot request to the surviving set: clearBatchAnnotations finish-
+		// matches on the persisted batch.Remediations (kept), so an annotation
+		// still holding the original CSV would never clear, reopening the batch
+		// every reconcile and thrashing MachineConfigPool pause/resume. Guard on
+		// the request still equaling what we opened with so a concurrent console
+		// resubmit (different names) is preserved, not clobbered.
+		if len(kept) < len(requested) {
+			if cur, ok := annotations[batchApplyAnnotation]; ok &&
+				slices.Equal(batchRemediationNames(cur), uniqueSortedStrings(requested)) {
+				if want := strings.Join(uniqueSortedStrings(kept), ","); cur != want {
+					annotations[batchApplyAnnotation] = want
+					changed = true
+				}
+			}
 		}
 		if !changed {
 			// Keep the in-memory CR aligned even when nothing was written.
@@ -219,13 +236,13 @@ func (r *ClusterBaselineReconciler) resumeOrphanedBatch(
 	owner := batchPauseOwner(cb)
 	for _, pool := range pools {
 		if err := r.setMCPPaused(ctx, pool, false, owner); err != nil {
-			return err
+			return fmt.Errorf("resuming orphaned batch pool %q: %w", pool, err)
 		}
 	}
 	// RetryOnConflict: a concurrent console patch (waiver/schedule/rescan) must
 	// not leave recovery annotations stuck after pools are already unpaused.
 	// Clone + re-Get so we never mutate a shared annotation map in place.
-	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+	if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		latest := &baselinev1alpha1.ClusterBaseline{}
 		if err := r.Get(ctx, types.NamespacedName{Name: cb.Name}, latest); err != nil {
 			return err
@@ -258,7 +275,10 @@ func (r *ClusterBaselineReconciler) resumeOrphanedBatch(
 		cb.SetAnnotations(ann)
 		cb.SetResourceVersion(latest.GetResourceVersion())
 		return nil
-	})
+	}); err != nil {
+		return fmt.Errorf("clearing orphaned batch annotations for ClusterBaseline %q: %w", cb.Name, err)
+	}
+	return nil
 }
 
 // clearBatchAnnotations drops the one-shot request and/or recovery annotations
@@ -270,7 +290,7 @@ func (r *ClusterBaselineReconciler) clearBatchAnnotations(
 	ctx context.Context, cb *baselinev1alpha1.ClusterBaseline,
 	clearRequest bool, requestMatch []string, clearRecovery bool,
 ) error {
-	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+	if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		latest := &baselinev1alpha1.ClusterBaseline{}
 		if err := r.Get(ctx, types.NamespacedName{Name: cb.Name}, latest); err != nil {
 			return err
@@ -316,12 +336,18 @@ func (r *ClusterBaselineReconciler) clearBatchAnnotations(
 		cb.SetAnnotations(ann)
 		cb.SetResourceVersion(latest.GetResourceVersion())
 		return nil
-	})
+	}); err != nil {
+		return fmt.Errorf("clearing batch annotations for ClusterBaseline %q: %w", cb.Name, err)
+	}
+	return nil
 }
 
-func remediationOwnedByBaseline(cb *baselinev1alpha1.ClusterBaseline, rem *unstructured.Unstructured) bool {
+// remediationOwnedByBaseline is true when rem's suite label is in suites
+// (prebuilt via ownedSuites). Callers must build the map once per batch of
+// targets: rebuilding ownedSuites per Get was O(profiles) × N remediations.
+func remediationOwnedByBaseline(suites map[string]bool, rem *unstructured.Unstructured) bool {
 	// Single-key label read: avoid GetLabels full-map copy on each batch target.
-	return ownedSuites(cb)[unstructuredLabel(rem.Object, suiteLabel)]
+	return suites[unstructuredLabel(rem.Object, suiteLabel)]
 }
 
 // getBatchRemediation validates the confused-deputy boundary before the
@@ -329,8 +355,9 @@ func remediationOwnedByBaseline(cb *baselinev1alpha1.ClusterBaseline, rem *unstr
 // NotFound returns (nil, nil) so a race-deleted remediation can be skipped.
 // NoMatch (CRDs absent) returns the error so batch start retries rather than
 // pretending every target was missing and clearing the request annotation.
+// suites is the prebuilt ownedSuites map (build once per batch of Gets).
 func (r *ClusterBaselineReconciler) getBatchRemediation(
-	ctx context.Context, cb *baselinev1alpha1.ClusterBaseline, name string,
+	ctx context.Context, name string, suites map[string]bool,
 ) (*unstructured.Unstructured, error) {
 	rem := u(remediationGVK)
 	if err := r.Get(ctx, types.NamespacedName{Namespace: complianceNamespace, Name: name}, rem); err != nil {
@@ -339,7 +366,7 @@ func (r *ClusterBaselineReconciler) getBatchRemediation(
 		}
 		return nil, fmt.Errorf("getting remediation %q: %w", name, err)
 	}
-	if !remediationOwnedByBaseline(cb, rem) {
+	if !remediationOwnedByBaseline(suites, rem) {
 		return nil, fmt.Errorf("remediation %q does not belong to a selected baseline suite", name)
 	}
 	state, _, err := unstructured.NestedString(rem.Object, "status", "applicationState")
@@ -352,11 +379,13 @@ func (r *ClusterBaselineReconciler) getBatchRemediation(
 	return rem, nil
 }
 
+// applyOwnedRemediation sets spec.apply=true on one owned remediation.
+// suites is the prebuilt ownedSuites map (build once per batch, not per name).
 func (r *ClusterBaselineReconciler) applyOwnedRemediation(
-	ctx context.Context, cb *baselinev1alpha1.ClusterBaseline, name string,
+	ctx context.Context, cb *baselinev1alpha1.ClusterBaseline, name string, suites map[string]bool,
 ) error {
 	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		rem, err := r.getBatchRemediation(ctx, cb, name)
+		rem, err := r.getBatchRemediation(ctx, name, suites)
 		if err != nil {
 			return err
 		}
@@ -407,17 +436,23 @@ func (r *ClusterBaselineReconciler) resumeBatchPoolsOnDelete(ctx context.Context
 		for _, pool := range batchRemediationNames(cb.Annotations[batchPoolsAnnotation]) {
 			pools[pool] = true
 		}
+		// One suite set for the whole recovery list (up to batchMaxRemediations).
+		suites := ownedSuites(cb)
 		for _, name := range batchRemediationNames(cb.Annotations[batchApplyAnnotation]) {
 			rem := u(remediationGVK)
 			if err := r.Get(ctx, types.NamespacedName{Namespace: complianceNamespace, Name: name}, rem); err != nil {
 				if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) {
+					// Info: pool rediscovery skipped this name; if batch-pools
+					// was also empty, on-call needs to know why no MCP resume ran.
+					log.FromContext(ctx).Info("remediation missing while recovering batch pools",
+						"remediation", name, "baseline", cb.Name, "notFound", apierrors.IsNotFound(err))
 					continue
 				}
 				return fmt.Errorf("getting remediation %q while recovering batch pools: %w", name, err)
 			}
 			// A crafted foreign remediation must not make this finalizer mutate its
 			// MachineConfigPool through the operator's service account.
-			if !remediationOwnedByBaseline(cb, rem) {
+			if !remediationOwnedByBaseline(suites, rem) {
 				log.FromContext(ctx).Info("skipping foreign remediation while recovering batch pools",
 					"remediation", name, "baseline", cb.Name)
 				continue
@@ -429,7 +464,7 @@ func (r *ClusterBaselineReconciler) resumeBatchPoolsOnDelete(ctx context.Context
 	}
 	for _, p := range slices.Sorted(maps.Keys(pools)) {
 		if err := r.setMCPPaused(ctx, p, false, owner); err != nil {
-			return err
+			return fmt.Errorf("resuming MachineConfigPool %q on ClusterBaseline delete: %w", p, err)
 		}
 	}
 	return nil

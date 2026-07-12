@@ -45,12 +45,14 @@ Install from published OLM image/CSV tags for only the released surface.
   (`baseline_security_compliance_score`, `baseline_security_checks`,
   `baseline_security_status_observed_timestamp_seconds` for HA scrape
   selection, `baseline_security_remediation_batch_active`,
-  `baseline_security_last_scan_timestamp_seconds`,
+  `baseline_security_remediation_batch_started_timestamp_seconds` for
+  MCP-paused batch age, `baseline_security_last_scan_timestamp_seconds`,
   `baseline_security_newly_failed`,
   `baseline_security_condition` for Available/Progressing/Degraded) with
   PrometheusRule alerts (`ComplianceScoreLow`, `ComplianceChecksFailing`,
-  `ComplianceChecksInError`, `ComplianceStatusStale`, `ComplianceScanStale`,
-  `ComplianceRegressions`, `RemediationBatchStuck`, `ClusterBaselineDegraded`);
+  `ComplianceChecksInError`, `ComplianceChecksInconsistent`,
+  `ComplianceStatusStale`, `ComplianceScanStale`, `ComplianceRegressions`,
+  `RemediationBatchStuck`, `ClusterBaselineDegraded`);
   native Observe →
   Dashboards ConfigMap when user-workload monitoring is enabled.
 - **Support**: `operator/hack/must-gather.sh` collects operator + compliance state.
@@ -58,6 +60,7 @@ Install from published OLM image/CSV tags for only the released surface.
 ## Layout
 
 - `CHANGELOG.md`: consumer-facing release notes and migration notes
+- `SECURITY.md`: supported versions and vulnerability reporting
 - `docs/SPEC.md`: design specification (read this first)
 - `docs/DESIGN-DECISIONS.md`: ADR-style product design tradeoffs
 - `docs/PATTERNS.md`: OpenShift addon patterns this repo follows
@@ -110,9 +113,8 @@ reuse a published tag), then:
 
 ```sh
 # Plugin image (must match CSV relatedImages / RELATED_IMAGE_CONSOLE_PLUGIN).
-# --provenance/--sbom false: same as Makefile DOCKER_BUILD_FLAGS (reproducible digests).
-docker build --provenance=false --sbom=false -t <PLUGIN_IMG> console-plugin
-docker push <PLUGIN_IMG>
+# Makefile pins DOCKER_BUILD_FLAGS (reproducible digests; same as operator).
+make -C console-plugin docker-build docker-push IMG=<PLUGIN_IMG>
 cd operator
 make docker-build docker-push          # operator image (IMG=...)
 make bundle bundle-build bundle-push   # validated OLM bundle
@@ -138,8 +140,10 @@ with `BASELINE_SECURITY_SKIP_DEFAULT_CR=true` on the CSV deployment.
 
 Metrics: the OLM bundle ships ServiceMonitor, PrometheusRule, and a metrics
 scrape ServiceAccount bound to ClusterRole `baseline-security-metrics-reader`
-(`GET /metrics`). Scrapes are inert until user-workload monitoring is enabled.
-For non-OLM `make deploy`, apply `operator/config/prometheus/` as needed.
+(`GET /metrics`). Non-OLM `make deploy` applies the same objects via
+`operator/config/default` (includes `config/prometheus/`). Scrapes stay inert
+until user-workload monitoring is enabled; monitoring CRDs are required on
+the cluster (present on OpenShift).
 
 Deleting the `ClusterBaseline` (or uninstalling this operator) does **not**
 remove the Compliance Operator Subscription; CO is treated as a shared
@@ -154,13 +158,23 @@ for every publish.
 
 - **SemVer 0.x + alpha**: the product is pre-1.0. The CRD is `v1alpha1`, the
   OLM channel and CSV `maturity` are `alpha`. Breaking behavior may appear in
-  minor releases; read [CHANGELOG.md](CHANGELOG.md) before upgrading.
+  minor releases; read [CHANGELOG.md](CHANGELOG.md) **Changed** / **Removed**
+  and **Migration notes** before upgrading.
+- **Consumer contract**: versioning covers the `ClusterBaseline` user-facing
+  API, shipped metrics/alerts, the OLM `alpha` channel `replaces` edge, and
+  the console plugin surface. Scan-diff bookkeeping fields
+  (`status.previousFailures`, `diffBaseFailures`, `diffBaseScanTime`) are
+  internal and may change in 0.x; details in [CHANGELOG.md](CHANGELOG.md).
 - **Supported host**: OpenShift 4.22 only (`com.redhat.openshift.versions: =v4.22`;
-  a bare `v4.22` would advertise 4.22 *and later*, which is untested).
+  a bare `v4.22` would advertise 4.22 *and later*, which is untested). CSV
+  `minKubeVersion` is `1.35.0` (the kube API floor for that OCP line). The
+  console plugin pins `@console/pluginAPI` to `>=4.22.0-0 <4.23.0-0` for the
+  same reason.
 - **Support window**: only the latest published 0.x release is supported for
   bugfixes and security updates. Older 0.x lines get no backports; upgrade to
   the latest 0.x. Published CSV/image tags are immutable (never re-push the
-  same version string with different bits).
+  same version string with different bits). Security reporting:
+  [SECURITY.md](SECURITY.md).
 - **Install path**: OLM bundle + file-based catalog is the only supported
   install. Helm was removed in 0.4.0.
 - **Upgrade path**: OLM `replaces` chain
@@ -170,33 +184,52 @@ for every publish.
   results (PASS where applicable, NOT-APPLICABLE elsewhere) now count as PASS
   in score, metrics, and UI. Scores can rise on upgrade without remediations.
 - **Unreleased (not yet versioned)**: empty `spec.profiles: []` disables
-  scanning; `spec.complianceCatalogSource` is DNS-1123-validated; new metrics
+  scanning; `spec.complianceCatalogSource` is DNS-1123-validated; scan-diff
+  tracks raw FAIL (waivers no longer clear `newlyFailed` / invent `fixed`);
+  status list-types for conditions/profiles/tailoredProfiles are map-merge;
+  HA-safe score/fail alert expressions; metrics
+  `baseline_security_status_observed_timestamp_seconds` /
+  `baseline_security_remediation_batch_active` /
+  `baseline_security_condition` /
   `baseline_security_last_scan_timestamp_seconds` /
-  `baseline_security_newly_failed` and alerts `ComplianceScanStale` /
-  `ComplianceRegressions`. Details and migration notes:
-  [CHANGELOG.md](CHANGELOG.md) **[Unreleased]**.
+  `baseline_security_newly_failed` /
+  `baseline_security_remediation_batch_started_timestamp_seconds`; alerts
+  `ComplianceChecksInError` / `ComplianceChecksInconsistent` /
+  `ComplianceStatusStale` / `RemediationBatchStuck` / `ClusterBaselineDegraded` /
+  `ComplianceScanStale` / `ComplianceRegressions`; dynamic informer watch on
+  Compliance CRs. Details and migration notes: [CHANGELOG.md](CHANGELOG.md)
+  **[Unreleased]**.
+  Do not push `:0.4.0` (or any current `VERSION`) images from `main` while
+  this section still has entries; that would re-label unreleased bits as a
+  published version.
 - **Version sources** (must stay equal; `make verify-versions` checks them):
   `operator/Makefile` (`VERSION` / `PREV_VERSION`), the CSV in
   `operator/bundle/manifests/baseline-security-operator.clusterserviceversion.yaml`
   (name, version, replaces, containerImage, relatedImages),
   `console-plugin/package.json` (`version` + `consolePlugin.version`),
+  `operator/catalog/package.yaml` channel entry (name + replaces) when present,
   `CHANGELOG.md` (`## [VERSION]`, `## [PREV_VERSION]`, `## [Unreleased]`, and
-  the `[VERSION]:` / `[Unreleased]:` compare footers), and this README's
-  **Current release** line and upgrade path.
+  the `[VERSION]:` / `[PREV_VERSION]:` / `[Unreleased]:` compare footers), and
+  this README's **Current release** line and upgrade path.
 - **Cutting a release**: bump `VERSION`/`PREV_VERSION`, CSV name/version/images/
   `replaces`, console-plugin versions, move CHANGELOG `[Unreleased]` into
-  `## [VERSION]` with migration notes and footer compare links (including
+  `## [VERSION]` with a `### Migration notes` section and footer compare
+  links (including `[VERSION]: ...compare/vPREV...vVERSION` and
   `[Unreleased]: ...compare/vVERSION...HEAD`), update **Current release** and
-  the upgrade path above, run `make verify-versions` (also in CI), create an
-  immutable git tag `vVERSION` pointing at that commit (CHANGELOG compare
-  URLs require it; never force-move a published tag), then publish **new**
-  image tags only (never overwrite an existing version tag).
+  the upgrade path above, create an immutable git tag `vVERSION` pointing at
+  that commit (CHANGELOG compare URLs require it; never force-move a published
+  tag), then run `RELEASE_GATE=1 REQUIRE_GIT_TAGS=1 make verify-versions`
+  (also plain `make verify-versions` in CI; the gate refuses a cut while
+  `[Unreleased]` still has bullets or when `vVERSION` / `vPREV_VERSION` tags
+  are missing), then publish **new** image tags only (never overwrite an
+  existing version tag). Keep the CSV `links` Changelog entry pointed at
+  `CHANGELOG.md` so OperatorHub consumers can find Migration notes.
 
 ## Development
 
 ```sh
 # operator: build, unit test, lint, run against the current kubeconfig
-# (Makefile sets GOTOOLCHAIN from go.mod; needs Go 1.25+ or auto-download.)
+# (Makefile pins GOTOOLCHAIN to match go.mod; needs Go 1.25+ or auto-download.)
 cd operator && make test && make lint && make install && make run
 
 # console plugin (Node 22 per .nvmrc / package.json engines; Yarn 4 via corepack)

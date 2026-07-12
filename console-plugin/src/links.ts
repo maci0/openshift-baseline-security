@@ -1,11 +1,16 @@
-// Drop unpaired surrogates so encodeURIComponent / URLSearchParams never throw
-// on malformed UTF-16 from untrusted names.
-const stripSurrogates = (s: string): string => s.replace(/[\uD800-\uDFFF]/g, '');
+import { COMPLIANCE_NAMESPACE } from './models';
+
+// Drop all surrogate code units so encodeURIComponent / URLSearchParams never
+// throw on malformed UTF-16 from untrusted names. This also strips valid astral
+// characters (emoji etc.), acceptable since these are resource names, not display text.
+// Module-level pattern: Overview/Results build many hrefs (recent changes, count rows).
+const surrogateRe = /[\uD800-\uDFFF]/g;
+const stripSurrogates = (s: string): string => s.replace(surrogateRe, '');
 
 // Console URL for a namespaced ComplianceCheckResult, so the detail modal can
 // deep-link to the raw Compliance Operator resource.
 export const checkResultHref = (name: string): string =>
-  `/k8s/ns/openshift-compliance/compliance.openshift.io~v1alpha1~ComplianceCheckResult/${encodeURIComponent(
+  `/k8s/ns/${COMPLIANCE_NAMESPACE}/compliance.openshift.io~v1alpha1~ComplianceCheckResult/${encodeURIComponent(
     stripSurrogates(name),
   )}`;
 

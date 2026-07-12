@@ -1,9 +1,20 @@
+// Operator process entrypoint (kubebuilder go/v4 layout).
+//
+// Files in this package:
+//   - main.go: flag parse, scheme, manager, health probes, controller SetupWithManager
+//   - default_cr.go: leader-elected create of ClusterBaseline/cluster when none exist
+//   - metrics_cert.go: service-ca / self-signed TLS cert provider for secure metrics
 package main
 
 import (
 	"errors"
 	"flag"
+	"fmt"
+	"net"
+	"net/http"
 	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 
 	"k8s.io/apimachinery/pkg/runtime"
@@ -18,6 +29,10 @@ import (
 	baselinev1alpha1 "github.com/maci0/baseline-security-operator/api/v1alpha1"
 	"github.com/maci0/baseline-security-operator/internal/controller"
 )
+
+// envSkipDefaultCR opts out of creating ClusterBaseline/cluster when none exist.
+// Keep the string in one place so README/CSV comments and code cannot drift.
+const envSkipDefaultCR = "BASELINE_SECURITY_SKIP_DEFAULT_CR"
 
 var scheme = runtime.NewScheme()
 
@@ -62,6 +77,25 @@ func main() {
 		setupLog.Error(errEmptyHealthProbeAddr, "health-probe-bind-address must not be empty (Deployment probes :8081)")
 		os.Exit(1)
 	}
+	// Reject host:port typos before manager start so a bad Deployment arg is
+	// obvious in setup logs instead of a later bind failure.
+	if err := validateListenAddr(metricsAddr, true); err != nil {
+		setupLog.Error(err, "invalid metrics-bind-address (want host:port, or 0 to disable)",
+			"metricsBindAddress", metricsAddr)
+		os.Exit(1)
+	}
+	if err := validateListenAddr(probeAddr, false); err != nil {
+		setupLog.Error(err, "invalid health-probe-bind-address (want host:port)",
+			"healthProbeBindAddress", probeAddr)
+		os.Exit(1)
+	}
+	// Relative cert dirs depend on process CWD and break under a read-only
+	// rootfs / different workdir. Require absolute when set.
+	if err := validateMetricsCertDir(metricsCertDir); err != nil {
+		setupLog.Error(err, "invalid metrics-cert-dir (want absolute path, or empty for self-signed only)",
+			"metricsCertDir", metricsCertDir)
+		os.Exit(1)
+	}
 
 	if !secureMetrics && metricsAddr != "0" && !isLoopbackMetricsAddr(metricsAddr) {
 		setupLog.Info("refusing non-loopback insecure metrics; forcing metrics-secure=true",
@@ -71,21 +105,36 @@ func main() {
 
 	// Non-secret config only. RELATED_IMAGE value is logged as set/unset so a
 	// misdeployed pod is obvious without printing the image pull path.
-	relatedImage := strings.TrimSpace(os.Getenv("RELATED_IMAGE_CONSOLE_PLUGIN"))
+	relatedImage := strings.TrimSpace(os.Getenv(controller.EnvRelatedImageConsolePlugin))
 	relatedImageSet := relatedImage != ""
 	// Log only validity so registry paths never hit stdout.
 	relatedImageValid := relatedImageSet && controller.ValidRelatedImage(relatedImage)
-	skipDefaultCR := envTruthy("BASELINE_SECURITY_SKIP_DEFAULT_CR")
+	skipDefaultCR := envTruthy(envSkipDefaultCR)
 	setupLog.Info("configuration",
 		"metricsBindAddress", metricsAddr,
 		"metricsSecure", secureMetrics,
 		"metricsCertDir", metricsCertDir,
 		"healthProbeBindAddress", probeAddr,
 		"leaderElect", enableLeaderElection,
+		"zapDevelopment", opts.Development,
 		"relatedImageConsolePluginSet", relatedImageSet,
 		"relatedImageConsolePluginValid", relatedImageValid,
 		"skipDefaultClusterBaseline", skipDefaultCR,
 	)
+	if !enableLeaderElection {
+		// Deployment ships 2 replicas; without a lease both leaders reconcile.
+		setupLog.Info("leader election disabled; multi-replica Deployments may race on reconcile and default CR create")
+	}
+	if opts.Development {
+		// Development mode is a zap flag for local debugging; warn so a
+		// mis-set CSV/Deployment arg is obvious in production pod logs.
+		setupLog.Info("zap development logging enabled (--zap-devel); not recommended for production")
+	}
+	// Empty cert dir with secure metrics always falls back to self-signed;
+	// OpenShift service-ca scrapers will fail until the path is set.
+	if secureMetrics && metricsAddr != "0" && metricsCertDir == "" {
+		setupLog.Info("metrics-cert-dir empty; secure metrics will use a self-signed cert (service-ca scrapers will not trust it)")
+	}
 	if !relatedImageSet {
 		setupLog.Info("RELATED_IMAGE_CONSOLE_PLUGIN is unset; console plugin stays ImageMissing until the env is fixed")
 	} else if !relatedImageValid {
@@ -126,7 +175,14 @@ func main() {
 	}
 
 	utilruntime.Must(mgr.AddHealthzCheck("healthz", healthz.Ping))
-	utilruntime.Must(mgr.AddReadyzCheck("readyz", healthz.Ping))
+	// Ready only after informers sync. Ping alone marks Ready while caches are
+	// empty, so kubelet can route to a pod that cannot reconcile yet.
+	utilruntime.Must(mgr.AddReadyzCheck("cache-sync", func(req *http.Request) error {
+		if !mgr.GetCache().WaitForCacheSync(req.Context()) {
+			return errCacheNotSynced
+		}
+		return nil
+	}))
 
 	// Zero-config default: create ClusterBaseline/cluster if none exists.
 	// Opt out with BASELINE_SECURITY_SKIP_DEFAULT_CR=true. Leader-only so
@@ -148,6 +204,43 @@ func main() {
 
 // errEmptyHealthProbeAddr is logged when --health-probe-bind-address is empty.
 var errEmptyHealthProbeAddr = errors.New("empty health-probe-bind-address")
+
+// errRelativeMetricsCertDir is logged when --metrics-cert-dir is non-empty but
+// not absolute (CWD-dependent paths are not supported in the container).
+var errRelativeMetricsCertDir = errors.New("metrics-cert-dir must be an absolute path")
+
+// validateMetricsCertDir allows empty (self-signed only) or an absolute path.
+// Relative paths are rejected: the manager CWD is not a stable config surface.
+func validateMetricsCertDir(dir string) error {
+	if dir == "" {
+		return nil
+	}
+	if !filepath.IsAbs(dir) {
+		return errRelativeMetricsCertDir
+	}
+	return nil
+}
+
+// validateListenAddr requires host:port (port 1-65535). When disableOK, "0" is
+// accepted (controller-runtime metrics disable). Empty is rejected: callers
+// must normalize or fail-fast before this check.
+func validateListenAddr(addr string, disableOK bool) error {
+	if disableOK && addr == "0" {
+		return nil
+	}
+	_, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return err
+	}
+	p, err := strconv.Atoi(port)
+	if err != nil {
+		return fmt.Errorf("port %q is not a number", port)
+	}
+	if p < 1 || p > 65535 {
+		return fmt.Errorf("port %q out of range 1-65535", port)
+	}
+	return nil
+}
 
 // isLoopbackMetricsAddr is true for disabled ("0") or explicit
 // 127.0.0.1 / localhost binds. Empty is NOT safe: controller-runtime

@@ -1,4 +1,6 @@
 FROM scratch
+# BuildKit special-case ARG: clamps image/layer timestamps when passed by the client.
+ARG SOURCE_DATE_EPOCH=0
 
 LABEL operators.operatorframework.io.bundle.mediatype.v1=registry+v1
 LABEL operators.operatorframework.io.bundle.manifests.v1=manifests/

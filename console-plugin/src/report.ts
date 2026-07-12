@@ -1,3 +1,5 @@
+// Printable HTML compliance report builder (score, profiles, fails, waivers).
+// Presentation-only: consumes domain helpers from models/results/scoring/status.
 import {
   checkProfileLabel,
   ClusterBaseline,
@@ -8,7 +10,7 @@ import {
 import { checkTitle, severityDisplayTitle } from './results';
 import { checkSeverity } from './scoring';
 import { effectiveStatus } from './status';
-import { formatLocalDate, formatLocalDateTime, safeLocale } from './dates';
+import { formatCount, formatLocalDate, formatLocalDateTime, safeLocale } from './dates';
 import { waiverExpired } from './waivers';
 
 // HTML-escape untrusted text (waiver reasons, rule titles) for the report.
@@ -19,9 +21,14 @@ const htmlEscapes: Record<string, string> = {
   '"': '&quot;',
   "'": '&#39;',
 };
+// Module-level regexes: multi-thousand FAIL-row exports must not recompile
+// patterns on every esc() / default translate call.
+const htmlEscapeRe = /[&<>"']/g;
+const reportInterpRe = /\{\{(\w+)\}\}/g;
 // Coerce first: CR fields typed as string are not runtime type-checked, so a
 // tampered numeric/object/null value must not throw and abort report export.
-const esc = (s: string): string => String(s ?? '').replace(/[&<>"']/g, (c) => htmlEscapes[c]);
+const esc = (s: string): string =>
+  String(s ?? '').replace(htmlEscapeRe, (c) => htmlEscapes[c]);
 
 // Optional translator for report chrome. When omitted, English source keys are
 // used with simple {{var}} interpolation so unit tests need no i18n harness.
@@ -31,9 +38,19 @@ const defaultReportTranslate: ReportTranslate = (key, options) => {
   if (!options) {
     return key;
   }
-  return key.replace(/\{\{(\w+)\}\}/g, (_, name: string) =>
-    options[name] !== undefined ? String(options[name]) : `{{${name}}}`,
-  );
+  // Prefer formatted* when present (locale-aware grouping), else the raw name.
+  // English JSON values remap {{count}}→{{formattedCount}}; the no-i18n path
+  // still interpolates the source key and must show the same digits.
+  return key.replace(reportInterpRe, (_, name: string) => {
+    const alias = `formatted${name.charAt(0).toUpperCase()}${name.slice(1)}`;
+    if (options[alias] !== undefined) {
+      return String(options[alias]);
+    }
+    if (options[name] !== undefined) {
+      return String(options[name]);
+    }
+    return `{{${name}}}`;
+  });
 };
 
 // Build a printable, self-contained HTML compliance report from already-watched
@@ -58,11 +75,12 @@ export const buildReportHtml = (
   const locale = safeLocale(docEl?.lang || 'en');
   const htmlLang = locale ?? 'en';
   const htmlDir = docEl?.dir === 'rtl' ? 'rtl' : 'ltr';
-  const fmt = (n: number): string => n.toLocaleString(locale);
+  // Same non-finite guard and locale validation as Overview counts.
+  const fmt = (n: number): string => formatCount(n, locale);
   const st = baseline.status ?? {};
   const score =
     st.score != null
-      ? t('{{score}} / 100', { score: fmt(st.score) })
+      ? t('{{score}} / 100', { score: fmt(Number(st.score)) })
       : t('Not scanned');
   const profileRows = [
     ...(st.profiles ?? []).map((p) => ({ name: t(profileTitle(p.key ?? '')), c: p })),
@@ -79,27 +97,33 @@ export const buildReportHtml = (
         `<td>${fmt(Number(c.manual) || 0)}</td><td>${fmt(Number(c.inconsistent) || 0)}</td><td>${fmt(Number(c.waived) || 0)}</td></tr>`,
     )
     .join('');
-  const activeWaivers = (baseline.spec.waivers ?? []).filter((w) => !waiverExpired(w, now));
-  // Membership Sets once: export can include thousands of check results.
-  const activeWaivedNames = new Set(activeWaivers.map((w) => w.name).filter(Boolean));
+  const activeWaivers = (baseline.spec.waivers ?? []).filter(
+    (w) => w.name && !waiverExpired(w, now),
+  );
+  // Same active set as score/CSV (activeWaivedNames); rebuild from the filtered
+  // list so empty names cannot suppress a FAIL row via a corrupt waiver entry.
+  const activeWaived = new Set(activeWaivers.map((w) => w.name));
   const profileSet = new Set(baseline.spec.profiles ?? []);
   const tailoredSet = new Set(baseline.spec.tailoredProfiles ?? []);
   // Single pass over results: no intermediate filtered array (export can hold
   // multi-thousand CCRs; only FAIL rows become HTML).
   const failingParts: string[] = [];
   for (const r of results) {
+    // Optional-chain: partial/tampered CCR list items must not abort the report.
+    const labels = r.metadata?.labels;
+    const name = r.metadata?.name ?? '';
     if (
-      !isOwnedByBaseline(r.metadata.labels, profileSet, tailoredSet) ||
+      !isOwnedByBaseline(labels, profileSet, tailoredSet) ||
       effectiveStatus(r) !== 'FAIL' ||
-      activeWaivedNames.has(r.metadata.name)
+      activeWaived.has(name)
     ) {
       continue;
     }
     failingParts.push(
-      `<tr><td>${esc(r.metadata.name)}</td><td>${esc(checkTitle(r))}</td>` +
+      `<tr><td>${esc(name)}</td><td>${esc(checkTitle(r))}</td>` +
         // checkProfileLabel returns i18n source titles for built-ins; t() leaves
         // tailored names and the empty em dash unchanged when no key exists.
-        `<td>${esc(t(checkProfileLabel(r.metadata.labels)))}</td>` +
+        `<td>${esc(t(checkProfileLabel(labels)))}</td>` +
         `<td>${esc(severityDisplayTitle(checkSeverity(r), t))}</td></tr>`,
     );
   }

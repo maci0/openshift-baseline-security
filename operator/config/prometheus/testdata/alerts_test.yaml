@@ -145,6 +145,35 @@ tests:
         alertname: ComplianceChecksInError
         exp_alerts: []
 
+  # ComplianceChecksInconsistent fires on multi-node drift after 1h.
+  - interval: 1m
+    input_series:
+      - series: 'baseline_security_checks{profile="cis",status="inconsistent",instance="op-1"}'
+        values: '2x70'
+      - series: 'baseline_security_status_observed_timestamp_seconds{instance="op-1"}'
+        values: '100x70'
+    alert_rule_test:
+      - eval_time: 61m
+        alertname: ComplianceChecksInconsistent
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: 'Compliance checks are INCONSISTENT across nodes'
+              description: '2 compliance check(s) report genuine multi-node drift (PASS on some nodes, FAIL on others after benign NOT-APPLICABLE collapse). Open Administration -> Compliance -> Results (status Inconsistent) and inspect per-node sources on the check detail. CLI: oc get compliancecheckresults -n openshift-compliance -l compliance.openshift.io/check-status=INCONSISTENT'
+
+  # Zero inconsistent checks: no ComplianceChecksInconsistent.
+  - interval: 1m
+    input_series:
+      - series: 'baseline_security_checks{profile="cis",status="inconsistent",instance="op-1"}'
+        values: '0x70'
+      - series: 'baseline_security_status_observed_timestamp_seconds{instance="op-1"}'
+        values: '100x70'
+    alert_rule_test:
+      - eval_time: 61m
+        alertname: ComplianceChecksInconsistent
+        exp_alerts: []
+
   # Never-published metrics (timestamp seed 0) fire ComplianceStatusStale.
   - interval: 1m
     input_series:

@@ -21,8 +21,8 @@ import (
 
 func (r *ClusterBaselineReconciler) ensureComplianceOperator(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline) error {
 	sub := u(subscriptionGVK)
-	err := r.Get(ctx, types.NamespacedName{Namespace: complianceNamespace, Name: "compliance-operator"}, sub)
-	if err == nil {
+	getErr := r.Get(ctx, types.NamespacedName{Namespace: complianceNamespace, Name: "compliance-operator"}, sub)
+	if getErr == nil {
 		// Keep catalog source in sync when we manage install. createIfMissing only
 		// writes the Subscription once; without this, changing
 		// spec.complianceCatalogSource (OKD / disconnected) is a silent no-op.
@@ -35,14 +35,14 @@ func (r *ClusterBaselineReconciler) ensureComplianceOperator(ctx context.Context
 		// stay True after CO is removed.
 		return r.setComplianceOperatorReady(ctx, cb, sub)
 	}
-	if meta.IsNoMatchError(err) {
+	if meta.IsNoMatchError(getErr) {
 		cb.Status.ComplianceOperatorVersion = ""
 		setCond(cb, "ComplianceOperatorReady", metav1.ConditionFalse, "NotInstalled",
 			"OLM Subscription API not available")
 		return nil
 	}
-	if !apierrors.IsNotFound(err) {
-		return fmt.Errorf("getting compliance-operator Subscription: %w", err)
+	if !apierrors.IsNotFound(getErr) {
+		return fmt.Errorf("getting compliance-operator Subscription: %w", getErr)
 	}
 
 	csv, err := r.findComplianceOperatorCSV(ctx)
@@ -101,12 +101,13 @@ func (r *ClusterBaselineReconciler) ensureComplianceOperatorGroup(ctx context.Co
 }
 
 // desiredComplianceCatalogSource is the OLM CatalogSource name for the CO
-// Subscription (default redhat-operators).
+// Subscription. Empty/whitespace is treated as unset (same as schedule defaulting)
+// so padding or empty quotes cannot create a Subscription with a junk source.
 func desiredComplianceCatalogSource(cb *baselinev1alpha1.ClusterBaseline) string {
-	if s := cb.Spec.ComplianceCatalogSource; s != "" {
+	if s := strings.TrimSpace(cb.Spec.ComplianceCatalogSource); s != "" {
 		return s
 	}
-	return "redhat-operators"
+	return baselinev1alpha1.DefaultComplianceCatalogSource
 }
 
 // syncComplianceSubscriptionSource updates an existing Subscription's
@@ -139,11 +140,11 @@ func (r *ClusterBaselineReconciler) syncComplianceSubscriptionSource(
 			return nil
 		}
 		if err := unstructured.SetNestedField(latest.Object, desired, "spec", "source"); err != nil {
-			return err
+			return fmt.Errorf("setting Subscription spec.source to %q: %w", desired, err)
 		}
 		return r.Update(ctx, latest)
 	}); err != nil {
-		return err
+		return fmt.Errorf("updating compliance-operator Subscription catalog source to %q: %w", desired, err)
 	}
 	// Catalog moves (OKD / disconnected) change CO install resolution; without
 	// this log, a stuck Installing condition has no marker that source flipped.
@@ -224,7 +225,12 @@ func pickComplianceOperatorCSV(items []unstructured.Unstructured, ns string, suc
 }
 
 func (r *ClusterBaselineReconciler) setComplianceOperatorReady(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline, sub *unstructured.Unstructured) error {
-	csvName, _, _ := unstructured.NestedString(sub.Object, "status", "installedCSV")
+	// Wrong-type installedCSV must not look like "still Installing" forever
+	// (empty string path): surface the shape error so Degraded is actionable.
+	csvName, _, err := unstructured.NestedString(sub.Object, "status", "installedCSV")
+	if err != nil {
+		return fmt.Errorf("reading Subscription status.installedCSV: %w", err)
+	}
 	if csvName == "" {
 		cb.Status.ComplianceOperatorVersion = ""
 		setCond(cb, "ComplianceOperatorReady", metav1.ConditionFalse, "Installing", "installedCSV empty")

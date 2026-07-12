@@ -3,7 +3,6 @@ package controller
 import (
 	"context"
 	"fmt"
-	"maps"
 	"os"
 	"slices"
 	"strings"
@@ -21,6 +20,7 @@ import (
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	baselinev1alpha1 "github.com/maci0/baseline-security-operator/api/v1alpha1"
 )
@@ -30,11 +30,16 @@ func withoutPlugin(plugins []string, name string) []string {
 	return slices.DeleteFunc(slices.Clone(plugins), func(p string) bool { return p == name })
 }
 
+// EnvRelatedImageConsolePlugin names the env var carrying the console plugin
+// image. Single source of truth so cmd startup logging and the reconciler read
+// the same key (a rename here cannot silently drift the two apart).
+const EnvRelatedImageConsolePlugin = "RELATED_IMAGE_CONSOLE_PLUGIN"
+
 // relatedImageConsolePlugin is the plugin image the operator deploys. Whitespace
 // alone is treated as unset so a mis-set env (padding, empty quotes) does not
 // create a Deployment with an unpullable image ref.
 func relatedImageConsolePlugin() string {
-	return strings.TrimSpace(os.Getenv("RELATED_IMAGE_CONSOLE_PLUGIN"))
+	return strings.TrimSpace(os.Getenv(EnvRelatedImageConsolePlugin))
 }
 
 // ValidRelatedImage rejects refs that cannot be a container image, so a
@@ -53,7 +58,7 @@ func ValidRelatedImage(ref string) bool {
 	}
 	// Shell / URL / path noise that never appears in a legal image reference.
 	// Includes % # \ so a mis-set env cannot smuggle encoding or fragments.
-	if strings.ContainsAny(ref, "<>|;&$`\\\"'*?[]{}()!%#\\") {
+	if strings.ContainsAny(ref, "<>|;&$`\\\"'*?[]{}()!%#") {
 		return false
 	}
 	for _, r := range ref {
@@ -111,7 +116,7 @@ func (r *ClusterBaselineReconciler) removeConsolePlugin(ctx context.Context, cb 
 		}
 	}
 	if err := r.deregisterConsolePlugin(ctx); err != nil {
-		return err
+		return fmt.Errorf("deregistering console plugin: %w", err)
 	}
 	setCond(cb, "ConsolePluginReady", metav1.ConditionFalse, "Disabled", "")
 	return nil
@@ -124,11 +129,13 @@ func (r *ClusterBaselineReconciler) ensureConsolePlugin(ctx context.Context, cb 
 	image := relatedImageConsolePlugin()
 	if image == "" {
 		// Soft-fail: still reconcile scans/status; requeue will retry when env is fixed.
-		setCond(cb, "ConsolePluginReady", metav1.ConditionFalse, "ImageMissing", "RELATED_IMAGE_CONSOLE_PLUGIN not set")
+		// Does not roll up to Degraded (scanning still works), so log on transition
+		// only: without this, a missing RELATED_IMAGE leaves only a CR condition.
+		logConsolePluginNotReady(ctx, cb, "ImageMissing", "RELATED_IMAGE_CONSOLE_PLUGIN not set")
 		return nil
 	}
 	if !ValidRelatedImage(image) {
-		setCond(cb, "ConsolePluginReady", metav1.ConditionFalse, "ImageInvalid",
+		logConsolePluginNotReady(ctx, cb, "ImageInvalid",
 			"RELATED_IMAGE_CONSOLE_PLUGIN is not a valid container image reference")
 		return nil
 	}
@@ -143,13 +150,13 @@ func (r *ClusterBaselineReconciler) ensureConsolePlugin(ctx context.Context, cb 
 	// Service first so service-ca can mint the serving-cert Secret before pods start.
 	svc := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: pluginName, Namespace: pluginNS}}
 	if _, err := controllerutil.CreateOrUpdate(ctx, r.Client, svc, func() error {
-		// Clone annotations before mutate: Get may share the map with cached state.
-		ann := maps.Clone(svc.Annotations)
-		if ann == nil {
-			ann = map[string]string{}
+		// Replace annotations entirely: hand-injected keys (external-dns, cloud
+		// LB controllers, route annotations) must not outlive a reconcile on an
+		// internal ClusterIP console backend. Fresh map: do not mutate a map
+		// shared with a cached object.
+		svc.Annotations = map[string]string{
+			"service.beta.openshift.io/serving-cert-secret-name": pluginName + "-cert",
 		}
-		ann["service.beta.openshift.io/serving-cert-secret-name"] = pluginName + "-cert"
-		svc.Annotations = ann
 		svc.Spec.Type = corev1.ServiceTypeClusterIP
 		// This is an internal console backend. Clear every field that can retain
 		// external exposure or is invalid after reconciling a hand-edited
@@ -235,7 +242,7 @@ func (r *ClusterBaselineReconciler) ensureConsolePlugin(ctx context.Context, cb 
 	}); err != nil {
 		if meta.IsNoMatchError(err) {
 			// Console capability disabled: no ConsolePlugin CRD on the cluster.
-			setCond(cb, "ConsolePluginReady", metav1.ConditionFalse, "ConsoleMissing",
+			logConsolePluginNotReady(ctx, cb, "ConsoleMissing",
 				"console CRDs not available (Console capability disabled)")
 			return nil
 		}
@@ -261,7 +268,7 @@ func (r *ClusterBaselineReconciler) ensureConsolePlugin(ctx context.Context, cb 
 	}); err != nil {
 		if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) {
 			// Soft-fail: still deploy plugin objects; registration retries later.
-			setCond(cb, "ConsolePluginReady", metav1.ConditionFalse, "ConsoleMissing",
+			logConsolePluginNotReady(ctx, cb, "ConsoleMissing",
 				"consoles.operator.openshift.io/cluster not available")
 			return nil
 		}
@@ -280,9 +287,13 @@ func (r *ClusterBaselineReconciler) ensureConsolePlugin(ctx context.Context, cb 
 				pluginNS, pluginName, dep.Status.ReadyReplicas, pluginReadyMin, pluginReplicas)
 		if pluginDeploymentUnavailable(dep) {
 			reason = "Unavailable"
-			msg = fmt.Sprintf("Deployment %s/%s has no ready pods for >5m", pluginNS, pluginName)
+			// Minutes from pluginUnavailableGrace so the message cannot drift.
+			msg = fmt.Sprintf("Deployment %s/%s has no ready pods for >%dm",
+				pluginNS, pluginName, int(pluginUnavailableGrace.Minutes()))
 		}
-		setCond(cb, "ConsolePluginReady", metav1.ConditionFalse, reason, msg)
+		// Transition-only Info so WaitingForPods / Unavailable appear in default
+		// logs without re-logging every requeue (matches ImageMissing path).
+		logConsolePluginNotReady(ctx, cb, reason, msg)
 		return nil
 	}
 	if !deploymentAvailable(dep) {
@@ -292,11 +303,25 @@ func (r *ClusterBaselineReconciler) ensureConsolePlugin(ctx context.Context, cb 
 		// must not Progress forever.
 		if deploymentAvailableFalsePastGrace(dep) {
 			reason = "Unavailable"
-			msg = fmt.Sprintf("Deployment %s/%s Available=False for >5m", pluginNS, pluginName)
+			msg = fmt.Sprintf("Deployment %s/%s Available=False for >%dm",
+				pluginNS, pluginName, int(pluginUnavailableGrace.Minutes()))
 		}
-		setCond(cb, "ConsolePluginReady", metav1.ConditionFalse, reason, msg)
+		logConsolePluginNotReady(ctx, cb, reason, msg)
 		return nil
 	}
 	setCond(cb, "ConsolePluginReady", metav1.ConditionTrue, "Deployed", "")
 	return nil
+}
+
+// logConsolePluginNotReady sets ConsolePluginReady=False and Info-logs only when
+// status or reason changes. Permanent soft-fails (ImageMissing/ImageInvalid) never
+// Degrade the rollup; transition logs are the only default-level operator signal.
+func logConsolePluginNotReady(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline, reason, msg string) {
+	prev := meta.FindStatusCondition(cb.Status.Conditions, "ConsolePluginReady")
+	setCond(cb, "ConsolePluginReady", metav1.ConditionFalse, reason, msg)
+	if prev != nil && prev.Status == metav1.ConditionFalse && prev.Reason == reason {
+		return
+	}
+	log.FromContext(ctx).Info("console plugin not ready",
+		"name", cb.Name, "reason", reason, "message", msg)
 }

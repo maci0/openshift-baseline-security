@@ -1,3 +1,5 @@
+// Waiver lookup, expiry, and active-set helpers (matching operator score exclusion).
+import { expiresAtMs } from './dates';
 import { Waiver } from './models';
 
 // A waiver is expired once its expiresAt is in the past; an expired waiver no
@@ -7,7 +9,7 @@ export const waiverExpired = (w: Waiver, now: Date = new Date()): boolean => {
   if (!w.expiresAt) {
     return false;
   }
-  const t = new Date(w.expiresAt).getTime();
+  const t = expiresAtMs(w.expiresAt);
   return Number.isNaN(t) || t <= now.getTime();
 };
 
@@ -51,9 +53,63 @@ export const expiringWaivers = (
     if (!w.expiresAt) {
       return false;
     }
-    const t = new Date(w.expiresAt).getTime();
+    const t = expiresAtMs(w.expiresAt);
     if (Number.isNaN(t)) {
       return false;
     }
     return t > now.getTime() && t <= now.getTime() + withinMs;
   });
+
+// Signed 32-bit setTimeout max; larger delays wrap and fire immediately.
+const MAX_TIMEOUT_MS = 2_147_483_647;
+// Pad past the deadline so callers observe t <= now after the tick fires.
+const TICK_PAD_MS = 25;
+
+// setTimeout delay until the soonest future epoch-ms deadline, or 0 when none.
+// Shared by Overview / Results waiver re-render clocks so pad and max cannot drift.
+export const soonestDeadlineDelayMs = (
+  nowMs: number,
+  deadlines: readonly number[],
+): number => {
+  let soonest = 0;
+  for (const t of deadlines) {
+    if (!Number.isFinite(t) || t <= nowMs) {
+      continue;
+    }
+    if (soonest === 0 || t < soonest) {
+      soonest = t;
+    }
+  }
+  if (soonest === 0) {
+    return 0;
+  }
+  return Math.min(Math.max(soonest - nowMs + TICK_PAD_MS, TICK_PAD_MS), MAX_TIMEOUT_MS);
+};
+
+// Future expiresAt instants (epoch ms) for still-active waivers, plus optional
+// per-expiry offsets (e.g. -14d so Overview can tick when a waiver enters the
+// expiring-soon alert window). Unparseable / already-past times are omitted.
+export const futureWaiverDeadlineMs = (
+  waivers: Waiver[] | undefined,
+  nowMs: number,
+  offsetsMs: readonly number[] = [],
+): number[] => {
+  const out: number[] = [];
+  for (const w of waivers ?? []) {
+    if (!w?.expiresAt) {
+      continue;
+    }
+    const t = expiresAtMs(w.expiresAt);
+    if (Number.isNaN(t) || t <= nowMs) {
+      continue;
+    }
+    out.push(t);
+    for (const off of offsetsMs) {
+      const d = t + off;
+      if (Number.isFinite(d) && d > nowMs) {
+        out.push(d);
+      }
+    }
+  }
+  return out;
+};

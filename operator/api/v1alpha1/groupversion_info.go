@@ -9,12 +9,12 @@ import (
 )
 
 var (
-	// GroupVersion is group version used to register these objects.
+	// GroupVersion is the baselinesecurity.io/v1alpha1 API group-version.
 	GroupVersion = schema.GroupVersion{Group: "baselinesecurity.io", Version: "v1alpha1"}
 
-	// SchemeBuilder is used to add go types to the GroupVersionKind scheme.
+	// SchemeBuilder registers this package's types with GroupVersion.
 	SchemeBuilder = &scheme.Builder{GroupVersion: GroupVersion}
 
-	// AddToScheme adds the types in this group-version to the given scheme.
+	// AddToScheme adds this package's types to a runtime.Scheme.
 	AddToScheme = SchemeBuilder.AddToScheme
 )

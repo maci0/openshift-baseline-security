@@ -33,7 +33,15 @@ function loadDotEnv(file: string): void {
       (val.startsWith('"') && val.endsWith('"')) ||
       (val.startsWith("'") && val.endsWith("'"))
     ) {
+      // Quoted: keep interior # and spaces (passwords may contain them).
       val = val.slice(1, -1);
+    } else {
+      // Unquoted: strip shell-style trailing comments (`KEY=value # note`).
+      // Require a space before # so values like `pass#1` stay intact.
+      const hash = val.indexOf(' #');
+      if (hash >= 0) {
+        val = val.slice(0, hash).trimEnd();
+      }
     }
     process.env[key] = val;
   }
