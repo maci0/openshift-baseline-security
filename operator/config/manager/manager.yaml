@@ -35,6 +35,8 @@ spec:
                     app: baseline-security-operator
                 topologyKey: kubernetes.io/hostname
       containers:
+        # :latest is the local kustomize default. `make deploy IMG=... PLUGIN_IMG=...`
+        # rewrites both refs before apply. OLM installs use versioned CSV tags.
         - name: manager
           image: quay.io/openshift-baseline-security/baseline-security-operator:latest
           args:
@@ -63,17 +65,28 @@ spec:
               path: /healthz
               port: 8081
             initialDelaySeconds: 15
+            timeoutSeconds: 1
+            periodSeconds: 20
+            failureThreshold: 3
           readinessProbe:
             httpGet:
               path: /readyz
               port: 8081
             initialDelaySeconds: 5
+            timeoutSeconds: 1
+            periodSeconds: 10
+            failureThreshold: 3
           resources:
             requests:
               cpu: 10m
               memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
       volumes:
         - name: metrics-certs
           secret:
             secretName: baseline-security-operator-metrics-cert
             optional: true
+            # Private key must not be group/world-readable inside the pod.
+            defaultMode: 0400

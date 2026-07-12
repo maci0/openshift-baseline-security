@@ -18,6 +18,18 @@ half shaped exactly like its standalone counterpart so a later split is
 
 ## 2. Versioning across OCP releases
 
+**Release contract (this repo)**: pre-1.0 SemVer on a single `alpha` OLM channel;
+API is `v1alpha1`. Consumer notes live in root `CHANGELOG.md` (Keep a Changelog).
+Version strings must match across `operator/Makefile` (`VERSION` /
+`PREV_VERSION` for the OLM `replaces` edge), the CSV
+(`bundle/manifests/baseline-security-operator.clusterserviceversion.yaml`), and
+`console-plugin/package.json` (`version` and `consolePlugin.version`).
+`make verify-versions` (also run from `make bundle` and CI) enforces that.
+Never reuse a published CSV/image tag; OLM unpack caches make same-tag
+republishes serve stale content. Breaking behavior in 0.x is allowed in minor
+bumps but must be called out under Changed/Removed in the changelog with a
+migration note.
+
 **Pattern**: two models.
 - Payload components: `main` tracks the next OCP; `release-4.y` branches cut
   at feature freeze carry the complete toolchain snapshot. Toolchain is pinned
@@ -95,7 +107,8 @@ replicas with preferred pod anti-affinity; manager uses leader election.
   uninstall).
 
 **Here**: all of the above, including `useAccessReview` gating on rescan,
-remediation apply/unapply, and the auto-apply toggle.
+profile/schedule/scoring/waiver patches, TailoredProfile authoring,
+remediation apply/unapply/batch, and the auto-apply toggle.
 
 ## 6. Security posture
 

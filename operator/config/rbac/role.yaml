@@ -86,6 +86,7 @@ rules:
   resources:
   - compliancecheckresults
   - compliancescans
+  - compliancesuites
   verbs:
   - get
   - list

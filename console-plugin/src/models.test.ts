@@ -71,6 +71,65 @@ describe('tailored suite ownership', () => {
     expect(suiteFilterKey(lbl('other'))).toBeUndefined();
     expect(suiteFilterKey(undefined)).toBeUndefined();
   });
+
+  // Suite labels come from untrusted cluster objects. Parsers must never throw,
+  // reject empty remainders, and keep tailored vs built-in mutually exclusive.
+  it('fuzz: suite parsers never throw; empty remainder rejected; tailored exclusive', () => {
+    // Deterministic PRNG so CI failures are reproducible.
+    let seed = 0xcafebabe;
+    const fuzzRand = (): number => {
+      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+      return seed / 0x100000000;
+    };
+    const rand = (n: number) =>
+      Array.from({ length: n }, () => String.fromCharCode(Math.floor(fuzzRand() * 0xffff))).join(
+        '',
+      );
+    for (let i = 0; i < 2000; i++) {
+      const suite =
+        i % 6 === 0
+          ? `baseline-${rand(i % 20)}`
+          : i % 6 === 1
+            ? `baseline-tp-${rand(i % 20)}`
+            : i % 6 === 2
+              ? 'baseline-'
+              : i % 6 === 3
+                ? 'baseline-tp-'
+                : i % 6 === 4
+                  ? rand(i % 40)
+                  : undefined;
+      const labels = suite === undefined ? undefined : lbl(suite);
+      let key: string | undefined;
+      let tailored: string | undefined;
+      let filter: string | undefined;
+      expect(() => {
+        key = suiteProfileKey(labels);
+        tailored = suiteTailoredName(labels);
+        filter = suiteFilterKey(labels);
+      }).not.toThrow();
+      // Empty remainder after prefix must be rejected.
+      if (suite === 'baseline-' || suite === 'baseline-tp-') {
+        expect(key).toBeUndefined();
+        expect(tailored).toBeUndefined();
+        expect(filter).toBeUndefined();
+        continue;
+      }
+      // Built-in and tailored are exclusive.
+      if (key !== undefined && tailored !== undefined) {
+        throw new Error(`both key=${key} and tailored=${tailored} for ${suite}`);
+      }
+      if (tailored !== undefined) {
+        expect(filter).toBe(`tp-${tailored}`);
+        expect(suite?.startsWith('baseline-tp-')).toBe(true);
+      } else if (key !== undefined) {
+        expect(filter).toBe(key);
+        expect(suite).toBe(`baseline-${key}`);
+        expect(suite?.startsWith('baseline-tp-')).toBe(false);
+      } else {
+        expect(filter).toBeUndefined();
+      }
+    }
+  });
   it('checkProfileLabel uppercases built-ins, keeps tailored names, dashes unknown', () => {
     expect(checkProfileLabel(lbl('baseline-cis'))).toBe('CIS');
     expect(checkProfileLabel(lbl('baseline-pci-dss'))).toBe('PCI-DSS');

@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -41,6 +42,10 @@ func testScheme(t *testing.T) *runtime.Scheme {
 	scanList.SetGroupVersionKind(scanGVK.GroupVersion().WithKind(scanGVK.Kind + "List"))
 	scheme.AddKnownTypeWithName(scanGVK, &unstructured.Unstructured{})
 	scheme.AddKnownTypeWithName(scanList.GroupVersionKind(), scanList)
+	suiteList := &unstructured.UnstructuredList{}
+	suiteList.SetGroupVersionKind(suiteGVK.GroupVersion().WithKind(suiteGVK.Kind + "List"))
+	scheme.AddKnownTypeWithName(suiteGVK, &unstructured.Unstructured{})
+	scheme.AddKnownTypeWithName(suiteList.GroupVersionKind(), suiteList)
 	csvList := &unstructured.UnstructuredList{}
 	csvList.SetGroupVersionKind(csvGVK.GroupVersion().WithKind(csvGVK.Kind + "List"))
 	scheme.AddKnownTypeWithName(csvGVK, &unstructured.Unstructured{})
@@ -54,23 +59,39 @@ func testScheme(t *testing.T) *runtime.Scheme {
 	return scheme
 }
 
-// nodeRemediation builds a ComplianceRemediation whose rendered object is a
-// MachineConfig for the given pool role, in the given applicationState.
-func nodeRemediation(name, pool, state string) *unstructured.Unstructured {
+// nodeRemediation builds an owned ComplianceRemediation whose rendered object
+// is a MachineConfig for the given pool role.
+func nodeRemediation(name, pool string) *unstructured.Unstructured {
 	rem := &unstructured.Unstructured{}
 	rem.SetGroupVersionKind(remediationGVK)
 	rem.SetName(name)
 	rem.SetNamespace(complianceNamespace)
+	rem.SetLabels(map[string]string{suiteLabel: "baseline-cis"})
 	_ = unstructured.SetNestedMap(rem.Object, map[string]any{
 		"kind": "MachineConfig",
 		"metadata": map[string]any{
 			"labels": map[string]any{"machineconfiguration.openshift.io/role": pool},
 		},
 	}, "spec", "current", "object")
-	if state != "" {
-		_ = unstructured.SetNestedField(rem.Object, state, "status", "applicationState")
-	}
 	return rem
+}
+
+func completedSuite(name string, ends ...time.Time) *unstructured.Unstructured {
+	suite := &unstructured.Unstructured{}
+	suite.SetGroupVersionKind(suiteGVK)
+	suite.SetName(name)
+	suite.SetNamespace(complianceNamespace)
+	_ = unstructured.SetNestedField(suite.Object, "DONE", "status", "phase")
+	statuses := make([]any, 0, len(ends))
+	for i, end := range ends {
+		statuses = append(statuses, map[string]any{
+			"name":         fmt.Sprintf("scan-%d", i),
+			"phase":        "DONE",
+			"endTimestamp": end.UTC().Format(time.RFC3339Nano),
+		})
+	}
+	_ = unstructured.SetNestedSlice(suite.Object, statuses, "status", "scanStatuses")
+	return suite
 }
 
 // TestPoolFromRemediation: prefer the MachineConfig role label, fall back to the
@@ -79,22 +100,36 @@ func nodeRemediation(name, pool, state string) *unstructured.Unstructured {
 // TestEnqueueSingleton: any watched compliance-CR event maps to a reconcile of
 // the ClusterBaseline singleton "cluster".
 func TestEnqueueSingleton(t *testing.T) {
-	reqs := enqueueSingleton(context.Background(), &unstructured.Unstructured{})
+	obj := &unstructured.Unstructured{}
+	obj.SetNamespace(complianceNamespace)
+	reqs := enqueueSingleton(context.Background(), obj)
 	if len(reqs) != 1 || reqs[0].Name != "cluster" || reqs[0].Namespace != "" {
 		t.Fatalf("enqueueSingleton = %+v, want one request Name=cluster", reqs)
+	}
+	obj.SetNamespace("unrelated")
+	if got := enqueueSingleton(context.Background(), obj); len(got) != 0 {
+		t.Fatalf("foreign namespace enqueued singleton: %+v", got)
 	}
 }
 
 func TestPoolFromRemediation(t *testing.T) {
 	// Role label present -> use it.
-	if got := poolFromRemediation(nodeRemediation("r", "worker", "")); got != "worker" {
+	if got := poolFromRemediation(nodeRemediation("r", "worker")); got != "worker" {
 		t.Fatalf("role-labeled: got %q, want worker", got)
 	}
 	// Role label empty, but the scan-name label carries the pool.
-	rem := nodeRemediation("r", "", "")
+	rem := nodeRemediation("r", "")
 	rem.SetLabels(map[string]string{"compliance.openshift.io/scan-name": "ocp4-pci-dss-node-master"})
 	if got := poolFromRemediation(rem); got != "master" {
 		t.Fatalf("scan-name fallback: got %q, want master", got)
+	}
+	// Tailored profile names may themselves contain "-node-"; the final
+	// delimiter identifies the actual pool suffix.
+	rem.SetLabels(map[string]string{
+		suiteLabel: "baseline-cis", "compliance.openshift.io/scan-name": "custom-node-profile-node-worker",
+	})
+	if got := poolFromRemediation(rem); got != "worker" {
+		t.Fatalf("last scan-name delimiter: got %q, want worker", got)
 	}
 	// Non-node remediation (not a MachineConfig) -> no pool.
 	pl := &unstructured.Unstructured{}
@@ -102,6 +137,25 @@ func TestPoolFromRemediation(t *testing.T) {
 	_ = unstructured.SetNestedMap(pl.Object, map[string]any{"kind": "ConfigMap"}, "spec", "current", "object")
 	if got := poolFromRemediation(pl); got != "" {
 		t.Fatalf("non-node: got %q, want empty", got)
+	}
+	// Partial MachineConfig (no kind yet) still uses scan-name for the pool so
+	// batch apply does not skip MCP pause.
+	partial := &unstructured.Unstructured{}
+	partial.SetGroupVersionKind(remediationGVK)
+	_ = unstructured.SetNestedMap(partial.Object, map[string]any{}, "spec", "current", "object")
+	partial.SetLabels(map[string]string{"compliance.openshift.io/scan-name": "ocp4-cis-node-worker"})
+	if got := poolFromRemediation(partial); got != "worker" {
+		t.Fatalf("empty kind scan-name fallback: got %q, want worker", got)
+	}
+	// Hostile / non-DNS1123 pool names from untrusted labels must not be used.
+	badRole := nodeRemediation("r", "Not_A_Valid/Pool")
+	if got := poolFromRemediation(badRole); got != "" {
+		t.Fatalf("invalid role label: got %q, want empty", got)
+	}
+	badScan := nodeRemediation("r", "")
+	badScan.SetLabels(map[string]string{"compliance.openshift.io/scan-name": "ocp4-cis-node-UPPER"})
+	if got := poolFromRemediation(badScan); got != "" {
+		t.Fatalf("invalid scan-name pool: got %q, want empty", got)
 	}
 }
 
@@ -112,14 +166,22 @@ func machineConfigPool(name string) *unstructured.Unstructured {
 	return mcp
 }
 
+func newBatchCB() *baselinev1alpha1.ClusterBaseline {
+	return &baselinev1alpha1.ClusterBaseline{
+		ObjectMeta: metav1.ObjectMeta{Name: "cluster"},
+		Spec: baselinev1alpha1.ClusterBaselineSpec{
+			Profiles: []baselinev1alpha1.ProfileKey{"cis"},
+		},
+	}
+}
+
 // TestRemediationBatch: the annotation triggers pause + apply, then a later
 // reconcile resumes once the remediation is Applied.
 func TestRemediationBatch(t *testing.T) {
 	scheme := testScheme(t)
-	rem := nodeRemediation("rem1", "worker", "")
+	rem := nodeRemediation("rem1", "worker")
 	pool := machineConfigPool("worker")
-	cb := &baselinev1alpha1.ClusterBaseline{}
-	cb.SetName("cluster")
+	cb := newBatchCB()
 	cb.SetAnnotations(map[string]string{batchApplyAnnotation: "rem1"})
 	r := &ClusterBaselineReconciler{
 		Client: fake.NewClientBuilder().WithScheme(scheme).
@@ -174,13 +236,193 @@ func TestRemediationBatch(t *testing.T) {
 	}
 	// Re-read from API: annotation clear is a meta Update.
 	gotCB := &baselinev1alpha1.ClusterBaseline{}
-	_ = r.Get(ctx, types.NamespacedName{Name: "cluster"}, gotCB)
+	if err := r.Get(ctx, types.NamespacedName{Name: "cluster"}, gotCB); err != nil {
+		t.Fatal(err)
+	}
 	if gotCB.Annotations[batchApplyAnnotation] != "" {
 		t.Fatal("annotation not cleared after resume")
 	}
-	_ = r.Get(ctx, types.NamespacedName{Name: "worker"}, gotPool)
+	if err := r.Get(ctx, types.NamespacedName{Name: "worker"}, gotPool); err != nil {
+		t.Fatal(err)
+	}
 	if paused, _, _ := unstructured.NestedBool(gotPool.Object, "spec", "paused"); paused {
 		t.Fatal("worker pool not resumed")
+	}
+}
+
+// TestRemediationBatchAllMissingClearsAnnotation: a batch of only NotFound
+// remediations must not open a fake Applying batch; clear the one-shot request.
+func TestRemediationBatchAllMissingClearsAnnotation(t *testing.T) {
+	scheme := testScheme(t)
+	cb := newBatchCB()
+	cb.SetAnnotations(map[string]string{batchApplyAnnotation: "gone1,gone2"})
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(cb).
+			WithStatusSubresource(&baselinev1alpha1.ClusterBaseline{}).Build(),
+		Scheme: scheme,
+	}
+	if err := r.applyRemediationBatch(context.Background(), cb); err != nil {
+		t.Fatal(err)
+	}
+	if cb.Status.RemediationBatch != nil {
+		t.Fatalf("fake batch opened for missing remediations: %+v", cb.Status.RemediationBatch)
+	}
+	got := &baselinev1alpha1.ClusterBaseline{}
+	if err := r.Get(context.Background(), types.NamespacedName{Name: "cluster"}, got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Annotations[batchApplyAnnotation] != "" {
+		t.Fatalf("annotation not cleared: %v", got.Annotations)
+	}
+}
+
+// TestRemediationBatchNoMatchPropagates: CRDs absent must not look like every
+// remediation was NotFound (which would clear the request without retry).
+func TestRemediationBatchNoMatchPropagates(t *testing.T) {
+	scheme := testScheme(t)
+	cb := newBatchCB()
+	cb.SetAnnotations(map[string]string{batchApplyAnnotation: "rem1"})
+	noMatch := &meta.NoKindMatchError{
+		GroupKind: schema.GroupKind{Group: remediationGVK.Group, Kind: remediationGVK.Kind},
+	}
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(cb).
+			WithStatusSubresource(&baselinev1alpha1.ClusterBaseline{}).
+			WithInterceptorFuncs(interceptor.Funcs{
+				Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+					if u, ok := obj.(*unstructured.Unstructured); ok && u.GroupVersionKind() == remediationGVK {
+						return noMatch
+					}
+					return c.Get(ctx, key, obj, opts...)
+				},
+			}).Build(),
+		Scheme: scheme,
+	}
+	if err := r.applyRemediationBatch(context.Background(), cb); err == nil {
+		t.Fatal("NoMatch must propagate so the batch request is retried")
+	}
+	if cb.Annotations[batchApplyAnnotation] == "" {
+		t.Fatal("annotation must remain when CRDs are missing")
+	}
+	if cb.Status.RemediationBatch != nil {
+		t.Fatal("batch must not start when CRDs are missing")
+	}
+}
+
+func TestRemediationBatchPreservesAdministratorPausedPool(t *testing.T) {
+	scheme := testScheme(t)
+	rem := nodeRemediation("rem1", "worker")
+	pool := machineConfigPool("worker")
+	_ = unstructured.SetNestedField(pool.Object, true, "spec", "paused")
+	cb := newBatchCB()
+	cb.SetAnnotations(map[string]string{batchApplyAnnotation: "rem1"})
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(cb, rem, pool).
+			WithStatusSubresource(&baselinev1alpha1.ClusterBaseline{}).Build(),
+		Scheme: scheme,
+	}
+	ctx := context.Background()
+	if err := r.applyRemediationBatch(ctx, cb); err != nil {
+		t.Fatal(err)
+	}
+	gotRem := u(remediationGVK)
+	if err := r.Get(ctx, types.NamespacedName{Namespace: complianceNamespace, Name: "rem1"}, gotRem); err != nil {
+		t.Fatal(err)
+	}
+	_ = unstructured.SetNestedField(gotRem.Object, "Applied", "status", "applicationState")
+	if err := r.Update(ctx, gotRem); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.applyRemediationBatch(ctx, cb); err != nil {
+		t.Fatal(err)
+	}
+	gotPool := machineConfigPool("worker")
+	if err := r.Get(ctx, types.NamespacedName{Name: "worker"}, gotPool); err != nil {
+		t.Fatal(err)
+	}
+	if paused, _, _ := unstructured.NestedBool(gotPool.Object, "spec", "paused"); !paused {
+		t.Fatal("batch unpaused a pool that was already paused by an administrator")
+	}
+	if gotPool.GetAnnotations()[batchPauseOwnerAnnotation] != "" {
+		t.Fatal("operator claimed ownership of an administrator pause")
+	}
+}
+
+func TestRemediationBatchRejectsForeignAndBlockedTargets(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		mutate func(*unstructured.Unstructured)
+	}{
+		{"foreign suite", func(rem *unstructured.Unstructured) {
+			rem.SetLabels(map[string]string{suiteLabel: "someone-elses-suite"})
+		}},
+		{"missing dependencies", func(rem *unstructured.Unstructured) {
+			_ = unstructured.SetNestedField(rem.Object, "MissingDependencies", "status", "applicationState")
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			scheme := testScheme(t)
+			rem := nodeRemediation("rem1", "worker")
+			tc.mutate(rem)
+			pool := machineConfigPool("worker")
+			cb := newBatchCB()
+			cb.SetAnnotations(map[string]string{batchApplyAnnotation: "rem1"})
+			r := &ClusterBaselineReconciler{
+				Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(cb, rem, pool).
+					WithStatusSubresource(&baselinev1alpha1.ClusterBaseline{}).Build(),
+				Scheme: scheme,
+			}
+			if err := r.applyRemediationBatch(context.Background(), cb); err == nil {
+				t.Fatal("unsafe batch target was accepted")
+			}
+			gotPool := machineConfigPool("worker")
+			if err := r.Get(context.Background(), types.NamespacedName{Name: "worker"}, gotPool); err != nil {
+				t.Fatal(err)
+			}
+			if paused, _, _ := unstructured.NestedBool(gotPool.Object, "spec", "paused"); paused {
+				t.Fatal("pool was paused before all targets passed validation")
+			}
+			gotRem := u(remediationGVK)
+			if err := r.Get(context.Background(), types.NamespacedName{Namespace: complianceNamespace, Name: "rem1"}, gotRem); err != nil {
+				t.Fatal(err)
+			}
+			if apply, _, _ := unstructured.NestedBool(gotRem.Object, "spec", "apply"); apply {
+				t.Fatal("unsafe remediation was applied through operator permissions")
+			}
+		})
+	}
+}
+
+func TestRemediationBatchDeduplicatesNamesAndPreservesQueuedRequest(t *testing.T) {
+	scheme := testScheme(t)
+	rem := nodeRemediation("rem1", "worker")
+	pool := machineConfigPool("worker")
+	cb := newBatchCB()
+	cb.SetAnnotations(map[string]string{batchApplyAnnotation: "rem1, rem1"})
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(cb, rem, pool).
+			WithStatusSubresource(&baselinev1alpha1.ClusterBaseline{}).Build(),
+		Scheme: scheme,
+	}
+	ctx := context.Background()
+	if err := r.applyRemediationBatch(ctx, cb); err != nil {
+		t.Fatal(err)
+	}
+	if got := cb.Status.RemediationBatch.Remediations; len(got) != 1 || got[0] != "rem1" {
+		t.Fatalf("batch remediations = %v, want deduplicated [rem1]", got)
+	}
+	// A second request arriving during this batch must not be deleted when the
+	// first completes; it will start on the next reconcile.
+	cb.Annotations[batchApplyAnnotation] = "rem2"
+	gotRem := u(remediationGVK)
+	_ = r.Get(ctx, types.NamespacedName{Namespace: complianceNamespace, Name: "rem1"}, gotRem)
+	_ = unstructured.SetNestedField(gotRem.Object, "Applied", "status", "applicationState")
+	_ = r.Update(ctx, gotRem)
+	if err := r.applyRemediationBatch(ctx, cb); err != nil {
+		t.Fatal(err)
+	}
+	if cb.Annotations[batchApplyAnnotation] != "rem2" {
+		t.Fatalf("queued batch annotation was lost: %v", cb.Annotations)
 	}
 }
 
@@ -188,10 +430,9 @@ func TestRemediationBatch(t *testing.T) {
 // mid-batch cancels it, so the pool resumes at once (not only after the grace).
 func TestRemediationBatchCancelResumes(t *testing.T) {
 	scheme := testScheme(t)
-	rem := nodeRemediation("rem1", "worker", "")
+	rem := nodeRemediation("rem1", "worker")
 	pool := machineConfigPool("worker")
-	cb := &baselinev1alpha1.ClusterBaseline{}
-	cb.SetName("cluster")
+	cb := newBatchCB()
 	cb.SetAnnotations(map[string]string{batchApplyAnnotation: "rem1"})
 	r := &ClusterBaselineReconciler{
 		Client: fake.NewClientBuilder().WithScheme(scheme).
@@ -224,7 +465,9 @@ func TestRemediationBatchCancelResumes(t *testing.T) {
 		t.Fatalf("batch not cleared after cancel: %+v", cb.Status.RemediationBatch)
 	}
 	gotPool := machineConfigPool("worker")
-	_ = r.Get(ctx, types.NamespacedName{Name: "worker"}, gotPool)
+	if err := r.Get(ctx, types.NamespacedName{Name: "worker"}, gotPool); err != nil {
+		t.Fatal(err)
+	}
 	if paused, _, _ := unstructured.NestedBool(gotPool.Object, "spec", "paused"); paused {
 		t.Fatal("worker pool left paused after cancel")
 	}
@@ -233,28 +476,28 @@ func TestRemediationBatchCancelResumes(t *testing.T) {
 func TestBatchPastGrace(t *testing.T) {
 	now := time.Date(2026, 7, 11, 12, 0, 0, 0, time.UTC)
 	grace := 10 * time.Minute
-	if !batchPastGrace(metav1.Time{}, now, grace) {
+	if !batchPastGrace(metav1.Time{}, now) {
 		t.Fatal("zero StartedAt must be past grace (corrupt status safety valve)")
 	}
 	// Modest future skew (NTP / handoff) must keep the pause live.
-	if batchPastGrace(metav1.NewTime(now.Add(time.Second)), now, grace) {
+	if batchPastGrace(metav1.NewTime(now.Add(time.Second)), now) {
 		t.Fatal("1s-ahead StartedAt must not force resume")
 	}
-	if batchPastGrace(metav1.NewTime(now.Add(grace)), now, grace) {
+	if batchPastGrace(metav1.NewTime(now.Add(grace)), now) {
 		// Equal to now+grace is not After(now+grace); still within bound.
 		t.Fatal("StartedAt == now+grace must not force resume via far-future path")
 	}
 	// Far future (beyond grace) is corrupt garbage, same class as zero.
-	if !batchPastGrace(metav1.NewTime(now.Add(grace+time.Second)), now, grace) {
+	if !batchPastGrace(metav1.NewTime(now.Add(grace+time.Second)), now) {
 		t.Fatal("far-future StartedAt (beyond grace) must be past grace")
 	}
-	if !batchPastGrace(metav1.NewTime(now.Add(time.Hour)), now, grace) {
+	if !batchPastGrace(metav1.NewTime(now.Add(time.Hour)), now) {
 		t.Fatal("hour-future StartedAt must be past grace")
 	}
-	if batchPastGrace(metav1.NewTime(now.Add(-time.Minute)), now, grace) {
+	if batchPastGrace(metav1.NewTime(now.Add(-time.Minute)), now) {
 		t.Fatal("fresh start must not be past grace")
 	}
-	if !batchPastGrace(metav1.NewTime(now.Add(-grace-time.Second)), now, grace) {
+	if !batchPastGrace(metav1.NewTime(now.Add(-grace-time.Second)), now) {
 		t.Fatal("elapsed grace must be past")
 	}
 }
@@ -263,11 +506,10 @@ func TestBatchPastGrace(t *testing.T) {
 // zero StartedAt must not disable the grace valve forever.
 func TestRemediationBatchZeroStartedAtResumes(t *testing.T) {
 	scheme := testScheme(t)
-	rem := nodeRemediation("rem1", "worker", "")
+	rem := nodeRemediation("rem1", "worker")
 	pool := machineConfigPool("worker")
 	_ = unstructured.SetNestedField(pool.Object, true, "spec", "paused")
-	cb := &baselinev1alpha1.ClusterBaseline{}
-	cb.SetName("cluster")
+	cb := newBatchCB()
 	cb.SetAnnotations(map[string]string{batchApplyAnnotation: "rem1"})
 	cb.Status.RemediationBatch = &baselinev1alpha1.RemediationBatchStatus{
 		Phase: "Applying", Pools: []string{"worker"}, Remediations: []string{"rem1"},
@@ -286,7 +528,9 @@ func TestRemediationBatchZeroStartedAtResumes(t *testing.T) {
 		t.Fatal("zero StartedAt must force resume and clear batch")
 	}
 	gotPool := machineConfigPool("worker")
-	_ = r.Get(context.Background(), types.NamespacedName{Name: "worker"}, gotPool)
+	if err := r.Get(context.Background(), types.NamespacedName{Name: "worker"}, gotPool); err != nil {
+		t.Fatal(err)
+	}
 	if paused, _, _ := unstructured.NestedBool(gotPool.Object, "spec", "paused"); paused {
 		t.Fatal("pool must resume when StartedAt is zero")
 	}
@@ -297,14 +541,13 @@ func TestRemediationBatchZeroStartedAtResumes(t *testing.T) {
 // without a status.remediationBatch.
 func TestRemediationBatchPauseFailureRollsBack(t *testing.T) {
 	scheme := testScheme(t)
-	remW := nodeRemediation("rem-w", "worker", "")
-	remM := nodeRemediation("rem-m", "master", "")
+	remW := nodeRemediation("rem-w", "worker")
+	remM := nodeRemediation("rem-m", "master")
 	// Distinct names so both remediations can exist; pools worker then master
 	// (sorted). Fail pause on master after worker succeeds.
 	poolW := machineConfigPool("worker")
 	poolM := machineConfigPool("master")
-	cb := &baselinev1alpha1.ClusterBaseline{}
-	cb.SetName("cluster")
+	cb := newBatchCB()
 	cb.SetAnnotations(map[string]string{batchApplyAnnotation: "rem-w,rem-m"})
 	pauseCalls := 0
 	r := &ClusterBaselineReconciler{
@@ -336,7 +579,9 @@ func TestRemediationBatchPauseFailureRollsBack(t *testing.T) {
 	}
 	// master is first alphabetically; it was paused then rolled back on worker failure.
 	gotM := machineConfigPool("master")
-	_ = r.Get(context.Background(), types.NamespacedName{Name: "master"}, gotM)
+	if err := r.Get(context.Background(), types.NamespacedName{Name: "master"}, gotM); err != nil {
+		t.Fatal(err)
+	}
 	if paused, _, _ := unstructured.NestedBool(gotM.Object, "spec", "paused"); paused {
 		t.Fatal("master must be unpaused after rollback")
 	}
@@ -345,16 +590,68 @@ func TestRemediationBatchPauseFailureRollsBack(t *testing.T) {
 	}
 }
 
+// TestRemediationBatchApplyFailureResumeFailsRecordsBatch: when apply fails and
+// the best-effort unpause also fails, status.remediationBatch must be set so
+// batchResumeGrace can force resume instead of leaving pools paused forever.
+func TestRemediationBatchApplyFailureResumeFailsRecordsBatch(t *testing.T) {
+	scheme := testScheme(t)
+	rem := nodeRemediation("rem1", "worker")
+	pool := machineConfigPool("worker")
+	cb := newBatchCB()
+	cb.SetAnnotations(map[string]string{batchApplyAnnotation: "rem1"})
+	// Pause succeeds; apply (remediation patch) fails; unpause then fails.
+	paused := false
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).
+			WithObjects(cb, rem, pool).
+			WithStatusSubresource(&baselinev1alpha1.ClusterBaseline{}).
+			WithInterceptorFuncs(interceptor.Funcs{
+				Patch: func(ctx context.Context, c client.WithWatch, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
+					u, ok := obj.(*unstructured.Unstructured)
+					if !ok {
+						return c.Patch(ctx, obj, patch, opts...)
+					}
+					switch u.GroupVersionKind() {
+					case mcpGVK:
+						wantPause, _, _ := unstructured.NestedBool(u.Object, "spec", "paused")
+						if wantPause {
+							paused = true
+							return c.Patch(ctx, obj, patch, opts...)
+						}
+						// Unpause after apply failure.
+						return apierrors.NewServiceUnavailable("resume worker failed")
+					case remediationGVK:
+						return apierrors.NewServiceUnavailable("apply rem1 failed")
+					}
+					return c.Patch(ctx, obj, patch, opts...)
+				},
+			}).Build(),
+		Scheme: scheme,
+	}
+	err := r.applyRemediationBatch(context.Background(), cb)
+	if err == nil {
+		t.Fatal("expected apply failure")
+	}
+	if !paused {
+		t.Fatal("pool should have been paused before apply failed")
+	}
+	if cb.Status.RemediationBatch == nil {
+		t.Fatal("batch status must be recorded when resume fails so grace can unpause")
+	}
+	if got := cb.Status.RemediationBatch.Pools; len(got) != 1 || got[0] != "worker" {
+		t.Fatalf("batch pools = %v, want [worker]", got)
+	}
+}
+
 // TestRemediationBatchApplyingGetErrorKeepsPaused: a transient Get failure while
 // checking applicationState must not be treated as Applied (would unpause pools
 // and clear the batch before remediations finish), as long as grace has not elapsed.
 func TestRemediationBatchApplyingGetErrorKeepsPaused(t *testing.T) {
 	scheme := testScheme(t)
-	rem := nodeRemediation("rem1", "worker", "")
+	rem := nodeRemediation("rem1", "worker")
 	pool := machineConfigPool("worker")
 	_ = unstructured.SetNestedField(pool.Object, true, "spec", "paused")
-	cb := &baselinev1alpha1.ClusterBaseline{}
-	cb.SetName("cluster")
+	cb := newBatchCB()
 	cb.SetAnnotations(map[string]string{batchApplyAnnotation: "rem1"})
 	cb.Status.RemediationBatch = &baselinev1alpha1.RemediationBatchStatus{
 		Phase: "Applying", Pools: []string{"worker"}, Remediations: []string{"rem1"},
@@ -396,11 +693,10 @@ func TestRemediationBatchApplyingGetErrorKeepsPaused(t *testing.T) {
 // bypass batchResumeGrace; after grace, pools resume even if status cannot be read.
 func TestRemediationBatchGetErrorPastGraceResumes(t *testing.T) {
 	scheme := testScheme(t)
-	rem := nodeRemediation("rem1", "worker", "")
+	rem := nodeRemediation("rem1", "worker")
 	pool := machineConfigPool("worker")
 	_ = unstructured.SetNestedField(pool.Object, true, "spec", "paused")
-	cb := &baselinev1alpha1.ClusterBaseline{}
-	cb.SetName("cluster")
+	cb := newBatchCB()
 	cb.SetAnnotations(map[string]string{batchApplyAnnotation: "rem1"})
 	cb.Status.RemediationBatch = &baselinev1alpha1.RemediationBatchStatus{
 		Phase: "Applying", Pools: []string{"worker"}, Remediations: []string{"rem1"},
@@ -428,12 +724,16 @@ func TestRemediationBatchGetErrorPastGraceResumes(t *testing.T) {
 		t.Fatal("batch must clear after grace resume")
 	}
 	gotCB := &baselinev1alpha1.ClusterBaseline{}
-	_ = r.Get(context.Background(), types.NamespacedName{Name: "cluster"}, gotCB)
+	if err := r.Get(context.Background(), types.NamespacedName{Name: "cluster"}, gotCB); err != nil {
+		t.Fatal(err)
+	}
 	if gotCB.Annotations[batchApplyAnnotation] != "" {
 		t.Fatal("annotation must clear after grace resume")
 	}
 	gotPool := machineConfigPool("worker")
-	_ = r.Get(context.Background(), types.NamespacedName{Name: "worker"}, gotPool)
+	if err := r.Get(context.Background(), types.NamespacedName{Name: "worker"}, gotPool); err != nil {
+		t.Fatal(err)
+	}
 	if paused, _, _ := unstructured.NestedBool(gotPool.Object, "spec", "paused"); paused {
 		t.Fatal("pool must resume after grace even when Get fails")
 	}
@@ -443,8 +743,7 @@ func TestRemediationBatchGetErrorPastGraceResumes(t *testing.T) {
 // an empty status.remediationBatch.
 func TestRemediationBatchEmptyAnnotationNoop(t *testing.T) {
 	scheme := testScheme(t)
-	cb := &baselinev1alpha1.ClusterBaseline{}
-	cb.SetName("cluster")
+	cb := newBatchCB()
 	cb.SetAnnotations(map[string]string{batchApplyAnnotation: " , , "})
 	r := &ClusterBaselineReconciler{
 		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(cb).
@@ -457,6 +756,13 @@ func TestRemediationBatchEmptyAnnotationNoop(t *testing.T) {
 	if cb.Status.RemediationBatch != nil {
 		t.Fatalf("empty CSV must not start batch: %+v", cb.Status.RemediationBatch)
 	}
+	got := &baselinev1alpha1.ClusterBaseline{}
+	if err := r.Get(context.Background(), types.NamespacedName{Name: "cluster"}, got); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := got.Annotations[batchApplyAnnotation]; ok {
+		t.Fatalf("empty batch annotation was not cleaned up: %v", got.Annotations)
+	}
 }
 
 // TestRemediationBatchRestartsFromAnnotation: if status.remediationBatch was
@@ -464,12 +770,12 @@ func TestRemediationBatchEmptyAnnotationNoop(t *testing.T) {
 // restarts the batch instead of leaving pools paused forever.
 func TestRemediationBatchRestartsFromAnnotation(t *testing.T) {
 	scheme := testScheme(t)
-	rem := nodeRemediation("rem1", "worker", "")
+	rem := nodeRemediation("rem1", "worker")
 	pool := machineConfigPool("worker")
 	// Pool already paused as if a prior start succeeded but status was lost.
 	_ = unstructured.SetNestedField(pool.Object, true, "spec", "paused")
-	cb := &baselinev1alpha1.ClusterBaseline{}
-	cb.SetName("cluster")
+	pool.SetAnnotations(map[string]string{batchPauseOwnerAnnotation: "cluster"})
+	cb := newBatchCB()
 	cb.SetAnnotations(map[string]string{batchApplyAnnotation: "rem1"})
 	// No RemediationBatch in status: models lost status write.
 	r := &ClusterBaselineReconciler{
@@ -483,6 +789,79 @@ func TestRemediationBatchRestartsFromAnnotation(t *testing.T) {
 	}
 	if cb.Status.RemediationBatch == nil {
 		t.Fatal("annotation must restart batch when status was lost")
+	}
+	if cb.Annotations[batchStartedAtAnnotation] == "" || cb.Annotations[batchPoolsAnnotation] != "worker" {
+		t.Fatalf("durable recovery metadata missing: %v", cb.Annotations)
+	}
+}
+
+func TestRemediationBatchStatusFailureCannotResetGrace(t *testing.T) {
+	scheme := testScheme(t)
+	rem := nodeRemediation("rem1", "worker")
+	_ = unstructured.SetNestedField(rem.Object, true, "spec", "apply")
+	pool := machineConfigPool("worker")
+	_ = unstructured.SetNestedField(pool.Object, true, "spec", "paused")
+	pool.SetAnnotations(map[string]string{batchPauseOwnerAnnotation: "cluster"})
+	started := time.Now().Add(-batchResumeGrace - time.Minute).UTC()
+	cb := newBatchCB()
+	cb.SetAnnotations(map[string]string{
+		batchApplyAnnotation:     "rem1",
+		batchStartedAtAnnotation: started.Format(time.RFC3339Nano),
+		batchPoolsAnnotation:     "worker",
+	})
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(cb, rem, pool).
+			WithStatusSubresource(&baselinev1alpha1.ClusterBaseline{}).Build(),
+		Scheme: scheme,
+	}
+	ctx := context.Background()
+	// Models a previous end-of-reconcile status write failure: metadata + MCP
+	// marker survived but status did not. Restart must reuse the old clock.
+	if err := r.applyRemediationBatch(ctx, cb); err != nil {
+		t.Fatal(err)
+	}
+	if cb.Status.RemediationBatch == nil || !cb.Status.RemediationBatch.StartedAt.Time.Equal(started) {
+		t.Fatalf("batch start time reset after status loss: %+v", cb.Status.RemediationBatch)
+	}
+	if err := r.applyRemediationBatch(ctx, cb); err != nil {
+		t.Fatal(err)
+	}
+	gotPool := machineConfigPool("worker")
+	if err := r.Get(ctx, types.NamespacedName{Name: "worker"}, gotPool); err != nil {
+		t.Fatal(err)
+	}
+	if paused, _, _ := unstructured.NestedBool(gotPool.Object, "spec", "paused"); paused {
+		t.Fatal("durable grace clock did not force pool resume")
+	}
+}
+
+func TestRemediationBatchRemovedRequestRecoversWithoutStatus(t *testing.T) {
+	scheme := testScheme(t)
+	pool := machineConfigPool("worker")
+	_ = unstructured.SetNestedField(pool.Object, true, "spec", "paused")
+	pool.SetAnnotations(map[string]string{batchPauseOwnerAnnotation: "cluster"})
+	cb := newBatchCB()
+	cb.SetAnnotations(map[string]string{
+		batchStartedAtAnnotation: metav1.Now().Format(time.RFC3339Nano),
+		batchPoolsAnnotation:     "worker",
+	})
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(cb, pool).
+			WithStatusSubresource(&baselinev1alpha1.ClusterBaseline{}).Build(),
+		Scheme: scheme,
+	}
+	if err := r.applyRemediationBatch(context.Background(), cb); err != nil {
+		t.Fatal(err)
+	}
+	gotPool := machineConfigPool("worker")
+	if err := r.Get(context.Background(), types.NamespacedName{Name: "worker"}, gotPool); err != nil {
+		t.Fatal(err)
+	}
+	if paused, _, _ := unstructured.NestedBool(gotPool.Object, "spec", "paused"); paused {
+		t.Fatal("removed request left an ownership-marked pool paused")
+	}
+	if cb.Annotations[batchStartedAtAnnotation] != "" || cb.Annotations[batchPoolsAnnotation] != "" {
+		t.Fatalf("orphan recovery metadata not cleared: %v", cb.Annotations)
 	}
 }
 
@@ -499,9 +878,7 @@ func TestEnsureComplianceDashboard(t *testing.T) {
 		Scheme: scheme,
 	}
 	ctx := context.Background()
-	if err := r.ensureComplianceDashboard(ctx, cb); err != nil {
-		t.Fatal(err)
-	}
+	r.ensureComplianceDashboard(ctx, cb)
 	cm := &corev1.ConfigMap{}
 	if err := r.Get(ctx, types.NamespacedName{Namespace: dashboardNS, Name: dashboardName}, cm); err != nil {
 		t.Fatalf("dashboard ConfigMap not created: %v", err)
@@ -517,8 +894,82 @@ func TestEnsureComplianceDashboard(t *testing.T) {
 		t.Fatalf("missing/incorrect owner ref: %+v", cm.OwnerReferences)
 	}
 	// Idempotent: a second reconcile must not error or duplicate.
-	if err := r.ensureComplianceDashboard(ctx, cb); err != nil {
-		t.Fatal(err)
+	r.ensureComplianceDashboard(ctx, cb)
+}
+
+func TestApplyPluginContainerRemovesUnownedPodPayloads(t *testing.T) {
+	runtimeClass := "unreviewed-runtime"
+	priority := int32(1000000)
+	shareProcesses := true
+	pod := &corev1.PodSpec{
+		Containers:            []corev1.Container{{Name: "sidecar", Image: "unreviewed"}},
+		InitContainers:        []corev1.Container{{Name: "init", Image: "unreviewed"}},
+		Volumes:               []corev1.Volume{{Name: "host-data"}},
+		HostNetwork:           true,
+		HostPID:               true,
+		HostIPC:               true,
+		ShareProcessNamespace: &shareProcesses,
+		NodeName:              "forced-node",
+		NodeSelector:          map[string]string{"unreviewed": "true"},
+		Tolerations:           []corev1.Toleration{{Key: "unreviewed"}},
+		RuntimeClassName:      &runtimeClass,
+		Priority:              &priority,
+		ActiveDeadlineSeconds: ptr.To(int64(1)),
+	}
+	applyPluginContainer(pod, "example.test/plugin:1")
+	if len(pod.Containers) != 1 || pod.Containers[0].Name != pluginName {
+		t.Fatalf("containers = %+v, want only managed plugin", pod.Containers)
+	}
+	if len(pod.InitContainers) != 0 {
+		t.Fatalf("unowned init containers survived reconcile: %+v", pod.InitContainers)
+	}
+	if len(pod.Volumes) != 2 {
+		t.Fatalf("volumes = %+v, want serving-cert + tmp", pod.Volumes)
+	}
+	var haveCert, haveTmp bool
+	for _, v := range pod.Volumes {
+		switch v.Name {
+		case "serving-cert":
+			haveCert = true
+			if v.Secret == nil || v.Secret.DefaultMode == nil || *v.Secret.DefaultMode != 0o400 {
+				t.Fatalf("serving-cert DefaultMode = %v, want 0400", v.Secret)
+			}
+		case "tmp":
+			haveTmp = true
+			if v.EmptyDir == nil {
+				t.Fatalf("tmp volume must be emptyDir: %+v", v)
+			}
+			if v.EmptyDir.SizeLimit == nil || v.EmptyDir.SizeLimit.Value() != 32*1024*1024 {
+				t.Fatalf("tmp SizeLimit = %v, want 32Mi", v.EmptyDir.SizeLimit)
+			}
+		default:
+			t.Fatalf("unexpected volume %q", v.Name)
+		}
+	}
+	if !haveCert || !haveTmp {
+		t.Fatalf("volumes = %+v, want serving-cert + tmp", pod.Volumes)
+	}
+	sc := pod.Containers[0].SecurityContext
+	if sc == nil || sc.ReadOnlyRootFilesystem == nil || !*sc.ReadOnlyRootFilesystem {
+		t.Fatal("plugin container ReadOnlyRootFilesystem required")
+	}
+	if sc.AllowPrivilegeEscalation == nil || *sc.AllowPrivilegeEscalation {
+		t.Fatal("plugin container AllowPrivilegeEscalation must be false")
+	}
+	if pod.HostNetwork || pod.HostPID || pod.HostIPC || pod.ShareProcessNamespace != nil ||
+		pod.NodeName != "" || len(pod.NodeSelector) != 0 || len(pod.Tolerations) != 0 ||
+		pod.RuntimeClassName != nil || pod.Priority != nil || pod.ActiveDeadlineSeconds != nil {
+		t.Fatalf("unsafe pod state survived reconcile: %+v", pod)
+	}
+	if pod.ServiceAccountName != "default" || pod.AutomountServiceAccountToken == nil || *pod.AutomountServiceAccountToken {
+		t.Fatalf("plugin service account settings = name %q automount %v", pod.ServiceAccountName, pod.AutomountServiceAccountToken)
+	}
+	if pod.Containers[0].ImagePullPolicy != corev1.PullIfNotPresent {
+		t.Fatalf("imagePullPolicy = %q, want IfNotPresent", pod.Containers[0].ImagePullPolicy)
+	}
+	applyPluginContainer(pod, "example.test/plugin:latest")
+	if pod.Containers[0].ImagePullPolicy != corev1.PullAlways {
+		t.Fatalf("latest imagePullPolicy = %q, want Always", pod.Containers[0].ImagePullPolicy)
 	}
 }
 
@@ -545,6 +996,7 @@ func TestEffectiveInconsistentStatus(t *testing.T) {
 		{"all-na", "n0:NOT-APPLICABLE", "NOT-APPLICABLE", "NOT-APPLICABLE"},
 		{"real-fail-split", "n0:FAIL", "PASS", "INCONSISTENT"},
 		{"error-present", "n0:ERROR", "PASS", "INCONSISTENT"},
+		{"unknown-with-pass", "n0:FUTURE-STATE", "PASS", "INCONSISTENT"},
 		{"malformed-empty", "garbage,,:", "", "INCONSISTENT"},
 		{"skip-only", "n0:SKIP", "SKIP", "NOT-APPLICABLE"},
 	}
@@ -604,9 +1056,50 @@ func TestAggregateStatus(t *testing.T) {
 	}
 }
 
+// TestAggregateStatusUnknownStatusCountsAsError: empty or future/unknown CCR
+// status must land in Error, never vanish from ResultCounts.
+func TestAggregateStatusUnknownStatusCountsAsError(t *testing.T) {
+	scheme := testScheme(t)
+	// Wrong JSON type for status (not a string): NestedString yields "" -> ERROR.
+	// Use a map (JSON object) so the fake client can deep-copy the unstructured.
+	wrongType := checkResult("wrong", "baseline-cis", "PASS")
+	wrongType.Object["status"] = map[string]any{"phase": "DONE"}
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(
+			checkResult("ok", "baseline-cis", "PASS"),
+			checkResult("empty", "baseline-cis", ""),
+			checkResult("future", "baseline-cis", "PENDING"),
+			wrongType,
+		).Build(),
+		Scheme: scheme,
+	}
+	cb := &baselinev1alpha1.ClusterBaseline{
+		Spec: baselinev1alpha1.ClusterBaselineSpec{Profiles: []baselinev1alpha1.ProfileKey{"cis"}},
+	}
+	if err := r.aggregateStatus(context.Background(), cb); err != nil {
+		t.Fatal(err)
+	}
+	p := cb.Status.Profiles[0]
+	if p.Pass != 1 || p.Error != 3 {
+		t.Fatalf("profile counts = %+v, want Pass=1 Error=3 (unknown statuses)", p)
+	}
+	if cb.Status.Score == nil || *cb.Status.Score != 100 {
+		t.Fatalf("score = %v, want 100 (errors excluded from denominator)", cb.Status.Score)
+	}
+}
+
 func checkResultSev(name, suite, status, sev string) *unstructured.Unstructured {
 	u := checkResult(name, suite, status)
-	u.SetLabels(map[string]string{suiteLabel: suite, checkSeverityLabel: sev})
+	// CO sets both .severity and the check-severity label; pin both so tests
+	// cover the field-preferred path used in production.
+	_ = unstructured.SetNestedField(u.Object, sev, "severity")
+	labels := u.GetLabels()
+	if labels == nil {
+		labels = map[string]string{}
+	}
+	labels[suiteLabel] = suite
+	labels[checkSeverityLabel] = sev
+	u.SetLabels(labels)
 	return u
 }
 
@@ -674,6 +1167,39 @@ func TestAggregateStatusSeverityWeighted(t *testing.T) {
 	}
 	if *cb.Status.Score != 83 {
 		t.Fatalf("weighted score = %d, want 83", *cb.Status.Score)
+	}
+}
+
+// TestCheckSeverityPrefersField: .severity is the CO typed field; the label is a
+// secondary selector. A mismatch must not silently use the wrong weight source.
+func TestCheckSeverityPrefersField(t *testing.T) {
+	u := checkResult("x", "baseline-cis", "FAIL")
+	_ = unstructured.SetNestedField(u.Object, "high", "severity")
+	u.SetLabels(map[string]string{suiteLabel: "baseline-cis", checkSeverityLabel: "low"})
+	if got := checkSeverity(u); got != "high" {
+		t.Fatalf("checkSeverity = %q, want high (field over label)", got)
+	}
+	// Label-only still works for older or partial objects.
+	u2 := checkResult("y", "baseline-cis", "FAIL")
+	u2.SetLabels(map[string]string{checkSeverityLabel: "medium"})
+	if got := checkSeverity(u2); got != "medium" {
+		t.Fatalf("checkSeverity label-only = %q, want medium", got)
+	}
+}
+
+// TestProfileBucketScoreWeighted: per-profile history must use the same mode as
+// status.score so Overview cards/trends do not disagree with the headline.
+func TestProfileBucketScoreWeighted(t *testing.T) {
+	// high PASS (10) + low FAIL (2) => 83 weighted, 50 flat.
+	w := weightedSum{pass: 10, fail: 2}
+	if got := profileBucketScore(1, 1, w, baselinev1alpha1.ScoringSeverityWeighted, true); got == nil || *got != 83 {
+		t.Fatalf("weighted = %v, want 83", got)
+	}
+	if got := profileBucketScore(1, 1, w, baselinev1alpha1.ScoringFlat, true); got == nil || *got != 50 {
+		t.Fatalf("flat mode = %v, want 50", got)
+	}
+	if got := profileBucketScore(1, 1, w, baselinev1alpha1.ScoringSeverityWeighted, false); got == nil || *got != 50 {
+		t.Fatalf("weighted without maps falls back to flat = %v, want 50", got)
 	}
 }
 
@@ -800,22 +1326,20 @@ func TestAggregateStatusWaivers(t *testing.T) {
 // computed against the previous scan's failures, then the snapshot advances.
 func TestRecordHistoryRegression(t *testing.T) {
 	scheme := testScheme(t)
-	scan := &unstructured.Unstructured{}
-	scan.SetGroupVersionKind(scanGVK)
-	scan.SetName("ocp4-cis")
-	scan.SetNamespace(complianceNamespace)
-	scan.SetLabels(map[string]string{suiteLabel: "baseline-cis"})
-	_ = unstructured.SetNestedField(scan.Object, time.Date(2026, 7, 11, 1, 0, 0, 0, time.UTC).Format(time.RFC3339), "status", "endTimestamp")
+	suite := completedSuite("baseline-cis", time.Date(2026, 7, 11, 1, 0, 0, 0, time.UTC))
 	r := &ClusterBaselineReconciler{
-		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(scan).Build(),
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(suite).Build(),
 		Scheme: scheme,
 	}
+	previousScan := metav1.NewTime(time.Date(2026, 7, 10, 1, 0, 0, 0, time.UTC))
 	cb := &baselinev1alpha1.ClusterBaseline{
-		Spec:   baselinev1alpha1.ClusterBaselineSpec{Profiles: []baselinev1alpha1.ProfileKey{"cis"}},
-		Status: baselinev1alpha1.ClusterBaselineStatus{PreviousFailures: []string{"a", "c"}},
+		Spec: baselinev1alpha1.ClusterBaselineSpec{Profiles: []baselinev1alpha1.ProfileKey{"cis"}},
+		Status: baselinev1alpha1.ClusterBaselineStatus{
+			LastScanTime: &previousScan, PreviousFailures: []string{"a", "c"},
+		},
 	}
 	// Current scan fails a,b (a persists, b new); c was fixed.
-	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(90)), []string{"a", "b"}); err != nil {
+	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(90)), []string{"a", "b"}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if got := cb.Status.NewlyFailed; len(got) != 1 || got[0] != "b" {
@@ -826,6 +1350,135 @@ func TestRecordHistoryRegression(t *testing.T) {
 	}
 	if got := cb.Status.PreviousFailures; len(got) != 2 || got[0] != "a" || got[1] != "b" {
 		t.Fatalf("previousFailures snapshot = %v, want [a b]", got)
+	}
+}
+
+func TestRecordHistoryFirstScanHasNoFalseRegressions(t *testing.T) {
+	scheme := testScheme(t)
+	suite := completedSuite("baseline-cis", time.Date(2026, 7, 11, 1, 0, 0, 0, time.UTC))
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(suite).Build(),
+		Scheme: scheme,
+	}
+	cb := &baselinev1alpha1.ClusterBaseline{
+		Spec: baselinev1alpha1.ClusterBaselineSpec{Profiles: []baselinev1alpha1.ProfileKey{"cis"}},
+	}
+	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(50)), []string{"initial-fail"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(cb.Status.NewlyFailed) != 0 || len(cb.Status.Fixed) != 0 {
+		t.Fatalf("first scan reported a regression: new=%v fixed=%v", cb.Status.NewlyFailed, cb.Status.Fixed)
+	}
+	if got := cb.Status.PreviousFailures; len(got) != 1 || got[0] != "initial-fail" {
+		t.Fatalf("first failure snapshot = %v, want [initial-fail]", got)
+	}
+}
+
+func TestRecordHistoryWaitsForEverySuiteGeneration(t *testing.T) {
+	scheme := testScheme(t)
+	previous := metav1.NewTime(time.Date(2026, 7, 10, 1, 10, 0, 0, time.UTC))
+	cisEnd := time.Date(2026, 7, 11, 1, 1, 0, 0, time.UTC)
+	oldPCIEnd := time.Date(2026, 7, 10, 1, 5, 0, 0, time.UTC)
+	cis := completedSuite("baseline-cis", cisEnd.Add(-time.Minute), cisEnd)
+	pci := completedSuite("baseline-pci-dss", oldPCIEnd)
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(cis, pci).Build(),
+		Scheme: scheme,
+	}
+	cb := &baselinev1alpha1.ClusterBaseline{
+		Spec: baselinev1alpha1.ClusterBaselineSpec{
+			Profiles: []baselinev1alpha1.ProfileKey{"cis", "pci-dss"},
+		},
+		Status: baselinev1alpha1.ClusterBaselineStatus{
+			LastScanTime:     &previous,
+			PreviousFailures: []string{"old-fail"},
+			History: []baselinev1alpha1.ScoreSnapshot{{
+				Time: previous, Score: 90,
+			}},
+		},
+	}
+
+	// CIS has completed the new run, but PCI-DSS still reports the prior run.
+	// A partial aggregate must not become a history point or regression diff.
+	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(40)), []string{"partial-fail"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if !cb.Status.LastScanTime.Equal(&previous) || len(cb.Status.History) != 1 {
+		t.Fatalf("partial suite generation advanced history: last=%v history=%+v", cb.Status.LastScanTime, cb.Status.History)
+	}
+	if got := cb.Status.PreviousFailures; len(got) != 1 || got[0] != "old-fail" {
+		t.Fatalf("partial suite generation advanced failure baseline: %v", got)
+	}
+
+	freshPCI := u(suiteGVK)
+	if err := r.Get(context.Background(), types.NamespacedName{Namespace: complianceNamespace, Name: "baseline-pci-dss"}, freshPCI); err != nil {
+		t.Fatal(err)
+	}
+	newPCIEnd := time.Date(2026, 7, 11, 1, 3, 0, 0, time.UTC)
+	freshPCI.Object["status"] = completedSuite("baseline-pci-dss", newPCIEnd).Object["status"]
+	if err := r.Update(context.Background(), freshPCI); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(80)), []string{"final-fail"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if cb.Status.LastScanTime == nil || !cb.Status.LastScanTime.Time.Equal(newPCIEnd) {
+		t.Fatalf("completed suite generation lastScanTime = %v, want %v", cb.Status.LastScanTime, newPCIEnd)
+	}
+	if len(cb.Status.History) != 2 || cb.Status.History[1].Score != 80 {
+		t.Fatalf("completed suite generation history = %+v", cb.Status.History)
+	}
+	if got := cb.Status.NewlyFailed; len(got) != 1 || got[0] != "final-fail" {
+		t.Fatalf("newlyFailed = %v, want [final-fail]", got)
+	}
+	if got := cb.Status.Fixed; len(got) != 1 || got[0] != "old-fail" {
+		t.Fatalf("fixed = %v, want [old-fail]", got)
+	}
+}
+
+func TestRecordHistoryWaitsForEveryMemberScan(t *testing.T) {
+	scheme := testScheme(t)
+	previous := metav1.NewTime(time.Date(2026, 7, 10, 1, 10, 0, 0, time.UTC))
+	oldEnd := time.Date(2026, 7, 10, 1, 5, 0, 0, time.UTC)
+	newEnd := time.Date(2026, 7, 11, 1, 2, 0, 0, time.UTC)
+	// A partial rescan can leave one old member DONE while another member has
+	// completed again. Suite phase alone is therefore not a generation barrier.
+	suite := completedSuite("baseline-cis", oldEnd, newEnd)
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(suite).Build(),
+		Scheme: scheme,
+	}
+	cb := &baselinev1alpha1.ClusterBaseline{
+		Spec: baselinev1alpha1.ClusterBaselineSpec{Profiles: []baselinev1alpha1.ProfileKey{"cis"}},
+		Status: baselinev1alpha1.ClusterBaselineStatus{
+			LastScanTime: &previous,
+			History:      []baselinev1alpha1.ScoreSnapshot{{Time: previous, Score: 90}},
+		},
+	}
+	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(50)), nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if !cb.Status.LastScanTime.Equal(&previous) || len(cb.Status.History) != 1 {
+		t.Fatalf("mixed member generations advanced history: last=%v history=%+v", cb.Status.LastScanTime, cb.Status.History)
+	}
+
+	fresh := u(suiteGVK)
+	if err := r.Get(context.Background(), types.NamespacedName{Namespace: complianceNamespace, Name: "baseline-cis"}, fresh); err != nil {
+		t.Fatal(err)
+	}
+	finalEnd := newEnd.Add(time.Minute)
+	fresh.Object["status"] = completedSuite("baseline-cis", newEnd, finalEnd).Object["status"]
+	if err := r.Update(context.Background(), fresh); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(75)), nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if cb.Status.LastScanTime == nil || !cb.Status.LastScanTime.Time.Equal(finalEnd) {
+		t.Fatalf("fully completed member generation lastScanTime = %v, want %v", cb.Status.LastScanTime, finalEnd)
+	}
+	if len(cb.Status.History) != 2 || cb.Status.History[1].Score != 75 {
+		t.Fatalf("fully completed member generation history = %+v", cb.Status.History)
 	}
 }
 
@@ -848,10 +1501,10 @@ func TestAggregateStatusClearsStaleScore(t *testing.T) {
 	}
 }
 
-func TestAggregateStatusPropagatesScanListError(t *testing.T) {
+func TestAggregateStatusPropagatesSuiteListError(t *testing.T) {
 	scheme := testScheme(t)
 	forbidden := apierrors.NewForbidden(
-		schema.GroupResource{Group: scanGVK.Group, Resource: "compliancescans"},
+		schema.GroupResource{Group: suiteGVK.Group, Resource: "compliancesuites"},
 		"",
 		nil,
 	)
@@ -861,7 +1514,7 @@ func TestAggregateStatusPropagatesScanListError(t *testing.T) {
 			WithInterceptorFuncs(interceptor.Funcs{
 				List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
 					gvk := list.GetObjectKind().GroupVersionKind()
-					if gvk.Group == scanGVK.Group && gvk.Kind == scanGVK.Kind+"List" {
+					if gvk.Group == suiteGVK.Group && gvk.Kind == suiteGVK.Kind+"List" {
 						return forbidden
 					}
 					return c.List(ctx, list, opts...)
@@ -873,7 +1526,7 @@ func TestAggregateStatusPropagatesScanListError(t *testing.T) {
 		Spec: baselinev1alpha1.ClusterBaselineSpec{Profiles: []baselinev1alpha1.ProfileKey{"cis"}},
 	}
 	if err := r.aggregateStatus(context.Background(), cb); err == nil {
-		t.Fatal("aggregateStatus swallowed ComplianceScan list error")
+		t.Fatal("aggregateStatus swallowed ComplianceSuite list error")
 	}
 }
 
@@ -905,6 +1558,8 @@ func TestAggregateStatusCRDsMissingClearsRegressionLists(t *testing.T) {
 			Score:            &prev,
 			History:          []baselinev1alpha1.ScoreSnapshot{{Score: 88}},
 			PreviousFailures: []string{"old-fail"},
+			DiffBaseFailures: []string{"older-fail"},
+			DiffBaseScanTime: &metav1.Time{Time: time.Now()},
 			NewlyFailed:      []string{"new-fail"},
 			Fixed:            []string{"was-fixed"},
 		},
@@ -921,6 +1576,9 @@ func TestAggregateStatusCRDsMissingClearsRegressionLists(t *testing.T) {
 	if cb.Status.PreviousFailures != nil {
 		t.Fatalf("PreviousFailures = %v, want nil", cb.Status.PreviousFailures)
 	}
+	if cb.Status.DiffBaseFailures != nil || cb.Status.DiffBaseScanTime != nil {
+		t.Fatalf("diff base not cleared: failures=%v time=%v", cb.Status.DiffBaseFailures, cb.Status.DiffBaseScanTime)
+	}
 	if cb.Status.NewlyFailed != nil {
 		t.Fatalf("NewlyFailed = %v, want nil", cb.Status.NewlyFailed)
 	}
@@ -931,23 +1589,12 @@ func TestAggregateStatusCRDsMissingClearsRegressionLists(t *testing.T) {
 
 func TestRecordHistoryRing(t *testing.T) {
 	scheme := testScheme(t)
-	end := time.Date(2026, 7, 9, 1, 0, 0, 0, time.UTC).Format(time.RFC3339)
-	scan := &unstructured.Unstructured{}
-	scan.SetGroupVersionKind(scanGVK)
-	scan.SetName("ocp4-cis")
-	scan.SetNamespace(complianceNamespace)
-	scan.SetLabels(map[string]string{suiteLabel: "baseline-cis"})
-	_ = unstructured.SetNestedField(scan.Object, end, "status", "endTimestamp")
-
-	foreign := &unstructured.Unstructured{}
-	foreign.SetGroupVersionKind(scanGVK)
-	foreign.SetName("other")
-	foreign.SetNamespace(complianceNamespace)
-	foreign.SetLabels(map[string]string{suiteLabel: "someone-else"})
-	_ = unstructured.SetNestedField(foreign.Object, time.Now().UTC().Format(time.RFC3339), "status", "endTimestamp")
+	end := time.Date(2026, 7, 9, 1, 0, 0, 0, time.UTC)
+	suite := completedSuite("baseline-cis", end)
+	foreign := completedSuite("someone-else", time.Now().UTC())
 
 	r := &ClusterBaselineReconciler{
-		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(scan, foreign).Build(),
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(suite, foreign).Build(),
 		Scheme: scheme,
 	}
 	cb := &baselinev1alpha1.ClusterBaseline{
@@ -959,7 +1606,7 @@ func TestRecordHistoryRing(t *testing.T) {
 			Score: int32(i),
 		})
 	}
-	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(77)), nil); err != nil {
+	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(77)), nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if len(cb.Status.History) != 30 {
@@ -976,7 +1623,7 @@ func TestRecordHistoryRing(t *testing.T) {
 		t.Fatalf("LastScanTime = %v, foreign scan leaked into history", cb.Status.LastScanTime)
 	}
 	before := len(cb.Status.History)
-	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(88)), nil); err != nil {
+	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(88)), nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if len(cb.Status.History) != before {
@@ -988,7 +1635,84 @@ func TestRecordHistoryRing(t *testing.T) {
 	}
 }
 
-func TestRecordHistoryNoOwnedScans(t *testing.T) {
+func TestRecordHistoryEqualScanRefreshesProfileTrends(t *testing.T) {
+	scheme := testScheme(t)
+	end := time.Date(2026, 7, 9, 1, 0, 0, 0, time.UTC)
+	suite := completedSuite("baseline-cis", end)
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(suite).Build(),
+		Scheme: scheme,
+	}
+	last := metav1.NewTime(end)
+	cb := &baselinev1alpha1.ClusterBaseline{
+		Spec: baselinev1alpha1.ClusterBaselineSpec{Profiles: []baselinev1alpha1.ProfileKey{"cis"}},
+		Status: baselinev1alpha1.ClusterBaselineStatus{
+			LastScanTime: &last,
+			History:      []baselinev1alpha1.ScoreSnapshot{{Time: last, Score: 50}},
+			Profiles: []baselinev1alpha1.ProfileStatus{{
+				Key: "cis", ResultCounts: baselinev1alpha1.ResultCounts{Pass: 3, Fail: 1},
+				History: []baselinev1alpha1.ScoreSnapshot{{Time: last, Score: 50}},
+			}},
+			TailoredProfiles: []baselinev1alpha1.TailoredProfileStatus{{
+				Name: "custom", ResultCounts: baselinev1alpha1.ResultCounts{Pass: 1, Fail: 1},
+				History: []baselinev1alpha1.ScoreSnapshot{{Time: last, Score: 10}},
+			}},
+		},
+	}
+	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(80)), []string{"late-fail"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := cb.Status.Profiles[0].History; len(got) != 1 || got[0].Score != 75 {
+		t.Fatalf("built-in profile history = %+v, want refreshed score 75", got)
+	}
+	if got := cb.Status.TailoredProfiles[0].History; len(got) != 1 || got[0].Score != 50 {
+		t.Fatalf("tailored profile history = %+v, want refreshed score 50", got)
+	}
+	if got := cb.Status.PreviousFailures; len(got) != 1 || got[0] != "late-fail" {
+		t.Fatalf("late failure snapshot = %v, want [late-fail]", got)
+	}
+}
+
+func TestRecordHistoryEqualScanCorrectsLateFailureDiff(t *testing.T) {
+	scheme := testScheme(t)
+	previous := metav1.NewTime(time.Date(2026, 7, 8, 1, 0, 0, 0, time.UTC))
+	end := time.Date(2026, 7, 9, 1, 0, 0, 0, time.UTC)
+	suite := completedSuite("baseline-cis", end)
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(suite).Build(),
+		Scheme: scheme,
+	}
+	cb := &baselinev1alpha1.ClusterBaseline{
+		Spec: baselinev1alpha1.ClusterBaselineSpec{Profiles: []baselinev1alpha1.ProfileKey{"cis"}},
+		Status: baselinev1alpha1.ClusterBaselineStatus{
+			LastScanTime:     &previous,
+			PreviousFailures: []string{"fixed", "persistent"},
+		},
+	}
+	// The suite event arrives while only part of the new result set is visible.
+	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(90)), []string{"persistent"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := cb.Status.Fixed; len(got) != 1 || got[0] != "fixed" {
+		t.Fatalf("initial fixed = %v, want [fixed]", got)
+	}
+	// A late CheckResult event for the same completed suite must recompute against
+	// the prior scan, not against the first partial view of this scan.
+	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(80)), []string{"late", "persistent"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := cb.Status.NewlyFailed; len(got) != 1 || got[0] != "late" {
+		t.Fatalf("late newlyFailed = %v, want [late]", got)
+	}
+	if got := cb.Status.Fixed; len(got) != 1 || got[0] != "fixed" {
+		t.Fatalf("late fixed = %v, want [fixed]", got)
+	}
+	if got := cb.Status.PreviousFailures; len(got) != 2 || got[0] != "late" || got[1] != "persistent" {
+		t.Fatalf("late failure snapshot = %v", got)
+	}
+}
+
+func TestRecordHistoryNoOwnedSuites(t *testing.T) {
 	scheme := testScheme(t)
 	r := &ClusterBaselineReconciler{
 		Client: fake.NewClientBuilder().WithScheme(scheme).Build(),
@@ -997,7 +1721,7 @@ func TestRecordHistoryNoOwnedScans(t *testing.T) {
 	cb := &baselinev1alpha1.ClusterBaseline{
 		Spec: baselinev1alpha1.ClusterBaselineSpec{Profiles: []baselinev1alpha1.ProfileKey{"cis"}},
 	}
-	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(50)), nil); err != nil {
+	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(50)), nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if cb.Status.LastScanTime != nil || len(cb.Status.History) != 0 {
@@ -1007,17 +1731,12 @@ func TestRecordHistoryNoOwnedScans(t *testing.T) {
 
 func TestRecordHistoryDoesNotRewind(t *testing.T) {
 	scheme := testScheme(t)
-	// Only an older owned scan remains after the newer suite was removed.
+	// Only an older owned suite remains after the newer suite was removed.
 	older := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
-	scan := &unstructured.Unstructured{}
-	scan.SetGroupVersionKind(scanGVK)
-	scan.SetName("ocp4-cis")
-	scan.SetNamespace(complianceNamespace)
-	scan.SetLabels(map[string]string{suiteLabel: "baseline-cis"})
-	_ = unstructured.SetNestedField(scan.Object, older.Format(time.RFC3339), "status", "endTimestamp")
+	suite := completedSuite("baseline-cis", older)
 
 	r := &ClusterBaselineReconciler{
-		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(scan).Build(),
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(suite).Build(),
 		Scheme: scheme,
 	}
 	newer := metav1.NewTime(time.Date(2026, 7, 9, 1, 0, 0, 0, time.UTC))
@@ -1030,7 +1749,7 @@ func TestRecordHistoryDoesNotRewind(t *testing.T) {
 			},
 		},
 	}
-	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(10)), nil); err != nil {
+	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(10)), nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if !cb.Status.LastScanTime.Equal(&newer) {
@@ -1043,22 +1762,17 @@ func TestRecordHistoryDoesNotRewind(t *testing.T) {
 
 func TestRecordHistoryIgnoresFarFutureEndTimestamp(t *testing.T) {
 	scheme := testScheme(t)
-	future := time.Now().UTC().Add(48 * time.Hour).Format(time.RFC3339)
-	scan := &unstructured.Unstructured{}
-	scan.SetGroupVersionKind(scanGVK)
-	scan.SetName("ocp4-cis")
-	scan.SetNamespace(complianceNamespace)
-	scan.SetLabels(map[string]string{suiteLabel: "baseline-cis"})
-	_ = unstructured.SetNestedField(scan.Object, future, "status", "endTimestamp")
+	future := time.Now().UTC().Add(48 * time.Hour)
+	suite := completedSuite("baseline-cis", future)
 
 	r := &ClusterBaselineReconciler{
-		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(scan).Build(),
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(suite).Build(),
 		Scheme: scheme,
 	}
 	cb := &baselinev1alpha1.ClusterBaseline{
 		Spec: baselinev1alpha1.ClusterBaselineSpec{Profiles: []baselinev1alpha1.ProfileKey{"cis"}},
 	}
-	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(50)), nil); err != nil {
+	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(50)), nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if cb.Status.LastScanTime != nil || len(cb.Status.History) != 0 {
@@ -1070,15 +1784,10 @@ func TestRecordHistoryIgnoresFarFutureEndTimestamp(t *testing.T) {
 func TestRecordHistoryAppendsWhenScoreAppearsLater(t *testing.T) {
 	scheme := testScheme(t)
 	end := time.Date(2026, 7, 9, 1, 0, 0, 0, time.UTC)
-	scan := &unstructured.Unstructured{}
-	scan.SetGroupVersionKind(scanGVK)
-	scan.SetName("ocp4-cis")
-	scan.SetNamespace(complianceNamespace)
-	scan.SetLabels(map[string]string{suiteLabel: "baseline-cis"})
-	_ = unstructured.SetNestedField(scan.Object, end.Format(time.RFC3339), "status", "endTimestamp")
+	suite := completedSuite("baseline-cis", end)
 
 	r := &ClusterBaselineReconciler{
-		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(scan).Build(),
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(suite).Build(),
 		Scheme: scheme,
 	}
 	last := metav1.NewTime(end)
@@ -1089,7 +1798,7 @@ func TestRecordHistoryAppendsWhenScoreAppearsLater(t *testing.T) {
 			LastScanTime: &last,
 		},
 	}
-	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(80)), nil); err != nil {
+	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(80)), nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if len(cb.Status.History) != 1 || cb.Status.History[0].Score != 80 {

@@ -3,5 +3,6 @@ kind: Kustomization
 # Metrics scrape + alerts. Inert without the Prometheus Operator CRDs and
 # user-workload monitoring; ship by default so enabling UWM is all that is left.
 resources:
+  - serving-ca-configmap.yaml
   - servicemonitor.yaml
   - prometheusrule.yaml

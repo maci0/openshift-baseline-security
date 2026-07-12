@@ -5,5 +5,11 @@ bin/
 test/
 hack/
 config/
+bundle/
+catalog/
 **/*_test.go
 internal/controller/testdata/
+Makefile
+.golangci.yml
+.dockerignore
+*.md

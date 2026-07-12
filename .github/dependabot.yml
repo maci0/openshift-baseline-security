@@ -1,0 +1,20 @@
+# Keep GitHub Actions, Go modules, and the console-plugin lockfile current.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: gomod
+    directory: /operator
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: npm
+    directory: /console-plugin
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5

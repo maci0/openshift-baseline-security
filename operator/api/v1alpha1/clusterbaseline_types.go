@@ -44,10 +44,14 @@ const (
 
 // ClusterBaselineSpec defines the desired baseline compliance posture.
 type ClusterBaselineSpec struct {
-	// profiles selects which benchmark profile sets to scan with.
+	// profiles selects which benchmark profile sets to scan with. An empty list
+	// (together with no tailoredProfiles) disables scanning: the operator prunes
+	// the ScanSettingBindings and clears the score, keeping the CR and history.
+	// New installs still default to {cis}; clear it explicitly to stop scanning.
+	// Capped at the number of known ProfileKey enum values (listType=set).
 	// +kubebuilder:default={cis}
-	// +kubebuilder:validation:MinItems=1
 	// +listType=set
+	// +kubebuilder:validation:MaxItems=8
 	Profiles []ProfileKey `json:"profiles"`
 
 	// tailoredProfiles names TailoredProfiles in the openshift-compliance
@@ -63,6 +67,10 @@ type ClusterBaselineSpec struct {
 	TailoredProfiles []string `json:"tailoredProfiles,omitempty"`
 
 	// schedule is the scan cron schedule, applied to the owned ScanSetting.
+	// Must be standard five-field cron (minute hour dom month dow), for example
+	// "0 1 * * *". Descriptors such as "@daily" or "@every 1h" are rejected at
+	// reconcile (InvalidSchedule Degraded) because Compliance Operator
+	// ScanSettings only accept five-field forms. Empty uses the default.
 	// Bounded so a hostile or accidental multi-megabyte string cannot bloat the
 	// CR or inflate condition messages that embed the value.
 	// +kubebuilder:default="0 1 * * *"
@@ -78,8 +86,11 @@ type ClusterBaselineSpec struct {
 
 	// complianceCatalogSource is the OLM CatalogSource providing the
 	// compliance-operator package (override for OKD or disconnected clusters).
+	// Must be a DNS-1123 subdomain (CatalogSource metadata.name).
 	// +kubebuilder:default="redhat-operators"
 	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`
 	// +optional
 	ComplianceCatalogSource string `json:"complianceCatalogSource,omitempty"`
 
@@ -111,8 +122,10 @@ type ClusterBaselineSpec struct {
 // WaiverEntry marks one ComplianceCheckResult as accepted risk.
 type WaiverEntry struct {
 	// name is the ComplianceCheckResult metadata.name to waive.
+	// Must be a DNS-1123 subdomain (same shape as Kubernetes resource names).
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`
 	Name string `json:"name"`
 	// reason records why this check is accepted (for audit).
 	// +optional
@@ -176,27 +189,41 @@ type ConsoleSpec struct {
 
 // ResultCounts holds check-result tallies shared by profile status types.
 type ResultCounts struct {
-	Pass   int32 `json:"pass"`
-	Fail   int32 `json:"fail"`
+	// +kubebuilder:validation:Minimum=0
+	Pass int32 `json:"pass"`
+	// +kubebuilder:validation:Minimum=0
+	Fail int32 `json:"fail"`
+	// +kubebuilder:validation:Minimum=0
 	Manual int32 `json:"manual"`
 	// Info counts informational checks (CO status INFO). Excluded from the
 	// score like Manual; still reported so Overview totals match Results.
-	Info  int32 `json:"info"`
+	// +kubebuilder:validation:Minimum=0
+	Info int32 `json:"info"`
+	// +kubebuilder:validation:Minimum=0
 	Error int32 `json:"error"`
-	// Inconsistent counts checks whose per-node results disagree across a
-	// MachineConfigPool (compliance operator status INCONSISTENT). Excluded from
-	// the score like Manual/Error; it flags a discrepancy that needs review.
+	// Inconsistent counts checks that remain INCONSISTENT after benign collapse
+	// (PASS where applicable, NOT-APPLICABLE elsewhere becomes PASS). Genuine
+	// PASS-vs-FAIL/ERROR node splits stay here. Excluded from the score like
+	// Manual/Error; it flags a real discrepancy that needs review.
+	// +kubebuilder:validation:Minimum=0
 	Inconsistent int32 `json:"inconsistent"`
 	// Waived counts checks excluded from the score by a spec.waivers entry
 	// (accepted risk). Excluded from the pass/fail denominator.
-	Waived        int32 `json:"waived"`
+	// +kubebuilder:validation:Minimum=0
+	Waived int32 `json:"waived"`
+	// +kubebuilder:validation:Minimum=0
 	NotApplicable int32 `json:"notApplicable"`
 }
 
 // ProfileStatus summarizes check results for one selected profile key.
 type ProfileStatus struct {
-	Key          ProfileKey `json:"key"`
-	ProfileNames []string   `json:"profileNames,omitempty"`
+	Key ProfileKey `json:"key"`
+	// profileNames are the Compliance Operator Profile names bound for this key.
+	// +optional
+	// +listType=set
+	// +kubebuilder:validation:MaxItems=16
+	// +kubebuilder:validation:items:MaxLength=253
+	ProfileNames []string `json:"profileNames,omitempty"`
 	ResultCounts `json:",inline"`
 	// history holds this profile's score snapshots, oldest first, capped at 30.
 	// +optional
@@ -206,6 +233,10 @@ type ProfileStatus struct {
 
 // TailoredProfileStatus summarizes check results for one bound TailoredProfile.
 type TailoredProfileStatus struct {
+	// name is the TailoredProfile metadata.name in openshift-compliance.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=51
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`
 	Name         string `json:"name"`
 	ResultCounts `json:",inline"`
 	// history holds this profile's score snapshots, oldest first, capped at 30.
@@ -217,9 +248,17 @@ type TailoredProfileStatus struct {
 // ObjectRef points at a cluster resource this baseline owns or drives; consumed
 // by must-gather and support tooling.
 type ObjectRef struct {
-	Group     string `json:"group,omitempty"`
-	Resource  string `json:"resource"`
-	Name      string `json:"name"`
+	// +optional
+	// +kubebuilder:validation:MaxLength=253
+	Group string `json:"group,omitempty"`
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
+	Resource string `json:"resource"`
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
+	Name string `json:"name"`
+	// +optional
+	// +kubebuilder:validation:MaxLength=63
 	Namespace string `json:"namespace,omitempty"`
 }
 
@@ -227,12 +266,24 @@ type ObjectRef struct {
 // affected MachineConfigPools so node remediations reboot once, not per apply.
 type RemediationBatchStatus struct {
 	// phase is Applying while pools are paused and remediations are being applied.
+	// +kubebuilder:validation:Enum=Applying
+	// +kubebuilder:validation:MaxLength=32
 	Phase string `json:"phase"`
 	// pools are the MachineConfigPools paused for this batch.
 	// +listType=set
+	// +kubebuilder:validation:MaxItems=32
+	// +kubebuilder:validation:items:MaxLength=253
 	Pools []string `json:"pools,omitempty"`
+	// pauseOwner is copied to each pool the operator actually pauses. It lets the
+	// resume path preserve pools that an administrator had already paused.
+	// Empty identifies a legacy in-flight batch created before ownership tracking.
+	// +optional
+	// +kubebuilder:validation:MaxLength=253
+	PauseOwner string `json:"pauseOwner,omitempty"`
 	// remediations are the ComplianceRemediation names in this batch.
 	// +listType=set
+	// +kubebuilder:validation:MaxItems=256
+	// +kubebuilder:validation:items:MaxLength=253
 	Remediations []string `json:"remediations,omitempty"`
 	// startedAt bounds how long pools stay paused before a forced resume.
 	StartedAt metav1.Time `json:"startedAt"`
@@ -250,9 +301,12 @@ type ScoreSnapshot struct {
 type ClusterBaselineStatus struct {
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
-	// score is pass/(pass+fail) across all profiles, 0-100. MANUAL, INFO,
-	// ERROR, INCONSISTENT, WAIVED, and NOT-APPLICABLE are excluded from the
-	// score; their counts are still reported per profile.
+	// score across all profiles, 0-100: pass/(pass+fail) in the default Flat
+	// mode, a severity-weighted ratio when spec.scoring.mode is
+	// SeverityWeighted. Benign INCONSISTENT is remapped to PASS or
+	// NOT-APPLICABLE first. Residual genuine INCONSISTENT, plus MANUAL, INFO,
+	// ERROR, WAIVED, and NOT-APPLICABLE, are excluded from the score; their
+	// counts are still reported per profile.
 	// +optional
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=100
@@ -263,11 +317,14 @@ type ClusterBaselineStatus struct {
 	// +optional
 	NextScanTime *metav1.Time `json:"nextScanTime,omitempty"`
 	// +optional
+	// +kubebuilder:validation:MaxLength=128
 	ComplianceOperatorVersion string `json:"complianceOperatorVersion,omitempty"`
 	// +optional
+	// +kubebuilder:validation:MaxItems=16
 	Profiles []ProfileStatus `json:"profiles,omitempty"`
 	// tailoredProfiles reports results for bound TailoredProfiles.
 	// +optional
+	// +kubebuilder:validation:MaxItems=32
 	TailoredProfiles []TailoredProfileStatus `json:"tailoredProfiles,omitempty"`
 	// history holds score snapshots, oldest first, capped at 30 entries.
 	// +optional
@@ -275,22 +332,42 @@ type ClusterBaselineStatus struct {
 	History []ScoreSnapshot `json:"history,omitempty"`
 	// relatedObjects lists the resources this baseline owns or drives.
 	// +optional
+	// +kubebuilder:validation:MaxItems=64
 	RelatedObjects []ObjectRef `json:"relatedObjects,omitempty"`
 	// newlyFailed lists owned checks that are FAIL now but were not FAIL at the
-	// previous completed scan (regressions since last scan). Bounded by fail count.
+	// previous completed scan (regressions since last scan). Bounded by fail count
+	// and hard-capped so a hostile status cannot brick Status().Update admission.
 	// +optional
 	// +listType=set
+	// +kubebuilder:validation:MaxItems=4096
+	// +kubebuilder:validation:items:MaxLength=253
 	NewlyFailed []string `json:"newlyFailed,omitempty"`
 	// fixed lists owned checks that were FAIL at the previous scan but are no
 	// longer FAIL now (improvements since last scan).
 	// +optional
 	// +listType=set
+	// +kubebuilder:validation:MaxItems=4096
+	// +kubebuilder:validation:items:MaxLength=253
 	Fixed []string `json:"fixed,omitempty"`
 	// previousFailures is the internal FAIL snapshot from the last completed scan,
 	// used to compute newlyFailed/fixed on the next scan.
 	// +optional
 	// +listType=set
+	// +kubebuilder:validation:MaxItems=4096
+	// +kubebuilder:validation:items:MaxLength=253
 	PreviousFailures []string `json:"previousFailures,omitempty"`
+	// diffBaseFailures retains the scan-before-last FAIL snapshot while results
+	// for lastScanTime settle, allowing late CheckResult events to correct the
+	// current newlyFailed/fixed diff. Internal bookkeeping, not a user setting.
+	// +optional
+	// +listType=set
+	// +kubebuilder:validation:MaxItems=4096
+	// +kubebuilder:validation:items:MaxLength=253
+	DiffBaseFailures []string `json:"diffBaseFailures,omitempty"`
+	// diffBaseScanTime identifies the lastScanTime whose diffBaseFailures apply.
+	// It is nil for the first completed scan, which has no comparison baseline.
+	// +optional
+	DiffBaseScanTime *metav1.Time `json:"diffBaseScanTime,omitempty"`
 	// remediationBatch tracks an in-progress MachineConfigPool-paused batch apply.
 	// +optional
 	RemediationBatch *RemediationBatchStatus `json:"remediationBatch,omitempty"`

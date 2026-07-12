@@ -27,14 +27,44 @@
           "title": "Compliance score",
           "type": "singlestat",
           "datasource": "$datasource",
-          "span": 12,
+          "span": 4,
           "format": "none",
           "valueName": "current",
           "thresholds": "60,80",
           "colorValue": true,
           "colors": ["#d64456", "#f0ab00", "#3e8635"],
           "targets": [
-            { "expr": "max(baseline_security_compliance_score >= 0)", "refId": "A" }
+            { "expr": "max((baseline_security_compliance_score >= 0) and on(instance) topk(1, baseline_security_status_observed_timestamp_seconds))", "refId": "A" }
+          ]
+        },
+        {
+          "id": 5,
+          "title": "Degraded",
+          "type": "singlestat",
+          "datasource": "$datasource",
+          "span": 4,
+          "format": "none",
+          "valueName": "current",
+          "thresholds": "0.5,0.5",
+          "colorValue": true,
+          "colors": ["#3e8635", "#d64456", "#d64456"],
+          "targets": [
+            { "expr": "max(baseline_security_condition{type=\"Degraded\"} and on(instance) topk(1, baseline_security_status_observed_timestamp_seconds))", "refId": "A" }
+          ]
+        },
+        {
+          "id": 6,
+          "title": "Remediation batch active",
+          "type": "singlestat",
+          "datasource": "$datasource",
+          "span": 4,
+          "format": "none",
+          "valueName": "current",
+          "thresholds": "0.5,0.5",
+          "colorValue": true,
+          "colors": ["#3e8635", "#f0ab00", "#d64456"],
+          "targets": [
+            { "expr": "max(baseline_security_remediation_batch_active and on(instance) topk(1, baseline_security_status_observed_timestamp_seconds))", "refId": "A" }
           ]
         }
       ]
@@ -52,7 +82,7 @@
           "span": 12,
           "yaxes": [ { "format": "none", "min": 0, "max": 100 }, { "show": false } ],
           "targets": [
-            { "expr": "max(baseline_security_compliance_score >= 0)", "legendFormat": "score", "refId": "A" }
+            { "expr": "max((baseline_security_compliance_score >= 0) and on(instance) topk(1, baseline_security_status_observed_timestamp_seconds))", "legendFormat": "score", "refId": "A" }
           ]
         }
       ]
@@ -70,7 +100,7 @@
           "span": 6,
           "stack": true,
           "targets": [
-            { "expr": "sum by (status) (max by (profile, status) (baseline_security_checks))", "legendFormat": "{{status}}", "refId": "A" }
+            { "expr": "sum by (status) (baseline_security_checks and on(instance) topk(1, baseline_security_status_observed_timestamp_seconds))", "legendFormat": "{{status}}", "refId": "A" }
           ]
         },
         {
@@ -80,7 +110,36 @@
           "datasource": "$datasource",
           "span": 6,
           "targets": [
-            { "expr": "max by (profile) (baseline_security_checks{status=\"fail\"})", "legendFormat": "{{profile}}", "refId": "A" }
+            { "expr": "sum by (profile) (baseline_security_checks{status=\"fail\"} and on(instance) topk(1, baseline_security_status_observed_timestamp_seconds))", "legendFormat": "{{profile}}", "refId": "A" }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Operator health",
+      "showTitle": false,
+      "height": "200px",
+      "panels": [
+        {
+          "id": 7,
+          "title": "Rollup conditions",
+          "type": "graph",
+          "datasource": "$datasource",
+          "span": 6,
+          "yaxes": [ { "format": "none", "min": 0, "max": 1 }, { "show": false } ],
+          "targets": [
+            { "expr": "max by (type) (baseline_security_condition and on(instance) topk(1, baseline_security_status_observed_timestamp_seconds))", "legendFormat": "{{type}}", "refId": "A" }
+          ]
+        },
+        {
+          "id": 8,
+          "title": "Metrics freshness (seconds since publish)",
+          "type": "graph",
+          "datasource": "$datasource",
+          "span": 6,
+          "yaxes": [ { "format": "s", "min": 0 }, { "show": false } ],
+          "targets": [
+            { "expr": "time() - max(baseline_security_status_observed_timestamp_seconds)", "legendFormat": "age", "refId": "A" }
           ]
         }
       ]

@@ -48,8 +48,13 @@ spec:
       path: /metrics
       interval: 30s
       tlsConfig:
-        # service-ca signed serving cert; UWM forbids caFile paths.
-        insecureSkipVerify: true
+        # Verify the service-ca identity through an injected ConfigMap. UWM
+        # forbids arbitrary caFile paths but permits this namespaced selector.
+        serverName: baseline-security-operator-metrics.openshift-baseline-security.svc
+        ca:
+          configMap:
+            name: baseline-security-metrics-serving-ca
+            key: service-ca.crt
       authorization:
         type: Bearer
         credentials:

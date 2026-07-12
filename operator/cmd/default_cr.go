@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -13,6 +14,10 @@ import (
 	baselinev1alpha1 "github.com/maci0/baseline-security-operator/api/v1alpha1"
 )
 
+// errCacheNotSynced is logged when WaitForCacheSync fails with a live context
+// (not shutdown). Keeps Error() from receiving a nil error value.
+var errCacheNotSynced = errors.New("cache did not sync")
+
 // defaultClusterBaseline creates ClusterBaseline/cluster once when none exist.
 // NeedLeaderElection keeps HA replicas from racing the create.
 type defaultClusterBaseline struct {
@@ -23,6 +28,12 @@ type defaultClusterBaseline struct {
 
 func (d *defaultClusterBaseline) Start(ctx context.Context) error {
 	if !d.Cache.WaitForCacheSync(ctx) {
+		// Shutdown is normal (ctx cancelled). A live context with failed sync is
+		// unexpected and would leave the cluster without the zero-config CR.
+		if err := ctx.Err(); err != nil {
+			return nil
+		}
+		d.Log.Error(errCacheNotSynced, "cache did not sync; skipping default ClusterBaseline creation")
 		return nil
 	}
 	// Retry on transient list/create failures so a brief API blip does not
@@ -54,9 +65,13 @@ func (d *defaultClusterBaseline) ensureOnce(ctx context.Context) error {
 		ObjectMeta: metav1.ObjectMeta{Name: "cluster"},
 		Spec:       baselinev1alpha1.ClusterBaselineSpec{Profiles: []baselinev1alpha1.ProfileKey{"cis"}},
 	}
-	if err := d.Client.Create(ctx, cb); err != nil && !apierrors.IsAlreadyExists(err) {
+	err := d.Client.Create(ctx, cb)
+	if err != nil && !apierrors.IsAlreadyExists(err) {
 		d.Log.Error(err, "creating default ClusterBaseline")
 		return err
+	}
+	if err == nil {
+		d.Log.Info("created default ClusterBaseline", "name", "cluster", "profiles", []string{"cis"})
 	}
 	return nil
 }

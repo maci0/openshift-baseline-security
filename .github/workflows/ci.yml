@@ -7,40 +7,62 @@ on:
     - cron: '0 3 * * *'
   workflow_dispatch:
 
+# Least privilege: jobs only need to read the repo. Secrets (e.g. E2E_KUBECONFIG)
+# remain available to steps that reference them.
+permissions:
+  contents: read
+
+# Cancel superseded runs on the same ref so PRs do not pile up queue time.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   operator:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: operator
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version-file: operator/go.mod
           cache-dependency-path: operator/go.sum
       - run: make test
       - run: make lint
+      - run: go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 ./...
+      - name: install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: "0.11.21"
+      - run: make test-alerts
       - name: verify generated files are current
         run: |
           make generate manifests
           git diff --exit-code
       - run: make verify-csv-rbac
+      - run: make verify-versions
       - name: validate OLM bundle
         run: make bundle
 
   console-plugin:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: console-plugin
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: 22
+          cache: yarn
+          cache-dependency-path: console-plugin/yarn.lock
       - run: npm i -g corepack && corepack enable
       - run: yarn install --immutable
+      - run: yarn npm audit --all --recursive
       - run: yarn lint
       - run: yarn typecheck
       - run: yarn test
@@ -51,19 +73,18 @@ jobs:
   fuzz:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     defaults:
       run:
         working-directory: operator
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version-file: operator/go.mod
           cache-dependency-path: operator/go.sum
+      - run: go test -race ./...
       - run: make fuzz
-      - name: install uv (for promtool alert extractor)
-        run: curl -LsSf https://astral.sh/uv/install.sh | sh
-      - run: make test-alerts
 
   # Live-cluster e2e, on demand only. Provide a base64-encoded kubeconfig for a
   # cluster with the operator already installed as the E2E_KUBECONFIG secret;
@@ -71,12 +92,13 @@ jobs:
   e2e:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     defaults:
       run:
         working-directory: operator
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version-file: operator/go.mod
           cache-dependency-path: operator/go.sum
@@ -88,14 +110,17 @@ jobs:
             echo "E2E_KUBECONFIG secret not set; skipping live e2e."
             exit 0
           fi
+          umask 077
           echo "$E2E_KUBECONFIG" | base64 -d > "$RUNNER_TEMP/kubeconfig"
           export KUBECONFIG="$RUNNER_TEMP/kubeconfig"
           make test-e2e
 
   images:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     needs: [operator, console-plugin]
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - run: docker build -t baseline-security-operator operator/
+      - run: docker build -f operator/bundle.Dockerfile -t baseline-security-operator-bundle operator/
       - run: docker build -t baseline-security-console-plugin console-plugin/

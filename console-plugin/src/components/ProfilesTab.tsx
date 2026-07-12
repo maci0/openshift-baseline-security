@@ -3,11 +3,14 @@ import { useTranslation } from 'react-i18next';
 import { k8sCreate, k8sPatch, useAccessReview } from '@openshift-console/dynamic-plugin-sdk';
 import {
   Alert,
+  AlertActionCloseButton,
   Button,
   Card,
   CardBody,
   CardHeader,
   CardTitle,
+  EmptyState,
+  EmptyStateBody,
   FormGroup,
   FormHelperText,
   Gallery,
@@ -29,7 +32,9 @@ import {
   errorMessage,
   isAlreadyExists,
   isValidTailoredProfileName,
+  resourceVersionTest,
   tailoredProfileManifest,
+  tailoredProfileBindingPatch,
   toggledProfiles,
 } from '../utils';
 
@@ -96,13 +101,14 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => 
         if (!isAlreadyExists(e)) throw e;
       }
       created = true;
-      await k8sPatch({
-        model: ClusterBaselineModel,
-        resource: baseline,
-        data: baseline.spec.tailoredProfiles
-          ? [{ op: 'add', path: '/spec/tailoredProfiles/-', value: name }]
-          : [{ op: 'add', path: '/spec/tailoredProfiles', value: [name] }],
-      });
+      const bindPatch = tailoredProfileBindingPatch(
+        baseline.spec.tailoredProfiles,
+        name,
+        baseline.metadata.resourceVersion,
+      );
+      if (bindPatch.length) {
+        await k8sPatch({ model: ClusterBaselineModel, resource: baseline, data: bindPatch });
+      }
       setCreating(false);
       setTpName('');
       setTpDisable('');
@@ -125,8 +131,8 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => 
 
   const toggle = async (key: string, checked: boolean) => {
     if (!baseline) return;
+    // Empty is allowed: clearing every profile disables scanning.
     const profiles = toggledProfiles(baseline.spec.profiles ?? [], key, checked);
-    if (!profiles) return; // CRD requires at least one profile
     setPending(true);
     setError(null);
     try {
@@ -136,6 +142,7 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => 
         // test op: reject the patch if another writer changed profiles since
         // this render, instead of silently clobbering their change.
         data: [
+          ...resourceVersionTest(baseline.metadata.resourceVersion),
           { op: 'test', path: '/spec/profiles', value: baseline.spec.profiles ?? [] },
           { op: 'replace', path: '/spec/profiles', value: profiles },
         ],
@@ -147,6 +154,20 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => 
     }
   };
 
+  if (!baseline) {
+    return (
+      <PageSection>
+        <EmptyState titleText={t('Baseline not configured')} headingLevel="h4">
+          <EmptyStateBody>
+            {t(
+              'No ClusterBaseline resource found. Install the baseline-security operator and create a ClusterBaseline to start scanning.',
+            )}
+          </EmptyStateBody>
+        </EmptyState>
+      </PageSection>
+    );
+  }
+
   return (
     <PageSection>
       {error && (
@@ -155,6 +176,9 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => 
           isInline
           title={error}
           style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}
+          actionClose={
+            <AlertActionCloseButton aria-label={t('Close')} onClose={() => setError(null)} />
+          }
         />
       )}
       {canAuthor && (
@@ -163,8 +187,11 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => 
           <SplitItem>
             <Button
               variant="secondary"
-              isDisabled={!baseline || !canEdit || canEditLoading || pending}
-              onClick={() => setCreating(true)}
+              isDisabled={!canEdit || canEditLoading || pending}
+              onClick={() => {
+                setError(null);
+                setCreating(true);
+              }}
             >
               {t('New tailored profile')}
             </Button>
@@ -179,6 +206,14 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => 
       >
         <ModalHeader title={t('New tailored profile')} labelId="new-tp-title" />
         <ModalBody>
+          {error && (
+            <Alert
+              variant="danger"
+              isInline
+              title={error}
+              style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}
+            />
+          )}
           <FormGroup label={t('Name')} fieldId="tp-name" isRequired>
             <TextInput
               id="tp-name"
@@ -227,24 +262,21 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => 
       </Modal>
       <Gallery hasGutter minWidths={{ default: '330px' }}>
         {Object.keys(PROFILE_INFO).map((key) => {
-          const profileCount = baseline?.spec.profiles?.length ?? 0;
-          const enabled = baseline?.spec.profiles?.includes(key) ?? false;
+          const enabled = baseline.spec.profiles?.includes(key) ?? false;
           return (
             <Card key={key}>
               <CardHeader
                 actions={{
+                  // Any profile can be toggled off, including the last one, which
+                  // disables scanning.
                   actions: (
                     <Switch
                       id={`profile-${key}`}
-                      aria-label={key}
+                      aria-label={t('Enable {{profile}} profile', {
+                        profile: PROFILE_INFO[key].title,
+                      })}
                       isChecked={enabled}
-                      isDisabled={
-                        !baseline ||
-                        !canEdit ||
-                        canEditLoading ||
-                        pending ||
-                        (enabled && profileCount === 1)
-                      }
+                      isDisabled={!canEdit || canEditLoading || pending}
                       onChange={(_e, checked) => {
                         void toggle(key, checked);
                       }}

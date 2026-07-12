@@ -54,7 +54,10 @@ spec:
                 description: |-
                   complianceCatalogSource is the OLM CatalogSource providing the
                   compliance-operator package (override for OKD or disconnected clusters).
+                  Must be a DNS-1123 subdomain (CatalogSource metadata.name).
                 maxLength: 253
+                minLength: 1
+                pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
                 type: string
               console:
                 description: console configures the console plugin deployment.
@@ -81,8 +84,12 @@ spec:
               profiles:
                 default:
                 - cis
-                description: profiles selects which benchmark profile sets to scan
-                  with.
+                description: |-
+                  profiles selects which benchmark profile sets to scan with. An empty list
+                  (together with no tailoredProfiles) disables scanning: the operator prunes
+                  the ScanSettingBindings and clears the score, keeping the CR and history.
+                  New installs still default to {cis}; clear it explicitly to stop scanning.
+                  Capped at the number of known ProfileKey enum values (listType=set).
                 items:
                   description: |-
                     ProfileKey identifies one of the profile sets shipped by the Compliance
@@ -97,7 +104,7 @@ spec:
                   - e8
                   - bsi
                   type: string
-                minItems: 1
+                maxItems: 8
                 type: array
                 x-kubernetes-list-type: set
               remediation:
@@ -119,6 +126,10 @@ spec:
                 default: 0 1 * * *
                 description: |-
                   schedule is the scan cron schedule, applied to the owned ScanSetting.
+                  Must be standard five-field cron (minute hour dom month dow), for example
+                  "0 1 * * *". Descriptors such as "@daily" or "@every 1h" are rejected at
+                  reconcile (InvalidSchedule Degraded) because Compliance Operator
+                  ScanSettings only accept five-field forms. Empty uses the default.
                   Bounded so a hostile or accidental multi-megabyte string cannot bloat the
                   CR or inflate condition messages that embed the value.
                 maxLength: 128
@@ -173,10 +184,12 @@ spec:
                       format: date-time
                       type: string
                     name:
-                      description: name is the ComplianceCheckResult metadata.name
-                        to waive.
+                      description: |-
+                        name is the ComplianceCheckResult metadata.name to waive.
+                        Must be a DNS-1123 subdomain (same shape as Kubernetes resource names).
                       maxLength: 253
                       minLength: 1
+                      pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
                       type: string
                     reason:
                       description: reason records why this check is accepted (for
@@ -208,6 +221,7 @@ spec:
             description: ClusterBaselineStatus is the observed state.
             properties:
               complianceOperatorVersion:
+                maxLength: 128
                 type: string
               conditions:
                 items:
@@ -265,12 +279,31 @@ spec:
                   - type
                   type: object
                 type: array
+              diffBaseFailures:
+                description: |-
+                  diffBaseFailures retains the scan-before-last FAIL snapshot while results
+                  for lastScanTime settle, allowing late CheckResult events to correct the
+                  current newlyFailed/fixed diff. Internal bookkeeping, not a user setting.
+                items:
+                  maxLength: 253
+                  type: string
+                maxItems: 4096
+                type: array
+                x-kubernetes-list-type: set
+              diffBaseScanTime:
+                description: |-
+                  diffBaseScanTime identifies the lastScanTime whose diffBaseFailures apply.
+                  It is nil for the first completed scan, which has no comparison baseline.
+                format: date-time
+                type: string
               fixed:
                 description: |-
                   fixed lists owned checks that were FAIL at the previous scan but are no
                   longer FAIL now (improvements since last scan).
                 items:
+                  maxLength: 253
                   type: string
+                maxItems: 4096
                 type: array
                 x-kubernetes-list-type: set
               history:
@@ -300,9 +333,12 @@ spec:
               newlyFailed:
                 description: |-
                   newlyFailed lists owned checks that are FAIL now but were not FAIL at the
-                  previous completed scan (regressions since last scan). Bounded by fail count.
+                  previous completed scan (regressions since last scan). Bounded by fail count
+                  and hard-capped so a hostile status cannot brick Status().Update admission.
                 items:
+                  maxLength: 253
                   type: string
+                maxItems: 4096
                 type: array
                 x-kubernetes-list-type: set
               nextScanTime:
@@ -315,7 +351,9 @@ spec:
                   previousFailures is the internal FAIL snapshot from the last completed scan,
                   used to compute newlyFailed/fixed on the next scan.
                 items:
+                  maxLength: 253
                   type: string
+                maxItems: 4096
                 type: array
                 x-kubernetes-list-type: set
               profiles:
@@ -325,9 +363,11 @@ spec:
                   properties:
                     error:
                       format: int32
+                      minimum: 0
                       type: integer
                     fail:
                       format: int32
+                      minimum: 0
                       type: integer
                     history:
                       description: history holds this profile's score snapshots, oldest
@@ -352,16 +392,19 @@ spec:
                       type: array
                     inconsistent:
                       description: |-
-                        Inconsistent counts checks whose per-node results disagree across a
-                        MachineConfigPool (compliance operator status INCONSISTENT). Excluded from
-                        the score like Manual/Error; it flags a discrepancy that needs review.
+                        Inconsistent counts checks that remain INCONSISTENT after benign collapse
+                        (PASS where applicable, NOT-APPLICABLE elsewhere becomes PASS). Genuine
+                        PASS-vs-FAIL/ERROR node splits stay here. Excluded from the score like
+                        Manual/Error; it flags a real discrepancy that needs review.
                       format: int32
+                      minimum: 0
                       type: integer
                     info:
                       description: |-
                         Info counts informational checks (CO status INFO). Excluded from the
                         score like Manual; still reported so Overview totals match Results.
                       format: int32
+                      minimum: 0
                       type: integer
                     key:
                       description: |-
@@ -379,22 +422,31 @@ spec:
                       type: string
                     manual:
                       format: int32
+                      minimum: 0
                       type: integer
                     notApplicable:
                       format: int32
+                      minimum: 0
                       type: integer
                     pass:
                       format: int32
+                      minimum: 0
                       type: integer
                     profileNames:
+                      description: profileNames are the Compliance Operator Profile
+                        names bound for this key.
                       items:
+                        maxLength: 253
                         type: string
+                      maxItems: 16
                       type: array
+                      x-kubernetes-list-type: set
                     waived:
                       description: |-
                         Waived counts checks excluded from the score by a spec.waivers entry
                         (accepted risk). Excluded from the pass/fail denominator.
                       format: int32
+                      minimum: 0
                       type: integer
                   required:
                   - error
@@ -407,6 +459,7 @@ spec:
                   - pass
                   - waived
                   type: object
+                maxItems: 16
                 type: array
               relatedObjects:
                 description: relatedObjects lists the resources this baseline owns
@@ -417,38 +470,59 @@ spec:
                     by must-gather and support tooling.
                   properties:
                     group:
+                      maxLength: 253
                       type: string
                     name:
+                      maxLength: 253
+                      minLength: 1
                       type: string
                     namespace:
+                      maxLength: 63
                       type: string
                     resource:
+                      maxLength: 253
+                      minLength: 1
                       type: string
                   required:
                   - name
                   - resource
                   type: object
+                maxItems: 64
                 type: array
               remediationBatch:
                 description: remediationBatch tracks an in-progress MachineConfigPool-paused
                   batch apply.
                 properties:
+                  pauseOwner:
+                    description: |-
+                      pauseOwner is copied to each pool the operator actually pauses. It lets the
+                      resume path preserve pools that an administrator had already paused.
+                      Empty identifies a legacy in-flight batch created before ownership tracking.
+                    maxLength: 253
+                    type: string
                   phase:
                     description: phase is Applying while pools are paused and remediations
                       are being applied.
+                    enum:
+                    - Applying
+                    maxLength: 32
                     type: string
                   pools:
                     description: pools are the MachineConfigPools paused for this
                       batch.
                     items:
+                      maxLength: 253
                       type: string
+                    maxItems: 32
                     type: array
                     x-kubernetes-list-type: set
                   remediations:
                     description: remediations are the ComplianceRemediation names
                       in this batch.
                     items:
+                      maxLength: 253
                       type: string
+                    maxItems: 256
                     type: array
                     x-kubernetes-list-type: set
                   startedAt:
@@ -462,9 +536,12 @@ spec:
                 type: object
               score:
                 description: |-
-                  score is pass/(pass+fail) across all profiles, 0-100. MANUAL, INFO,
-                  ERROR, INCONSISTENT, WAIVED, and NOT-APPLICABLE are excluded from the
-                  score; their counts are still reported per profile.
+                  score across all profiles, 0-100: pass/(pass+fail) in the default Flat
+                  mode, a severity-weighted ratio when spec.scoring.mode is
+                  SeverityWeighted. Benign INCONSISTENT is remapped to PASS or
+                  NOT-APPLICABLE first. Residual genuine INCONSISTENT, plus MANUAL, INFO,
+                  ERROR, WAIVED, and NOT-APPLICABLE, are excluded from the score; their
+                  counts are still reported per profile.
                 format: int32
                 maximum: 100
                 minimum: 0
@@ -477,9 +554,11 @@ spec:
                   properties:
                     error:
                       format: int32
+                      minimum: 0
                       type: integer
                     fail:
                       format: int32
+                      minimum: 0
                       type: integer
                     history:
                       description: history holds this profile's score snapshots, oldest
@@ -504,33 +583,44 @@ spec:
                       type: array
                     inconsistent:
                       description: |-
-                        Inconsistent counts checks whose per-node results disagree across a
-                        MachineConfigPool (compliance operator status INCONSISTENT). Excluded from
-                        the score like Manual/Error; it flags a discrepancy that needs review.
+                        Inconsistent counts checks that remain INCONSISTENT after benign collapse
+                        (PASS where applicable, NOT-APPLICABLE elsewhere becomes PASS). Genuine
+                        PASS-vs-FAIL/ERROR node splits stay here. Excluded from the score like
+                        Manual/Error; it flags a real discrepancy that needs review.
                       format: int32
+                      minimum: 0
                       type: integer
                     info:
                       description: |-
                         Info counts informational checks (CO status INFO). Excluded from the
                         score like Manual; still reported so Overview totals match Results.
                       format: int32
+                      minimum: 0
                       type: integer
                     manual:
                       format: int32
+                      minimum: 0
                       type: integer
                     name:
+                      description: name is the TailoredProfile metadata.name in openshift-compliance.
+                      maxLength: 51
+                      minLength: 1
+                      pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
                       type: string
                     notApplicable:
                       format: int32
+                      minimum: 0
                       type: integer
                     pass:
                       format: int32
+                      minimum: 0
                       type: integer
                     waived:
                       description: |-
                         Waived counts checks excluded from the score by a spec.waivers entry
                         (accepted risk). Excluded from the pass/fail denominator.
                       format: int32
+                      minimum: 0
                       type: integer
                   required:
                   - error
@@ -543,6 +633,7 @@ spec:
                   - pass
                   - waived
                   type: object
+                maxItems: 32
                 type: array
             type: object
         required:

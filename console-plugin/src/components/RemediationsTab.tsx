@@ -7,6 +7,7 @@ import {
 } from '@openshift-console/dynamic-plugin-sdk';
 import {
   Alert,
+  AlertActionCloseButton,
   Bullseye,
   Button,
   CodeBlock,
@@ -40,6 +41,7 @@ import {
   isNodeRemediation,
   remediationApplyPatch,
   remediationObjectText,
+  resourceVersionTest,
 } from '../utils';
 
 const stateColor: Record<string, React.ComponentProps<typeof Label>['color']> = {
@@ -58,6 +60,8 @@ const RemediationsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline })
     namespace: 'openshift-compliance',
   });
   const [confirming, setConfirming] = React.useState<ComplianceRemediation | null>(null);
+  const [unapplying, setUnapplying] = React.useState<ComplianceRemediation | null>(null);
+  const [autoApplyConfirming, setAutoApplyConfirming] = React.useState(false);
   const [batchConfirming, setBatchConfirming] = React.useState(false);
   const [viewing, setViewing] = React.useState<ComplianceRemediation | null>(null);
   const [busy, setBusy] = React.useState(false);
@@ -74,13 +78,21 @@ const RemediationsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline })
     verb: 'patch',
   });
   const watchError = errorMessage(loadError);
+  const batchInProgress =
+    baseline?.status?.remediationBatch != null ||
+    Object.prototype.hasOwnProperty.call(
+      baseline?.metadata.annotations ?? {},
+      'baselinesecurity.io/batch-apply',
+    );
 
+  const profiles = baseline?.spec.profiles;
+  const tailoredProfiles = baseline?.spec.tailoredProfiles;
   const owned = React.useMemo(
     () =>
       (remediations ?? []).filter((r) =>
-        isOwnedByBaseline(r.metadata.labels, baseline?.spec.profiles, baseline?.spec.tailoredProfiles),
+        isOwnedByBaseline(r.metadata.labels, profiles, tailoredProfiles),
       ),
-    [remediations, baseline?.spec.profiles, baseline?.spec.tailoredProfiles],
+    [remediations, profiles, tailoredProfiles],
   );
 
   const run = async (fn: () => Promise<unknown>, failMsg: string): Promise<boolean> => {
@@ -112,16 +124,19 @@ const RemediationsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline })
   );
 
   const doBatchApply = () => {
-    if (!baseline) return;
+    if (!baseline || batchInProgress || batchable.length === 0) return;
     void run(
       () =>
         k8sPatch({
           model: ClusterBaselineModel,
           resource: baseline,
-          data: batchApplyPatch(
-            !!baseline.metadata.annotations,
-            batchable.map((r) => r.metadata.name),
-          ),
+          data: [
+            ...resourceVersionTest(baseline.metadata.resourceVersion),
+            ...batchApplyPatch(
+              !!baseline.metadata.annotations,
+              batchable.map((r) => r.metadata.name),
+            ),
+          ],
         }),
       t('Failed to start batch apply.'),
     ).then((ok) => ok && setBatchConfirming(false));
@@ -138,18 +153,34 @@ const RemediationsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline })
       t('Failed to update remediation.'),
     );
 
-  const toggleAutoApply = (checked: boolean) => {
-    if (!baseline) return;
-    void run(
+  const toggleAutoApply = async (checked: boolean): Promise<boolean> => {
+    if (!baseline) return false;
+    return run(
       () =>
         k8sPatch({
           model: ClusterBaselineModel,
           resource: baseline,
-          data: remediationApplyPatch(baseline.spec.remediation != null, checked),
+          data: [
+            ...resourceVersionTest(baseline.metadata.resourceVersion),
+            ...remediationApplyPatch(baseline.spec.remediation != null, checked),
+          ],
         }),
       t('Failed to update auto-apply setting.'),
     );
   };
+
+  // Turning auto-apply on can reboot nodes after every scan; confirm first.
+  // Turning it off is safe and applies immediately.
+  const onAutoApplyChange = (_e: unknown, checked: boolean) => {
+    if (checked) {
+      setError(null);
+      setAutoApplyConfirming(true);
+      return;
+    }
+    void toggleAutoApply(false);
+  };
+
+  const anyModalOpen = !!confirming || !!unapplying || batchConfirming || autoApplyConfirming;
 
   return (
     <PageSection>
@@ -172,36 +203,92 @@ const RemediationsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline })
       )}
       {/* Shown page-top only when no modal is open; the modals render their own
           copy of this error so a failed apply is not hidden behind the backdrop. */}
-      {error && !confirming && !batchConfirming && (
+      {error && !anyModalOpen && (
         <Alert
           variant="danger"
           isInline
           title={error}
           style={{ marginTop: 'var(--pf-t--global--spacer--md)' }}
+          actionClose={
+            <AlertActionCloseButton
+              aria-label={t('Close')}
+              onClose={() => setError(null)}
+            />
+          }
         />
       )}
       <Split hasGutter style={{ marginTop: 'var(--pf-t--global--spacer--md)' }}>
         <SplitItem isFilled>
-          {batchable.length > 0 && (
+          {batchInProgress ? (
+            <Label color="blue">{t('Batch apply in progress')}</Label>
+          ) : batchable.length > 0 ? (
             <Button
               variant="secondary"
               isDisabled={!baseline || !canEditBaseline || canEditBaselineLoading || busy}
-              onClick={() => setBatchConfirming(true)}
+              onClick={() => {
+                setError(null);
+                setBatchConfirming(true);
+              }}
             >
-              {t('Batch apply {{count}} node remediation(s)', { count: batchable.length })}
+              {t('Batch apply {{count}} node remediation', { count: batchable.length })}
             </Button>
-          )}
+          ) : null}
         </SplitItem>
         <SplitItem>
           <Switch
             id="auto-apply"
             label={t('Auto-apply remediations after each scan')}
-            isChecked={baseline?.spec.remediation?.apply === 'Automatic'}
+            isChecked={
+              autoApplyConfirming || baseline?.spec.remediation?.apply === 'Automatic'
+            }
             isDisabled={!baseline || !canEditBaseline || canEditBaselineLoading || busy}
-            onChange={(_e, checked) => toggleAutoApply(checked)}
+            onChange={onAutoApplyChange}
           />
         </SplitItem>
       </Split>
+      <Modal
+        variant="small"
+        isOpen={autoApplyConfirming}
+        onClose={() => setAutoApplyConfirming(false)}
+        aria-labelledby="auto-apply-title"
+      >
+        <ModalHeader
+          title={t('Enable auto-apply remediations?')}
+          labelId="auto-apply-title"
+        />
+        <ModalBody>
+          {t(
+            'After each scan, available remediations will apply automatically. Node remediations render into MachineConfigs and trigger rolling node reboots.',
+          )}
+          {error && (
+            <Alert
+              variant="danger"
+              isInline
+              title={error}
+              style={{ marginTop: 'var(--pf-t--global--spacer--md)' }}
+            />
+          )}
+        </ModalBody>
+        <ModalFooter>
+          <Button
+            variant="danger"
+            isDisabled={busy || !canEditBaseline || canEditBaselineLoading}
+            isLoading={busy}
+            onClick={() => {
+              void toggleAutoApply(true).then((ok) => ok && setAutoApplyConfirming(false));
+            }}
+          >
+            {t('Enable auto-apply')}
+          </Button>
+          <Button
+            variant="link"
+            isDisabled={busy}
+            onClick={() => setAutoApplyConfirming(false)}
+          >
+            {t('Cancel')}
+          </Button>
+        </ModalFooter>
+      </Modal>
       <Modal
         variant="small"
         isOpen={batchConfirming}
@@ -287,14 +374,17 @@ const RemediationsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline })
                         variant="link"
                         isInline
                         isDisabled={!canApply || canApplyLoading || busy}
-                        onClick={() => void setApply(rem, false)}
+                        onClick={() => {
+                          setError(null);
+                          setUnapplying(rem);
+                        }}
                       >
                         {t('Unapply')}
                       </Button>
                     ) : state === 'MissingDependencies' ? (
                       // Blocked: applying now would fail; a prerequisite remediation
                       // must be applied first. Do not offer a plain Apply.
-                      <Tooltip content={t('Blocked: apply the prerequisite remediation(s) first.')}>
+                      <Tooltip content={t('Blocked: apply the prerequisite remediations first.')}>
                         <Button variant="link" isInline isAriaDisabled>
                           {t('Blocked')}
                         </Button>
@@ -304,7 +394,10 @@ const RemediationsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline })
                         variant="link"
                         isInline
                         isDisabled={!canApply || canApplyLoading || busy}
-                        onClick={() => setConfirming(rem)}
+                        onClick={() => {
+                          setError(null);
+                          setConfirming(rem);
+                        }}
                       >
                         {t('Apply')}
                       </Button>
@@ -372,6 +465,49 @@ const RemediationsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline })
         </ModalFooter>
       </Modal>
       <Modal
+        variant="small"
+        isOpen={!!unapplying}
+        onClose={() => setUnapplying(null)}
+        aria-labelledby="unapply-remediation-title"
+      >
+        <ModalHeader title={t('Unapply remediation?')} labelId="unapply-remediation-title" />
+        <ModalBody>
+          {t(
+            '{{name}} will stop being applied. A rescan is required afterwards for results to reflect the change.',
+            { name: unapplying?.metadata.name },
+          )}
+          {error && (
+            <Alert
+              variant="danger"
+              isInline
+              title={error}
+              style={{ marginTop: 'var(--pf-t--global--spacer--md)' }}
+            />
+          )}
+        </ModalBody>
+        <ModalFooter>
+          <Button
+            variant="secondary"
+            isDisabled={busy || !canApply || canApplyLoading}
+            isLoading={busy}
+            onClick={() => {
+              if (!unapplying) return;
+              const rem = unapplying;
+              void (async () => {
+                if (await setApply(rem, false)) {
+                  setUnapplying(null);
+                }
+              })();
+            }}
+          >
+            {t('Unapply')}
+          </Button>
+          <Button variant="link" isDisabled={busy} onClick={() => setUnapplying(null)}>
+            {t('Cancel')}
+          </Button>
+        </ModalFooter>
+      </Modal>
+      <Modal
         variant="medium"
         isOpen={!!viewing}
         onClose={() => setViewing(null)}
@@ -389,6 +525,11 @@ const RemediationsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline })
             </CodeBlockCode>
           </CodeBlock>
         </ModalBody>
+        <ModalFooter>
+          <Button variant="link" onClick={() => setViewing(null)}>
+            {t('Close')}
+          </Button>
+        </ModalFooter>
       </Modal>
     </PageSection>
   );

@@ -130,7 +130,7 @@ func TestReconcileDeletionResumesBatchPools(t *testing.T) {
 // unstarted (or an in-flight batch unserviced) while MCPs are/should be managed.
 func TestReconcileOwnedBatchBeforeCOFailure(t *testing.T) {
 	scheme := testScheme(t)
-	rem := nodeRemediation("rem1", "worker", "")
+	rem := nodeRemediation("rem1", "worker")
 	pool := machineConfigPool("worker")
 	cb := newCB("cis")
 	cb.SetAnnotations(map[string]string{batchApplyAnnotation: "rem1"})
@@ -172,9 +172,10 @@ func TestResumeBatchPoolsOnDeleteFromAnnotation(t *testing.T) {
 	scheme := testScheme(t)
 	cb := newCB("cis")
 	cb.SetAnnotations(map[string]string{batchApplyAnnotation: "rem1"})
-	rem := nodeRemediation("rem1", "worker", "")
+	rem := nodeRemediation("rem1", "worker")
 	pool := machineConfigPool("worker")
 	_ = unstructured.SetNestedField(pool.Object, true, "spec", "paused")
+	pool.SetAnnotations(map[string]string{batchPauseOwnerAnnotation: batchPauseOwner(cb)})
 	r := &ClusterBaselineReconciler{
 		Client: fake.NewClientBuilder().WithScheme(scheme).
 			WithObjects(cb, rem, pool).Build(),
@@ -184,7 +185,9 @@ func TestResumeBatchPoolsOnDeleteFromAnnotation(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := machineConfigPool("worker")
-	_ = r.Get(context.Background(), types.NamespacedName{Name: "worker"}, got)
+	if err := r.Get(context.Background(), types.NamespacedName{Name: "worker"}, got); err != nil {
+		t.Fatal(err)
+	}
 	if paused, _, _ := unstructured.NestedBool(got.Object, "spec", "paused"); paused {
 		t.Fatal("pool must resume from annotation rediscovery on delete")
 	}
@@ -449,6 +452,43 @@ func TestEnsureScanConfigCreatesAndPrunes(t *testing.T) {
 	}
 }
 
+// TestEnsureScanConfigScanningDisabled: clearing all profiles (and tailored
+// profiles) prunes the owned bindings and reports ScanConfigured=True with
+// reason ScanningDisabled, not an error or Degraded.
+func TestEnsureScanConfigScanningDisabled(t *testing.T) {
+	scheme := testScheme(t)
+	scheme.AddKnownTypeWithName(scanSettingGVK, &unstructured.Unstructured{})
+	bindingList := &unstructured.UnstructuredList{}
+	bindingList.SetGroupVersionKind(bindingGVK.GroupVersion().WithKind(bindingGVK.Kind + "List"))
+	scheme.AddKnownTypeWithName(bindingGVK, &unstructured.Unstructured{})
+	scheme.AddKnownTypeWithName(bindingList.GroupVersionKind(), bindingList)
+
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).Build(),
+		Scheme: scheme,
+	}
+	// Create a cis binding, then clear every profile.
+	cb := newCB("cis")
+	if err := r.ensureScanConfig(context.Background(), cb); err != nil {
+		t.Fatal(err)
+	}
+	cb.Spec.Profiles = nil
+	cb.Spec.TailoredProfiles = nil
+	if err := r.ensureScanConfig(context.Background(), cb); err != nil {
+		t.Fatal(err)
+	}
+	c := meta.FindStatusCondition(cb.Status.Conditions, "ScanConfigured")
+	if c == nil || c.Status != metav1.ConditionTrue || c.Reason != "ScanningDisabled" {
+		t.Fatalf("ScanConfigured = %+v, want True/ScanningDisabled", c)
+	}
+	binding := &unstructured.Unstructured{}
+	binding.SetGroupVersionKind(bindingGVK)
+	err := r.Get(context.Background(), types.NamespacedName{Namespace: complianceNamespace, Name: "baseline-cis"}, binding)
+	if !apierrors.IsNotFound(err) {
+		t.Fatalf("baseline-cis binding should be pruned when scanning is disabled, err=%v", err)
+	}
+}
+
 // TestEnsureScanConfigInvalidCronFirstCreate covers the first-create path: with
 // no pre-existing ScanSetting there is no last-good schedule, so an invalid cron
 // must fall back to the operator default rather than leave CO with an empty one.
@@ -481,9 +521,25 @@ func TestEnsureScanConfigInvalidCronFirstCreate(t *testing.T) {
 
 func TestEnsureConsolePlugin(t *testing.T) {
 	scheme := testScheme(t)
+	lbClass := "example.test/external"
+	allocateNodePorts := true
+	hostileService := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: pluginName, Namespace: pluginNS},
+		Spec: corev1.ServiceSpec{
+			Type:                          corev1.ServiceTypeLoadBalancer,
+			ExternalIPs:                   []string{"203.0.113.10"},
+			LoadBalancerIP:                "203.0.113.11",
+			LoadBalancerSourceRanges:      []string{"0.0.0.0/0"},
+			LoadBalancerClass:             &lbClass,
+			AllocateLoadBalancerNodePorts: &allocateNodePorts,
+			ExternalTrafficPolicy:         corev1.ServiceExternalTrafficPolicyLocal,
+			HealthCheckNodePort:           32000,
+			PublishNotReadyAddresses:      true,
+		},
+	}
 	r := &ClusterBaselineReconciler{
 		Client: fake.NewClientBuilder().WithScheme(scheme).
-			WithObjects(consoleCluster("other")).
+			WithObjects(consoleCluster("other"), hostileService).
 			WithStatusSubresource(&appsv1.Deployment{}).
 			Build(),
 		Scheme: scheme,
@@ -511,6 +567,15 @@ func TestEnsureConsolePlugin(t *testing.T) {
 	if svc.Annotations["service.beta.openshift.io/serving-cert-secret-name"] != pluginName+"-cert" {
 		t.Fatal("serving-cert annotation missing")
 	}
+	if svc.Spec.Type != corev1.ServiceTypeClusterIP {
+		t.Fatalf("plugin Service type = %q, want ClusterIP", svc.Spec.Type)
+	}
+	if len(svc.Spec.ExternalIPs) != 0 || svc.Spec.LoadBalancerIP != "" ||
+		len(svc.Spec.LoadBalancerSourceRanges) != 0 || svc.Spec.LoadBalancerClass != nil ||
+		svc.Spec.AllocateLoadBalancerNodePorts != nil || svc.Spec.ExternalTrafficPolicy != "" ||
+		svc.Spec.HealthCheckNodePort != 0 || svc.Spec.PublishNotReadyAddresses {
+		t.Fatalf("plugin Service retained external exposure fields: %+v", svc.Spec)
+	}
 	dep := &appsv1.Deployment{}
 	if err := r.Get(context.Background(), types.NamespacedName{Namespace: pluginNS, Name: pluginName}, dep); err != nil {
 		t.Fatal(err)
@@ -530,9 +595,29 @@ func TestEnsureConsolePlugin(t *testing.T) {
 	if sc := dep.Spec.Template.Spec.SecurityContext; sc.SeccompProfile == nil || sc.SeccompProfile.Type != corev1.SeccompProfileTypeRuntimeDefault {
 		t.Fatal("pod SeccompProfile RuntimeDefault required")
 	}
-	vol := dep.Spec.Template.Spec.Volumes[0].Secret
-	if vol == nil || vol.Optional == nil || !*vol.Optional {
+	var certVol *corev1.SecretVolumeSource
+	var haveTmp bool
+	for _, v := range dep.Spec.Template.Spec.Volumes {
+		switch v.Name {
+		case "serving-cert":
+			certVol = v.Secret
+		case "tmp":
+			haveTmp = v.EmptyDir != nil && v.EmptyDir.SizeLimit != nil &&
+				v.EmptyDir.SizeLimit.Value() == 32*1024*1024
+		}
+	}
+	if certVol == nil || certVol.Optional == nil || !*certVol.Optional {
 		t.Fatal("serving-cert volume must be optional until service-ca mints the Secret")
+	}
+	if certVol.DefaultMode == nil || *certVol.DefaultMode != 0o400 {
+		t.Fatalf("serving-cert DefaultMode = %v, want 0400", certVol.DefaultMode)
+	}
+	if !haveTmp {
+		t.Fatal("tmp emptyDir with 32Mi SizeLimit required for read-only rootfs")
+	}
+	csc := dep.Spec.Template.Spec.Containers[0].SecurityContext
+	if csc == nil || csc.ReadOnlyRootFilesystem == nil || !*csc.ReadOnlyRootFilesystem {
+		t.Fatal("plugin container ReadOnlyRootFilesystem required")
 	}
 	console := consoleCluster()
 	if err := r.Get(context.Background(), types.NamespacedName{Name: "cluster"}, console); err != nil {

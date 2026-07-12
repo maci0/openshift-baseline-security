@@ -12,9 +12,15 @@ spec:
       rules:
         - alert: ComplianceScoreLow
           # -1 is the "no score yet" sentinel; only alert on a real low score.
-          # max() is instance-safe under HA: only the leader updates gauges, so
-          # non-leaders may stay at -1 or stale values if scraped.
-          expr: max(baseline_security_compliance_score) >= 0 and max(baseline_security_compliance_score) < 80
+          # Only the leader updates gauges. Select the replica with the newest
+          # observation timestamp so an old leader's stale value cannot mask a
+          # lower score after failover.
+          expr: >-
+            max(baseline_security_compliance_score
+              and on(instance) topk(1, baseline_security_status_observed_timestamp_seconds)) >= 0
+            and
+            max(baseline_security_compliance_score
+              and on(instance) topk(1, baseline_security_status_observed_timestamp_seconds)) < 80
           for: 30m
           labels:
             severity: warning
@@ -22,10 +28,15 @@ spec:
             summary: Cluster compliance score is below 80
             description: >-
               The baseline compliance score is {{ $value }} (threshold 80).
-              Review failing checks under Administration -> Compliance.
+              Open Administration -> Compliance, filter Results by Fail, and
+              review newlyFailed on the ClusterBaseline status. Check Degraded
+              and ScanStorageReady conditions if the score is unexpectedly low.
         - alert: ComplianceChecksFailing
-          # Collapse per-pod series before summing so HA replicas do not double-count.
-          expr: sum(max by (profile, status) (baseline_security_checks{status="fail"})) > 0
+          # Select the newest publishing replica before summing profiles. This
+          # avoids both HA double-counting and stale values after leader failover.
+          expr: >-
+            sum(baseline_security_checks{status="fail"}
+              and on(instance) topk(1, baseline_security_status_observed_timestamp_seconds)) > 0
           for: 1h
           labels:
             severity: warning
@@ -33,4 +44,76 @@ spec:
             summary: Compliance checks are failing
             description: >-
               {{ $value }} compliance check(s) are failing across the selected
-              benchmark profiles.
+              benchmark profiles. Open Administration -> Compliance -> Results
+              (status=Fail). Compare status.newlyFailed vs fixed for regressions.
+        - alert: ComplianceChecksInError
+          # ERROR is distinct from FAIL: the check did not run cleanly (scanner,
+          # RBAC, or node issues). Same HA newest-publisher selection as fails.
+          expr: >-
+            sum(baseline_security_checks{status="error"}
+              and on(instance) topk(1, baseline_security_status_observed_timestamp_seconds)) > 0
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: Compliance checks are in ERROR state
+            description: >-
+              {{ $value }} compliance check(s) are in ERROR (not merely FAIL).
+              Inspect ComplianceCheckResult objects in openshift-compliance and
+              Compliance Operator pod logs; ERROR often means a scan/runtime
+              problem rather than a policy violation.
+        - alert: ComplianceStatusStale
+          # Operator stopped publishing (crash loop, stuck reconcile, scrape
+          # only from a demoted replica that never aggregated). Timestamp 0 is
+          # the pre-first-publish seed; treat it as never-published.
+          # Steady requeue is 1m; 15m covers leader election + install grace.
+          expr: >-
+            max(baseline_security_status_observed_timestamp_seconds) == 0
+            or
+            (time() - max(baseline_security_status_observed_timestamp_seconds)) > 900
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            summary: Baseline security status metrics are stale
+            description: >-
+              ClusterBaseline metrics have not been published recently (or never).
+              Check the baseline-security-operator Deployment and pod logs in
+              openshift-baseline-security, leader election, and that user-workload
+              monitoring scrapes the metrics ServiceMonitor.
+        - alert: RemediationBatchStuck
+          # batchResumeGrace is 10m; past ~20m the batch should have cleared.
+          # A stuck batch means MachineConfigPools may remain paused.
+          expr: >-
+            max(baseline_security_remediation_batch_active
+              and on(instance) topk(1, baseline_security_status_observed_timestamp_seconds)) == 1
+          for: 20m
+          labels:
+            severity: critical
+          annotations:
+            summary: Remediation batch has not completed
+            description: >-
+              A MachineConfigPool-paused remediation batch has been active for
+              over 20m. Inspect ClusterBaseline status.remediationBatch and
+              MachineConfigPool .spec.paused; resume pools if the operator cannot
+              (operator logs mention resume failures). Unpausing without care may
+              trigger node reboots.
+        - alert: ClusterBaselineDegraded
+          # Covers InvalidSchedule, CSVFailed, InstallStalled, ScanStorageNotReady,
+          # ConsolePluginUnavailable, and ReconcileError. Score/check alerts alone
+          # miss operator-level degradation when aggregation still publishes.
+          # 15m avoids paging on brief API blips that set Degraded then clear.
+          expr: >-
+            max(baseline_security_condition{type="Degraded"}
+              and on(instance) topk(1, baseline_security_status_observed_timestamp_seconds)) == 1
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: ClusterBaseline is Degraded
+            description: >-
+              The ClusterBaseline Degraded condition has been True for 15m.
+              Check status.conditions on ClusterBaseline/cluster (reason and
+              message), operator logs in openshift-baseline-security, and
+              related detail conditions (ComplianceOperatorReady, ScanConfigured,
+              ScanStorageReady, ConsolePluginReady).

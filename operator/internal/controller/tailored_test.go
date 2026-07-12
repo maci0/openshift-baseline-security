@@ -85,6 +85,11 @@ func TestNextScanTime(t *testing.T) {
 	if nextScanTime("not a cron", now) != nil {
 		t.Fatal("invalid schedule should yield nil")
 	}
+	// robfig ParseStandard accepts descriptors, but ScanSetting is intentionally
+	// constrained to five-field cron so an annotation cannot request @every 1s.
+	if nextScanTime("@every 1s", now) != nil {
+		t.Fatal("cron descriptor should be rejected")
+	}
 	// Parseable but never-firing schedule (fuzz-found): Next returns the zero
 	// time; must be nil, not a year-0001 timestamp.
 	if got := nextScanTime("*/7 , 1 1 0", now); got != nil {

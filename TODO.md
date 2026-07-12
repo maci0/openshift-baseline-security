@@ -1,10 +1,11 @@
 # Roadmap
 
-Status of **openshift-baseline-security**. Current release **0.2.1**
-(cluster-scoped `ClusterBaseline` API, string-enum spec). Verified end to end
-on a single-node OpenShift 4.22 cluster: operator + console plugin installed
-via OLM, CIS scan scored, both e2e suites green, five adversarial review
-rounds converged clean.
+Status of **openshift-baseline-security**. Current release **0.4.0**
+(cluster-scoped `ClusterBaseline` API `v1alpha1`, string-enum spec, OLM
+channel `alpha`). See [CHANGELOG.md](CHANGELOG.md) for consumer-facing notes
+and upgrade impact. Verified end to end on a single-node OpenShift 4.22
+cluster: operator + console plugin installed via OLM, CIS scan scored, both
+e2e suites green.
 
 Legend: `[x]` done · `[ ]` planned · **(H/M/L)** rough value.
 
@@ -40,8 +41,13 @@ Legend: `[x]` done · `[ ]` planned · **(H/M/L)** rough value.
 ### Observability
 - [x] Prometheus metrics on the secure endpoint:
       `baseline_security_compliance_score`,
-      `baseline_security_checks{profile,status}`.
-- [x] PrometheusRule: `ComplianceScoreLow`, `ComplianceChecksFailing`.
+      `baseline_security_checks{profile,status}`,
+      `baseline_security_status_observed_timestamp_seconds` (HA newest
+      publisher selection for alerts),
+      `baseline_security_remediation_batch_active`.
+- [x] PrometheusRule: `ComplianceScoreLow`, `ComplianceChecksFailing`,
+      `ComplianceChecksInError`, `ComplianceStatusStale`,
+      `RemediationBatchStuck`.
 - [x] Aggregated `baseline-security-viewer` / `-admin` ClusterRoles.
 
 ### 0.3 additions
@@ -55,8 +61,9 @@ Legend: `[x]` done · `[ ]` planned · **(H/M/L)** rough value.
 - [x] Console cluster Overview details item surfacing the compliance score.
 
 ### Packaging & quality
-- [x] OLM bundle + FBC catalog (`make bundle` validates); 0.2.1 replaces
-      0.2.0 in the upgrade graph; images/tools digest-pinned.
+- [x] OLM bundle + FBC catalog (`make bundle` validates); upgrade graph
+      0.2.0 → 0.2.1 → 0.3.0 → 0.3.1 → 0.4.0 (`replaces` chain); images/tools
+      digest-pinned where applicable.
 - [x] CI (unit, fuzz, lint, generated-file drift, image builds).
 - [x] E2E: operator Go (`make test-e2e`) + console Playwright
       (`yarn test-e2e`, also regenerates `docs/screenshots`).

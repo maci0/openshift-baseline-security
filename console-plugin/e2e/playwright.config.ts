@@ -1,10 +1,16 @@
 import { defineConfig } from '@playwright/test';
 
-// E2E against a live OpenShift console. Configure via env:
+// E2E against a live OpenShift console. Configure via env (see .env.example):
 //   CONSOLE_URL          console base URL (required)
 //   KUBEADMIN_USER       login user (default: kubeadmin)
 //   KUBEADMIN_PASSWORD   login password (required)
 //   SCREENSHOT_DIR       where spec screenshots are written (default: ../docs/screenshots)
+// Optional local overrides: copy .env.example to .env (gitignored) and
+//   set -a && . ./.env && set +a && yarn test-e2e
+if (!process.env.CONSOLE_URL) {
+  throw new Error('CONSOLE_URL must be set (see console-plugin/.env.example)');
+}
+
 export default defineConfig({
   testDir: '.',
   timeout: 60_000,

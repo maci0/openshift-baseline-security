@@ -8,7 +8,9 @@ export default async function globalSetup(_config: FullConfig) {
   const user = process.env.KUBEADMIN_USER ?? 'kubeadmin';
   const password = process.env.KUBEADMIN_PASSWORD;
   if (!consoleURL || !password) {
-    throw new Error('CONSOLE_URL and KUBEADMIN_PASSWORD must be set');
+    throw new Error(
+      'CONSOLE_URL and KUBEADMIN_PASSWORD must be set (see console-plugin/.env.example)',
+    );
   }
 
   const browser = await chromium.launch();

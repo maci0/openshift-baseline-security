@@ -16,12 +16,30 @@ const ClusterScoreItem: React.FC = () => {
     isList: true,
   });
 
-  if (!loaded || error) {
-    return <>—</>;
+  if (!loaded) {
+    return (
+      <span aria-busy="true" aria-label={t('Loading compliance data')}>
+        —
+      </span>
+    );
+  }
+  if (error) {
+    return (
+      <a href="/baseline-security" aria-label={t('Compliance score unavailable')}>
+        —
+      </a>
+    );
   }
   const score = clusterScore(baselines);
   return (
-    <a href="/baseline-security">
+    <a
+      href="/baseline-security"
+      aria-label={
+        score != null
+          ? t('Compliance score {{score}} of 100', { score })
+          : t('Compliance score not scanned')
+      }
+    >
       {score != null ? (
         <span style={{ color: scoreColor(score) }}>{t('{{score}} / 100', { score })}</span>
       ) : (

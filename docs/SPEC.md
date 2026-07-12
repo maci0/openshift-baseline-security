@@ -1,6 +1,7 @@
 # OpenShift Baseline Security
 
-Design specification. Status: draft. Targets OpenShift Container Platform 4.22.
+Design specification for the shipped 0.4.x line. Targets OpenShift Container
+Platform 4.22. Consumer release notes: [CHANGELOG.md](../CHANGELOG.md).
 
 ## 1. Summary
 
@@ -32,7 +33,7 @@ Facts established from current (2026-07) Red Hat sources:
 | Fact | Source |
 |---|---|
 | Compliance Operator is free with all OCP versions; ACS is a separate paid SKU | redhat.com blog "A guide to OpenShift Compliance Operator best practices" |
-| Compliance Operator v1.8.2 (2026-02), upstream `github.com/ComplianceAsCode/compliance-operator`, ships via `redhat-operators` OLM catalog, channel `stable`, namespace `openshift-compliance` | GitHub releases, RHSA-2026:1859 |
+| Compliance Operator (verified on-cluster 1.9.1; content evolves via the catalog), upstream `github.com/ComplianceAsCode/compliance-operator`, ships via `redhat-operators` OLM catalog, channel `stable`, namespace `openshift-compliance` | GitHub releases, live e2e on OCP 4.22 |
 | No compliance UI in the OpenShift console; no official console plugin exists; results consumption is CLI-first or via ACS | OpenShift docs, openshift org survey |
 | ACS 4.8 "Schedules and Coverage" (compliance v2) is GA and is Red Hat's official graphical compliance answer; it drives the same Compliance Operator on secured clusters | RHACS 4.8 release notes |
 | Console dynamic plugins are the sanctioned console extension mechanism (used by ODF, monitoring, netobserv, kubevirt) | openshift/enhancements dynamic-plugins |
@@ -52,9 +53,10 @@ defaults and presentation are missing. Both are cheap. That is this project.
 - G2: Profile selection: expose the full Red Hat profile catalog
   (CIS, PCI-DSS, NIST 800-53 moderate/high, DISA STIG, NERC CIP, ACSC E8,
   BSI) as a checkbox list, not YAML.
-- G3: Console UI (admin perspective): compliance dashboard (score, severity
-  breakdown, per-profile status), filterable check-result list with rule
-  detail (description, instructions, severity), scan status and "rescan now".
+- G3: Console UI (admin perspective): compliance dashboard (score, composition
+  donut by result status, per-profile status, score trend), filterable
+  check-result list with rule detail (description, instructions, severity),
+  scan status and "rescan now".
 - G4: Compliance Operator lifecycle: install it automatically if absent,
   adopt it if present, never fight an existing installation.
 - G5: Ship as an OLM bundle installable from a catalog source; repo layout
@@ -66,12 +68,14 @@ defaults and presentation are missing. Both are cheap. That is this project.
 - S1: **Remediation apply from the UI**: one-click `spec.apply: true` on a
   `ComplianceRemediation`, with an explicit warning that node remediations
   render into MachineConfigs and reboot nodes; "auto-apply" toggle mapping
-  to `ScanSetting.autoApplyRemediations`. (MachineConfigPool pause awareness
-  is future work.)
+  to `ScanSetting.autoApplyRemediations`. Batch apply pauses affected
+  MachineConfigPools so node remediations reboot once (annotation-driven
+  `baselinesecurity.io/batch-apply` + `status.remediationBatch`).
 - S2: **Trend and score history**: persist per-scan score snapshots
-  (operator writes a compact history into the `ClusterBaseline` status or a
-  status history ring; long-term via the Compliance Operator's Prometheus
-  metrics) and render a trendline on the dashboard.
+  (operator writes a compact history into the `ClusterBaseline` status,
+  oldest first, capped at 30; optional per-profile history) and render a
+  trendline on the dashboard. A native console dashboard ConfigMap under
+  Observe → Dashboards exposes the Prometheus score series when UWM is on.
 
 ### Non-goals
 
@@ -81,8 +85,9 @@ defaults and presentation are missing. Both are cheap. That is this project.
   deliberately "this cluster" only.
 - No vulnerability (CVE) scanning. Different problem, different tooling
   (Quay/Clair, ACS).
-- No custom rule authoring UI (Compliance Operator 1.8 CustomRule/CEL is
-  Tech Preview; revisit later).
+- No CustomRule/CEL authoring UI (Compliance Operator CustomRule is Tech
+  Preview). TailoredProfile create/edit/bind from the console is in scope
+  (select/disable existing content rules; not free-form CEL).
 
 ## 4. Architecture
 
@@ -125,7 +130,8 @@ Responsibilities:
 1. **Compliance Operator lifecycle** (G4). On reconcile of `ClusterBaseline`:
    - If the `compliance-operator` CSV is present in any namespace: adopt,
      record version in status, touch nothing of its config.
-   - If absent and `spec.installComplianceOperator: true` (default): create
+   - If absent and `spec.installComplianceOperator: Automatic` (default;
+     string enum `Automatic`|`Manual`, not a boolean): create
      `openshift-compliance` Namespace, OperatorGroup, and a Subscription to
      package `compliance-operator`, channel `stable`, in the
      `redhat-operators` catalog (catalog source name configurable for
@@ -147,19 +153,25 @@ Responsibilities:
    `openshift-baseline-security` (created if missing), and registration on
    `consoles.operator.openshift.io/cluster` `spec.plugins` (removed on CR
    deletion via finalizer, or when `spec.console.managementState` is Removed).
-4. **Status aggregation**: poll `ComplianceCheckResult`s labeled with
-   `compliance.openshift.io/suite=baseline-<profile>` (suite name equals the
-   owned ScanSettingBinding). Foreign CO suites are ignored. Aggregate into
-   `ClusterBaseline.status`: per-profile pass/fail/manual/error counts, a
-   0-100 score (pass / (pass+fail), MANUAL and NOT-APPLICABLE excluded;
-   score is cleared when there are no countable results), lastScanTime,
-   history (oldest first, capped at 30), conditions
-   (`Available` / `Progressing` / `Degraded` rollups plus detail:
-   `ComplianceOperatorReady` from CSV phase Succeeded, `ScanConfigured`,
-   `ConsolePluginReady`; `Degraded` for owned Pending PVCs). Compliance
-   CRDs are not watched at manager start (they may be absent); the
-   controller requeues every minute and Owns the plugin Deployment/Service.
-   Deleting ClusterBaseline does **not** uninstall the Compliance Operator.
+4. **Status aggregation**: list `ComplianceCheckResult`s labeled with
+   `compliance.openshift.io/suite=baseline-<profile>` (or
+   `baseline-tp-<name>` for tailored bindings). Foreign CO suites are
+   ignored. Aggregate into `ClusterBaseline.status`: per-profile (and
+   tailored) pass/fail/manual/info/error/inconsistent/waived counts, a
+   0-100 score (default flat pass/(pass+fail); optional
+   `spec.scoring.mode: SeverityWeighted`; benign INCONSISTENT remapped
+   to PASS/NOT-APPLICABLE first; residual INCONSISTENT plus MANUAL, INFO,
+   ERROR, WAIVED, and NOT-APPLICABLE excluded; score cleared when
+   there are no countable results), lastScanTime, nextScanTime, history
+   (oldest first, capped at 30), newlyFailed/fixed since the previous
+   scan, conditions (`Available` / `Progressing` / `Degraded` rollups
+   plus detail: `ComplianceOperatorReady` from CSV phase Succeeded,
+   `ScanConfigured`, `ConsolePluginReady`; `Degraded` for owned Pending
+   PVCs). A lazy dynamic informer watches compliance CRs once their CRDs
+   exist (event-driven reconcile); a 1-minute requeue remains as fallback
+   until watches are up or if they fail. Owns the plugin
+   Deployment/Service. Deleting ClusterBaseline does **not** uninstall
+   the Compliance Operator.
 
 ### 4.2 API: `ClusterBaseline` CRD
 
@@ -176,28 +188,58 @@ metadata:
 spec:
   profiles: [cis]              # enum keys: cis, pci-dss, nist-moderate,
                                # nist-high, stig, nerc-cip, e8, bsi
+  tailoredProfiles: []         # names of TailoredProfiles in openshift-compliance
   schedule: "0 1 * * *"        # cron, passed to ScanSetting
-  installComplianceOperator: Automatic # or Manual
+  installComplianceOperator: Automatic # or Manual (string enum, not boolean)
   complianceCatalogSource: redhat-operators   # okd/disconnected override
   console:
     managementState: Managed         # or Removed
   remediation:
     apply: Manual                    # Automatic maps to ScanSetting autoApplyRemediations
+  scoring:
+    mode: Flat                       # or SeverityWeighted (see scoring note)
+  waivers: []                        # accepted-risk exclusions from the score
 status:
   conditions: [...]
-  complianceOperatorVersion: 1.8.2
+  complianceOperatorVersion: 1.9.1
   lastScanTime: "2026-07-09T01:00:00Z"
-  score: 87                    # 0-100, pass/(pass+fail)
+  nextScanTime: "2026-07-10T01:00:00Z"
+  score: 87                    # 0-100; see scoring note below
   profiles:
     - key: cis
       profileNames: [ocp4-cis, ocp4-cis-node]
       pass: 142
       fail: 21
       manual: 9
+      info: 0
       error: 0
+      inconsistent: 0
+      waived: 0
       notApplicable: 3
-  history: []                  # stretch S2: bounded ring, oldest first, max 30
+      history: []              # per-profile snapshots, oldest first, max 30
+  tailoredProfiles: []         # same count shape as profiles, keyed by name
+  history: []                  # overall score ring, oldest first, max 30
+  newlyFailed: []              # regressions vs previous completed scan
+  fixed: []                    # improvements vs previous completed scan
+  relatedObjects: []           # owned/driven resources for must-gather
+  # remediationBatch: optional in-flight MCP-paused batch apply
+  # previousFailures / diffBaseFailures / diffBaseScanTime: internal scan-diff
+  # bookkeeping retained across reconciles (not user-facing knobs)
 ```
+
+**Scoring note.** `status.score` is a single **pooled** ratio across every selected
+profile and tailored binding (not the mean of per-profile scores). Default
+`spec.scoring.mode: Flat` is `pass / (pass + fail) * 100` (integer floor).
+`SeverityWeighted` multiplies each PASS/FAIL by a fixed severity weight before
+that ratio: **high=10, medium=5, low=2, unknown/info/missing=1**. Before scoring,
+benign Compliance Operator `INCONSISTENT` results (PASS where the check applies,
+NOT-APPLICABLE elsewhere) collapse to PASS or NOT-APPLICABLE; only a genuine
+PASS-vs-FAIL/ERROR node split stays INCONSISTENT. Residual INCONSISTENT, plus
+MANUAL, INFO, ERROR, WAIVED, and NOT-APPLICABLE, are excluded from the
+denominator in both modes. Per-profile `status.profiles[].history` (and tailored)
+uses the same mode as the headline score. Severity is read from the
+ComplianceCheckResult `.severity` field, with the
+`compliance.openshift.io/check-severity` label as fallback.
 
 ### 4.3 Console plugin (`baseline-security-console-plugin`)
 
@@ -216,20 +258,36 @@ Extension points (exact SDK types):
 | Extension | Type | Purpose |
 |---|---|---|
 | Nav item "Compliance" under Administration | `console.navigation/href` (`perspective: admin`, `section: administration`) | entry point |
-| Page `/baseline-security` with HorizontalNav tabs | `console.page/route` | Overview (score, severity, trend), Results, Remediations, Profiles |
-| Results tab | (in-page) | virtualized ComplianceCheckResult table: filter by status/severity; detail modal for description + instructions; suite-scoped to baseline bindings |
-| Profiles tab | (in-page) | catalog of shipped profiles with enable switches writing `ClusterBaseline.spec.profiles` (`useAccessReview`) |
-| Remediations tab | (in-page) | apply/unapply with confirmation; auto-apply toggle |
+| Page `/baseline-security` with HorizontalNav tabs | `console.page/route` | Overview (score, composition donut, trend, schedule, waivers, scan diff), Results, Remediations, Profiles |
+| Results tab | (in-page) | virtualized ComplianceCheckResult table: filter by status/severity/profile; detail modal for description + instructions; suite-scoped to baseline bindings; CSV export |
+| Profiles tab | (in-page) | catalog of shipped profiles with enable switches writing `ClusterBaseline.spec.profiles`; TailoredProfile create/edit/bind (`useAccessReview`) |
+| Remediations tab | (in-page) | apply/unapply with confirmation; batch apply; auto-apply toggle; rendered-object view |
 | Cluster overview details item | `console.dashboards/custom/overview/detail/item` | compliance score deep-link on the cluster Overview |
 
 Behaviors that write to the cluster:
 
-- **Rescan now**: empty-value annotation `compliance.openshift.io/rescan=`
-  on the owned ComplianceScans (documented Compliance Operator mechanism).
+- **Rescan now**: set annotation `compliance.openshift.io/rescan` on each
+  owned ComplianceScan to a fresh token (e.g. timestamp). The value must
+  change on every click so a re-rescan is observed when the key already
+  exists (empty string alone is not enough).
 - **Profile toggle**: patch `ClusterBaseline.spec.profiles`.
-- **Remediation apply (stretch S1)**: patch `ComplianceRemediation.spec.apply`,
-  behind a confirmation modal spelling out the MachineConfig/reboot blast
-  radius.
+- **Schedule edit**: patch `ClusterBaseline.spec.schedule` (5-field cron).
+- **Scoring mode**: patch `ClusterBaseline.spec.scoring.mode`
+  (`Flat` | `SeverityWeighted`).
+- **Waivers**: add/remove entries on `ClusterBaseline.spec.waivers`.
+- **TailoredProfile authoring**: create/patch TailoredProfiles in
+  `openshift-compliance`, then bind via `spec.tailoredProfiles`.
+- **Remediation apply**: patch `ComplianceRemediation.spec.apply`, behind a
+  confirmation modal spelling out the MachineConfig/reboot blast radius.
+- **Auto-apply toggle**: patch `ClusterBaseline.spec.remediation.apply`
+  (`Automatic` maps to ScanSetting `autoApplyRemediations`).
+- **Batch remediation apply**: set annotation
+  `baselinesecurity.io/batch-apply` on `ClusterBaseline` (comma-separated
+  remediation names); the operator pauses target MachineConfigPools, sets
+  apply, then resumes.
+
+Client-only (no API write): CSV export of filtered results and printable
+HTML compliance report.
 
 All writes go through the user's token; a read-only user gets disabled
 buttons (SDK `useAccessReview`), not errors.
@@ -265,10 +323,9 @@ and Red Hat-updated.
 - Aggregated ClusterRoles shipped for humans:
   `baseline-security-viewer` (read CRs + check results, bound via
   cluster-reader aggregation label) and `baseline-security-admin`
-  (edit ClusterBaseline, annotate scans, and, when S1 lands, patch
-  remediations).
+  (edit ClusterBaseline, annotate scans, and patch remediations).
 - Remediation apply is the only dangerous write in the system and is
-  stretch-gated, confirmation-gated, and RBAC-gated three ways.
+  confirmation-gated and RBAC-gated (user token + admin role + modal).
 - Plugin loads no external sources, so the console default CSP applies
   unmodified (no ConsolePlugin contentSecurityPolicy entries needed).
 
@@ -301,9 +358,9 @@ ComplianceAsCode/compliance-operator master, and npm dist-tags).
 - **OLM**: one package `baseline-security-operator`; bundle carries the
   ClusterBaseline CRD, CSV (with `console.openshift.io` related-images for
   the plugin image via `RELATED_IMAGE_CONSOLE_PLUGIN` env, so disconnected
-  mirroring works), channel `alpha` → `stable`. File-based catalog (FBC)
-  image for a CatalogSource; goal: community-operators submission once v1
-  is stable.
+  mirroring works), OLM channel `alpha` (pre-1.0; `stable` is a later goal).
+  File-based catalog (FBC) image for a CatalogSource; goal:
+  community-operators submission once v1 is stable.
 - **Install UX**: OperatorHub → install → operator creates a default
   `ClusterBaseline/cluster` if none exists (or console form; decide during
   implementation, default-create is the zero-config goal, opt-out via env).
@@ -321,18 +378,22 @@ openshift-baseline-security/
 │   ├── api/v1alpha1/
 │   ├── cmd/main.go
 │   ├── internal/controller/
-│   ├── config/{crd,rbac,manager,default,samples,manifests}/
+│   ├── config/{crd,rbac,manager,default,prometheus,samples}/
 │   ├── bundle/                     # OLM bundle (generated)
 │   ├── Dockerfile
 │   ├── Makefile
 │   └── go.mod
 ├── console-plugin/                 # console-plugin-template shape
-│   ├── src/{components,hooks,i18n}/
+│   ├── src/components/             # React tabs + cluster Overview item
+│   ├── src/{models,utils,scoring,status,names,cron,waivers,patches,links,results,remediation,report,baselineContext}.*
 │   ├── locales/en/
+│   ├── e2e/                        # Playwright live-console suite
 │   ├── console-extensions.json
 │   ├── package.json
 │   ├── webpack.config.ts
 │   └── Dockerfile
+├── docs/{SPEC,PATTERNS,STANDARDS,TEST-PLAN}.md
+├── CHANGELOG.md
 ├── OWNERS
 └── LICENSE                         # Apache-2.0
 ```
@@ -347,8 +408,8 @@ same Makefile targets (`test`, `lint`, `docker-build`).
 |---|---|---|
 | 0.1 | Operator: CO install/adopt + CIS default binding + status score. Plugin: dashboard + results list. | Done; verified e2e on SNO 4.22.0 (score 96 from 277 CIS results) |
 | 0.2 | Full profile catalog (G2), rescan button, OLM bundle + catalog. | Done; OLM install path verified on-cluster. community-operators submission pending |
-| 0.3 (S2) | Score history + trendline. | Done (30-entry status ring + trend chart) |
-| 0.4 (S1) | Remediation viewing + gated apply, auto-apply toggle. | Done (confirmation modal, useAccessReview gating) |
+| 0.3 (S2) | Score history + trendline; tailored profiles; metrics/alerts. | Done (30-entry status ring + trend chart) |
+| 0.4 (S1 + expand-compliance-features) | Remediation gated apply + MCP-paused batch; waivers; scan diff; severity-weighted score; schedule/report UI; TailoredProfile authoring; dynamic informer; benign INCONSISTENT→PASS; Helm removed (OLM only). | Done; see CHANGELOG.md 0.4.0 |
 | Productization | Rename API group to openshift.io namespace, Dockerfile.rhel + ci-operator onboarding, split repos, Red Hat enhancement proposal referencing this spec. | Open |
 
 ## 11. Prerequisites

@@ -4,7 +4,6 @@ import {
   k8sPatch,
   Timestamp,
   useAccessReview,
-  useK8sWatchResource,
 } from '@openshift-console/dynamic-plugin-sdk';
 import {
   Chart,
@@ -49,9 +48,10 @@ import {
   ClusterBaseline,
   ClusterBaselineModel,
   ComplianceCheckResult,
-  ComplianceCheckResultGVK,
+  isOwnedByBaseline,
   ResultCounts,
   ScoreSnapshot,
+  suiteFilterKey,
 } from '../models';
 import {
   aggregateCounts,
@@ -59,6 +59,8 @@ import {
   errorMessage,
   expiringWaivers,
   isValidCron,
+  profileScore,
+  resourceVersionTest,
   resultsHref,
   schedulePatch,
 } from '../utils';
@@ -109,7 +111,10 @@ const ScheduleEditor: React.FC<{ baseline: ClusterBaseline }> = ({ baseline }) =
       await k8sPatch({
         model: ClusterBaselineModel,
         resource: baseline,
-        data: schedulePatch(!!baseline.spec.schedule, value.trim()),
+        data: [
+          ...resourceVersionTest(baseline.metadata.resourceVersion),
+          ...schedulePatch(!!baseline.spec.schedule, value.trim()),
+        ],
       });
       setEditing(false);
     } catch (e) {
@@ -135,7 +140,16 @@ const ScheduleEditor: React.FC<{ baseline: ClusterBaseline }> = ({ baseline }) =
           </Button>
         </SplitItem>
         <SplitItem>
-          <Button variant="link" isInline isDisabled={busy} onClick={() => setEditing(false)}>
+          <Button
+            variant="link"
+            isInline
+            isDisabled={busy}
+            onClick={() => {
+              setValue(current);
+              setErr(null);
+              setEditing(false);
+            }}
+          >
             {t('Cancel')}
           </Button>
         </SplitItem>
@@ -233,18 +247,44 @@ const ProfileCounts: React.FC<{ counts: ResultCounts; filterKey: string }> = ({
   );
 };
 
-const Overview: React.FC<{ baseline?: ClusterBaseline; loaded: boolean }> = ({
-  baseline,
-  loaded,
-}) => {
+const Overview: React.FC<{
+  baseline?: ClusterBaseline;
+  loaded: boolean;
+  // Shared from CompliancePage (single watch); used for Recent changes titles
+  // and SeverityWeighted per-profile scores.
+  checkResults?: ComplianceCheckResult[];
+}> = ({ baseline, loaded, checkResults }) => {
   const { t } = useTranslation('plugin__baseline-security-console-plugin');
-  // Watched so the Recent changes card can show human titles for the check
-  // names in status.newlyFailed / status.fixed. Deduped with the Results tab.
-  const [checkResults] = useK8sWatchResource<ComplianceCheckResult[]>({
-    groupVersionKind: ComplianceCheckResultGVK,
-    isList: true,
-    namespace: 'openshift-compliance',
-  });
+
+  // SeverityWeighted per-profile scores need to scan check results. Group owned
+  // results by filter key once here instead of letting each profile card's
+  // profileScore re-scan every result (O(cards x results)); each card then only
+  // weighs its own bucket. null in Flat mode, where scores use counts alone.
+  const weighted = baseline?.spec.scoring?.mode === 'SeverityWeighted';
+  const resultsByKey = React.useMemo(() => {
+    if (!weighted) {
+      return null;
+    }
+    const profiles = baseline?.spec.profiles;
+    const tailored = baseline?.spec.tailoredProfiles;
+    const m = new Map<string, ComplianceCheckResult[]>();
+    for (const r of checkResults ?? []) {
+      if (!isOwnedByBaseline(r.metadata.labels, profiles, tailored)) {
+        continue;
+      }
+      const key = suiteFilterKey(r.metadata.labels);
+      if (key === undefined) {
+        continue;
+      }
+      const arr = m.get(key);
+      if (arr) {
+        arr.push(r);
+      } else {
+        m.set(key, [r]);
+      }
+    }
+    return m;
+  }, [weighted, checkResults, baseline?.spec.profiles, baseline?.spec.tailoredProfiles]);
 
   if (!loaded) {
     return (
@@ -285,17 +325,18 @@ const Overview: React.FC<{ baseline?: ClusterBaseline; loaded: boolean }> = ({
   const coVersion = baseline.status?.complianceOperatorVersion;
   // Prefer version when present. Otherwise map terminal/stalled reasons so the
   // Details card does not say "Installing" after InstallStalled or CSVFailed.
-  const coLabel =
-    coVersion ||
-    (coReady?.reason === 'NotInstalled'
-      ? t('Not installed')
-      : coReady?.reason === 'CSVFailed'
-        ? t('Failed')
-        : degraded?.reason === 'InstallStalled'
-          ? t('Install stalled')
-          : coReady?.status === 'True'
-            ? t('Installed')
-            : t('Installing'));
+  let coLabel = t('Installing');
+  if (coVersion) {
+    coLabel = coVersion;
+  } else if (coReady?.reason === 'NotInstalled') {
+    coLabel = t('Not installed');
+  } else if (coReady?.reason === 'CSVFailed') {
+    coLabel = t('Failed');
+  } else if (degraded?.reason === 'InstallStalled') {
+    coLabel = t('Install stalled');
+  } else if (coReady?.status === 'True') {
+    coLabel = t('Installed');
+  }
   const score = baseline.status?.score;
 
   // Aggregate per-status counts across built-in AND tailored profiles for the
@@ -332,12 +373,27 @@ const Overview: React.FC<{ baseline?: ClusterBaseline; loaded: boolean }> = ({
   const fixed = baseline.status?.fixed ?? [];
   const newlyFailedItems = changedChecks(newlyFailed, checkResults);
   const fixedItems = changedChecks(fixed, checkResults);
-  // status.history is written each scan; an empty ring means no prior scan to
-  // diff against, so "no changes" reads as "nothing to compare yet".
-  const hasPriorScan = (baseline.status?.history?.length ?? 0) > 1;
+  // Prefer status.diffBaseScanTime (set once a prior completed scan exists for
+  // regression diff). History length alone is wrong when the first scan had no
+  // countable score (history stays short) but a second scan already compared.
+  const hasPriorScan =
+    !!baseline.status?.diffBaseScanTime || (baseline.status?.history?.length ?? 0) > 1;
+  const scanningDisabled =
+    (baseline.spec.profiles?.length ?? 0) === 0 &&
+    (baseline.spec.tailoredProfiles?.length ?? 0) === 0;
 
   return (
     <PageSection>
+      {scanningDisabled && (
+        <Alert
+          variant="info"
+          isInline
+          title={t('Scanning is disabled')}
+          style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}
+        >
+          {t('No profiles are selected. Enable a profile under the Profiles tab to resume scanning.')}
+        </Alert>
+      )}
       {degraded && (
         <Alert
           variant="warning"
@@ -355,14 +411,14 @@ const Overview: React.FC<{ baseline?: ClusterBaseline; loaded: boolean }> = ({
           title={t('Baseline is progressing')}
           style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}
         >
-          {progressing.message || t('installing or configuring dependencies')}
+          {progressing.message || t('Installing or configuring dependencies.')}
         </Alert>
       )}
       {newlyFailed.length > 0 && (
         <Alert
           variant="danger"
           isInline
-          title={t('{{count}} check(s) newly failing since the last scan', {
+          title={t('{{count}} check newly failing since the last scan', {
             count: newlyFailed.length,
           })}
           style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}
@@ -375,7 +431,7 @@ const Overview: React.FC<{ baseline?: ClusterBaseline; loaded: boolean }> = ({
         <Alert
           variant="warning"
           isInline
-          title={t('{{count}} waiver(s) expiring within two weeks', { count: expiring.length })}
+          title={t('{{count}} waiver expiring within two weeks', { count: expiring.length })}
           style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}
         >
           {expiring.map((w) => w.name).join(', ')}
@@ -574,12 +630,16 @@ const Overview: React.FC<{ baseline?: ClusterBaseline; loaded: boolean }> = ({
         style={{ marginTop: 'var(--pf-t--global--spacer--md)' }}
       >
         {(baseline.status?.profiles ?? []).map((p) => {
-          // Zero-fill missing fields from older status so scores never go NaN.
-          // Floor to match the operator's integer score (pass*100/(pass+fail)).
-          const pass = p.pass ?? 0;
-          const fail = p.fail ?? 0;
-          const denom = pass + fail;
-          const pScore = denom > 0 ? Math.floor((pass * 100) / denom) : null;
+          // Match operator scoring.mode: Flat uses counts; SeverityWeighted uses
+          // the same weight table over watched check results.
+          const pScore = profileScore(p, {
+            mode: baseline.spec.scoring?.mode,
+            filterKey: p.key,
+            results: resultsByKey ? resultsByKey.get(p.key) ?? [] : checkResults,
+            profiles: baseline.spec.profiles,
+            tailoredProfiles: baseline.spec.tailoredProfiles,
+            waivers: baseline.spec.waivers,
+          });
           return (
             <Card key={p.key}>
               <CardHeader
@@ -603,10 +663,14 @@ const Overview: React.FC<{ baseline?: ClusterBaseline; loaded: boolean }> = ({
           );
         })}
         {(baseline.status?.tailoredProfiles ?? []).map((tp) => {
-          const pass = tp.pass ?? 0;
-          const fail = tp.fail ?? 0;
-          const denom = pass + fail;
-          const pScore = denom > 0 ? Math.floor((pass * 100) / denom) : null;
+          const pScore = profileScore(tp, {
+            mode: baseline.spec.scoring?.mode,
+            filterKey: `tp-${tp.name}`,
+            results: resultsByKey ? resultsByKey.get(`tp-${tp.name}`) ?? [] : checkResults,
+            profiles: baseline.spec.profiles,
+            tailoredProfiles: baseline.spec.tailoredProfiles,
+            waivers: baseline.spec.waivers,
+          });
           return (
             <Card key={`tp-${tp.name}`}>
               <CardHeader

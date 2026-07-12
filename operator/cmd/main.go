@@ -49,6 +49,23 @@ func main() {
 		secureMetrics = true
 	}
 
+	// Non-secret config only. RELATED_IMAGE value is logged as set/unset so a
+	// misdeployed pod is obvious without printing the image pull path.
+	relatedImageSet := os.Getenv("RELATED_IMAGE_CONSOLE_PLUGIN") != ""
+	skipDefaultCR := os.Getenv("BASELINE_SECURITY_SKIP_DEFAULT_CR") == "true"
+	setupLog.Info("configuration",
+		"metricsBindAddress", metricsAddr,
+		"metricsSecure", secureMetrics,
+		"metricsCertDir", metricsCertDir,
+		"healthProbeBindAddress", probeAddr,
+		"leaderElect", enableLeaderElection,
+		"relatedImageConsolePluginSet", relatedImageSet,
+		"skipDefaultClusterBaseline", skipDefaultCR,
+	)
+	if !relatedImageSet {
+		setupLog.Info("RELATED_IMAGE_CONSOLE_PLUGIN is unset; console plugin stays ImageMissing until the env is fixed")
+	}
+
 	metricsServerOptions := metricsserver.Options{
 		BindAddress:   metricsAddr,
 		SecureServing: secureMetrics,
@@ -88,7 +105,7 @@ func main() {
 	// Zero-config default: create ClusterBaseline/cluster if none exists.
 	// Opt out with BASELINE_SECURITY_SKIP_DEFAULT_CR=true. Leader-only so
 	// HA replicas do not race the create on every pod.
-	if os.Getenv("BASELINE_SECURITY_SKIP_DEFAULT_CR") != "true" {
+	if !skipDefaultCR {
 		utilruntime.Must(mgr.Add(&defaultClusterBaseline{
 			Client: mgr.GetClient(),
 			Cache:  mgr.GetCache(),

@@ -6,7 +6,7 @@ RUN go mod download
 COPY api/ api/
 COPY cmd/ cmd/
 COPY internal/ internal/
-RUN CGO_ENABLED=0 go build -o /tmp/manager ./cmd
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /tmp/manager ./cmd
 
 # ubi9/ubi-micro
 FROM registry.access.redhat.com/ubi9/ubi-micro@sha256:35de56a9413112f1474e392ebc35e0cf6f0fb484c8e8877bbae59b513694b41f

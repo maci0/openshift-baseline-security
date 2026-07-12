@@ -15,7 +15,11 @@ spec:
       path: /metrics
       interval: 30s
       tlsConfig:
-        insecureSkipVerify: true
+        serverName: baseline-security-operator-metrics.openshift-baseline-security.svc
+        ca:
+          configMap:
+            name: baseline-security-metrics-serving-ca
+            key: service-ca.crt
       authorization:
         type: Bearer
         credentials:

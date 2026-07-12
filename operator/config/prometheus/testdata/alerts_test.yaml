@@ -10,8 +10,10 @@ tests:
   # ComplianceScoreLow fires only on a real low score, after the 30m window.
   - interval: 1m
     input_series:
-      - series: 'baseline_security_compliance_score'
+      - series: 'baseline_security_compliance_score{instance="op-1"}'
         values: '79x40'
+      - series: 'baseline_security_status_observed_timestamp_seconds{instance="op-1"}'
+        values: '100x40'
     alert_rule_test:
       - eval_time: 31m
         alertname: ComplianceScoreLow
@@ -20,13 +22,15 @@ tests:
               severity: warning
             exp_annotations:
               summary: 'Cluster compliance score is below 80'
-              description: 'The baseline compliance score is 79 (threshold 80). Review failing checks under Administration -> Compliance.'
+              description: 'The baseline compliance score is 79 (threshold 80). Open Administration -> Compliance, filter Results by Fail, and review newlyFailed on the ClusterBaseline status. Check Degraded and ScanStorageReady conditions if the score is unexpectedly low.'
 
   # Score exactly at the threshold does not fire (expr is `< 80`).
   - interval: 1m
     input_series:
-      - series: 'baseline_security_compliance_score'
+      - series: 'baseline_security_compliance_score{instance="op-1"}'
         values: '80x40'
+      - series: 'baseline_security_status_observed_timestamp_seconds{instance="op-1"}'
+        values: '100x40'
     alert_rule_test:
       - eval_time: 31m
         alertname: ComplianceScoreLow
@@ -35,8 +39,10 @@ tests:
   # The -1 "no score yet" sentinel must never fire (expr guards `>= 0`).
   - interval: 1m
     input_series:
-      - series: 'baseline_security_compliance_score'
+      - series: 'baseline_security_compliance_score{instance="op-1"}'
         values: '-1x40'
+      - series: 'baseline_security_status_observed_timestamp_seconds{instance="op-1"}'
+        values: '100x40'
     alert_rule_test:
       - eval_time: 31m
         alertname: ComplianceScoreLow
@@ -45,21 +51,27 @@ tests:
   # A healthy score does not fire.
   - interval: 1m
     input_series:
-      - series: 'baseline_security_compliance_score'
+      - series: 'baseline_security_compliance_score{instance="op-1"}'
         values: '94x40'
+      - series: 'baseline_security_status_observed_timestamp_seconds{instance="op-1"}'
+        values: '100x40'
     alert_rule_test:
       - eval_time: 31m
         alertname: ComplianceScoreLow
         exp_alerts: []
 
-  # ComplianceChecksFailing fires after 1h; two HA pods reporting the same
-  # profile/status must be de-duplicated (max by), so the value is 5, not 10.
+  # ComplianceChecksFailing fires after 1h; only the newest HA publisher is
+  # selected, so duplicate/stale replicas are not counted.
   - interval: 1m
     input_series:
-      - series: 'baseline_security_checks{profile="cis",status="fail",pod="op-1"}'
+      - series: 'baseline_security_checks{profile="cis",status="fail",instance="op-1"}'
+        values: '9x70'
+      - series: 'baseline_security_checks{profile="cis",status="fail",instance="op-2"}'
         values: '5x70'
-      - series: 'baseline_security_checks{profile="cis",status="fail",pod="op-2"}'
-        values: '5x70'
+      - series: 'baseline_security_status_observed_timestamp_seconds{instance="op-1"}'
+        values: '100x70'
+      - series: 'baseline_security_status_observed_timestamp_seconds{instance="op-2"}'
+        values: '200x70'
     alert_rule_test:
       - eval_time: 61m
         alertname: ComplianceChecksFailing
@@ -68,14 +80,172 @@ tests:
               severity: warning
             exp_annotations:
               summary: 'Compliance checks are failing'
-              description: '5 compliance check(s) are failing across the selected benchmark profiles.'
+              description: '5 compliance check(s) are failing across the selected benchmark profiles. Open Administration -> Compliance -> Results (status=Fail). Compare status.newlyFailed vs fixed for regressions.'
 
   # Zero failing checks: no alert.
   - interval: 1m
     input_series:
-      - series: 'baseline_security_checks{profile="cis",status="fail",pod="op-1"}'
+      - series: 'baseline_security_checks{profile="cis",status="fail",instance="op-1"}'
         values: '0x70'
+      - series: 'baseline_security_status_observed_timestamp_seconds{instance="op-1"}'
+        values: '100x70'
     alert_rule_test:
       - eval_time: 61m
         alertname: ComplianceChecksFailing
         exp_alerts: []
+
+  # After failover, a stale healthy old leader must not mask the current low
+  # score from the newer publisher.
+  - interval: 1m
+    input_series:
+      - series: 'baseline_security_compliance_score{instance="old"}'
+        values: '95x40'
+      - series: 'baseline_security_status_observed_timestamp_seconds{instance="old"}'
+        values: '100x40'
+      - series: 'baseline_security_compliance_score{instance="new"}'
+        values: '70x40'
+      - series: 'baseline_security_status_observed_timestamp_seconds{instance="new"}'
+        values: '200x40'
+    alert_rule_test:
+      - eval_time: 31m
+        alertname: ComplianceScoreLow
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: 'Cluster compliance score is below 80'
+              description: 'The baseline compliance score is 70 (threshold 80). Open Administration -> Compliance, filter Results by Fail, and review newlyFailed on the ClusterBaseline status. Check Degraded and ScanStorageReady conditions if the score is unexpectedly low.'
+
+  # ComplianceChecksInError fires on ERROR (not FAIL) after 30m.
+  - interval: 1m
+    input_series:
+      - series: 'baseline_security_checks{profile="cis",status="error",instance="op-1"}'
+        values: '3x40'
+      - series: 'baseline_security_status_observed_timestamp_seconds{instance="op-1"}'
+        values: '100x40'
+    alert_rule_test:
+      - eval_time: 31m
+        alertname: ComplianceChecksInError
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: 'Compliance checks are in ERROR state'
+              description: '3 compliance check(s) are in ERROR (not merely FAIL). Inspect ComplianceCheckResult objects in openshift-compliance and Compliance Operator pod logs; ERROR often means a scan/runtime problem rather than a policy violation.'
+
+  # Zero ERROR checks: no ComplianceChecksInError.
+  - interval: 1m
+    input_series:
+      - series: 'baseline_security_checks{profile="cis",status="error",instance="op-1"}'
+        values: '0x40'
+      - series: 'baseline_security_status_observed_timestamp_seconds{instance="op-1"}'
+        values: '100x40'
+    alert_rule_test:
+      - eval_time: 31m
+        alertname: ComplianceChecksInError
+        exp_alerts: []
+
+  # Never-published metrics (timestamp seed 0) fire ComplianceStatusStale.
+  - interval: 1m
+    input_series:
+      - series: 'baseline_security_status_observed_timestamp_seconds{instance="op-1"}'
+        values: '0x20'
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: ComplianceStatusStale
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: 'Baseline security status metrics are stale'
+              description: 'ClusterBaseline metrics have not been published recently (or never). Check the baseline-security-operator Deployment and pod logs in openshift-baseline-security, leader election, and that user-workload monitoring scrapes the metrics ServiceMonitor.'
+
+  # Fresh timestamp: ComplianceStatusStale must not fire.
+  # eval_time 16m => unix ~960; timestamp 900 => age 60s < 900s threshold.
+  - interval: 1m
+    input_series:
+      - series: 'baseline_security_status_observed_timestamp_seconds{instance="op-1"}'
+        values: '900x20'
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: ComplianceStatusStale
+        exp_alerts: []
+
+  # Remediation batch active for 20m+ fires RemediationBatchStuck.
+  - interval: 1m
+    input_series:
+      - series: 'baseline_security_remediation_batch_active{instance="op-1"}'
+        values: '1x30'
+      - series: 'baseline_security_status_observed_timestamp_seconds{instance="op-1"}'
+        values: '100x30'
+    alert_rule_test:
+      - eval_time: 21m
+        alertname: RemediationBatchStuck
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: 'Remediation batch has not completed'
+              description: 'A MachineConfigPool-paused remediation batch has been active for over 20m. Inspect ClusterBaseline status.remediationBatch and MachineConfigPool .spec.paused; resume pools if the operator cannot (operator logs mention resume failures). Unpausing without care may trigger node reboots.'
+
+  # No active batch: RemediationBatchStuck silent.
+  - interval: 1m
+    input_series:
+      - series: 'baseline_security_remediation_batch_active{instance="op-1"}'
+        values: '0x30'
+      - series: 'baseline_security_status_observed_timestamp_seconds{instance="op-1"}'
+        values: '100x30'
+    alert_rule_test:
+      - eval_time: 21m
+        alertname: RemediationBatchStuck
+        exp_alerts: []
+
+  # ClusterBaselineDegraded fires when Degraded=1 for 15m (newest publisher).
+  - interval: 1m
+    input_series:
+      - series: 'baseline_security_condition{type="Degraded",instance="op-1"}'
+        values: '1x20'
+      - series: 'baseline_security_status_observed_timestamp_seconds{instance="op-1"}'
+        values: '100x20'
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: ClusterBaselineDegraded
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: 'ClusterBaseline is Degraded'
+              description: 'The ClusterBaseline Degraded condition has been True for 15m. Check status.conditions on ClusterBaseline/cluster (reason and message), operator logs in openshift-baseline-security, and related detail conditions (ComplianceOperatorReady, ScanConfigured, ScanStorageReady, ConsolePluginReady).'
+
+  # Degraded=0: ClusterBaselineDegraded silent.
+  - interval: 1m
+    input_series:
+      - series: 'baseline_security_condition{type="Degraded",instance="op-1"}'
+        values: '0x20'
+      - series: 'baseline_security_status_observed_timestamp_seconds{instance="op-1"}'
+        values: '100x20'
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: ClusterBaselineDegraded
+        exp_alerts: []
+
+  # Stale healthy old leader must not mask a Degraded new publisher.
+  - interval: 1m
+    input_series:
+      - series: 'baseline_security_condition{type="Degraded",instance="old"}'
+        values: '0x20'
+      - series: 'baseline_security_status_observed_timestamp_seconds{instance="old"}'
+        values: '100x20'
+      - series: 'baseline_security_condition{type="Degraded",instance="new"}'
+        values: '1x20'
+      - series: 'baseline_security_status_observed_timestamp_seconds{instance="new"}'
+        values: '200x20'
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: ClusterBaselineDegraded
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: 'ClusterBaseline is Degraded'
+              description: 'The ClusterBaseline Degraded condition has been True for 15m. Check status.conditions on ClusterBaseline/cluster (reason and message), operator logs in openshift-baseline-security, and related detail conditions (ComplianceOperatorReady, ScanConfigured, ScanStorageReady, ConsolePluginReady).'

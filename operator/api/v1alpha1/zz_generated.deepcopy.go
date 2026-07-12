@@ -167,6 +167,15 @@ func (in *ClusterBaselineStatus) DeepCopyInto(out *ClusterBaselineStatus) {
 		*out = make([]string, len(*in))
 		copy(*out, *in)
 	}
+	if in.DiffBaseFailures != nil {
+		in, out := &in.DiffBaseFailures, &out.DiffBaseFailures
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
+	if in.DiffBaseScanTime != nil {
+		in, out := &in.DiffBaseScanTime, &out.DiffBaseScanTime
+		*out = (*in).DeepCopy()
+	}
 	if in.RemediationBatch != nil {
 		in, out := &in.RemediationBatch, &out.RemediationBatch
 		*out = new(RemediationBatchStatus)

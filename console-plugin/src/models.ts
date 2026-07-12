@@ -118,12 +118,16 @@ export type ProfileStatus = ResultCounts & {
 export type TailoredProfileStatus = ResultCounts & { name: string; history?: ScoreSnapshot[] };
 
 export type ClusterBaseline = {
-  metadata: { name: string; annotations?: Record<string, string> };
+  metadata: { name: string; resourceVersion?: string; annotations?: Record<string, string> };
   spec: {
     profiles: string[];
     tailoredProfiles?: string[];
     schedule?: string;
     installComplianceOperator?: 'Automatic' | 'Manual';
+    // OLM CatalogSource name for the compliance-operator package (default
+    // redhat-operators; override for OKD / disconnected). Matches CRD
+    // spec.complianceCatalogSource.
+    complianceCatalogSource?: string;
     console?: { managementState?: 'Managed' | 'Removed' };
     remediation?: { apply?: 'Automatic' | 'Manual' };
     scoring?: { mode?: 'Flat' | 'SeverityWeighted' };
@@ -140,6 +144,17 @@ export type ClusterBaseline = {
     history?: ScoreSnapshot[];
     newlyFailed?: string[];
     fixed?: string[];
+    // Set when a prior completed scan exists for regression diff (operator
+    // internal bookkeeping exposed on the CR). Used by Overview empty-state
+    // copy so a second scan with a thin history ring is not "no prior scan".
+    diffBaseScanTime?: string;
+    remediationBatch?: {
+      phase: string;
+      pools?: string[];
+      remediations?: string[];
+      startedAt: string;
+      pauseOwner?: string;
+    };
   };
 };
 

@@ -112,7 +112,7 @@ spec:
               resources: [clusterbaselines/finalizers]
               verbs: [update]
             - apiGroups: [compliance.openshift.io]
-              resources: [compliancecheckresults, compliancescans]
+              resources: [compliancecheckresults, compliancescans, compliancesuites]
               verbs: [get, list, watch]
             - apiGroups: [compliance.openshift.io]
               resources: [complianceremediations]
@@ -199,20 +199,30 @@ spec:
                         path: /healthz
                         port: 8081
                       initialDelaySeconds: 15
+                      timeoutSeconds: 1
+                      periodSeconds: 20
+                      failureThreshold: 3
                     readinessProbe:
                       httpGet:
                         path: /readyz
                         port: 8081
                       initialDelaySeconds: 5
+                      timeoutSeconds: 1
+                      periodSeconds: 10
+                      failureThreshold: 3
                     resources:
                       requests:
                         cpu: 10m
                         memory: 64Mi
+                      limits:
+                        cpu: 500m
+                        memory: 256Mi
                 volumes:
                   - name: metrics-certs
                     secret:
                       secretName: baseline-security-operator-metrics-cert
                       optional: true
+                      defaultMode: 0400
   relatedImages:
     - name: manager
       image: quay.io/openshift-baseline-security/baseline-security-operator:0.4.0

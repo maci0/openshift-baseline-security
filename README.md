@@ -7,27 +7,46 @@ Install it and the cluster benchmarks itself against the CIS OpenShift
 Benchmark out of the box, rendered natively in the console under
 **Administration → Compliance**.
 
+**Current release: 0.4.0** (OLM channel `alpha`, API `baselinesecurity.io/v1alpha1`).
+Consumer-facing release notes and upgrade notes: [CHANGELOG.md](CHANGELOG.md).
+
 ## Features
 
 - **Zero-config baseline**: installing the operator scans the cluster against
   CIS on a daily schedule; no YAML required.
 - **Profile catalog**: CIS, PCI-DSS, NIST 800-53 moderate/high, DISA STIG,
   NERC CIP, ACSC Essential Eight, BSI, selectable per profile. Bind your own
-  Compliance Operator `TailoredProfile`s via `spec.tailoredProfiles`.
+  Compliance Operator `TailoredProfile`s via `spec.tailoredProfiles`, or
+  author them from the console.
 - **Console UI**: compliance score (composition donut), per-profile score
-  badges, filterable check results with detail + deep-link to the raw
-  resource, CSV export, score trend, next/last scan times.
+  badges and history, filterable check results with detail + deep-link to the
+  raw resource, CSV and printable HTML report export, score trend, editable
+  schedule, next/last scan times.
+- **Waivers & scan diff**: accepted-risk waivers (`spec.waivers` with expiry)
+  excluded from the score; Overview surfaces `status.newlyFailed` /
+  `status.fixed` since the previous scan.
+- **Scoring**: default flat PASS/(PASS+FAIL); optional
+  `spec.scoring.mode: SeverityWeighted`. Benign Compliance Operator
+  INCONSISTENT results (PASS where applicable, NOT-APPLICABLE elsewhere)
+  count as PASS.
 - **Remediations**: gated apply with a confirmation modal, node-remediation
-  (MachineConfig) warnings and MachineConfigPool guidance, rendered-object
-  view, and an auto-apply switch.
+  (MachineConfig) warnings and MachineConfigPool-paused batch apply, rendered
+  object view, and an auto-apply switch.
 - **Status & conditions**: OpenShift-style Available / Progressing / Degraded
   rollups, per-profile counts, score history, `relatedObjects`.
-- **Observability**: Prometheus metrics (`baseline_security_compliance_score`,
-  `baseline_security_checks`) with PrometheusRule alerts.
+- **Observability**: Prometheus metrics
+  (`baseline_security_compliance_score`, `baseline_security_checks`,
+  `baseline_security_status_observed_timestamp_seconds` for HA scrape
+  selection, `baseline_security_remediation_batch_active`) with
+  PrometheusRule alerts (`ComplianceScoreLow`, `ComplianceChecksFailing`,
+  `ComplianceChecksInError`, `ComplianceStatusStale`,
+  `RemediationBatchStuck`); native Observe → Dashboards ConfigMap when
+  user-workload monitoring is enabled.
 - **Support**: `hack/must-gather.sh` collects operator + compliance state.
 
 ## Layout
 
+- `CHANGELOG.md`: consumer-facing release notes and migration notes
 - `docs/SPEC.md`: design specification (read this first)
 - `docs/PATTERNS.md`: OpenShift addon patterns this repo follows
 - `docs/STANDARDS.md`: coding standards reference with authoritative links
@@ -98,9 +117,10 @@ Then install "Baseline Security" from OperatorHub into the
 `ClusterBaseline/cluster` with the CIS profile and starts scanning; opt out
 with `BASELINE_SECURITY_SKIP_DEFAULT_CR=true` on the CSV deployment.
 
-Optional metrics scrape: apply `operator/config/prometheus/servicemonitor.yaml`
-when user-workload monitoring is enabled, and bind the scrape ServiceAccount
-to ClusterRole `baseline-security-metrics-reader` (`GET /metrics`).
+Metrics: the OLM bundle ships ServiceMonitor, PrometheusRule, and a metrics
+scrape ServiceAccount bound to ClusterRole `baseline-security-metrics-reader`
+(`GET /metrics`). Scrapes are inert until user-workload monitoring is enabled.
+For non-OLM `make deploy`, apply `operator/config/prometheus/` as needed.
 
 Deleting the `ClusterBaseline` (or uninstalling this operator) does **not**
 remove the Compliance Operator Subscription; CO is treated as a shared
@@ -108,7 +128,28 @@ cluster component. The console plugin and owned ScanSetting/bindings are
 cleaned up via owner references and the finalizer.
 
 Never reuse bundle/catalog image tags between pushes; OLM and kubelet caches
-will serve the stale content.
+will serve the stale content. Bump the version (CSV, images, catalog entry)
+for every publish.
+
+## Versioning and upgrades
+
+- **SemVer 0.x + alpha**: the product is pre-1.0. The CRD is `v1alpha1`, the
+  OLM channel and CSV `maturity` are `alpha`. Breaking behavior may appear in
+  minor releases; read [CHANGELOG.md](CHANGELOG.md) before upgrading.
+- **Supported host**: OpenShift 4.22 only (`com.redhat.openshift.versions: =v4.22`;
+  a bare `v4.22` would advertise 4.22 *and later*, which is untested).
+- **Install path**: OLM bundle + file-based catalog is the only supported
+  install. Helm was removed in 0.4.0.
+- **Upgrade path**: OLM `replaces` chain
+  `0.2.0 → 0.2.1 → 0.3.0 → 0.3.1 → 0.4.0`. Do not skip edges when building a
+  multi-version catalog if you need in-place upgrades from older installs.
+- **Notable 0.4.0 behavior change**: benign Compliance Operator `INCONSISTENT`
+  results (PASS where applicable, NOT-APPLICABLE elsewhere) now count as PASS
+  in score, metrics, and UI. Scores can rise on upgrade without remediations.
+- **Version sources** (must stay equal; `make verify-versions` checks them):
+  `operator/Makefile` (`VERSION`), the CSV in
+  `operator/bundle/manifests/baseline-security-operator.clusterserviceversion.yaml`,
+  and `console-plugin/package.json` (`version` + `consolePlugin.version`).
 
 ## Development
 

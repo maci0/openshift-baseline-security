@@ -7,12 +7,9 @@ import (
 	"maps"
 	"os"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
-	"unicode/utf8"
 
-	"github.com/robfig/cron/v3"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -24,6 +21,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	utilvalidation "k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/client-go/util/retry"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -47,11 +45,11 @@ const (
 	pluginNS            = "openshift-baseline-security"
 	// The console renders dashboards from ConfigMaps in this namespace; ours is
 	// created here so it shows under Observe -> Dashboards without a Grafana.
-	dashboardNS   = "openshift-config-managed"
-	dashboardName = "baseline-security-compliance-dashboard"
-	suiteLabel          = "compliance.openshift.io/suite"
-	checkSeverityLabel  = "compliance.openshift.io/check-severity"
-	historyMax          = 30
+	dashboardNS        = "openshift-config-managed"
+	dashboardName      = "baseline-security-compliance-dashboard"
+	suiteLabel         = "compliance.openshift.io/suite"
+	checkSeverityLabel = "compliance.openshift.io/check-severity"
+	historyMax         = 30
 	// Grace before a not-ready Compliance Operator install rolls up to Degraded
 	// (OLM resolve + CSV install + pods can take several minutes on a slow cluster).
 	coInstallGrace = 15 * time.Minute
@@ -68,6 +66,7 @@ var (
 	csvGVK           = schema.GroupVersionKind{Group: "operators.coreos.com", Version: "v1alpha1", Kind: "ClusterServiceVersion"}
 	scanSettingGVK   = schema.GroupVersionKind{Group: "compliance.openshift.io", Version: "v1alpha1", Kind: "ScanSetting"}
 	bindingGVK       = schema.GroupVersionKind{Group: "compliance.openshift.io", Version: "v1alpha1", Kind: "ScanSettingBinding"}
+	suiteGVK         = schema.GroupVersionKind{Group: "compliance.openshift.io", Version: "v1alpha1", Kind: "ComplianceSuite"}
 	checkResultGVK   = schema.GroupVersionKind{Group: "compliance.openshift.io", Version: "v1alpha1", Kind: "ComplianceCheckResult"}
 	scanGVK          = schema.GroupVersionKind{Group: "compliance.openshift.io", Version: "v1alpha1", Kind: "ComplianceScan"}
 	consolePluginGVK = schema.GroupVersionKind{Group: "console.openshift.io", Version: "v1", Kind: "ConsolePlugin"}
@@ -80,79 +79,6 @@ var (
 //go:embed assets/compliance-dashboard.json
 var complianceDashboardJSON string
 
-// Compliance Operator annotations on an INCONSISTENT ComplianceCheckResult: the
-// diverging nodes ("node:STATE,node:STATE") and the state the rest share.
-const (
-	inconsistentSourceAnn = "compliance.openshift.io/inconsistent-source"
-	mostCommonStatusAnn   = "compliance.openshift.io/most-common-status"
-)
-
-// effectiveInconsistentStatus collapses a benign INCONSISTENT check to the status
-// a user actually cares about. The Compliance Operator flags a check INCONSISTENT
-// whenever nodes in a pool disagree, including when the check simply does not
-// apply on some nodes (PASS where it applies, NOT-APPLICABLE elsewhere). That is
-// not a real conflict, so:
-//   - any FAIL or ERROR among the node states -> INCONSISTENT (genuine, review it)
-//   - else at least one PASS                  -> PASS (passes where it applies)
-//   - else only NOT-APPLICABLE/SKIP           -> NOT-APPLICABLE
-//   - unknown/empty states                    -> INCONSISTENT (keep the raw signal)
-func effectiveInconsistentStatus(item *unstructured.Unstructured) string {
-	states := inconsistentStates(item)
-	switch {
-	case states["FAIL"] || states["ERROR"]:
-		return "INCONSISTENT"
-	case states["PASS"]:
-		return "PASS"
-	case states["NOT-APPLICABLE"] || states["SKIP"]:
-		return "NOT-APPLICABLE"
-	default:
-		return "INCONSISTENT"
-	}
-}
-
-// inconsistentStates returns the set of per-node states of an INCONSISTENT check,
-// gathered from the inconsistent-source annotation and most-common-status.
-// Untrusted cluster data: tolerant of malformed values, never panics.
-func inconsistentStates(item *unstructured.Unstructured) map[string]bool {
-	ann := item.GetAnnotations()
-	states := map[string]bool{}
-	for _, s := range strings.Split(ann[inconsistentSourceAnn], ",") {
-		if i := strings.IndexByte(s, ':'); i >= 0 {
-			if st := strings.ToUpper(strings.TrimSpace(s[i+1:])); st != "" {
-				states[st] = true
-			}
-		}
-	}
-	if mc := strings.ToUpper(strings.TrimSpace(ann[mostCommonStatusAnn])); mc != "" {
-		states[mc] = true
-	}
-	return states
-}
-
-// batchApplyAnnotation on the ClusterBaseline carries a comma-separated list of
-// ComplianceRemediation names to batch-apply with MachineConfigPool pause/resume.
-const batchApplyAnnotation = "baselinesecurity.io/batch-apply"
-
-// batchResumeGrace forces a resume even if remediations never reach Applied, so
-// a MachineConfigPool is never left paused.
-const batchResumeGrace = 10 * time.Minute
-
-// batchPastGrace is true when the batch safety timer has elapsed (or is unusable).
-// Zero StartedAt (hand-edit / corrupt) must not disable the valve forever.
-// Far-future StartedAt (beyond grace, matching the spirit of parseScanEndTimestamp's
-// clock-skew bound) is also treated as garbage. Modest future skew (NTP / leader
-// handoff of a few seconds) must NOT force an immediate resume of a live pause.
-func batchPastGrace(started metav1.Time, now time.Time, grace time.Duration) bool {
-	if started.IsZero() {
-		return true
-	}
-	// Started more than `grace` ahead of now is corrupt, not skew.
-	if started.Time.After(now.Add(grace)) {
-		return true
-	}
-	return now.Sub(started.Time) > grace
-}
-
 // ClusterBaselineReconciler reconciles the ClusterBaseline singleton.
 type ClusterBaselineReconciler struct {
 	client.Client
@@ -163,7 +89,7 @@ type ClusterBaselineReconciler struct {
 // +kubebuilder:rbac:groups=baselinesecurity.io,resources=clusterbaselines/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=baselinesecurity.io,resources=clusterbaselines/finalizers,verbs=update
 // +kubebuilder:rbac:groups=compliance.openshift.io,resources=scansettings;scansettingbindings,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=compliance.openshift.io,resources=compliancecheckresults;compliancescans,verbs=get;list;watch
+// +kubebuilder:rbac:groups=compliance.openshift.io,resources=compliancecheckresults;compliancescans;compliancesuites,verbs=get;list;watch
 // +kubebuilder:rbac:groups=compliance.openshift.io,resources=complianceremediations,verbs=get;list;watch;patch
 // +kubebuilder:rbac:groups=machineconfiguration.openshift.io,resources=machineconfigpools,verbs=get;list;watch;patch
 // Subscriptions need update/patch so complianceCatalogSource can be synced after
@@ -192,13 +118,21 @@ func (r *ClusterBaselineReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		// Unpause any MCPs a live batch held. Finalizer removal + GC must not
 		// leave MachineConfigPools stuck paused with no operator left to resume.
 		if err := r.resumeBatchPoolsOnDelete(ctx, cb); err != nil {
+			// Structured context: finalizer stays until resume succeeds; without
+			// this log on-call only sees a generic reconcile error.
+			logger.Error(err, "resume batch pools on delete failed", "name", cb.Name)
 			return ctrl.Result{}, err
 		}
 		if err := r.deregisterConsolePlugin(ctx); err != nil {
+			logger.Error(err, "deregister console plugin on delete failed", "name", cb.Name)
 			return ctrl.Result{}, err
 		}
 		if controllerutil.RemoveFinalizer(cb, finalizerName) {
-			return ctrl.Result{}, r.Update(ctx, cb)
+			if err := r.Update(ctx, cb); err != nil {
+				logger.Error(err, "remove finalizer failed", "name", cb.Name)
+				return ctrl.Result{}, err
+			}
+			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, nil
 	}
@@ -212,24 +146,35 @@ func (r *ClusterBaselineReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		sanitizeStatusForUpdate(cb)
 		setRollupConditions(cb)
 		setCond(cb, "Degraded", metav1.ConditionTrue, "ReconcileError", err.Error())
+		// Structured Error before return: controller-runtime also logs the error,
+		// but without the CR name or that Degraded was attempted.
+		logger.Error(err, "reconcile failed", "name", cb.Name)
 		if serr := r.Status().Update(ctx, cb); serr != nil {
-			logger.V(1).Info("status update after reconcile error failed", "error", serr)
+			// Error, not V(1): without this log the CR can look healthy while
+			// every reconcile fails and the Degraded condition never sticks.
+			logger.Error(serr, "status update after reconcile error failed", "name", cb.Name)
 		}
+		// Publish after Degraded is set so ClusterBaselineDegraded can fire even
+		// when aggregation never ran (API blip, batch apply failure, etc.).
+		publishMetrics(cb)
 		return ctrl.Result{}, err
 	}
 	// OpenShift-style rollup conditions (Available / Progressing / Degraded).
+	// Publish metrics after rollup so Available/Degraded gauges match status.
 	sanitizeStatusForUpdate(cb)
 	setRollupConditions(cb)
+	publishMetrics(cb)
 	if err := r.Status().Update(ctx, cb); err != nil {
+		logger.Error(err, "status update failed", "name", cb.Name)
 		return ctrl.Result{}, err
 	}
 	logger.V(1).Info("reconciled", "score", cb.Status.Score)
 	return ctrl.Result{RequeueAfter: requeueAfter(cb)}, nil
 }
 
-// requeueAfter picks the poll cadence. Steady state is 1m; install Progressing
-// and an in-flight remediation batch use 15s so cancel/grace/Applied are not
-// stuck behind a full minute when the dynamic informer is lagging or not yet up.
+// requeueAfter picks the poll cadence. Steady state is 1m; any Progressing
+// rollup and an in-flight remediation batch use 15s so cancel/grace/Applied are
+// not stuck behind a full minute when the dynamic informer is lagging or not yet up.
 func requeueAfter(cb *baselinev1alpha1.ClusterBaseline) time.Duration {
 	const fast = 15 * time.Second
 	const slow = time.Minute
@@ -259,156 +204,16 @@ func (r *ClusterBaselineReconciler) reconcileOwned(ctx context.Context, cb *base
 	if err := r.ensureConsolePlugin(ctx, cb); err != nil {
 		return fmt.Errorf("ensuring console plugin: %w", err)
 	}
-	if err := r.ensureComplianceDashboard(ctx, cb); err != nil {
-		return fmt.Errorf("ensuring compliance dashboard: %w", err)
-	}
+	r.ensureComplianceDashboard(ctx, cb)
 	if err := r.aggregateStatus(ctx, cb); err != nil {
 		return fmt.Errorf("aggregating status: %w", err)
 	}
-	publishMetrics(cb)
+	// Metrics are published in Reconcile after setRollupConditions so condition
+	// gauges (Available/Progressing/Degraded) match the status being written.
 	if err := r.checkScanStorage(ctx, cb); err != nil {
 		return fmt.Errorf("checking scan storage: %w", err)
 	}
 	return nil
-}
-
-func bindingName(key baselinev1alpha1.ProfileKey) string { return "baseline-" + string(key) }
-
-// tailoredBindingName names the binding for a TailoredProfile. The "tp-" infix
-// keeps its suite label distinct from a built-in profile's "baseline-<key>".
-func tailoredBindingName(name string) string { return "baseline-tp-" + name }
-
-// tailoredNameFromSuite returns the TailoredProfile name for a tailored suite
-// label ("baseline-tp-<name>"), or ("", false) otherwise.
-func tailoredNameFromSuite(suite string) (string, bool) {
-	n, ok := strings.CutPrefix(suite, "baseline-tp-")
-	if !ok || n == "" {
-		return "", false
-	}
-	return n, true
-}
-
-func ownedSuites(cb *baselinev1alpha1.ClusterBaseline) map[string]bool {
-	s := make(map[string]bool, len(cb.Spec.Profiles)+len(cb.Spec.TailoredProfiles))
-	for _, key := range cb.Spec.Profiles {
-		s[bindingName(key)] = true
-	}
-	for _, name := range cb.Spec.TailoredProfiles {
-		s[tailoredBindingName(name)] = true
-	}
-	return s
-}
-
-// matchesAnyProfile: name equals a profile/tailored base or a role-suffixed
-// variant (ocp4-cis-node -> ocp4-cis-node-master, custom -> custom-worker).
-// Only known ScanSetting roles are accepted after the "<base>-" boundary so a
-// short or ambiguous base (e.g. tailored "ocp4") cannot prefix-match foreign
-// PVCs like "ocp4-cis". name is untrusted cluster data.
-func matchesAnyProfile(name string, profiles map[string]bool) bool {
-	for p := range profiles {
-		if name == p {
-			return true
-		}
-		if rest, ok := strings.CutPrefix(name, p+"-"); ok && scanRoleSuffix(rest) {
-			return true
-		}
-	}
-	return false
-}
-
-// scanRoleSuffix is true for the role path we may append after a scan/profile
-// base name. Matches ScanSetting roles we set (worker/master) and common extras,
-// including the "node-<role>" form used by CO node profiles.
-func scanRoleSuffix(rest string) bool {
-	switch rest {
-	case "worker", "master", "control-plane", "infra", "node":
-		return true
-	}
-	if role, ok := strings.CutPrefix(rest, "node-"); ok {
-		switch role {
-		case "worker", "master", "control-plane", "infra":
-			return true
-		}
-	}
-	return false
-}
-
-// profileKeyFromSuite inverts bindingName ("baseline-<key>").
-// Requires a non-empty key after the prefix so "baseline-" alone is rejected.
-// Tailored suites ("baseline-tp-<name>") are excluded so they are only handled
-// by tailoredNameFromSuite.
-func profileKeyFromSuite(suite string) (baselinev1alpha1.ProfileKey, bool) {
-	p, ok := strings.CutPrefix(suite, "baseline-")
-	if !ok || p == "" || strings.HasPrefix(p, "tp-") {
-		return "", false
-	}
-	return baselinev1alpha1.ProfileKey(p), true
-}
-
-// score is pass/(pass+fail)*100, or nil when there are no countable results.
-// All arithmetic is int64 so pass+fail and pass*100 cannot overflow int32.
-func score(pass, fail int32) *int32 {
-	if pass < 0 || fail < 0 {
-		return nil
-	}
-	total := int64(pass) + int64(fail)
-	if total == 0 {
-		return nil
-	}
-	s := int32(int64(pass) * 100 / total)
-	return &s
-}
-
-// score64 is score() over already-int64 (severity-weighted) sums.
-func score64(pass, fail int64) *int32 {
-	if pass < 0 || fail < 0 || pass+fail == 0 {
-		return nil
-	}
-	s := int32(pass * 100 / (pass + fail))
-	return &s
-}
-
-// severityWeight maps a ComplianceCheckResult severity to a score weight, so a
-// high-severity failure moves the severity-weighted score more than a low one.
-func severityWeight(sev string) int64 {
-	switch sev {
-	case "high":
-		return 10
-	case "medium":
-		return 5
-	case "low":
-		return 2
-	default: // "unknown", "info", or missing
-		return 1
-	}
-}
-
-// splitCSV splits a comma-separated list, trimming and dropping empty items.
-func splitCSV(s string) []string {
-	var out []string
-	for _, p := range strings.Split(s, ",") {
-		if p = strings.TrimSpace(p); p != "" {
-			out = append(out, p)
-		}
-	}
-	return out
-}
-
-// notIn returns the sorted members of a that are absent from set b.
-func notIn(a []string, b map[string]bool) []string {
-	var out []string
-	for _, x := range a {
-		if !b[x] {
-			out = append(out, x)
-		}
-	}
-	slices.Sort(out)
-	return out
-}
-
-// withoutPlugin returns plugins without name (copy; does not mutate input).
-func withoutPlugin(plugins []string, name string) []string {
-	return slices.DeleteFunc(slices.Clone(plugins), func(p string) bool { return p == name })
 }
 
 // preferredHostnameAntiAffinity spreads pods across nodes (CONVENTIONS.md HA).
@@ -423,201 +228,6 @@ func preferredHostnameAntiAffinity(labels map[string]string) *corev1.Affinity {
 				},
 			}},
 		},
-	}
-}
-
-// appendHistoryRing appends a snapshot and keeps at most max entries (oldest first).
-// The returned slice does not alias the input backing array after truncation.
-func appendHistoryRing(hist []baselinev1alpha1.ScoreSnapshot, t metav1.Time, s int32, max int) []baselinev1alpha1.ScoreSnapshot {
-	hist = append(hist, baselinev1alpha1.ScoreSnapshot{Time: t, Score: s})
-	return clampHistory(hist, max)
-}
-
-// clampHistory trims history to the CRD MaxItems bound and clamps each score
-// into [0,100]. Without this, a status already over the limit or with an
-// out-of-range score (hand-edit, old bug) makes every Status().Update fail
-// admission and freezes reconciliation feedback.
-func clampHistory(hist []baselinev1alpha1.ScoreSnapshot, max int) []baselinev1alpha1.ScoreSnapshot {
-	if max > 0 && len(hist) > max {
-		hist = append([]baselinev1alpha1.ScoreSnapshot(nil), hist[len(hist)-max:]...)
-	}
-	for i := range hist {
-		if hist[i].Score < 0 {
-			hist[i].Score = 0
-		} else if hist[i].Score > 100 {
-			hist[i].Score = 100
-		}
-	}
-	return hist
-}
-
-// clampScore keeps status.score inside the CRD [0,100] bounds so a hand-edited
-// out-of-range value cannot lock out Status().Update admission.
-func clampScore(s *int32) *int32 {
-	if s == nil {
-		return nil
-	}
-	switch {
-	case *s < 0:
-		z := int32(0)
-		return &z
-	case *s > 100:
-		z := int32(100)
-		return &z
-	default:
-		return s
-	}
-}
-
-// sanitizeStatusForUpdate applies admission-safe bounds to status fields the
-// reconciler writes so a hostile or stale status cannot brick updates.
-// Per-profile and tailored history share the CRD MaxItems=30 / score [0,100]
-// bounds with the top-level history ring.
-func sanitizeStatusForUpdate(cb *baselinev1alpha1.ClusterBaseline) {
-	cb.Status.History = clampHistory(cb.Status.History, historyMax)
-	cb.Status.Score = clampScore(cb.Status.Score)
-	for i := range cb.Status.Profiles {
-		cb.Status.Profiles[i].History = clampHistory(cb.Status.Profiles[i].History, historyMax)
-	}
-	for i := range cb.Status.TailoredProfiles {
-		cb.Status.TailoredProfiles[i].History = clampHistory(cb.Status.TailoredProfiles[i].History, historyMax)
-	}
-}
-
-// condMessage caps condition messages so a huge wrapped error, invalid cron,
-// or long PVC list cannot exceed the Condition message budget or fail status
-// admission. Truncates on a UTF-8 boundary so the CR JSON stays valid.
-func condMessage(s string) string {
-	const max = 1024
-	if len(s) <= max {
-		return s
-	}
-	// Drop incomplete trailing rune; leave room for "...".
-	end := max - 3
-	for end > 0 && !utf8.ValidString(s[:end]) {
-		end--
-	}
-	return s[:end] + "..."
-}
-
-// parseScanEndTimestamp parses a ComplianceScan status.endTimestamp. Accepts
-// RFC3339 with optional fractional seconds. Far-future values are rejected so
-// clock skew / corrupt data cannot pin LastScanTime ahead of real scans.
-func parseScanEndTimestamp(ts string, now time.Time) (time.Time, bool) {
-	if ts == "" {
-		return time.Time{}, false
-	}
-	t, err := time.Parse(time.RFC3339Nano, ts)
-	if err != nil {
-		t, err = time.Parse(time.RFC3339, ts)
-		if err != nil {
-			return time.Time{}, false
-		}
-	}
-	// Allow modest clock skew; anything further ahead is treated as garbage.
-	if t.After(now.Add(time.Hour)) {
-		return time.Time{}, false
-	}
-	return t, true
-}
-
-func setCond(cb *baselinev1alpha1.ClusterBaseline, typ string, status metav1.ConditionStatus, reason, msg string) {
-	// Reason is required (minLength 1) and pattern-constrained on the CRD.
-	// Never write empty: a hand-edited detail condition with Reason "" would
-	// otherwise brick Status().Update when rolled up into Degraded.
-	if reason == "" {
-		reason = "Unknown"
-	}
-	meta.SetStatusCondition(&cb.Status.Conditions, metav1.Condition{
-		Type:   typ,
-		Status: status,
-		Reason: reason,
-		// Cap every message: InvalidSchedule embeds user cron text; storage
-		// embeds PVC names; wrap errors can be huge. One path keeps status
-		// updates from failing admission on an oversized message.
-		Message:            condMessage(msg),
-		ObservedGeneration: cb.Generation,
-	})
-}
-
-// conditionProgressing is true for non-terminal False detail reasons that mean
-// work is still in flight (not permanent admin action like Manual NotInstalled).
-func conditionProgressing(c *metav1.Condition) bool {
-	if c == nil || c.Status != metav1.ConditionFalse {
-		return false
-	}
-	switch c.Reason {
-	// Steady states (must not Progress / 15s-poll forever):
-	// - ImageMissing: permanent deployment misconfig
-	// - ConsoleMissing: Console capability disabled
-	// - CRDsMissing: no compliance CRDs (common with installComplianceOperator=Manual
-	//   until the admin installs CO; Automatic install is already Progressing via
-	//   Installing/CSVNotReady on ComplianceOperatorReady)
-	case "Installing", "CSVNotReady", "WaitingForPods":
-		return true
-	default:
-		return false
-	}
-}
-
-// setRollupConditions sets Available, Progressing, and Degraded from the
-// detail conditions (ClusterOperator-style rollups).
-func setRollupConditions(cb *baselinev1alpha1.ClusterBaseline) {
-	co := meta.FindStatusCondition(cb.Status.Conditions, "ComplianceOperatorReady")
-	scan := meta.FindStatusCondition(cb.Status.Conditions, "ScanConfigured")
-	plugin := meta.FindStatusCondition(cb.Status.Conditions, "ConsolePluginReady")
-	storage := meta.FindStatusCondition(cb.Status.Conditions, "ScanStorageReady")
-
-	coReady := co != nil && co.Status == metav1.ConditionTrue
-	scanOK := scan != nil && scan.Status == metav1.ConditionTrue
-	// A Compliance Operator install that never becomes ready (bad catalog source,
-	// unresolvable Subscription) would otherwise Progress + fast-poll forever. Past
-	// a grace window, stop treating it as progress so it rolls up to Degraded and
-	// the poll backs off, mirroring the console plugin's Unavailable-past-grace.
-	coStuck := co != nil && co.Status == metav1.ConditionFalse &&
-		(co.Reason == "Installing" || co.Reason == "CSVNotReady") &&
-		!co.LastTransitionTime.IsZero() &&
-		time.Since(co.LastTransitionTime.Time) > coInstallGrace
-	progressing := (conditionProgressing(co) && !coStuck) ||
-		conditionProgressing(scan) || conditionProgressing(plugin)
-
-	if progressing {
-		setCond(cb, "Progressing", metav1.ConditionTrue, "Reconciling", "installing or configuring dependencies")
-	} else {
-		setCond(cb, "Progressing", metav1.ConditionFalse, "AsExpected", "")
-	}
-	if coReady && scanOK {
-		setCond(cb, "Available", metav1.ConditionTrue, "AsExpected", "compliance operator ready and scans configured")
-	} else {
-		setCond(cb, "Available", metav1.ConditionFalse, "NotReady", "waiting for compliance operator and scan configuration")
-	}
-	// Degraded: persistent failures that are not mere installation progress:
-	// failed Compliance Operator CSV, invalid schedule, scan result storage
-	// wedged, or the plugin down past its grace period.
-	// Use fixed CamelCase reasons (never copy a possibly empty/hostile detail
-	// Reason) so status admission cannot fail on Reason pattern/minLength.
-	switch {
-	case co != nil && co.Status == metav1.ConditionFalse && co.Reason == "CSVFailed":
-		setCond(cb, "Degraded", metav1.ConditionTrue, "CSVFailed", co.Message)
-	case coStuck:
-		// Prefer the detail message; fall back to reason so we never end with a
-		// trailing empty ": ".
-		detail := co.Message
-		if detail == "" {
-			detail = co.Reason
-		}
-		setCond(cb, "Degraded", metav1.ConditionTrue, "InstallStalled",
-			fmt.Sprintf("Compliance Operator not ready after %s: %s", coInstallGrace, detail))
-	case scan != nil && scan.Status == metav1.ConditionFalse && scan.Reason == "InvalidSchedule":
-		setCond(cb, "Degraded", metav1.ConditionTrue, "InvalidSchedule", scan.Message)
-	case storage != nil && storage.Status == metav1.ConditionFalse:
-		// Fixed reason only: never copy storage.Reason (hand-edit can violate
-		// Condition Reason pattern and brick Status().Update admission).
-		setCond(cb, "Degraded", metav1.ConditionTrue, "ScanStorageNotReady", storage.Message)
-	case plugin != nil && plugin.Status == metav1.ConditionFalse && plugin.Reason == "Unavailable":
-		setCond(cb, "Degraded", metav1.ConditionTrue, "ConsolePluginUnavailable", plugin.Message)
-	default:
-		setCond(cb, "Degraded", metav1.ConditionFalse, "AsExpected", "")
 	}
 }
 
@@ -688,7 +298,10 @@ func (r *ClusterBaselineReconciler) ensureComplianceOperator(ctx context.Context
 	og := u(operatorGroupGVK)
 	og.SetName("compliance-operator")
 	og.SetNamespace(complianceNamespace)
-	_ = unstructured.SetNestedStringSlice(og.Object, []string{complianceNamespace}, "spec", "targetNamespaces")
+	// Must set targetNamespaces: an empty OperatorGroup can install cluster-wide.
+	if err := unstructured.SetNestedStringSlice(og.Object, []string{complianceNamespace}, "spec", "targetNamespaces"); err != nil {
+		return fmt.Errorf("setting OperatorGroup targetNamespaces: %w", err)
+	}
 	if err := createIfMissing(ctx, r.Client, og); err != nil {
 		return err
 	}
@@ -718,28 +331,41 @@ func desiredComplianceCatalogSource(cb *baselinev1alpha1.ClusterBaseline) string
 
 // syncComplianceSubscriptionSource updates an existing Subscription's
 // spec.source when it diverges from the CR. No-op when already matched.
+// Retries on conflict: OLM and other controllers race Subscription updates, and
+// a single failed Update would Degrade the whole reconcile for a catalog move.
 func (r *ClusterBaselineReconciler) syncComplianceSubscriptionSource(
 	ctx context.Context, cb *baselinev1alpha1.ClusterBaseline, sub *unstructured.Unstructured,
 ) error {
 	desired := desiredComplianceCatalogSource(cb)
-	current, _, _ := unstructured.NestedString(sub.Object, "spec", "source")
+	current, _, err := unstructured.NestedString(sub.Object, "spec", "source")
+	if err != nil {
+		return fmt.Errorf("reading Subscription spec.source: %w", err)
+	}
 	if current == desired {
 		return nil
 	}
-	if err := unstructured.SetNestedField(sub.Object, desired, "spec", "source"); err != nil {
-		return err
-	}
-	return r.Update(ctx, sub)
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		latest := u(subscriptionGVK)
+		if err := r.Get(ctx, types.NamespacedName{
+			Namespace: complianceNamespace, Name: "compliance-operator",
+		}, latest); err != nil {
+			return err
+		}
+		cur, _, err := unstructured.NestedString(latest.Object, "spec", "source")
+		if err != nil {
+			return fmt.Errorf("reading Subscription spec.source: %w", err)
+		}
+		if cur == desired {
+			return nil
+		}
+		if err := unstructured.SetNestedField(latest.Object, desired, "spec", "source"); err != nil {
+			return err
+		}
+		return r.Update(ctx, latest)
+	})
 }
 
 func (r *ClusterBaselineReconciler) findComplianceOperatorCSV(ctx context.Context) (*unstructured.Unstructured, error) {
-	csvs := uList(csvGVK)
-	if err := r.List(ctx, csvs); err != nil {
-		if meta.IsNoMatchError(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
 	// Priority (newest version within each tier):
 	//  1. Succeeded in openshift-compliance (where we install / Get installedCSV)
 	//  2. Succeeded anywhere (manual install in another NS)
@@ -748,13 +374,34 @@ func (r *ClusterBaselineReconciler) findComplianceOperatorCSV(ctx context.Contex
 	// Tiering avoids two attacks: (a) stale high-version Succeeded leftovers in a
 	// foreign NS beating the live local CSV; (b) a local Failed/Installing remnant
 	// hiding a healthy Succeeded CSV elsewhere.
-	if csv := pickComplianceOperatorCSV(csvs.Items, complianceNamespace, true); csv != nil {
+	//
+	// Common path: Succeeded CSV already in openshift-compliance. List that
+	// namespace first so every reconcile does not pull cluster-wide CSVs (can be
+	// large on multi-operator clusters). Fall back to a full list only when
+	// local Succeeded is absent.
+	local := uList(csvGVK)
+	if err := r.List(ctx, local, client.InNamespace(complianceNamespace)); err != nil {
+		if meta.IsNoMatchError(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if csv := pickComplianceOperatorCSV(local.Items, complianceNamespace, true); csv != nil {
 		return csv, nil
+	}
+
+	csvs := uList(csvGVK)
+	if err := r.List(ctx, csvs); err != nil {
+		if meta.IsNoMatchError(err) {
+			// CRD still present for namespaced list; only non-Succeeded local remains.
+			return pickComplianceOperatorCSV(local.Items, complianceNamespace, false), nil
+		}
+		return nil, err
 	}
 	if csv := pickComplianceOperatorCSV(csvs.Items, "", true); csv != nil {
 		return csv, nil
 	}
-	if csv := pickComplianceOperatorCSV(csvs.Items, complianceNamespace, false); csv != nil {
+	if csv := pickComplianceOperatorCSV(local.Items, complianceNamespace, false); csv != nil {
 		return csv, nil
 	}
 	return pickComplianceOperatorCSV(csvs.Items, "", false), nil
@@ -763,8 +410,9 @@ func (r *ClusterBaselineReconciler) findComplianceOperatorCSV(ctx context.Contex
 // pickComplianceOperatorCSV chooses the newest compliance-operator CSV among items.
 // If ns is non-empty, only that namespace is considered. If succeededOnly, only
 // phase=Succeeded CSVs are candidates; otherwise only non-Succeeded.
+// DeepCopy runs once for the winner so candidate comparisons stay cheap.
 func pickComplianceOperatorCSV(items []unstructured.Unstructured, ns string, succeededOnly bool) *unstructured.Unstructured {
-	var best *unstructured.Unstructured
+	bestIdx := -1
 	for i := range items {
 		csv := &items[i]
 		if ns != "" && csv.GetNamespace() != ns {
@@ -778,139 +426,14 @@ func pickComplianceOperatorCSV(items []unstructured.Unstructured, ns string, suc
 		if succeededOnly != isSucceeded {
 			continue
 		}
-		if best == nil || compareComplianceCSVVersion(csv.GetName(), best.GetName()) > 0 {
-			best = csv.DeepCopy()
+		if bestIdx < 0 || compareComplianceCSVVersion(csv.GetName(), items[bestIdx].GetName()) > 0 {
+			bestIdx = i
 		}
 	}
-	return best
-}
-
-type complianceVersion struct {
-	parts      []int
-	prerelease string
-}
-
-func compareComplianceCSVVersion(a, b string) int {
-	av, aok := complianceCSVVersion(a)
-	bv, bok := complianceCSVVersion(b)
-	switch {
-	case aok && bok:
-		if cmp := compareComplianceVersions(av, bv); cmp != 0 {
-			return cmp
-		}
-		return strings.Compare(a, b)
-	case aok:
-		return 1
-	case bok:
-		return -1
-	default:
-		return strings.Compare(a, b)
+	if bestIdx < 0 {
+		return nil
 	}
-}
-
-func complianceCSVVersion(name string) (complianceVersion, bool) {
-	v, ok := strings.CutPrefix(name, "compliance-operator.v")
-	if !ok || v == "" {
-		return complianceVersion{}, false
-	}
-	v, _, _ = strings.Cut(v, "+")
-	core, _, _ := strings.Cut(v, "-")
-	_, prerelease, _ := strings.Cut(v, "-")
-	parts := strings.Split(core, ".")
-	out := make([]int, len(parts))
-	for i, p := range parts {
-		if p == "" {
-			return complianceVersion{}, false
-		}
-		n, err := strconv.Atoi(p)
-		if err != nil {
-			return complianceVersion{}, false
-		}
-		out[i] = n
-	}
-	return complianceVersion{parts: out, prerelease: prerelease}, true
-}
-
-func compareComplianceVersions(a, b complianceVersion) int {
-	if cmp := compareVersionParts(a.parts, b.parts); cmp != 0 {
-		return cmp
-	}
-	switch {
-	case a.prerelease == "" && b.prerelease != "":
-		return 1
-	case a.prerelease != "" && b.prerelease == "":
-		return -1
-	case a.prerelease != "" && b.prerelease != "":
-		return comparePrerelease(a.prerelease, b.prerelease)
-	default:
-		return 0
-	}
-}
-
-func compareVersionParts(a, b []int) int {
-	n := max(len(a), len(b))
-	for i := range n {
-		var av, bv int
-		if i < len(a) {
-			av = a[i]
-		}
-		if i < len(b) {
-			bv = b[i]
-		}
-		if av > bv {
-			return 1
-		}
-		if av < bv {
-			return -1
-		}
-	}
-	return 0
-}
-
-func comparePrerelease(a, b string) int {
-	ap := strings.Split(a, ".")
-	bp := strings.Split(b, ".")
-	n := min(len(ap), len(bp))
-	for i := range n {
-		ai, aNum := parsePrereleaseNumber(ap[i])
-		bi, bNum := parsePrereleaseNumber(bp[i])
-		switch {
-		case aNum && bNum && ai != bi:
-			if ai > bi {
-				return 1
-			}
-			return -1
-		case aNum && !bNum:
-			return -1
-		case !aNum && bNum:
-			return 1
-		case !aNum && !bNum:
-			if cmp := strings.Compare(ap[i], bp[i]); cmp != 0 {
-				return cmp
-			}
-		}
-	}
-	switch {
-	case len(ap) > len(bp):
-		return 1
-	case len(ap) < len(bp):
-		return -1
-	default:
-		return 0
-	}
-}
-
-func parsePrereleaseNumber(s string) (int, bool) {
-	if s == "" {
-		return 0, false
-	}
-	for _, r := range s {
-		if r < '0' || r > '9' {
-			return 0, false
-		}
-	}
-	n, err := strconv.Atoi(s)
-	return n, err == nil
+	return items[bestIdx].DeepCopy()
 }
 
 func (r *ClusterBaselineReconciler) setComplianceOperatorReady(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline, sub *unstructured.Unstructured) error {
@@ -952,6 +475,14 @@ func setComplianceOperatorReadyFromCSV(cb *baselinev1alpha1.ClusterBaseline, csv
 	setCond(cb, "ComplianceOperatorReady", metav1.ConditionFalse, "CSVNotReady", "phase="+phase)
 }
 
+// setScanCRDsMissing marks ScanConfigured false when the compliance.openshift.io
+// CRDs are absent (no REST mapping), so a missing Compliance Operator degrades
+// gracefully instead of erroring the reconcile.
+func setScanCRDsMissing(cb *baselinev1alpha1.ClusterBaseline) {
+	setCond(cb, "ScanConfigured", metav1.ConditionFalse, "CRDsMissing",
+		"compliance.openshift.io CRDs not installed")
+}
+
 func (r *ClusterBaselineReconciler) ensureScanConfig(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline) error {
 	// Validate schedule first, but still reconcile ScanSetting fields other than
 	// schedule and all bindings so a bad cron does not freeze profile/tp or
@@ -972,13 +503,20 @@ func (r *ClusterBaselineReconciler) ensureScanConfig(ctx context.Context, cb *ba
 		// to the operator default so CO is not left with an empty schedule.
 		if schedErr == nil {
 			ss.Object["schedule"] = schedule
-		} else if existing, found, _ := unstructured.NestedString(ss.Object, "schedule"); !found || existing == "" {
-			ss.Object["schedule"] = "0 1 * * *"
+		} else if existing, found, err := unstructured.NestedString(ss.Object, "schedule"); err != nil {
+			return fmt.Errorf("reading ScanSetting schedule: %w", err)
+		} else if !found || existing == "" {
+			ss.Object["schedule"] = defaultScanSchedule
 		}
 		ss.Object["roles"] = []any{"worker", "master"}
 		// Set only the storage leaves we own; preserve server-defaulted siblings
 		// (e.g. pvAccessModes) so this does not diff on every reconcile.
-		storage, _, _ := unstructured.NestedMap(ss.Object, "rawResultStorage")
+		// Wrong-type rawResultStorage must not be overwritten with a bare map
+		// that would drop siblings; fail the reconcile so the shape is fixed.
+		storage, _, err := unstructured.NestedMap(ss.Object, "rawResultStorage")
+		if err != nil {
+			return fmt.Errorf("reading ScanSetting rawResultStorage: %w", err)
+		}
 		if storage == nil {
 			storage = map[string]any{}
 		}
@@ -991,8 +529,7 @@ func (r *ClusterBaselineReconciler) ensureScanConfig(ctx context.Context, cb *ba
 	})
 	if err != nil {
 		if meta.IsNoMatchError(err) {
-			setCond(cb, "ScanConfigured", metav1.ConditionFalse, "CRDsMissing",
-				"compliance.openshift.io CRDs not installed")
+			setScanCRDsMissing(cb)
 			return nil
 		}
 		return err
@@ -1042,8 +579,7 @@ func (r *ClusterBaselineReconciler) ensureScanConfig(ctx context.Context, cb *ba
 	bindings := uList(bindingGVK)
 	if err := r.List(ctx, bindings, client.InNamespace(complianceNamespace)); err != nil {
 		if meta.IsNoMatchError(err) {
-			setCond(cb, "ScanConfigured", metav1.ConditionFalse, "CRDsMissing",
-				"compliance.openshift.io CRDs not installed")
+			setScanCRDsMissing(cb)
 			return nil
 		}
 		return err
@@ -1063,59 +599,14 @@ func (r *ClusterBaselineReconciler) ensureScanConfig(ctx context.Context, cb *ba
 			fmt.Sprintf("spec.schedule %q is not a valid standard cron schedule: %s", cb.Spec.Schedule, invalidScheduleMessage))
 		return nil
 	}
-	setCond(cb, "ScanConfigured", metav1.ConditionTrue, "BindingsCreated", "")
-	return nil
-}
-
-func normalizedSchedule(schedule string) (string, error) {
-	if schedule == "" {
-		schedule = "0 1 * * *"
-	}
-	if _, err := cron.ParseStandard(schedule); err != nil {
-		return "", err
-	}
-	return schedule, nil
-}
-
-// checkScanStorage flags Degraded when owned scan PVCs stay Pending (no default SC).
-// checkScanStorage sets the ScanStorageReady detail condition; the Degraded
-// rollup propagates it. Listing in a nonexistent namespace returns an empty
-// list, so no NotFound handling is needed.
-func (r *ClusterBaselineReconciler) checkScanStorage(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline) error {
-	pvcs := &corev1.PersistentVolumeClaimList{}
-	if err := r.List(ctx, pvcs, client.InNamespace(complianceNamespace)); err != nil {
-		return err
-	}
-	// Owned scan PVC names: built-in CO profile names and TailoredProfile names,
-	// plus known role suffixes only (see matchesAnyProfile / scanRoleSuffix).
-	names := map[string]bool{}
-	for _, key := range cb.Spec.Profiles {
-		for _, p := range key.ProfileNames() {
-			names[p] = true
-		}
-	}
-	for _, name := range cb.Spec.TailoredProfiles {
-		names[name] = true
-	}
-	var pending []string
-	for _, pvc := range pvcs.Items {
-		owned := matchesAnyProfile(pvc.Name, names)
-		// Require a real CreationTimestamp: a zero time makes time.Since huge and
-		// would false-Degrade brand-new objects in some test/API edge paths.
-		if owned &&
-			pvc.Status.Phase == corev1.ClaimPending &&
-			!pvc.CreationTimestamp.IsZero() &&
-			time.Since(pvc.CreationTimestamp.Time) > 2*time.Minute {
-			pending = append(pending, pvc.Name)
-		}
-	}
-	if len(pending) > 0 {
-		setCond(cb, "ScanStorageReady", metav1.ConditionFalse, "ScanStoragePending",
-			fmt.Sprintf("PVC(s) %s/%s Pending >2m; need a default StorageClass",
-				complianceNamespace, strings.Join(pending, ", ")))
+	// No profiles and no tailored profiles: scanning is intentionally disabled.
+	// Bindings were pruned above; report it as a healthy (not Degraded) state.
+	if len(cb.Spec.Profiles) == 0 && len(cb.Spec.TailoredProfiles) == 0 {
+		setCond(cb, "ScanConfigured", metav1.ConditionTrue, "ScanningDisabled",
+			"No profiles selected; scanning is disabled.")
 		return nil
 	}
-	setCond(cb, "ScanStorageReady", metav1.ConditionTrue, "AsExpected", "")
+	setCond(cb, "ScanConfigured", metav1.ConditionTrue, "BindingsCreated", "")
 	return nil
 }
 
@@ -1132,12 +623,17 @@ func (r *ClusterBaselineReconciler) deregisterConsolePlugin(ctx context.Context)
 			}
 			return client.IgnoreNotFound(err)
 		}
-		plugins, _, _ := unstructured.NestedStringSlice(console.Object, "spec", "plugins")
+		plugins, _, err := unstructured.NestedStringSlice(console.Object, "spec", "plugins")
+		if err != nil {
+			return fmt.Errorf("reading console plugins: %w", err)
+		}
 		kept := withoutPlugin(plugins, pluginName)
 		if len(kept) == len(plugins) {
 			return nil
 		}
-		_ = unstructured.SetNestedStringSlice(console.Object, kept, "spec", "plugins")
+		if err := unstructured.SetNestedStringSlice(console.Object, kept, "spec", "plugins"); err != nil {
+			return fmt.Errorf("removing console plugin registration: %w", err)
+		}
 		return r.Update(ctx, console)
 	})
 }
@@ -1178,6 +674,8 @@ func (r *ClusterBaselineReconciler) aggregateStatus(ctx context.Context, cb *bas
 			cb.Status.NextScanTime = nil
 			cb.Status.History = nil
 			cb.Status.PreviousFailures = nil
+			cb.Status.DiffBaseFailures = nil
+			cb.Status.DiffBaseScanTime = nil
 			cb.Status.NewlyFailed = nil
 			cb.Status.Fixed = nil
 			// Keep relatedObjects in sync with desired ownership even when CO is absent.
@@ -1213,12 +711,18 @@ func (r *ClusterBaselineReconciler) aggregateStatus(ctx context.Context, cb *bas
 	}
 
 	var pass, fail int32
-	var wPass, wFail int64 // severity-weighted totals
+	var wPass, wFail int64 // severity-weighted totals (pooled)
+	weights := &scoreWeights{
+		profiles: make(map[baselinev1alpha1.ProfileKey]weightedSum, len(byProfile)),
+		tailored: make(map[string]weightedSum, len(byTailored)),
+	}
 	var currentFails []string
 	// tally routes one check result's status into the counts and the score.
 	// INFO is counted (excluded from score) so Overview totals match Results.
 	// SKIP is folded into NotApplicable (CO: check skipped for this system).
 	// WAIVED is our synthetic status for accepted-risk checks (excluded from score).
+	// Unknown/empty/corrupt status fails closed into ERROR so a CCR is never
+	// silently dropped from ResultCounts (and metrics stay complete).
 	tally := func(c *baselinev1alpha1.ResultCounts, status string) {
 		switch status {
 		case "PASS":
@@ -1239,34 +743,81 @@ func (r *ClusterBaselineReconciler) aggregateStatus(ctx context.Context, cb *bas
 			c.Waived++
 		case "SKIP", "NOT-APPLICABLE":
 			c.NotApplicable++
+		default:
+			c.Error++
 		}
 	}
-	for _, item := range list.Items {
+	// addWeight accumulates severity mass for the pooled score and the owning
+	// profile/tailored bucket so per-profile history follows scoring.mode.
+	addWeight := func(status string, item *unstructured.Unstructured, profileKey baselinev1alpha1.ProfileKey, tailoredName string, isTailored bool) {
+		if status != "PASS" && status != "FAIL" {
+			return
+		}
+		w := severityWeight(checkSeverity(item))
+		if status == "FAIL" {
+			wFail += w
+			if isTailored {
+				s := weights.tailored[tailoredName]
+				s.fail += w
+				weights.tailored[tailoredName] = s
+			} else {
+				s := weights.profiles[profileKey]
+				s.fail += w
+				weights.profiles[profileKey] = s
+			}
+			return
+		}
+		wPass += w
+		if isTailored {
+			s := weights.tailored[tailoredName]
+			s.pass += w
+			weights.tailored[tailoredName] = s
+		} else {
+			s := weights.profiles[profileKey]
+			s.pass += w
+			weights.profiles[profileKey] = s
+		}
+	}
+	// Index range: avoid copying each Unstructured (map header + metadata) on
+	// every iteration when multi-profile scans yield thousands of results.
+	for i := range list.Items {
+		item := &list.Items[i]
 		suite := item.GetLabels()[suiteLabel]
 		// Route to the owning bucket first so weighting/regression only see owned checks.
 		var rc *baselinev1alpha1.ResultCounts
+		var profileKey baselinev1alpha1.ProfileKey
+		var tailoredName string
+		var isTailored bool
 		if name, ok := tailoredNameFromSuite(suite); ok {
 			if ts := byTailored[name]; ts != nil {
 				rc = &ts.ResultCounts
+				tailoredName = name
+				isTailored = true
 			}
 		} else if key, ok := profileKeyFromSuite(suite); ok {
 			if ps := byProfile[key]; ps != nil {
 				rc = &ps.ResultCounts
+				profileKey = key
 			}
 		}
 		if rc == nil {
 			continue
 		}
-		status, _, _ := unstructured.NestedString(item.Object, "status")
+		status, _, err := unstructured.NestedString(item.Object, "status")
+		// Wrong-type or missing status must not vanish from counts (tally default
+		// maps empty/unknown to ERROR). NestedString returns "" on type error.
+		if err != nil {
+			status = ""
+		}
 		// A check the Compliance Operator marks INCONSISTENT only because it does
 		// not apply on some nodes (PASS where it applies, NOT-APPLICABLE elsewhere)
 		// is benign; collapse it so it does not read as "review each". A real
 		// PASS-vs-FAIL split stays INCONSISTENT.
 		if status == "INCONSISTENT" {
-			status = effectiveInconsistentStatus(&item)
+			status = effectiveInconsistentStatus(item)
 		}
-		// Waivers apply to failing checks only: a waived FAIL leaves the score
-		// denominator into the Waived bucket. If a waived check later passes it
+		// Waivers apply to failing checks only: a waived FAIL is pulled out of
+		// the pass/fail denominator into the Waived bucket. If a waived check later passes it
 		// counts as PASS again (self-healing), so a stale waiver never silently
 		// depresses the score; the admin can still remove it from the UI.
 		if status == "FAIL" && waived[item.GetName()] {
@@ -1275,10 +826,8 @@ func (r *ClusterBaselineReconciler) aggregateStatus(ctx context.Context, cb *bas
 		tally(rc, status)
 		if status == "FAIL" {
 			currentFails = append(currentFails, item.GetName())
-			wFail += severityWeight(item.GetLabels()[checkSeverityLabel])
-		} else if status == "PASS" {
-			wPass += severityWeight(item.GetLabels()[checkSeverityLabel])
 		}
+		addWeight(status, item, profileKey, tailoredName, isTailored)
 	}
 	slices.Sort(currentFails)
 
@@ -1314,28 +863,7 @@ func (r *ClusterBaselineReconciler) aggregateStatus(ctx context.Context, cb *bas
 	// still leaves a coherent rollup on the error-path status update.
 	cb.Status.NextScanTime = nextScanTime(cb.Spec.Schedule, time.Now())
 	cb.Status.RelatedObjects = relatedObjects(cb)
-	return r.recordHistory(ctx, cb, cb.Status.Score, currentFails)
-}
-
-// nextScanTime computes the next cron fire after now, or nil on an invalid or
-// empty schedule.
-func nextScanTime(schedule string, now time.Time) *metav1.Time {
-	normalized, err := normalizedSchedule(schedule)
-	if err != nil {
-		return nil
-	}
-	sched, err := cron.ParseStandard(normalized)
-	if err != nil {
-		return nil
-	}
-	// A degenerate-but-parseable schedule (e.g. an impossible day/month combo)
-	// yields the zero time from Next; report no next scan rather than year 0001.
-	nextTime := sched.Next(now)
-	if nextTime.IsZero() {
-		return nil
-	}
-	next := metav1.NewTime(nextTime)
-	return &next
+	return r.recordHistory(ctx, cb, cb.Status.Score, currentFails, weights)
 }
 
 // relatedObjects lists the resources this baseline owns or drives, for
@@ -1366,36 +894,285 @@ func relatedObjects(cb *baselinev1alpha1.ClusterBaseline) []baselinev1alpha1.Obj
 // label: node scans run per-MCP, named "<profile>-node-<pool>". Without this
 // fallback a node remediation whose MachineConfig has no role label would pause
 // no pool, so its apply would reboot the node uncoalesced.
+// Role labels and scan-name suffixes are untrusted cluster data; non-DNS1123
+// values are dropped so they never enter batch pool lists or MCP Get calls.
 func poolFromRemediation(rem *unstructured.Unstructured) string {
-	obj, _, _ := unstructured.NestedMap(rem.Object, "spec", "current", "object")
-	if obj != nil {
-		if kind, _, _ := unstructured.NestedString(obj, "kind"); kind != "MachineConfig" {
+	obj, _, err := unstructured.NestedMap(rem.Object, "spec", "current", "object")
+	// Wrong-type object: ignore it and fall through to the scan-name label.
+	if err == nil && obj != nil {
+		kind, _, _ := unstructured.NestedString(obj, "kind")
+		// Only reject known non-node kinds. Missing/empty kind still allows the
+		// scan-name fallback so a partially rendered MachineConfig does not
+		// skip MCP pause during batch apply.
+		if kind != "" && kind != "MachineConfig" {
 			return ""
 		}
-		if role, _, _ := unstructured.NestedString(obj, "metadata", "labels", "machineconfiguration.openshift.io/role"); role != "" {
-			return role
+		if kind == "MachineConfig" {
+			if role, _, _ := unstructured.NestedString(obj, "metadata", "labels", "machineconfiguration.openshift.io/role"); role != "" {
+				return validMCPPoolName(role)
+			}
 		}
 	}
 	scan := rem.GetLabels()["compliance.openshift.io/scan-name"]
-	if i := strings.Index(scan, "-node-"); i >= 0 {
-		return scan[i+len("-node-"):]
+	if i := strings.LastIndex(scan, "-node-"); i >= 0 {
+		return validMCPPoolName(scan[i+len("-node-"):])
 	}
 	return ""
 }
 
-func (r *ClusterBaselineReconciler) setMCPPaused(ctx context.Context, pool string, paused bool) error {
+// validMCPPoolName returns name when it is a non-empty DNS-1123 subdomain
+// (Kubernetes resource name shape), otherwise "".
+func validMCPPoolName(name string) string {
+	if name == "" || len(utilvalidation.IsDNS1123Subdomain(name)) > 0 {
+		return ""
+	}
+	return name
+}
+
+func batchPauseOwner(cb *baselinev1alpha1.ClusterBaseline) string {
+	if cb.UID != "" {
+		return string(cb.UID)
+	}
+	if cb.Name != "" {
+		return cb.Name
+	}
+	return "cluster"
+}
+
+// setMCPPaused changes an MCP only when this batch owns the pause. A pool that
+// was already paused without our marker is left alone and therefore remains
+// paused after the batch. Empty owner is the upgrade path for a legacy batch
+// status created before pause ownership was tracked.
+func (r *ClusterBaselineReconciler) setMCPPaused(ctx context.Context, pool string, paused bool, owner string) error {
 	if pool == "" {
 		return nil
 	}
-	mcp := u(mcpGVK)
-	mcp.SetName(pool)
-	patch := []byte(fmt.Sprintf(`{"spec":{"paused":%t}}`, paused))
-	err := r.Patch(ctx, mcp, client.RawPatch(types.MergePatchType, patch))
-	// A missing pool or absent MCP CRD must not wedge the batch.
-	if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) {
+	// Pool names come from untrusted remediation labels / scan-name suffixes.
+	// An invalid name would make Get return a non-NotFound error and could
+	// wedge batch pause/resume; skip rather than fail the batch.
+	if len(utilvalidation.IsDNS1123Subdomain(pool)) > 0 {
+		log.FromContext(ctx).Info("skipping MachineConfigPool with invalid name", "pool", pool)
 		return nil
 	}
-	return err
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		mcp := u(mcpGVK)
+		if err := r.Get(ctx, types.NamespacedName{Name: pool}, mcp); err != nil {
+			// A missing pool or absent MCP CRD must not wedge the batch.
+			if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) {
+				return nil
+			}
+			return err
+		}
+
+		current, _, err := unstructured.NestedBool(mcp.Object, "spec", "paused")
+		if err != nil {
+			return err
+		}
+		annotations := maps.Clone(mcp.GetAnnotations())
+		marker := annotations[batchPauseOwnerAnnotation]
+		before := mcp.DeepCopy()
+
+		if paused {
+			if owner == "" {
+				return fmt.Errorf("pause owner is empty for MachineConfigPool %q", pool)
+			}
+			if marker != "" && marker != owner {
+				return fmt.Errorf("MachineConfigPool %q pause is owned by another batch", pool)
+			}
+			if current && marker == "" {
+				// Administrator-owned pause: use it, but never claim or undo it.
+				return nil
+			}
+			if current && marker == owner {
+				return nil
+			}
+			if annotations == nil {
+				annotations = map[string]string{}
+			}
+			annotations[batchPauseOwnerAnnotation] = owner
+			mcp.SetAnnotations(annotations)
+			if err := unstructured.SetNestedField(mcp.Object, true, "spec", "paused"); err != nil {
+				return err
+			}
+		} else {
+			if owner == "" {
+				// Legacy active batches did not mark ownership. Preserve a marker from a
+				// newer batch if one somehow overlaps the upgrade window.
+				if marker != "" || !current {
+					return nil
+				}
+				if err := unstructured.SetNestedField(mcp.Object, false, "spec", "paused"); err != nil {
+					return err
+				}
+			} else {
+				if marker != owner {
+					return nil
+				}
+				delete(annotations, batchPauseOwnerAnnotation)
+				if len(annotations) == 0 {
+					annotations = nil
+				}
+				mcp.SetAnnotations(annotations)
+				if err := unstructured.SetNestedField(mcp.Object, false, "spec", "paused"); err != nil {
+					return err
+				}
+			}
+		}
+
+		// Info: pausing/resuming an MCP halts or resumes node rollouts. The batch
+		// start/finish logs cover the happy path, but standalone resumes (orphan
+		// cleanup, delete, grace-force) flip pools with no other marker; on-call
+		// needs a per-pool audit trail when a pool is stuck paused.
+		log.FromContext(ctx).Info("changing MachineConfigPool pause state", "pool", pool, "paused", paused, "owner", owner)
+		return r.Patch(ctx, mcp, client.MergeFromWithOptions(before, client.MergeFromWithOptimisticLock{}))
+	})
+}
+
+func uniqueSortedStrings(values []string) []string {
+	set := make(map[string]bool, len(values))
+	for _, value := range values {
+		if value != "" {
+			set[value] = true
+		}
+	}
+	return slices.Sorted(maps.Keys(set))
+}
+
+func batchRemediationNames(raw string) []string {
+	return uniqueSortedStrings(splitCSV(raw))
+}
+
+func (r *ClusterBaselineReconciler) ensureBatchMetadata(
+	ctx context.Context, cb *baselinev1alpha1.ClusterBaseline, pools []string,
+) (metav1.Time, error) {
+	desiredPools := strings.Join(uniqueSortedStrings(pools), ",")
+	var started metav1.Time
+	// RetryOnConflict: a concurrent console patch (waiver, schedule, rescan)
+	// must not abort batch start after validation; without a stable
+	// batch-started-at the grace clock can reset across attempts.
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		// Re-read on every attempt so the ResourceVersion and any annotations
+		// written by a racing client are current before we merge ours.
+		latest := &baselinev1alpha1.ClusterBaseline{}
+		if err := r.Get(ctx, types.NamespacedName{Name: cb.Name}, latest); err != nil {
+			return err
+		}
+		annotations := maps.Clone(latest.GetAnnotations())
+		if annotations == nil {
+			annotations = map[string]string{}
+		}
+		changed := false
+		started = metav1.Time{}
+		if raw := annotations[batchStartedAtAnnotation]; raw != "" {
+			if parsed, err := time.Parse(time.RFC3339Nano, raw); err == nil && !parsed.IsZero() {
+				started = metav1.NewTime(parsed)
+			}
+		}
+		if started.IsZero() {
+			started = metav1.Now()
+			annotations[batchStartedAtAnnotation] = started.Time.UTC().Format(time.RFC3339Nano)
+			changed = true
+		}
+		if annotations[batchPoolsAnnotation] != desiredPools {
+			annotations[batchPoolsAnnotation] = desiredPools
+			changed = true
+		}
+		// Keep the in-memory CR aligned: later batch steps and Status().Update
+		// reuse this object and need the batch annotations + fresh RV.
+		cb.SetAnnotations(annotations)
+		cb.SetResourceVersion(latest.GetResourceVersion())
+		if !changed {
+			return nil
+		}
+		// Persist before pausing. A conflict leaves every MCP untouched.
+		return r.Update(ctx, cb)
+	})
+	if err != nil {
+		return metav1.Time{}, err
+	}
+	return started, nil
+}
+
+// resumeOrphanedBatch handles the crash/cancel window where metadata was
+// persisted and MCPs may be paused, but status.remediationBatch is absent and
+// the request annotation was removed.
+func (r *ClusterBaselineReconciler) resumeOrphanedBatch(
+	ctx context.Context, cb *baselinev1alpha1.ClusterBaseline,
+) error {
+	annotations := cb.GetAnnotations()
+	requestValue, hasRequest := annotations[batchApplyAnnotation]
+	emptyRequest := hasRequest && len(batchRemediationNames(requestValue)) == 0
+	if annotations[batchStartedAtAnnotation] == "" && annotations[batchPoolsAnnotation] == "" && !emptyRequest {
+		return nil
+	}
+	owner := batchPauseOwner(cb)
+	for _, pool := range batchRemediationNames(annotations[batchPoolsAnnotation]) {
+		if err := r.setMCPPaused(ctx, pool, false, owner); err != nil {
+			return err
+		}
+	}
+	delete(annotations, batchStartedAtAnnotation)
+	delete(annotations, batchPoolsAnnotation)
+	if emptyRequest {
+		delete(annotations, batchApplyAnnotation)
+	}
+	cb.SetAnnotations(annotations)
+	return r.Update(ctx, cb)
+}
+
+func remediationOwnedByBaseline(cb *baselinev1alpha1.ClusterBaseline, rem *unstructured.Unstructured) bool {
+	return ownedSuites(cb)[rem.GetLabels()[suiteLabel]]
+}
+
+// getBatchRemediation validates the confused-deputy boundary before the
+// operator uses its stronger service-account permissions to apply a request.
+// NotFound returns (nil, nil) so a race-deleted remediation can be skipped.
+// NoMatch (CRDs absent) returns the error so batch start retries rather than
+// pretending every target was missing and clearing the request annotation.
+func (r *ClusterBaselineReconciler) getBatchRemediation(
+	ctx context.Context, cb *baselinev1alpha1.ClusterBaseline, name string,
+) (*unstructured.Unstructured, error) {
+	rem := u(remediationGVK)
+	if err := r.Get(ctx, types.NamespacedName{Namespace: complianceNamespace, Name: name}, rem); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if !remediationOwnedByBaseline(cb, rem) {
+		return nil, fmt.Errorf("remediation %q does not belong to a selected baseline suite", name)
+	}
+	state, _, err := unstructured.NestedString(rem.Object, "status", "applicationState")
+	if err != nil {
+		return nil, fmt.Errorf("reading applicationState for remediation %q: %w", name, err)
+	}
+	if state == "MissingDependencies" {
+		return nil, fmt.Errorf("remediation %q has missing dependencies", name)
+	}
+	return rem, nil
+}
+
+func (r *ClusterBaselineReconciler) applyOwnedRemediation(
+	ctx context.Context, cb *baselinev1alpha1.ClusterBaseline, name string,
+) error {
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		rem, err := r.getBatchRemediation(ctx, cb, name)
+		if err != nil || rem == nil {
+			return err
+		}
+		apply, _, err := unstructured.NestedBool(rem.Object, "spec", "apply")
+		if err != nil {
+			return fmt.Errorf("reading spec.apply for remediation %q: %w", name, err)
+		}
+		if apply {
+			return nil
+		}
+		before := rem.DeepCopy()
+		if err := unstructured.SetNestedField(rem.Object, true, "spec", "apply"); err != nil {
+			return err
+		}
+		return r.Patch(ctx, rem, client.MergeFromWithOptions(before, client.MergeFromWithOptimisticLock{}))
+	})
 }
 
 // resumeBatchPoolsOnDelete unpauses every MachineConfigPool a remediation batch
@@ -1405,7 +1182,9 @@ func (r *ClusterBaselineReconciler) setMCPPaused(ctx context.Context, pool strin
 // we retry rather than drop the finalizer with pools still paused.
 func (r *ClusterBaselineReconciler) resumeBatchPoolsOnDelete(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline) error {
 	pools := map[string]bool{}
+	owner := ""
 	if batch := cb.Status.RemediationBatch; batch != nil {
+		owner = batch.PauseOwner
 		for _, p := range batch.Pools {
 			if p != "" {
 				pools[p] = true
@@ -1414,7 +1193,11 @@ func (r *ClusterBaselineReconciler) resumeBatchPoolsOnDelete(ctx context.Context
 	}
 	// Status lost but annotation still present: rediscover pools from rem names.
 	if len(pools) == 0 && cb.Annotations != nil {
-		for _, name := range splitCSV(cb.Annotations[batchApplyAnnotation]) {
+		owner = batchPauseOwner(cb)
+		for _, pool := range batchRemediationNames(cb.Annotations[batchPoolsAnnotation]) {
+			pools[pool] = true
+		}
+		for _, name := range batchRemediationNames(cb.Annotations[batchApplyAnnotation]) {
 			rem := u(remediationGVK)
 			if err := r.Get(ctx, types.NamespacedName{Namespace: complianceNamespace, Name: name}, rem); err != nil {
 				if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) {
@@ -1422,13 +1205,18 @@ func (r *ClusterBaselineReconciler) resumeBatchPoolsOnDelete(ctx context.Context
 				}
 				return err
 			}
+			// A crafted foreign remediation must not make this finalizer mutate its
+			// MachineConfigPool through the operator's service account.
+			if !remediationOwnedByBaseline(cb, rem) {
+				continue
+			}
 			if p := poolFromRemediation(rem); p != "" {
 				pools[p] = true
 			}
 		}
 	}
 	for _, p := range slices.Sorted(maps.Keys(pools)) {
-		if err := r.setMCPPaused(ctx, p, false); err != nil {
+		if err := r.setMCPPaused(ctx, p, false, owner); err != nil {
 			return err
 		}
 	}
@@ -1452,52 +1240,101 @@ func (r *ClusterBaselineReconciler) applyRemediationBatch(ctx context.Context, c
 
 	if batch == nil {
 		if strings.TrimSpace(names) == "" {
-			return nil
+			return r.resumeOrphanedBatch(ctx, cb)
 		}
-		list := splitCSV(names)
+		list := batchRemediationNames(names)
 		// Annotation of only commas/whitespace: do not open an empty batch.
 		if len(list) == 0 {
-			return nil
+			return r.resumeOrphanedBatch(ctx, cb)
 		}
-		pools := map[string]bool{}
+		if len(list) > batchMaxRemediations {
+			return fmt.Errorf("batch requests %d remediations; maximum is %d", len(list), batchMaxRemediations)
+		}
 		for _, name := range list {
-			rem := u(remediationGVK)
-			if err := r.Get(ctx, types.NamespacedName{Namespace: complianceNamespace, Name: name}, rem); err != nil {
-				if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) {
-					continue
-				}
+			if errs := utilvalidation.IsDNS1123Subdomain(name); len(errs) > 0 {
+				return fmt.Errorf("invalid remediation name %q: %s", name, strings.Join(errs, "; "))
+			}
+		}
+
+		// Validate every existing target before any mutation. In particular, the
+		// suite check prevents ClusterBaseline patch permission from becoming a
+		// deputy that can apply arbitrary ComplianceRemediations.
+		// Drop race-deleted (NotFound) names so status only lists remediations we
+		// will actually apply. If none remain, clear the one-shot annotation
+		// instead of opening a fake batch that "succeeds" with no work.
+		pools := map[string]bool{}
+		keep := make([]string, 0, len(list))
+		for _, name := range list {
+			rem, err := r.getBatchRemediation(ctx, cb, name)
+			if err != nil {
 				return err
 			}
+			if rem == nil {
+				continue
+			}
+			keep = append(keep, name)
 			if p := poolFromRemediation(rem); p != "" {
 				pools[p] = true
 			}
 		}
+		if len(keep) == 0 {
+			log.FromContext(ctx).Info("remediation batch skipped: no remediations found",
+				"requested", list)
+			if cb.Annotations != nil {
+				if _, ok := cb.Annotations[batchApplyAnnotation]; ok {
+					delete(cb.Annotations, batchApplyAnnotation)
+					return r.Update(ctx, cb)
+				}
+			}
+			return nil
+		}
+		list = keep
 		poolList := slices.Sorted(maps.Keys(pools))
+		startedAt, err := r.ensureBatchMetadata(ctx, cb, poolList)
+		if err != nil {
+			return err
+		}
+		owner := batchPauseOwner(cb)
 		// Pause first so all apply-triggered MachineConfig renders coalesce.
 		// On a mid-list failure, unpause what we already paused this attempt so
 		// a permanent error cannot leave a subset of pools paused with no batch.
+		logger := log.FromContext(ctx)
 		var paused []string
 		for _, p := range poolList {
-			if err := r.setMCPPaused(ctx, p, true); err != nil {
+			if err := r.setMCPPaused(ctx, p, true, owner); err != nil {
+				resumeFailed := false
 				for _, done := range paused {
-					_ = r.setMCPPaused(ctx, done, false)
+					if rerr := r.setMCPPaused(ctx, done, false, owner); rerr != nil {
+						logger.Error(rerr, "failed to resume MachineConfigPool after pause failure", "pool", done)
+						resumeFailed = true
+					}
+				}
+				// If unpause itself failed, record the batch so batchResumeGrace
+				// can force resume instead of leaving pools paused forever while
+				// apply/pause keeps failing and status.remediationBatch stays nil.
+				if resumeFailed {
+					cb.Status.RemediationBatch = &baselinev1alpha1.RemediationBatchStatus{
+						Phase: "Applying", Pools: append([]string(nil), paused...), Remediations: list, StartedAt: startedAt, PauseOwner: owner,
+					}
 				}
 				return err
 			}
 			paused = append(paused, p)
 		}
 		for _, name := range list {
-			rem := u(remediationGVK)
-			rem.SetName(name)
-			rem.SetNamespace(complianceNamespace)
-			patch := []byte(`{"spec":{"apply":true}}`)
-			if err := r.Patch(ctx, rem, client.RawPatch(types.MergePatchType, patch)); err != nil {
-				if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) {
-					continue
-				}
+			if err := r.applyOwnedRemediation(ctx, cb, name); err != nil {
 				// Resume any paused pools so a failure never leaves them paused.
+				resumeFailed := false
 				for _, p := range poolList {
-					_ = r.setMCPPaused(ctx, p, false)
+					if rerr := r.setMCPPaused(ctx, p, false, owner); rerr != nil {
+						logger.Error(rerr, "failed to resume MachineConfigPool after batch apply error", "pool", p)
+						resumeFailed = true
+					}
+				}
+				if resumeFailed {
+					cb.Status.RemediationBatch = &baselinev1alpha1.RemediationBatchStatus{
+						Phase: "Applying", Pools: poolList, Remediations: list, StartedAt: startedAt, PauseOwner: owner,
+					}
 				}
 				return err
 			}
@@ -1506,8 +1343,11 @@ func (r *ClusterBaselineReconciler) applyRemediationBatch(ctx context.Context, c
 		// the end-of-reconcile Status().Update; if that fails, the annotation still
 		// drives a restart rather than orphaning paused pools.
 		cb.Status.RemediationBatch = &baselinev1alpha1.RemediationBatchStatus{
-			Phase: "Applying", Pools: poolList, Remediations: list, StartedAt: metav1.Now(),
+			Phase: "Applying", Pools: poolList, Remediations: list, StartedAt: startedAt, PauseOwner: owner,
 		}
+		// Info: MCP pause is operationally sensitive; on-call needs a clear
+		// start marker in logs when investigating stuck paused pools.
+		logger.Info("remediation batch started", "remediations", len(list), "pools", poolList)
 		return nil
 	}
 
@@ -1530,33 +1370,63 @@ func (r *ClusterBaselineReconciler) applyRemediationBatch(ctx context.Context, c
 			applied = false
 			continue
 		}
-		if s, _, _ := unstructured.NestedString(rem.Object, "status", "applicationState"); s != "Applied" {
+		if s, _, err := unstructured.NestedString(rem.Object, "status", "applicationState"); err != nil {
+			// Wrong-type status must not look like Applied (would unpause early).
+			getErr = err
+			applied = false
+			continue
+		} else if s != "Applied" {
 			applied = false
 		}
-		if a, _, _ := unstructured.NestedBool(rem.Object, "spec", "apply"); a {
+		if a, _, err := unstructured.NestedBool(rem.Object, "spec", "apply"); err != nil {
+			// Corrupt apply must not cancel the batch (false negative on anyApplying).
+			getErr = err
+			applied = false
+			continue
+		} else if a {
 			anyApplying = true
 		}
 	}
 	// Cancelled only when we saw every remediation cleanly (no transient error hid
 	// an apply=true one), so a flaky Get never triggers an early resume.
 	cancelled := !anyApplying && getErr == nil
-	pastGrace := batchPastGrace(batch.StartedAt, time.Now(), batchResumeGrace)
+	pastGrace := batchPastGrace(batch.StartedAt, time.Now())
 	if applied || pastGrace || cancelled {
 		for _, p := range batch.Pools {
-			if err := r.setMCPPaused(ctx, p, false); err != nil {
+			if err := r.setMCPPaused(ctx, p, false, batch.PauseOwner); err != nil {
 				return err
 			}
 		}
 		// Clear one-shot annotation after pools are resumed. Pools are safe even
 		// if this Update fails; the next reconcile retries the clear.
+		metadataChanged := false
 		if cb.Annotations != nil {
-			if _, ok := cb.Annotations[batchApplyAnnotation]; ok {
+			if value, ok := cb.Annotations[batchApplyAnnotation]; ok &&
+				slices.Equal(batchRemediationNames(value), uniqueSortedStrings(batch.Remediations)) {
 				delete(cb.Annotations, batchApplyAnnotation)
-				if err := r.Update(ctx, cb); err != nil {
-					return err
-				}
+				metadataChanged = true
+			}
+			if _, ok := cb.Annotations[batchStartedAtAnnotation]; ok {
+				delete(cb.Annotations, batchStartedAtAnnotation)
+				metadataChanged = true
+			}
+			if _, ok := cb.Annotations[batchPoolsAnnotation]; ok {
+				delete(cb.Annotations, batchPoolsAnnotation)
+				metadataChanged = true
 			}
 		}
+		if metadataChanged {
+			if err := r.Update(ctx, cb); err != nil {
+				return err
+			}
+		}
+		reason := "applied"
+		if cancelled {
+			reason = "cancelled"
+		} else if pastGrace {
+			reason = "grace"
+		}
+		log.FromContext(ctx).Info("remediation batch finished", "reason", reason, "pools", batch.Pools, "remediations", len(batch.Remediations))
 		cb.Status.RemediationBatch = nil
 		return nil
 	}
@@ -1568,27 +1438,93 @@ func (r *ClusterBaselineReconciler) applyRemediationBatch(ctx context.Context, c
 	return nil
 }
 
-func (r *ClusterBaselineReconciler) recordHistory(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline, s *int32, currentFails []string) error {
-	scans := uList(scanGVK)
-	if err := r.List(ctx, scans, client.InNamespace(complianceNamespace)); err != nil {
+type completedSuiteRun struct {
+	earliest time.Time
+	latest   time.Time
+}
+
+// completedSuiteTimes returns the member-scan completion range only when the
+// suite and every status entry are complete. ComplianceSuite is the transaction
+// boundary for a ScanSettingBinding; recording an individual scan would snapshot
+// a partial multi-scan run.
+func completedSuiteTimes(suite *unstructured.Unstructured, now time.Time) (completedSuiteRun, bool) {
+	phase, _, err := unstructured.NestedString(suite.Object, "status", "phase")
+	if err != nil || phase != "DONE" {
+		return completedSuiteRun{}, false
+	}
+	statuses, found, err := unstructured.NestedSlice(suite.Object, "status", "scanStatuses")
+	if err != nil || !found || len(statuses) == 0 {
+		return completedSuiteRun{}, false
+	}
+	var run completedSuiteRun
+	for _, raw := range statuses {
+		status, ok := raw.(map[string]any)
+		if !ok {
+			return completedSuiteRun{}, false
+		}
+		memberPhase, _, err := unstructured.NestedString(status, "phase")
+		if err != nil || memberPhase != "DONE" {
+			return completedSuiteRun{}, false
+		}
+		ts, _, err := unstructured.NestedString(status, "endTimestamp")
+		if err != nil {
+			return completedSuiteRun{}, false
+		}
+		completed, ok := parseScanEndTimestamp(ts, now)
+		if !ok {
+			return completedSuiteRun{}, false
+		}
+		if run.earliest.IsZero() || completed.Before(run.earliest) {
+			run.earliest = completed
+		}
+		if completed.After(run.latest) {
+			run.latest = completed
+		}
+	}
+	return run, !run.latest.IsZero()
+}
+
+// recordHistory advances score history and scan-diff state when every owned
+// suite has a completed run. weights may be nil (Flat mode, or unit tests that
+// only care about overall history); per-profile rings then use pass/fail counts.
+func (r *ClusterBaselineReconciler) recordHistory(
+	ctx context.Context,
+	cb *baselinev1alpha1.ClusterBaseline,
+	s *int32,
+	currentFails []string,
+	weights *scoreWeights,
+) error {
+	suiteList := uList(suiteGVK)
+	if err := r.List(ctx, suiteList, client.InNamespace(complianceNamespace)); err != nil {
 		if meta.IsNoMatchError(err) {
 			return nil
 		}
 		return err
 	}
-	suites := ownedSuites(cb)
+	expectedSuites := ownedSuites(cb)
+	if len(expectedSuites) == 0 {
+		return nil
+	}
 	now := time.Now()
 	var latest time.Time
-	for _, item := range scans.Items {
-		if suite := item.GetLabels()[suiteLabel]; suite == "" || !suites[suite] {
+	completedSuites := make(map[string]completedSuiteRun, len(expectedSuites))
+	for i := range suiteList.Items {
+		item := &suiteList.Items[i]
+		if !expectedSuites[item.GetName()] {
 			continue
 		}
-		ts, _, _ := unstructured.NestedString(item.Object, "status", "endTimestamp")
-		if t, ok := parseScanEndTimestamp(ts, now); ok && t.After(latest) {
-			latest = t
+		completed, ok := completedSuiteTimes(item, now)
+		if !ok {
+			return nil
+		}
+		completedSuites[item.GetName()] = completed
+		if completed.latest.After(latest) {
+			latest = completed.latest
 		}
 	}
-	if latest.IsZero() {
+	// Wait until every selected binding has a completed suite. This prevents a
+	// fast profile from advancing global history while another is still running.
+	if len(completedSuites) != len(expectedSuites) || latest.IsZero() {
 		return nil
 	}
 	last := metav1.NewTime(latest)
@@ -1598,43 +1534,49 @@ func (r *ClusterBaselineReconciler) recordHistory(ctx context.Context, cb *basel
 		// - refresh the latest history score when late results change the rollup
 		// - append a first history point when an earlier pass had score=nil
 		//   (all MANUAL/INFO) and a countable score appears for the same scan
-		if last.Equal(cb.Status.LastScanTime) && s != nil {
-			if n := len(cb.Status.History); n > 0 && cb.Status.History[n-1].Time.Equal(cb.Status.LastScanTime) {
-				cb.Status.History[n-1].Score = *s
-			} else {
-				cb.Status.History = appendHistoryRing(cb.Status.History, last, *s, historyMax)
+		if last.Equal(cb.Status.LastScanTime) {
+			cb.Status.History = syncHistorySnapshot(cb.Status.History, last, s)
+			syncProfileHistory(cb, last, weights)
+			// Keep the baseline for the next scan current when CheckResults arrive
+			// after endTimestamp, and correct this scan's diff against its retained
+			// prior-scan baseline.
+			if cb.Status.DiffBaseScanTime != nil && last.Equal(cb.Status.DiffBaseScanTime) {
+				syncFailureDiff(cb, currentFails, cb.Status.DiffBaseFailures)
 			}
+			cb.Status.PreviousFailures = slices.Clone(currentFails)
 		}
 		return nil
 	}
-	cb.Status.LastScanTime = &last
-	if s != nil {
-		cb.Status.History = appendHistoryRing(cb.Status.History, last, *s, historyMax)
+	if cb.Status.LastScanTime != nil {
+		// A DONE suite may still represent the previous scheduled run while another
+		// suite has already completed the next one. Advance only after every suite's
+		// newest member scan is newer than the prior global snapshot.
+		for _, completed := range completedSuites {
+			if !completed.earliest.After(cb.Status.LastScanTime.Time) {
+				return nil
+			}
+		}
 	}
+	hadPreviousScan := cb.Status.LastScanTime != nil
+	cb.Status.LastScanTime = &last
+	cb.Status.History = syncHistorySnapshot(cb.Status.History, last, s)
 	// A new scan completed: compute regressions vs the previous scan's failures,
 	// then snapshot the current failures for next time, and append a per-profile
 	// history point so each benchmark can be trended.
-	prev := make(map[string]bool, len(cb.Status.PreviousFailures))
-	for _, n := range cb.Status.PreviousFailures {
-		prev[n] = true
+	if hadPreviousScan {
+		cb.Status.DiffBaseFailures = slices.Clone(cb.Status.PreviousFailures)
+		cb.Status.DiffBaseScanTime = &last
+		syncFailureDiff(cb, currentFails, cb.Status.DiffBaseFailures)
+	} else {
+		// There is no previous completed scan to compare against. Reporting every
+		// initial failure as a regression is misleading and triggers a false alert.
+		cb.Status.NewlyFailed = nil
+		cb.Status.Fixed = nil
+		cb.Status.DiffBaseFailures = nil
+		cb.Status.DiffBaseScanTime = nil
 	}
-	cur := make(map[string]bool, len(currentFails))
-	for _, n := range currentFails {
-		cur[n] = true
-	}
-	cb.Status.NewlyFailed = notIn(currentFails, prev)
-	cb.Status.Fixed = notIn(cb.Status.PreviousFailures, cur)
-	cb.Status.PreviousFailures = currentFails
-	for i := range cb.Status.Profiles {
-		if ps := score(cb.Status.Profiles[i].Pass, cb.Status.Profiles[i].Fail); ps != nil {
-			cb.Status.Profiles[i].History = appendHistoryRing(cb.Status.Profiles[i].History, last, *ps, historyMax)
-		}
-	}
-	for i := range cb.Status.TailoredProfiles {
-		if ps := score(cb.Status.TailoredProfiles[i].Pass, cb.Status.TailoredProfiles[i].Fail); ps != nil {
-			cb.Status.TailoredProfiles[i].History = appendHistoryRing(cb.Status.TailoredProfiles[i].History, last, *ps, historyMax)
-		}
-	}
+	cb.Status.PreviousFailures = slices.Clone(currentFails)
+	syncProfileHistory(cb, last, weights)
 	return nil
 }
 
@@ -1644,7 +1586,7 @@ func (r *ClusterBaselineReconciler) recordHistory(ctx context.Context, cb *basel
 // monitoring + the metrics ServiceMonitor; the dashboard renders regardless.
 // Best-effort: a write failure here is logged, not Degrading, since the dashboard
 // is cosmetic and must never block scanning or status.
-func (r *ClusterBaselineReconciler) ensureComplianceDashboard(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline) error {
+func (r *ClusterBaselineReconciler) ensureComplianceDashboard(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline) {
 	cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: dashboardName, Namespace: dashboardNS}}
 	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, cm, func() error {
 		if cm.Labels == nil {
@@ -1658,9 +1600,10 @@ func (r *ClusterBaselineReconciler) ensureComplianceDashboard(ctx context.Contex
 		return controllerutil.SetControllerReference(cb, cm, r.Scheme)
 	})
 	if err != nil {
-		log.FromContext(ctx).V(1).Info("compliance dashboard configmap not reconciled", "error", err)
+		// Error (not Info): best-effort cosmetic resource, but operators need to
+		// see RBAC/namespace failures when the dashboard never appears.
+		log.FromContext(ctx).Error(err, "compliance dashboard configmap not reconciled")
 	}
-	return nil
 }
 
 func (r *ClusterBaselineReconciler) ensureConsolePlugin(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline) error {
@@ -1686,6 +1629,19 @@ func (r *ClusterBaselineReconciler) ensureConsolePlugin(ctx context.Context, cb 
 			svc.Annotations = map[string]string{}
 		}
 		svc.Annotations["service.beta.openshift.io/serving-cert-secret-name"] = pluginName + "-cert"
+		svc.Spec.Type = corev1.ServiceTypeClusterIP
+		// This is an internal console backend. Clear every field that can retain
+		// external exposure or is invalid after reconciling a hand-edited
+		// LoadBalancer/ExternalName Service back to ClusterIP.
+		svc.Spec.ExternalIPs = nil
+		svc.Spec.ExternalName = ""
+		svc.Spec.LoadBalancerIP = ""
+		svc.Spec.LoadBalancerSourceRanges = nil
+		svc.Spec.LoadBalancerClass = nil
+		svc.Spec.AllocateLoadBalancerNodePorts = nil
+		svc.Spec.ExternalTrafficPolicy = ""
+		svc.Spec.HealthCheckNodePort = 0
+		svc.Spec.PublishNotReadyAddresses = false
 		svc.Spec.Selector = labels
 		svc.Spec.Ports = []corev1.ServicePort{{
 			Name: "https", Port: 9443, TargetPort: intstr.FromInt32(9443), Protocol: corev1.ProtocolTCP,
@@ -1758,11 +1714,16 @@ func (r *ClusterBaselineReconciler) ensureConsolePlugin(ctx context.Context, cb 
 		if err := r.Get(ctx, types.NamespacedName{Name: "cluster"}, console); err != nil {
 			return err
 		}
-		plugins, _, _ := unstructured.NestedStringSlice(console.Object, "spec", "plugins")
+		plugins, _, err := unstructured.NestedStringSlice(console.Object, "spec", "plugins")
+		if err != nil {
+			return fmt.Errorf("reading console plugins: %w", err)
+		}
 		if slices.Contains(plugins, pluginName) {
 			return nil
 		}
-		_ = unstructured.SetNestedStringSlice(console.Object, append(plugins, pluginName), "spec", "plugins")
+		if err := unstructured.SetNestedStringSlice(console.Object, append(plugins, pluginName), "spec", "plugins"); err != nil {
+			return fmt.Errorf("registering console plugin: %w", err)
+		}
 		return r.Update(ctx, console)
 	}); err != nil {
 		if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) {
@@ -1863,63 +1824,125 @@ func pluginDeploymentUnavailable(dep *appsv1.Deployment) bool {
 func applyPluginContainer(pod *corev1.PodSpec, image string) {
 	// nginx serves static files; it never talks to the API server.
 	pod.AutomountServiceAccountToken = ptr.To(false)
+	pod.ServiceAccountName = "default"
+	pod.HostNetwork = false
+	pod.HostPID = false
+	pod.HostIPC = false
+	pod.ShareProcessNamespace = nil
+	pod.EphemeralContainers = nil
+	pod.NodeName = ""
+	pod.NodeSelector = nil
+	pod.Tolerations = nil
+	pod.TopologySpreadConstraints = nil
+	pod.RuntimeClassName = nil
+	pod.PriorityClassName = ""
+	pod.Priority = nil
+	pod.PreemptionPolicy = ptr.To(corev1.PreemptLowerPriority)
+	pod.ActiveDeadlineSeconds = nil
+	pod.ReadinessGates = nil
+	pod.HostAliases = nil
+	pod.Hostname = ""
+	pod.Subdomain = ""
+	pod.SetHostnameAsFQDN = ptr.To(false)
+	pod.OS = nil
+	pod.SchedulingGates = nil
+	pod.ResourceClaims = nil
+	pod.Resources = nil
+	pod.Overhead = nil
+	pod.HostnameOverride = nil
+	pod.WorkloadRef = nil
+	pod.DNSConfig = nil
+	pod.EnableServiceLinks = ptr.To(false)
+	pod.DNSPolicy = corev1.DNSClusterFirst
+	pod.RestartPolicy = corev1.RestartPolicyAlways
+	pod.SchedulerName = corev1.DefaultSchedulerName
+	pod.TerminationGracePeriodSeconds = ptr.To(int64(30))
+	pullPolicy := corev1.PullIfNotPresent
+	imageLeaf := image[strings.LastIndex(image, "/")+1:]
+	if !strings.Contains(imageLeaf, ":") || strings.HasSuffix(imageLeaf, ":latest") {
+		pullPolicy = corev1.PullAlways
+	}
 	container := corev1.Container{
-		Name:  pluginName,
-		Image: image,
-		Ports: []corev1.ContainerPort{{Name: "https", ContainerPort: 9443, Protocol: corev1.ProtocolTCP}},
+		Name:            pluginName,
+		Image:           image,
+		ImagePullPolicy: pullPolicy,
+		Ports:           []corev1.ContainerPort{{Name: "https", ContainerPort: 9443, Protocol: corev1.ProtocolTCP}},
 		SecurityContext: &corev1.SecurityContext{
 			AllowPrivilegeEscalation: ptr.To(false),
 			Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
 			RunAsNonRoot:             ptr.To(true),
+			// nginx pid/logs/temp use /tmp (emptyDir); rootfs stays immutable.
+			ReadOnlyRootFilesystem: ptr.To(true),
 		},
 		Resources: corev1.ResourceRequirements{
 			Requests: corev1.ResourceList{
 				corev1.ResourceCPU:    resource.MustParse("10m"),
 				corev1.ResourceMemory: resource.MustParse("32Mi"),
 			},
+			// Static asset server; bound usage so a runaway cannot starve the node.
+			Limits: corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("200m"),
+				corev1.ResourceMemory: resource.MustParse("128Mi"),
+			},
 		},
+		// TCP only: the serving cert may be absent at first start, so HTTP
+		// probes would fail closed until service-ca mints the Secret.
 		ReadinessProbe: &corev1.Probe{
 			ProbeHandler: corev1.ProbeHandler{
 				TCPSocket: &corev1.TCPSocketAction{Port: intstr.FromInt32(9443)},
 			},
 			InitialDelaySeconds: 5,
+			TimeoutSeconds:      1,
+			PeriodSeconds:       10,
+			SuccessThreshold:    1,
+			FailureThreshold:    3,
 		},
+		LivenessProbe: &corev1.Probe{
+			ProbeHandler: corev1.ProbeHandler{
+				TCPSocket: &corev1.TCPSocketAction{Port: intstr.FromInt32(9443)},
+			},
+			InitialDelaySeconds: 15,
+			TimeoutSeconds:      1,
+			PeriodSeconds:       20,
+			SuccessThreshold:    1,
+			FailureThreshold:    3,
+		},
+		TerminationMessagePath:   corev1.TerminationMessagePathDefault,
+		TerminationMessagePolicy: corev1.TerminationMessageReadFile,
 		VolumeMounts: []corev1.VolumeMount{
 			{Name: "serving-cert", MountPath: "/var/serving-cert", ReadOnly: true},
+			// Writable scratch for pid file and nginx temp paths (read-only rootfs).
+			{Name: "tmp", MountPath: "/tmp"},
 		},
 	}
-	found := false
-	for i := range pod.Containers {
-		if pod.Containers[i].Name == pluginName {
-			pod.Containers[i] = container
-			found = true
-			break
-		}
-	}
-	if !found {
-		pod.Containers = append(pod.Containers, container)
-	}
+	// The Deployment is fully owned. Replacing the lists removes injected or
+	// hand-added sidecars/init containers that would otherwise run unreviewed in
+	// the plugin pod and survive every reconcile.
+	pod.Containers = []corev1.Container{container}
+	pod.InitContainers = nil
 
-	vol := corev1.Volume{
-		Name: "serving-cert",
-		VolumeSource: corev1.VolumeSource{
-			// Optional until service-ca mints the Secret.
-			Secret: &corev1.SecretVolumeSource{
-				SecretName: pluginName + "-cert",
-				Optional:   ptr.To(true),
+	// 0400: only the nginx UID can read the private key (default is 0644).
+	const certMode int32 = 0o400
+	// Bound /tmp so a compromised nginx process cannot fill the node disk.
+	tmpLimit := resource.MustParse("32Mi")
+	pod.Volumes = []corev1.Volume{
+		{
+			Name: "serving-cert",
+			VolumeSource: corev1.VolumeSource{
+				// Optional until service-ca mints the Secret.
+				Secret: &corev1.SecretVolumeSource{
+					SecretName:  pluginName + "-cert",
+					Optional:    ptr.To(true),
+					DefaultMode: ptr.To(certMode),
+				},
 			},
 		},
-	}
-	volFound := false
-	for i := range pod.Volumes {
-		if pod.Volumes[i].Name == "serving-cert" {
-			pod.Volumes[i] = vol
-			volFound = true
-			break
-		}
-	}
-	if !volFound {
-		pod.Volumes = append(pod.Volumes, vol)
+		{
+			Name: "tmp",
+			VolumeSource: corev1.VolumeSource{
+				EmptyDir: &corev1.EmptyDirVolumeSource{SizeLimit: &tmpLimit},
+			},
+		},
 	}
 }
 
@@ -1943,13 +1966,16 @@ func (r *ClusterBaselineReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		ctrl:   c,
 		cache:  mgr.GetCache(),
 		mapper: mgr.GetRESTMapper(),
-		gvks:   []schema.GroupVersionKind{scanGVK, remediationGVK, checkResultGVK},
+		gvks:   []schema.GroupVersionKind{suiteGVK, scanGVK, remediationGVK, checkResultGVK},
 	})
 }
 
 // enqueueSingleton maps any compliance-CR event to a reconcile of the
 // ClusterBaseline singleton, coalesced by the workqueue.
-func enqueueSingleton(context.Context, client.Object) []reconcile.Request {
+func enqueueSingleton(_ context.Context, obj client.Object) []reconcile.Request {
+	if obj.GetNamespace() != complianceNamespace {
+		return nil
+	}
 	return []reconcile.Request{{NamespacedName: types.NamespacedName{Name: "cluster"}}}
 }
 
@@ -1993,10 +2019,14 @@ func (l *lazyComplianceWatch) Start(ctx context.Context) error {
 			return nil
 		}
 		pending = still
+		// NewTimer (not time.After): stop on ctx cancel so a shutdown mid-wait
+		// does not leave a 30s timer holding the Runnable goroutine's stack.
+		timer := time.NewTimer(30 * time.Second)
 		select {
 		case <-ctx.Done():
+			timer.Stop()
 			return nil
-		case <-time.After(30 * time.Second):
+		case <-timer.C:
 		}
 	}
 }

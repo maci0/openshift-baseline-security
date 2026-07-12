@@ -1,5 +1,13 @@
 node_modules/
 dist/
+coverage/
 .yarn/
 e2e/
+test-results/
+**/*.test.ts
+**/*.test.tsx
+jest.config.cjs
+eslint.config.mjs
 *.log
+*.md
+.dockerignore

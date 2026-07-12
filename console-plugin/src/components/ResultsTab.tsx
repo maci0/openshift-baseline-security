@@ -9,7 +9,6 @@ import {
   TableColumn,
   TableData,
   useAccessReview,
-  useK8sWatchResource,
   useListPageFilter,
   VirtualizedTable,
 } from '@openshift-console/dynamic-plugin-sdk';
@@ -47,7 +46,6 @@ import {
   ClusterBaseline,
   ClusterBaselineModel,
   ComplianceCheckResult,
-  ComplianceCheckResultGVK,
   isOwnedByBaseline,
   suiteFilterKey,
 } from '../models';
@@ -57,15 +55,15 @@ import {
   checkBody,
   checkResultHref,
   checkTitle,
+  dateInputEndOfDayIso,
   effectiveStatus,
   errorMessage,
   findWaiver,
   inconsistentSources,
-  isWaived,
   machineConfigPoolHref,
   nodeScanPool,
   removeWaiverPatch,
-  resultFilterStatus,
+  resourceVersionTest,
   resultsCsv,
   waiverExpired,
 } from '../utils';
@@ -85,18 +83,22 @@ const statusLabel: Record<
   'NOT-APPLICABLE': { color: 'grey', icon: <MinusCircleIcon /> },
 };
 
-const ResultsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => {
+const ResultsTab: React.FC<{
+  baseline?: ClusterBaseline;
+  // Shared list from CompliancePage so this tab does not open a second watch.
+  results?: ComplianceCheckResult[];
+  resultsLoaded?: boolean;
+  resultsError?: unknown;
+}> = ({ baseline, results, resultsLoaded = false, resultsError }) => {
   const { t } = useTranslation('plugin__baseline-security-console-plugin');
-  const [results, loaded, error] = useK8sWatchResource<ComplianceCheckResult[]>({
-    groupVersionKind: ComplianceCheckResultGVK,
-    isList: true,
-    namespace: 'openshift-compliance',
-  });
+  const loaded = resultsLoaded;
+  const error = resultsError;
   const [selected, setSelected] = React.useState<ComplianceCheckResult | null>(null);
   const [waiveReason, setWaiveReason] = React.useState('');
   const [waiveRequestedBy, setWaiveRequestedBy] = React.useState('');
   const [waiveApprovedBy, setWaiveApprovedBy] = React.useState('');
   const [waiveExpiresAt, setWaiveExpiresAt] = React.useState('');
+  const [waiveReviewBy, setWaiveReviewBy] = React.useState('');
   const [busy, setBusy] = React.useState(false);
   const [waiveError, setWaiveError] = React.useState<string | null>(null);
   const [canWaive, canWaiveLoading] = useAccessReview({
@@ -105,11 +107,23 @@ const ResultsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => {
     verb: 'patch',
   });
   const waivers = baseline?.spec.waivers;
+  // Active (non-expired) waiver names as a Set so row filters and cells are O(1)
+  // per check instead of scanning the waiver list on every result.
+  const activeWaived = React.useMemo(() => {
+    const now = new Date();
+    const set = new Set<string>();
+    for (const w of waivers ?? []) {
+      if (w.name && !waiverExpired(w, now)) {
+        set.add(w.name);
+      }
+    }
+    return set;
+  }, [waivers]);
   // Offer the waiver controls for a FAIL (the only score-affecting status), and
   // for any already-waived check so a stale waiver can always be removed even
   // after the check starts passing.
   const showWaiver = (r: ComplianceCheckResult): boolean =>
-    isWaived(r.metadata.name, waivers) || (!!baseline && r.status === 'FAIL');
+    !!findWaiver(r.metadata.name, waivers) || (!!baseline && effectiveStatus(r) === 'FAIL');
 
   const closeModal = () => {
     setSelected(null);
@@ -117,6 +131,7 @@ const ResultsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => {
     setWaiveRequestedBy('');
     setWaiveApprovedBy('');
     setWaiveExpiresAt('');
+    setWaiveReviewBy('');
     setWaiveError(null);
   };
 
@@ -128,7 +143,11 @@ const ResultsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => {
     setBusy(true);
     setWaiveError(null);
     try {
-      await k8sPatch({ model: ClusterBaselineModel, resource: baseline, data });
+      await k8sPatch({
+        model: ClusterBaselineModel,
+        resource: baseline,
+        data: [...resourceVersionTest(baseline.metadata.resourceVersion), ...data],
+      });
       closeModal();
     } catch (e) {
       setWaiveError(errorMessage(e) ?? failMsg);
@@ -178,7 +197,7 @@ const ResultsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => {
             <Label isCompact color={s.color} icon={s.icon}>
               {eff}
             </Label>
-            {isWaived(obj.metadata.name, waivers) && (
+            {activeWaived.has(obj.metadata.name) && (
               <Label isCompact color="grey" style={{ marginLeft: 8 }}>
                 {t('Waived')}
               </Label>
@@ -190,7 +209,7 @@ const ResultsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => {
         </>
       );
     },
-    [setSelected, waivers, t],
+    [setSelected, activeWaived, t],
   );
 
   const profileItems = React.useMemo(() => {
@@ -210,17 +229,27 @@ const ResultsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => {
     return [...keys].sort().map((k) => ({ id: k, title: k.startsWith('tp-') ? k.slice(3) : k }));
   }, [profiles, tailored, ownedResults]);
 
+  // FAIL+active-waiver -> WAIVED so FAIL chips/deep-links match Overview fail
+  // counts (operator excludes waived fails from the Fail bucket). Uses the
+  // activeWaived Set (built once) instead of scanning waivers per row.
+  const rowFilterStatus = React.useCallback(
+    (r: ComplianceCheckResult): string => {
+      const eff = effectiveStatus(r);
+      return eff === 'FAIL' && activeWaived.has(r.metadata.name) ? 'WAIVED' : eff;
+    },
+    [activeWaived],
+  );
+
   const rowFilters: RowFilter<ComplianceCheckResult>[] = React.useMemo(
     () => [
       {
         filterGroupName: t('Status'),
         type: 'result-status',
-        // FAIL+waiver -> WAIVED so FAIL chips/deep-links match Overview fail
-        // counts (operator excludes waived fails from the Fail bucket).
-        reducer: (r) => resultFilterStatus(r, waivers),
+        reducer: rowFilterStatus,
         filter: (input, r) =>
-          !input.selected?.length ||
-          input.selected.includes(resultFilterStatus(r, waivers)),
+          !input.selected?.length || input.selected.includes(rowFilterStatus(r)),
+        // SKIP is folded into NOT-APPLICABLE by effectiveStatus (operator
+        // ResultCounts.notApplicable); a separate SKIP chip would never match.
         items: [
           'PASS',
           'FAIL',
@@ -229,7 +258,6 @@ const ResultsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => {
           'ERROR',
           'INFO',
           'INCONSISTENT',
-          'SKIP',
           'NOT-APPLICABLE',
         ].map((s) => ({
           id: s,
@@ -253,7 +281,7 @@ const ResultsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => {
         items: profileItems,
       },
     ],
-    [t, profileItems, waivers],
+    [t, profileItems, rowFilterStatus],
   );
 
   const [data, filteredData, onFilterChange] = useListPageFilter(ownedResults, rowFilters);
@@ -446,6 +474,14 @@ const ResultsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => {
                                 </DescriptionListDescription>
                               </DescriptionListGroup>
                             )}
+                            {w.reviewBy && (
+                              <DescriptionListGroup>
+                                <DescriptionListTerm>{t('Review by')}</DescriptionListTerm>
+                                <DescriptionListDescription>
+                                  {new Date(w.reviewBy).toLocaleDateString()}
+                                </DescriptionListDescription>
+                              </DescriptionListGroup>
+                            )}
                           </DescriptionList>
                         </>
                       ) : (
@@ -453,42 +489,55 @@ const ResultsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => {
                           <Content component="p">
                             {t('Accept this failing check as risk to exclude it from the score.')}
                           </Content>
-                          <FormGroup label={t('Reason')} fieldId="waive-reason">
+                          <FormGroup label={t('Reason (optional)')} fieldId="waive-reason">
                             <TextArea
                               id="waive-reason"
                               aria-label={t('Waiver reason')}
-                              placeholder={t('Reason (optional)')}
                               value={waiveReason}
                               onChange={(_e, v) => setWaiveReason(v)}
+                              // Match ClusterBaseline CRD waiver field MaxLength.
+                              maxLength={1024}
                               rows={2}
                             />
                           </FormGroup>
                           <Split hasGutter>
                             <SplitItem isFilled>
-                              <FormGroup label={t('Requested by')} fieldId="waive-req">
+                              <FormGroup label={t('Requested by (optional)')} fieldId="waive-req">
                                 <TextInput
                                   id="waive-req"
                                   value={waiveRequestedBy}
                                   onChange={(_e, v) => setWaiveRequestedBy(v)}
+                                  maxLength={253}
                                 />
                               </FormGroup>
                             </SplitItem>
                             <SplitItem isFilled>
-                              <FormGroup label={t('Approved by')} fieldId="waive-appr">
+                              <FormGroup label={t('Approved by (optional)')} fieldId="waive-appr">
                                 <TextInput
                                   id="waive-appr"
                                   value={waiveApprovedBy}
                                   onChange={(_e, v) => setWaiveApprovedBy(v)}
+                                  maxLength={253}
                                 />
                               </FormGroup>
                             </SplitItem>
                             <SplitItem isFilled>
-                              <FormGroup label={t('Expires')} fieldId="waive-exp">
+                              <FormGroup label={t('Expires (optional)')} fieldId="waive-exp">
                                 <TextInput
                                   id="waive-exp"
                                   type="date"
                                   value={waiveExpiresAt}
                                   onChange={(_e, v) => setWaiveExpiresAt(v)}
+                                />
+                              </FormGroup>
+                            </SplitItem>
+                            <SplitItem isFilled>
+                              <FormGroup label={t('Review by (optional)')} fieldId="waive-review">
+                                <TextInput
+                                  id="waive-review"
+                                  type="date"
+                                  value={waiveReviewBy}
+                                  onChange={(_e, v) => setWaiveReviewBy(v)}
                                 />
                               </FormGroup>
                             </SplitItem>
@@ -509,14 +558,13 @@ const ResultsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => {
             </>
           )}
         </ModalBody>
-        {selected &&
-          showWaiver(selected) &&
-          (() => {
-            const waived = isWaived(selected.metadata.name, waivers);
-            const idx = waivers?.findIndex((w) => w.name === selected.metadata.name) ?? -1;
-            return (
-              <ModalFooter>
-                {waived ? (
+        {selected && (
+          <ModalFooter>
+            {showWaiver(selected) &&
+              (() => {
+                const idx = waivers?.findIndex((w) => w.name === selected.metadata.name) ?? -1;
+                const storedWaiver = idx >= 0;
+                return storedWaiver ? (
                   <Button
                     variant="secondary"
                     isDisabled={!baseline || !canWaive || canWaiveLoading || busy || idx < 0}
@@ -542,23 +590,31 @@ const ResultsTab: React.FC<{ baseline?: ClusterBaseline }> = ({ baseline }) => {
                         reason: waiveReason.trim(),
                         requestedBy: waiveRequestedBy.trim(),
                         approvedBy: waiveApprovedBy.trim(),
-                        expiresAt: waiveExpiresAt
-                          ? new Date(waiveExpiresAt).toISOString()
-                          : undefined,
+                        expiresAt: dateInputEndOfDayIso(waiveExpiresAt),
+                        reviewBy: dateInputEndOfDayIso(waiveReviewBy),
                       });
-                      if (!data.length) return;
+                      // Empty patch is client-side MaxLength/name validation:
+                      // surface it so over-long fields are not a silent no-op.
+                      if (!data.length) {
+                        setWaiveError(
+                          t(
+                            'Waiver fields are invalid or exceed length limits (name 253, reason 1024, attribution 253).',
+                          ),
+                        );
+                        return;
+                      }
                       void patchWaivers(data, t('Failed to waive check.'));
                     }}
                   >
                     {t('Waive check')}
                   </Button>
-                )}
-                <Button variant="link" isDisabled={busy} onClick={closeModal}>
-                  {t('Cancel')}
-                </Button>
-              </ModalFooter>
-            );
-          })()}
+                );
+              })()}
+            <Button variant="link" isDisabled={busy} onClick={closeModal}>
+              {showWaiver(selected) ? t('Cancel') : t('Close')}
+            </Button>
+          </ModalFooter>
+        )}
       </Modal>
     </ListPageBody>
   );
