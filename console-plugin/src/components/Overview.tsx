@@ -1034,7 +1034,7 @@ const Overview: React.FC<{
                     ? t('No changes since the last scan')
                     : t('No previous scan to compare yet')
                 }
-                headingLevel="h4"
+                headingLevel="h2"
               >
                 <EmptyStateBody>
                   {hasPriorScan

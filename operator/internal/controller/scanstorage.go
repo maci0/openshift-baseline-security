@@ -55,8 +55,8 @@ func (r *ClusterBaselineReconciler) checkScanStorage(ctx context.Context, cb *ba
 		// without only reading the CR condition. Steady-state spam is noise.
 		// Duration text from scanStoragePendingGrace so the message cannot drift
 		// from the grace constant (and TEST-PLAN "Pending >2m" row).
-		msg := fmt.Sprintf("PVC(s) %s/%s Pending >%dm; need a default StorageClass",
-			complianceNamespace, strings.Join(pending, ", "), int(scanStoragePendingGrace.Minutes()))
+		msg := fmt.Sprintf("PVC(s) %s in namespace %s Pending >%dm; need a default StorageClass",
+			strings.Join(pending, ", "), complianceNamespace, int(scanStoragePendingGrace.Minutes()))
 		setCondFalseLogOnce(ctx, cb, "ScanStorageReady", "ScanStoragePending", msg,
 			"scan storage PVCs pending", "namespace", complianceNamespace, "pvcs", pending, "name", cb.Name)
 		return nil

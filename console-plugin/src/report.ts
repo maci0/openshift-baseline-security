@@ -149,7 +149,7 @@ export const buildReportHtml = (
   // embedded chrome CSS only; all untrusted text is HTML-escaped above.
   // system-ui first so CJK/Arabic/Cyrillic glyphs resolve to platform fonts.
   return `<!doctype html><html lang="${esc(htmlLang)}" dir="${htmlDir}"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"><meta name="referrer" content="no-referrer"><title>${esc(t('Compliance report'))}</title>
-<style>body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans","Helvetica Neue",Arial,sans-serif;margin:2rem;color:#151515}h1{margin-bottom:0}
+<style>:root{color-scheme:light}body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans","Helvetica Neue",Arial,sans-serif;margin:2rem;color:#151515;background:#fff}h1{margin-bottom:0}
 table{border-collapse:collapse;margin:1rem 0;width:100%}th,td{border:1px solid #ccc;padding:4px 8px;text-align:start}
 .muted{color:#666}</style></head><body>
 <h1>${esc(t('Compliance report'))}</h1>
