@@ -2586,10 +2586,10 @@ describe('tailoredProfileBindingPatch', () => {
 describe('batchApplyPatch', () => {
   it('adds the annotation, creating the map when absent', () => {
     expect(batchApplyPatch(true, ['a', 'b'])).toEqual([
-      { op: 'add', path: '/metadata/annotations/baselinesecurity.io~1batch-apply', value: 'a,b' },
+      { op: 'add', path: '/metadata/annotations/baselinesecurity.openshift.io~1batch-apply', value: 'a,b' },
     ]);
     expect(batchApplyPatch(false, ['a'])).toEqual([
-      { op: 'add', path: '/metadata/annotations', value: { 'baselinesecurity.io/batch-apply': 'a' } },
+      { op: 'add', path: '/metadata/annotations', value: { 'baselinesecurity.openshift.io/batch-apply': 'a' } },
     ]);
   });
   it('is a no-op for empty, blank, or invalid names', () => {
@@ -2599,7 +2599,7 @@ describe('batchApplyPatch', () => {
   });
   it('dedupes, trims, and caps at the operator batch limit', () => {
     expect(batchApplyPatch(true, [' a ', 'b', 'a', 'b '])).toEqual([
-      { op: 'add', path: '/metadata/annotations/baselinesecurity.io~1batch-apply', value: 'a,b' },
+      { op: 'add', path: '/metadata/annotations/baselinesecurity.openshift.io~1batch-apply', value: 'a,b' },
     ]);
     const many = Array.from({ length: 300 }, (_, i) => `rem-${i}`);
     const patch = batchApplyPatch(true, many);
@@ -2628,8 +2628,8 @@ describe('batchApplyPatch', () => {
       const value =
         typeof patch[0].value === 'string'
           ? patch[0].value
-          : (patch[0].value as { 'baselinesecurity.io/batch-apply': string })[
-              'baselinesecurity.io/batch-apply'
+          : (patch[0].value as { 'baselinesecurity.openshift.io/batch-apply': string })[
+              'baselinesecurity.openshift.io/batch-apply'
             ];
       const parts = value.split(',');
       expect(parts.length).toBeLessThanOrEqual(256);
@@ -2643,7 +2643,7 @@ describe('batchApplyPatch', () => {
 
 // Operator treats empty / comma-only batch-apply values as no request; key presence alone is not enough.
 describe('batchApplyRequested', () => {
-  const key = 'baselinesecurity.io/batch-apply';
+  const key = 'baselinesecurity.openshift.io/batch-apply';
   it('is false when missing, empty, whitespace, or comma-only', () => {
     expect(batchApplyRequested(undefined)).toBe(false);
     expect(batchApplyRequested(null)).toBe(false);

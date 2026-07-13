@@ -5,7 +5,7 @@ metadata:
   labels:
     rbac.authorization.k8s.io/aggregate-to-admin: "true"
 rules:
-  - apiGroups: [baselinesecurity.io]
+  - apiGroups: [baselinesecurity.openshift.io]
     resources: [clusterbaselines]
     verbs: [get, list, watch, update, patch]
   - apiGroups: [compliance.openshift.io]

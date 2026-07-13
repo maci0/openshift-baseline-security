@@ -79,7 +79,7 @@ export const DEFAULT_SCAN_SCHEDULE = '0 1 * * *';
 export const COMPLIANCE_NAMESPACE = 'openshift-compliance';
 
 export const ClusterBaselineGVK: K8sGroupVersionKind = {
-  group: 'baselinesecurity.io',
+  group: 'baselinesecurity.openshift.io',
   version: 'v1alpha1',
   kind: 'ClusterBaseline',
 };

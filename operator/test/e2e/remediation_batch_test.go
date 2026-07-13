@@ -14,7 +14,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-const batchApplyAnnotation = "baselinesecurity.io/batch-apply"
+const batchApplyAnnotation = "baselinesecurity.openshift.io/batch-apply"
 
 var mcpGVK = schema.GroupVersionKind{
 	Group: "machineconfiguration.openshift.io", Version: "v1", Kind: "MachineConfigPool",

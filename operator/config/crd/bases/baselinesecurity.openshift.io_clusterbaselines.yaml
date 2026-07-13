@@ -4,9 +4,9 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.20.1
-  name: clusterbaselines.baselinesecurity.io
+  name: clusterbaselines.baselinesecurity.openshift.io
 spec:
-  group: baselinesecurity.io
+  group: baselinesecurity.openshift.io
   names:
     kind: ClusterBaseline
     listKind: ClusterBaselineList

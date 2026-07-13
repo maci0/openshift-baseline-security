@@ -78,7 +78,7 @@ func TestEnsureOnceNoopWhenPresent(t *testing.T) {
 // A create losing the race to another replica (AlreadyExists) is tolerated.
 func TestEnsureOnceToleratesAlreadyExists(t *testing.T) {
 	s := crScheme(t)
-	gvr := schema.GroupResource{Group: "baselinesecurity.io", Resource: "clusterbaselines"}
+	gvr := schema.GroupResource{Group: "baselinesecurity.openshift.io", Resource: "clusterbaselines"}
 	c := fake.NewClientBuilder().WithScheme(s).
 		WithInterceptorFuncs(interceptor.Funcs{
 			Create: func(context.Context, client.WithWatch, client.Object, ...client.CreateOption) error {
@@ -109,7 +109,7 @@ func TestEnsureOnceListErrorPropagates(t *testing.T) {
 }
 
 func TestIsPermanentDefaultCRError(t *testing.T) {
-	gvr := schema.GroupResource{Group: "baselinesecurity.io", Resource: "clusterbaselines"}
+	gvr := schema.GroupResource{Group: "baselinesecurity.openshift.io", Resource: "clusterbaselines"}
 	if !isPermanentDefaultCRError(apierrors.NewForbidden(gvr, "cluster", nil)) {
 		t.Fatal("Forbidden must be permanent")
 	}

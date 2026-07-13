@@ -12,7 +12,7 @@ import (
 // historyScoringModeAnn records which scoring mode wrote the latest history
 // ring points. Late CCR refresh for the same LastScanTime must not rewrite those
 // snapshots under a different formula when the admin flips Flat <-> SeverityWeighted.
-const historyScoringModeAnn = "baselinesecurity.io/history-scoring-mode"
+const historyScoringModeAnn = "baselinesecurity.openshift.io/history-scoring-mode"
 
 // scoringMode returns the effective scoring mode (Flat when unset).
 func scoringMode(cb *baselinev1alpha1.ClusterBaseline) baselinev1alpha1.ScoringMode {

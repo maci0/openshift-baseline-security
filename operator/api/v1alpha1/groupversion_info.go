@@ -1,6 +1,6 @@
-// Package v1alpha1 contains API Schema definitions for the baselinesecurity.io v1alpha1 API group.
+// Package v1alpha1 contains API Schema definitions for the baselinesecurity.openshift.io v1alpha1 API group.
 // +kubebuilder:object:generate=true
-// +groupName=baselinesecurity.io
+// +groupName=baselinesecurity.openshift.io
 package v1alpha1
 
 import (
@@ -9,8 +9,8 @@ import (
 )
 
 var (
-	// GroupVersion is the baselinesecurity.io/v1alpha1 API group-version.
-	GroupVersion = schema.GroupVersion{Group: "baselinesecurity.io", Version: "v1alpha1"}
+	// GroupVersion is the baselinesecurity.openshift.io/v1alpha1 API group-version.
+	GroupVersion = schema.GroupVersion{Group: "baselinesecurity.openshift.io", Version: "v1alpha1"}
 
 	// SchemeBuilder registers this package's types with GroupVersion.
 	SchemeBuilder = &scheme.Builder{GroupVersion: GroupVersion}

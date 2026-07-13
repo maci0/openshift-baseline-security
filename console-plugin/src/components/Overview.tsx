@@ -115,7 +115,7 @@ const ScheduleEditor: React.FC<{ baseline: ClusterBaseline }> = ({ baseline }) =
     return () => window.clearTimeout(id);
   }, [saved]);
   const [canEdit, canEditLoading] = useAccessReview({
-    group: 'baselinesecurity.io',
+    group: 'baselinesecurity.openshift.io',
     resource: 'clusterbaselines',
     verb: 'patch',
   });

@@ -15,19 +15,19 @@ import (
 
 // batchApplyAnnotation on the ClusterBaseline carries a comma-separated list of
 // ComplianceRemediation names to batch-apply with MachineConfigPool pause/resume.
-const batchApplyAnnotation = "baselinesecurity.io/batch-apply"
+const batchApplyAnnotation = "baselinesecurity.openshift.io/batch-apply"
 
 // batchStartedAtAnnotation persists the safety-valve clock before any MCP is
 // paused, so repeated status-subresource failures cannot reset the grace period.
-const batchStartedAtAnnotation = "baselinesecurity.io/batch-started-at"
+const batchStartedAtAnnotation = "baselinesecurity.openshift.io/batch-started-at"
 
 // batchPoolsAnnotation records affected pools before pausing so deletion or a
 // removed request annotation can still recover when status was never persisted.
-const batchPoolsAnnotation = "baselinesecurity.io/batch-pools"
+const batchPoolsAnnotation = "baselinesecurity.openshift.io/batch-pools"
 
 // batchPauseOwnerAnnotation marks an MCP pause as ours. Without ownership,
 // finishing a batch would unpause a pool an administrator had already paused.
-const batchPauseOwnerAnnotation = "baselinesecurity.io/batch-pause-owner"
+const batchPauseOwnerAnnotation = "baselinesecurity.openshift.io/batch-pause-owner"
 
 // Bound the work a single metadata annotation can make the controller perform.
 const batchMaxRemediations = 256

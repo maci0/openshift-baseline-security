@@ -30,7 +30,7 @@ import (
 const (
 	complianceNamespace = "openshift-compliance"
 	scanSettingName     = "baseline"
-	finalizerName       = "baselinesecurity.io/cleanup"
+	finalizerName       = "baselinesecurity.openshift.io/cleanup"
 	pluginName          = "baseline-security-console-plugin"
 	pluginNS            = "openshift-baseline-security"
 	// The console renders dashboards from ConfigMaps in this namespace; ours is
@@ -81,9 +81,9 @@ type ClusterBaselineReconciler struct {
 	lastHistoryStallLog time.Time
 }
 
-// +kubebuilder:rbac:groups=baselinesecurity.io,resources=clusterbaselines,verbs=get;list;watch;create;update;patch
-// +kubebuilder:rbac:groups=baselinesecurity.io,resources=clusterbaselines/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=baselinesecurity.io,resources=clusterbaselines/finalizers,verbs=update
+// +kubebuilder:rbac:groups=baselinesecurity.openshift.io,resources=clusterbaselines,verbs=get;list;watch;create;update;patch
+// +kubebuilder:rbac:groups=baselinesecurity.openshift.io,resources=clusterbaselines/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=baselinesecurity.openshift.io,resources=clusterbaselines/finalizers,verbs=update
 // ScanSetting name is fixed (scanSettingName); bindings are profile-derived so
 // they stay unscoped. Create cannot use resourceNames (apiserver limitation).
 // +kubebuilder:rbac:groups=compliance.openshift.io,resources=scansettings,verbs=create;list;watch

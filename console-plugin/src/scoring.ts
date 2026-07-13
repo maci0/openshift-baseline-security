@@ -13,7 +13,7 @@ import { activeWaivedNames } from './waivers';
 // Operator annotation recording which scoring mode wrote the latest history
 // ring points (lockstep with operator historyScoringModeAnn). Used to detect
 // Flat <-> SeverityWeighted flips so charts can warn about incomparable points.
-export const HISTORY_SCORING_MODE_ANN = 'baselinesecurity.io/history-scoring-mode';
+export const HISTORY_SCORING_MODE_ANN = 'baselinesecurity.openshift.io/history-scoring-mode';
 
 export type ScoringMode = 'Flat' | 'SeverityWeighted';
 

@@ -167,7 +167,7 @@ const ResultsTab: React.FC<{
     return () => window.clearTimeout(id);
   }, [waiveSuccess]);
   const [canWaive, canWaiveLoading] = useAccessReview({
-    group: 'baselinesecurity.io',
+    group: 'baselinesecurity.openshift.io',
     resource: 'clusterbaselines',
     verb: 'patch',
   });

@@ -7,7 +7,7 @@ metadata:
     alm-examples: |-
       [
         {
-          "apiVersion": "baselinesecurity.io/v1alpha1",
+          "apiVersion": "baselinesecurity.openshift.io/v1alpha1",
           "kind": "ClusterBaseline",
           "metadata": {"name": "cluster"},
           "spec": {"profiles": ["cis"]}
@@ -77,7 +77,7 @@ spec:
   customresourcedefinitions:
     owned:
       - kind: ClusterBaseline
-        name: clusterbaselines.baselinesecurity.io
+        name: clusterbaselines.baselinesecurity.openshift.io
         version: v1alpha1
         displayName: Cluster Baseline
         description: Cluster-scoped singleton configuring baseline compliance scanning.
@@ -137,13 +137,13 @@ spec:
               resources: [poddisruptionbudgets]
               resourceNames: [baseline-security-console-plugin]
               verbs: [get, delete, patch, update]
-            - apiGroups: [baselinesecurity.io]
+            - apiGroups: [baselinesecurity.openshift.io]
               resources: [clusterbaselines]
               verbs: [create, get, list, patch, update, watch]
-            - apiGroups: [baselinesecurity.io]
+            - apiGroups: [baselinesecurity.openshift.io]
               resources: [clusterbaselines/status]
               verbs: [get, patch, update]
-            - apiGroups: [baselinesecurity.io]
+            - apiGroups: [baselinesecurity.openshift.io]
               resources: [clusterbaselines/finalizers]
               verbs: [update]
             - apiGroups: [compliance.openshift.io]

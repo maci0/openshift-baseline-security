@@ -1,4 +1,4 @@
-apiVersion: baselinesecurity.io/v1alpha1
+apiVersion: baselinesecurity.openshift.io/v1alpha1
 kind: ClusterBaseline
 metadata:
   name: cluster

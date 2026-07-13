@@ -3,7 +3,7 @@
 ## Supported versions
 
 This project is pre-1.0 (SemVer **0.x**, OLM channel and CSV maturity
-`alpha`, API `baselinesecurity.io/v1alpha1`).
+`alpha`, API `baselinesecurity.openshift.io/v1alpha1`).
 
 | Version line | Supported |
 |--------------|-----------|

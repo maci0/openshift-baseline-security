@@ -8,7 +8,7 @@ metadata:
     rbac.authorization.k8s.io/aggregate-to-view: "true"
     rbac.authorization.k8s.io/aggregate-to-cluster-reader: "true"
 rules:
-  - apiGroups: [baselinesecurity.io]
+  - apiGroups: [baselinesecurity.openshift.io]
     resources: [clusterbaselines]
     verbs: [get, list, watch]
   - apiGroups: [compliance.openshift.io]

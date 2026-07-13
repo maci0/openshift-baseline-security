@@ -274,7 +274,7 @@ Initial packaged release.
 
 ### Added
 
-- Cluster-scoped `ClusterBaseline` API (`baselinesecurity.io/v1alpha1`).
+- Cluster-scoped `ClusterBaseline` API (`baselinesecurity.openshift.io/v1alpha1`).
 - Operator: install/adopt Compliance Operator, own ScanSetting + bindings,
   deploy console plugin, aggregate score + history into status.
 - Console plugin under Administration → Compliance (Overview, Results,

@@ -73,7 +73,7 @@ defaults and presentation are missing. Both are cheap. That is this project.
   render into MachineConfigs and reboot nodes; "auto-apply" toggle mapping
   to `ScanSetting.autoApplyRemediations`. Batch apply pauses affected
   MachineConfigPools so node remediations reboot once (annotation-driven
-  `baselinesecurity.io/batch-apply` + `status.remediationBatch`).
+  `baselinesecurity.openshift.io/batch-apply` + `status.remediationBatch`).
 - S2: **Trend and score history**: persist per-scan score snapshots
   (operator writes a compact history into the `ClusterBaseline` status,
   oldest first, capped at 30; optional per-profile history) and render a
@@ -191,13 +191,13 @@ Responsibilities:
 
 ### 4.2 API: `ClusterBaseline` CRD
 
-Group `baselinesecurity.io/v1alpha1` (neutral OSS domain; productization
+Group `baselinesecurity.openshift.io/v1alpha1` (neutral OSS domain; productization
 would move it under an openshift.io group). Cluster-scoped singleton named
 `cluster`, enforced by CEL validation on metadata.name (openshift config CR
 convention).
 
 ```yaml
-apiVersion: baselinesecurity.io/v1alpha1
+apiVersion: baselinesecurity.openshift.io/v1alpha1
 kind: ClusterBaseline
 metadata:
   name: cluster
@@ -272,7 +272,7 @@ TypeScript 5.9, webpack 5 module federation, Yarn 4 (Berry), i18n namespace
 `plugin__baseline-security-console-plugin`. **No backend**: all data comes
 from the Kubernetes API through the console's proxy using
 `useK8sWatchResource` against `compliance.openshift.io/v1alpha1` and
-`baselinesecurity.io/v1alpha1` resources, with the logged-in user's own
+`baselinesecurity.openshift.io/v1alpha1` resources, with the logged-in user's own
 token. RBAC therefore falls out for free: users see what their role allows
 (see §6).
 
@@ -305,7 +305,7 @@ Behaviors that write to the cluster:
 - **Auto-apply toggle**: patch `ClusterBaseline.spec.remediation.apply`
   (`Automatic` maps to ScanSetting `autoApplyRemediations`).
 - **Batch remediation apply**: set annotation
-  `baselinesecurity.io/batch-apply` on `ClusterBaseline` (comma-separated
+  `baselinesecurity.openshift.io/batch-apply` on `ClusterBaseline` (comma-separated
   remediation names); the operator pauses target MachineConfigPools, sets
   apply, then resumes.
 

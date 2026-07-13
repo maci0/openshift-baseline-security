@@ -159,7 +159,7 @@ const RemediationsTab: React.FC<{
     namespace: COMPLIANCE_NAMESPACE,
   });
   const [canEditBaseline, canEditBaselineLoading] = useAccessReview({
-    group: 'baselinesecurity.io',
+    group: 'baselinesecurity.openshift.io',
     resource: 'clusterbaselines',
     verb: 'patch',
   });

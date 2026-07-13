@@ -75,13 +75,13 @@ reported as Fixed and does not hide a regression.
 
 ## ADR-006: Batch remediation via annotation + MCP pause
 
-**Decision:** UI sets `baselinesecurity.io/batch-apply` (comma-separated
+**Decision:** UI sets `baselinesecurity.openshift.io/batch-apply` (comma-separated
 remediation names, capped at 256). Operator pauses target MachineConfigPools,
 applies, then resumes. Pause ownership
-(`baselinesecurity.io/batch-pause-owner` on each MCP the operator actually
+(`baselinesecurity.openshift.io/batch-pause-owner` on each MCP the operator actually
 paused) ensures admin-paused pools stay paused on resume. In-flight state is
 dual-written: `status.remediationBatch` for the console, plus
-`baselinesecurity.io/batch-started-at` and `baselinesecurity.io/batch-pools`
+`baselinesecurity.openshift.io/batch-started-at` and `baselinesecurity.openshift.io/batch-pools`
 annotations so grace and pool recovery still work if a status-subresource write
 fails. Safety valve: `batchResumeGrace` is 10m (zero or far-future `StartedAt`
 treated as corrupt so the valve cannot stick forever). Alert
@@ -114,7 +114,7 @@ cannot do privileged work the user cannot.
 **Decision:** Default score is flat `pass/(pass+fail)`. `SeverityWeighted` uses
 fixed weights (high=10, medium=5, low=2, else=1; see ADR-022). History points
 are captured under the mode active at write time; an annotation
-`baselinesecurity.io/history-scoring-mode` prevents late CheckResult refresh
+`baselinesecurity.openshift.io/history-scoring-mode` prevents late CheckResult refresh
 from rewriting completed snapshots after a mode flip.
 
 **Alternatives:** Always weighted; store mode per `ScoreSnapshot` field; clear

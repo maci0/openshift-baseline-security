@@ -95,7 +95,7 @@ manifests:
 		output:crd:artifacts:config=config/crd/bases output:rbac:artifacts:config=config/rbac
 	# Keep the bundle CRD in sync so an OLM install never gets a stale schema,
 	# and so CI's `make manifests && git diff --exit-code` catches bundle drift.
-	cp config/crd/bases/baselinesecurity.io_clusterbaselines.yaml bundle/manifests/
+	cp config/crd/bases/baselinesecurity.openshift.io_clusterbaselines.yaml bundle/manifests/
 
 .PHONY: generate
 generate:
@@ -384,7 +384,7 @@ verify-product-lockstep:
 .PHONY: bundle
 bundle: manifests
 	$(MAKE) --no-print-directory verify-crd verify-csv-rbac verify-monitoring-bundle verify-versions verify-product-lockstep
-	cp config/crd/bases/baselinesecurity.io_clusterbaselines.yaml bundle/manifests/
+	cp config/crd/bases/baselinesecurity.openshift.io_clusterbaselines.yaml bundle/manifests/
 	# DOCKER_RUN_FLAGS: pure filesystem I/O (no registry pulls, ro mount).
 	# Ensure the tool image is local first (network=none cannot pull).
 	@$(call ensure_image,$(OPERATOR_SDK_IMAGE))

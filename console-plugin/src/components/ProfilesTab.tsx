@@ -64,7 +64,7 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
   const [error, setError] = React.useState<string | null>(null);
   const [success, setSuccess] = React.useState<string | null>(null);
   const [canEdit, canEditLoading] = useAccessReview({
-    group: 'baselinesecurity.io',
+    group: 'baselinesecurity.openshift.io',
     resource: 'clusterbaselines',
     verb: 'patch',
   });

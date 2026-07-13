@@ -75,7 +75,7 @@ const hostileResults = (rand: () => number): ComplianceCheckResult[] =>
     metadata: {
       name: pick(rand),
       namespace: 'openshift-compliance',
-      annotations: { 'baselinesecurity.io/waived': pick(rand) },
+      annotations: { 'baselinesecurity.openshift.io/waived': pick(rand) },
     },
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     status: pick(rand) as any,
