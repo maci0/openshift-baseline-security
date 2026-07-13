@@ -112,6 +112,16 @@ func (r *ClusterBaselineReconciler) ensureScanConfig(ctx context.Context, cb *ba
 			return fmt.Errorf("deleting ScanSettingBinding %s/%s: %w", complianceNamespace, b.GetName(), err)
 		}
 	}
+	// No profiles and no tailored profiles: scanning is intentionally disabled.
+	// Bindings were pruned above; report it as a healthy (not Degraded) state.
+	// This precedes the invalid-schedule check on purpose: a leftover bad cron
+	// never fires when nothing is scheduled, so it must not Degrade (and page)
+	// a baseline the user deliberately turned off.
+	if len(cb.Spec.Profiles) == 0 && len(cb.Spec.TailoredProfiles) == 0 {
+		setCond(cb, "ScanConfigured", metav1.ConditionTrue, "ScanningDisabled",
+			"No profiles selected; scanning is disabled.")
+		return nil
+	}
 	if invalidScheduleMessage != "" {
 		msg := fmt.Sprintf("spec.schedule %q is not a valid standard cron schedule: %s", cb.Spec.Schedule, invalidScheduleMessage)
 		// Info once on transition: InvalidSchedule rolls up to Degraded but leaves
@@ -124,13 +134,6 @@ func (r *ClusterBaselineReconciler) ensureScanConfig(ctx context.Context, cb *ba
 			log.FromContext(ctx).Info("invalid scan schedule; keeping last-good cron on ScanSetting",
 				"name", cb.Name, "schedule", cb.Spec.Schedule, "error", invalidScheduleMessage)
 		}
-		return nil
-	}
-	// No profiles and no tailored profiles: scanning is intentionally disabled.
-	// Bindings were pruned above; report it as a healthy (not Degraded) state.
-	if len(cb.Spec.Profiles) == 0 && len(cb.Spec.TailoredProfiles) == 0 {
-		setCond(cb, "ScanConfigured", metav1.ConditionTrue, "ScanningDisabled",
-			"No profiles selected; scanning is disabled.")
 		return nil
 	}
 	setCond(cb, "ScanConfigured", metav1.ConditionTrue, "BindingsCreated", "")

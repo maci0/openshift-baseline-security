@@ -130,12 +130,21 @@ func (r *ClusterBaselineReconciler) resolveCatalogSource(ctx context.Context, cb
 }
 
 // catalogSourceExists reports whether a CatalogSource of the given name is present
-// in openshift-marketplace. NotFound and NoMatch (CatalogSource CRD absent) both
-// read as "not present" so detection degrades to the default, never blocks.
+// in openshift-marketplace. Only a genuine absence counts as "not present":
+// NotFound (no such CatalogSource) or NoMatch (the CatalogSource CRD is not
+// installed) degrade detection to the default. A transient/forbidden error is
+// NOT read as absent: doing so would wrongly fall through to the default catalog
+// (for example redhat-operators on OKD) and write a Subscription pointing at a
+// source that does not exist. On such an error assume present so detection keeps
+// its priority-ordered choice; syncComplianceSubscriptionSource re-resolves on
+// the next reconcile once the API recovers.
 func (r *ClusterBaselineReconciler) catalogSourceExists(ctx context.Context, name string) bool {
 	cs := u(catalogSourceGVK)
 	err := r.Get(ctx, types.NamespacedName{Namespace: "openshift-marketplace", Name: name}, cs)
-	return err == nil
+	if err == nil {
+		return true
+	}
+	return !apierrors.IsNotFound(err) && !meta.IsNoMatchError(err)
 }
 
 // syncComplianceSubscriptionSource updates an existing Subscription's

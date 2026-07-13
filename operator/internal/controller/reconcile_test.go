@@ -594,6 +594,18 @@ func TestEnsureScanConfigScanningDisabled(t *testing.T) {
 	if !apierrors.IsNotFound(err) {
 		t.Fatalf("baseline-cis binding should be pruned when scanning is disabled, err=%v", err)
 	}
+
+	// A leftover invalid schedule must not Degrade a disabled baseline: the cron
+	// never fires when nothing is scheduled. ScanningDisabled must win over
+	// InvalidSchedule.
+	cb.Spec.Schedule = "not-a-cron"
+	if err := r.ensureScanConfig(context.Background(), cb); err != nil {
+		t.Fatal(err)
+	}
+	c = meta.FindStatusCondition(cb.Status.Conditions, "ScanConfigured")
+	if c == nil || c.Status != metav1.ConditionTrue || c.Reason != "ScanningDisabled" {
+		t.Fatalf("disabled + invalid schedule: ScanConfigured = %+v, want True/ScanningDisabled", c)
+	}
 }
 
 // TestEnsureScanConfigInvalidCronFirstCreate covers the first-create path: with

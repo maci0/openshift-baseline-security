@@ -331,6 +331,7 @@ type RemediationBatchStatus struct {
 	// +kubebuilder:validation:MaxLength=32
 	Phase string `json:"phase"`
 	// pools are the MachineConfigPools paused for this batch.
+	// +optional
 	// +listType=set
 	// +kubebuilder:validation:MaxItems=32
 	// +kubebuilder:validation:items:MaxLength=253
@@ -342,6 +343,7 @@ type RemediationBatchStatus struct {
 	// +kubebuilder:validation:MaxLength=253
 	PauseOwner string `json:"pauseOwner,omitempty"`
 	// remediations are the ComplianceRemediation names in this batch.
+	// +optional
 	// +listType=set
 	// +kubebuilder:validation:MaxItems=256
 	// +kubebuilder:validation:items:MaxLength=253

@@ -13,7 +13,11 @@ RUN go mod download && go mod verify
 COPY api/ api/
 COPY cmd/ cmd/
 COPY internal/ internal/
-RUN CGO_ENABLED=0 go build -trimpath -buildvcs=false -mod=readonly -ldflags="-s -w -buildid=" -o /tmp/manager ./cmd \
+# Hermetic compile: GOPROXY=off plus --network=none so the build cannot reach the
+# network after deps are downloaded/verified above, matching the release
+# Dockerfile. Keeps the CI image bit-comparable and closes a supply-chain seam.
+ENV GOPROXY=off
+RUN --network=none CGO_ENABLED=0 go build -trimpath -buildvcs=false -mod=readonly -ldflags="-s -w -buildid=" -o /tmp/manager ./cmd \
 	&& test -s /tmp/manager
 
 FROM registry.ci.openshift.org/ocp/4.22:base-rhel9

@@ -80,13 +80,17 @@ export const aggregateCounts = (...groups: ResultCounts[]): ResultCounts => {
 export const SCORE_DANGER_BELOW = 60;
 export const SCORE_SUCCESS_AT = 90;
 
-// PatternFly semantic status color token for a 0-100 score.
+// PatternFly semantic status color token for a 0-100 score. Uses the text (not
+// icon) status tokens: this tints the score number itself, so it must meet the
+// WCAG 1.4.3 4.5:1 text ratio, which the text tokens are calibrated for; the
+// icon tokens are only 3:1 (graphics) and can be hard to read as text, worst on
+// the warning band over a light console background.
 export const scoreColor = (score?: number): string =>
   score == null || Number.isNaN(score) || score < SCORE_DANGER_BELOW
-    ? 'var(--pf-t--global--icon--color--status--danger--default)'
+    ? 'var(--pf-t--global--text--color--status--danger--default)'
     : score < SCORE_SUCCESS_AT
-      ? 'var(--pf-t--global--icon--color--status--warning--default)'
-      : 'var(--pf-t--global--icon--color--status--success--default)';
+      ? 'var(--pf-t--global--text--color--status--warning--default)'
+      : 'var(--pf-t--global--text--color--status--success--default)';
 
 // PatternFly Label color for a profile score (same bands as scoreColor).
 // Mirror scoreColor's NaN / threshold order so the two cannot diverge.
