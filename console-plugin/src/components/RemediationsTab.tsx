@@ -539,7 +539,9 @@ const RemediationsTab: React.FC<{
       </Modal>
       <Modal
         variant="small"
-        isOpen={batchConfirming}
+        // Hide if the set empties while open (rows applied by auto-apply / another
+        // admin via the live watch) so the modal never shows "0 remediations".
+        isOpen={batchConfirming && batchable.length > 0}
         onClose={() => {
           if (busyRef.current) return;
           setBatchConfirming(false);
@@ -568,7 +570,11 @@ const RemediationsTab: React.FC<{
         <ModalFooter>
           <Button
             variant="danger"
-            isDisabled={busy || !canEditBaseline || canEditBaselineLoading}
+            // Gate on batchable.length: the watch can empty the set (rows applied
+            // by auto-apply / another admin) while this modal is open; without
+            // this the button stays enabled but doBatchApply early-returns (a dead
+            // button with no feedback).
+            isDisabled={busy || !canEditBaseline || canEditBaselineLoading || batchable.length === 0}
             isLoading={busy}
             onClick={doBatchApply}
           >
