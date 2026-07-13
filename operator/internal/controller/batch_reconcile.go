@@ -438,7 +438,24 @@ func (r *ClusterBaselineReconciler) resumeBatchPoolsOnDelete(ctx context.Context
 		}
 		// One suite set for the whole recovery list (up to batchMaxRemediations).
 		suites := ownedSuites(cb)
-		for _, name := range batchRemediationNames(cb.Annotations[batchApplyAnnotation]) {
+		names := batchRemediationNames(cb.Annotations[batchApplyAnnotation])
+		// Best-effort recovery must never wedge the CR's own deletion. Cap the
+		// Gets (an oversized annotation would otherwise fire thousands serially in
+		// the finalizer) and skip names that are not DNS-1123 subdomains: a Get
+		// with an invalid name can return 400 (not 404), which would fall through
+		// to the error return below and block finalizer removal. The apply path
+		// rejects these outright; here we skip and keep resuming what we can.
+		if len(names) > batchMaxRemediations {
+			log.FromContext(ctx).Info("batch-apply annotation exceeds max during pool recovery; capping",
+				"count", len(names), "max", batchMaxRemediations, "baseline", cb.Name)
+			names = names[:batchMaxRemediations]
+		}
+		for _, name := range names {
+			if len(utilvalidation.IsDNS1123Subdomain(name)) > 0 {
+				log.FromContext(ctx).Info("skipping invalid remediation name while recovering batch pools",
+					"remediation", name, "baseline", cb.Name)
+				continue
+			}
 			rem := u(remediationGVK)
 			if err := r.Get(ctx, types.NamespacedName{Namespace: complianceNamespace, Name: name}, rem); err != nil {
 				if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) {

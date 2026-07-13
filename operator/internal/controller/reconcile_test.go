@@ -254,6 +254,46 @@ func TestResumeBatchPoolsOnDeleteFromAnnotation(t *testing.T) {
 	}
 }
 
+// TestResumeBatchPoolsOnDeleteSkipsInvalidRemediationNames: the delete-time pool
+// recovery path must not wedge the CR's finalizer on a malformed batch-apply
+// annotation. A real apiserver returns 400 (not 404) for a Get with a non-DNS-1123
+// name, so the recovery path skips such names before the Get and still resumes
+// from the valid remediation.
+func TestResumeBatchPoolsOnDeleteSkipsInvalidRemediationNames(t *testing.T) {
+	scheme := testScheme(t)
+	cb := newCB("cis")
+	cb.SetAnnotations(map[string]string{batchApplyAnnotation: "Bad_Name,rem1"})
+	rem := nodeRemediation("rem1", "worker")
+	pool := machineConfigPool("worker")
+	_ = unstructured.SetNestedField(pool.Object, true, "spec", "paused")
+	pool.SetAnnotations(map[string]string{batchPauseOwnerAnnotation: batchPauseOwner(cb)})
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).
+			WithObjects(cb, rem, pool).
+			WithInterceptorFuncs(interceptor.Funcs{
+				Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+					// The guard must skip "Bad_Name" before ever calling Get; if it
+					// does not, this 400 propagates and wedges the finalizer.
+					if key.Name == "Bad_Name" {
+						return apierrors.NewBadRequest("Invalid value: \"Bad_Name\"")
+					}
+					return c.Get(ctx, key, obj, opts...)
+				},
+			}).Build(),
+		Scheme: scheme,
+	}
+	if err := r.resumeBatchPoolsOnDelete(context.Background(), cb); err != nil {
+		t.Fatalf("invalid remediation name must be skipped, not wedge deletion: %v", err)
+	}
+	got := machineConfigPool("worker")
+	if err := r.Get(context.Background(), types.NamespacedName{Name: "worker"}, got); err != nil {
+		t.Fatal(err)
+	}
+	if paused, _, _ := unstructured.NestedBool(got.Object, "spec", "paused"); paused {
+		t.Fatal("pool must still resume from the valid remediation")
+	}
+}
+
 func TestEnsureComplianceOperatorCreatesSubscription(t *testing.T) {
 	scheme := testScheme(t)
 	r := &ClusterBaselineReconciler{

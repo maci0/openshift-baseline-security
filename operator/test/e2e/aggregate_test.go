@@ -291,15 +291,21 @@ func TestWaiverExcludesCheck(t *testing.T) {
 
 	before, _ := countOwnedResults(ctx, c, cb)
 	cb.Spec.Waivers = []baselinev1alpha1.WaiverEntry{{Name: failName, Reason: "e2e"}}
-	if err := c.Update(ctx, cb); err != nil {
+	// Retry on conflict: the operator writes .status on the same singleton, so a
+	// plain Update races a status write. A cleanup that 409s and is ignored would
+	// leave the waiver on the shared CR and skew every later test's scoring.
+	if err := applySpec(ctx, c, cb); err != nil {
 		t.Fatalf("add waiver: %v", err)
 	}
 	after, _ := getBaseline(ctx, c)
 	t.Logf("waived %q; spec.waivers now has %d entries", failName, len(after.Spec.Waivers))
 	t.Cleanup(func() {
-		restore, _ := getBaseline(ctx, c)
+		restore, getErr := getBaseline(ctx, c)
+		if getErr != nil {
+			return
+		}
 		restore.Spec.Waivers = nil
-		_ = c.Update(ctx, restore)
+		_ = applySpec(ctx, c, restore)
 	})
 
 	eventually(t, 2*time.Minute, "waived count reflected in status", func() error {
