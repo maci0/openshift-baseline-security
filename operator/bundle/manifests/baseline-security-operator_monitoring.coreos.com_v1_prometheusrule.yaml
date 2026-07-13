@@ -89,9 +89,14 @@ spec:
         - alert: ComplianceStatusStale
           # Operator stopped publishing (crash loop, stuck reconcile, scrape
           # only from a demoted replica that never aggregated). Timestamp 0 is
-          # the pre-first-publish seed; treat it as never-published.
+          # the pre-first-publish seed; treat it as never-published. The absent()
+          # disjunct catches the series vanishing entirely (all replicas gone /
+          # scaled to 0 / hard crashloop where the metrics server never binds),
+          # which max() over an empty vector would otherwise miss.
           # Steady requeue is 1m; 15m covers leader election + install grace.
           expr: >-
+            absent(baseline_security_status_observed_timestamp_seconds)
+            or
             max(baseline_security_status_observed_timestamp_seconds) == 0
             or
             (time() - max(baseline_security_status_observed_timestamp_seconds)) > 900
