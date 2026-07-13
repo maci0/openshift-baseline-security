@@ -48,7 +48,7 @@ import { isValidK8sName, isValidTailoredProfileName } from '../names';
 import { resourceVersionTest, tailoredProfileBindingPatch } from '../patches';
 import { tailoredProfileManifest, toggledProfiles } from '../profiles';
 import BaselineNotConfigured from './BaselineNotConfigured';
-import { withDisabledTip } from './DisabledTip';
+import { restoreFocus, withDisabledTip } from './DisabledTip';
 import { SUCCESS_DISMISS_MS } from './feedback';
 
 const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = ({
@@ -88,6 +88,9 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
   const wasCreating = React.useRef(false);
   // Return focus to Unbind / profile switch when those confirm modals close.
   const returnFocusRef = React.useRef<HTMLElement | null>(null);
+  // Focus fallback when a confirm modal's trigger (e.g. the Unbind button on a
+  // now-removed tailored row) unmounts on success: restore to the tab region.
+  const regionRef = React.useRef<HTMLDivElement>(null);
   const confirmModalWasOpen = React.useRef(false);
   const anyConfirmModalOpen = !!unbinding || !!disablingLast;
 
@@ -112,7 +115,7 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
     confirmModalWasOpen.current = false;
     const el = returnFocusRef.current;
     returnFocusRef.current = null;
-    window.requestAnimationFrame(() => el?.focus?.());
+    restoreFocus(el, regionRef);
   }, [anyConfirmModalOpen]);
 
   // Auto-dismiss success so enable/disable/create feedback does not stick forever.
@@ -363,7 +366,7 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
   }
 
   return (
-    <PageSection>
+    <PageSection ref={regionRef} tabIndex={-1}>
       {/* Hide page-top error while a modal owns the same message. */}
       {error && !unbinding && !disablingLast && !creating && (
         <Alert

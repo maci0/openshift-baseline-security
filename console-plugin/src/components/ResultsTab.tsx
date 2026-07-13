@@ -82,7 +82,7 @@ import {
   waiverExpired,
 } from '../waivers';
 import BaselineNotConfigured from './BaselineNotConfigured';
-import { withDisabledTip } from './DisabledTip';
+import { restoreFocus, withDisabledTip } from './DisabledTip';
 import { SUCCESS_DISMISS_MS } from './feedback';
 
 const statusLabel: Record<
@@ -317,8 +317,10 @@ const ResultsTab: React.FC<{
     detailWasOpen.current = false;
     const el = returnFocusRef.current;
     returnFocusRef.current = null;
-    // Defer until the modal unmounts so focus is not stolen by the backdrop.
-    window.requestAnimationFrame(() => el?.focus?.());
+    // Defer until the modal unmounts so focus is not stolen by the backdrop; if
+    // the row was virtualized away while the modal was open, the trigger is
+    // detached and restoreFocus no-ops rather than dropping focus somewhere odd.
+    restoreFocus(el);
   }, [selectedLive]);
 
   // Named event handlers (not inline IIFE onClick) so react-hooks/refs does not

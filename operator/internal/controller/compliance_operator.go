@@ -100,15 +100,6 @@ func (r *ClusterBaselineReconciler) ensureComplianceOperatorGroup(ctx context.Co
 	return nil
 }
 
-// desiredComplianceCatalogSource is the explicit spec value, or the default name
-// when unset. resolveCatalogSource layers OKD auto-detection on top of this.
-func desiredComplianceCatalogSource(cb *baselinev1alpha1.ClusterBaseline) string {
-	if s := strings.TrimSpace(cb.Spec.ComplianceCatalogSource); s != "" {
-		return s
-	}
-	return baselinev1alpha1.DefaultComplianceCatalogSource
-}
-
 // resolveCatalogSource picks the OLM CatalogSource for the CO Subscription. An
 // explicit spec value always wins. When unset it auto-detects the cluster flavor:
 // OCP carries the Compliance Operator in redhat-operators, OKD in

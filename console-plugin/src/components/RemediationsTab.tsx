@@ -63,7 +63,7 @@ import {
   remediationObjectText,
 } from '../remediation';
 import BaselineNotConfigured from './BaselineNotConfigured';
-import { regionFocusProps, withDisabledTip } from './DisabledTip';
+import { regionFocusProps, restoreFocus, withDisabledTip } from './DisabledTip';
 import { SUCCESS_DISMISS_MS } from './feedback';
 
 // Stable empty list when the suite-scoped watch is inactive.
@@ -150,6 +150,9 @@ const RemediationsTab: React.FC<{
   const busyRef = React.useRef(false);
   // Return focus to the control that opened a confirm/view modal (WCAG 2.4.3).
   const returnFocusRef = React.useRef<HTMLElement | null>(null);
+  // Focus fallback when a modal's trigger unmounts on success (e.g. the batch
+  // button is replaced by an in-progress label): restore to the tab region.
+  const regionRef = React.useRef<HTMLDivElement>(null);
   const modalWasOpen = React.useRef(false);
   const [error, setError] = React.useState<string | null>(null);
   // Success feedback after modal close so apply/unapply/batch is not a silent no-op.
@@ -322,7 +325,7 @@ const RemediationsTab: React.FC<{
     modalWasOpen.current = false;
     const el = returnFocusRef.current;
     returnFocusRef.current = null;
-    window.requestAnimationFrame(() => el?.focus?.());
+    restoreFocus(el, regionRef);
   }, [anyModalOpen]);
 
   const baselineEditDisabled =
@@ -351,7 +354,7 @@ const RemediationsTab: React.FC<{
   }
 
   return (
-    <PageSection>
+    <PageSection ref={regionRef} tabIndex={-1}>
       {/* Only when node remediations exist: during loading / empty / platform-only
           the reboot warning is irrelevant (or misleading) noise. */}
       {nodeNames.size > 0 && (

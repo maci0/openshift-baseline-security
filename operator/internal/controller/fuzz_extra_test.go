@@ -543,38 +543,3 @@ func FuzzSetRollupConditions(f *testing.F) {
 		}
 	})
 }
-
-// FuzzDesiredComplianceCatalogSource: CR-editable catalog override (and
-// hand-padded YAML). Empty/whitespace must fall back to the CRD default;
-// non-empty after TrimSpace is returned unchanged (never empty, never panics).
-func FuzzDesiredComplianceCatalogSource(f *testing.F) {
-	f.Add("")
-	f.Add("   ")
-	f.Add("\t\n")
-	f.Add("redhat-operators")
-	f.Add("  okd-operators\n")
-	f.Add("community-operators")
-	f.Add(strings.Repeat("x", 300))
-	f.Fuzz(func(t *testing.T, raw string) {
-		if len(raw) > 512 {
-			raw = raw[:512]
-		}
-		cb := &baselinev1alpha1.ClusterBaseline{
-			Spec: baselinev1alpha1.ClusterBaselineSpec{ComplianceCatalogSource: raw},
-		}
-		got := desiredComplianceCatalogSource(cb)
-		if got == "" {
-			t.Fatal("desiredComplianceCatalogSource returned empty")
-		}
-		trimmed := strings.TrimSpace(raw)
-		if trimmed == "" {
-			if got != baselinev1alpha1.DefaultComplianceCatalogSource {
-				t.Fatalf("whitespace/empty got %q want default %q", got, baselinev1alpha1.DefaultComplianceCatalogSource)
-			}
-			return
-		}
-		if got != trimmed {
-			t.Fatalf("override got %q want trimmed %q", got, trimmed)
-		}
-	})
-}

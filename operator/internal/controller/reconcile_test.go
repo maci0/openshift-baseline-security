@@ -477,33 +477,6 @@ func TestEnsureComplianceOperatorManualDoesNotRewriteSource(t *testing.T) {
 	}
 }
 
-func TestDesiredComplianceCatalogSource(t *testing.T) {
-	wantDefault := baselinev1alpha1.DefaultComplianceCatalogSource
-	if got := desiredComplianceCatalogSource(&baselinev1alpha1.ClusterBaseline{}); got != wantDefault {
-		t.Fatalf("default = %q, want %q", got, wantDefault)
-	}
-	// Whitespace-only must not create a junk Subscription source.
-	ws := &baselinev1alpha1.ClusterBaseline{
-		Spec: baselinev1alpha1.ClusterBaselineSpec{ComplianceCatalogSource: "  \t "},
-	}
-	if got := desiredComplianceCatalogSource(ws); got != wantDefault {
-		t.Fatalf("whitespace = %q, want default %q", got, wantDefault)
-	}
-	// Padding around a real name is stripped so a mis-set env/YAML pad still works.
-	pad := &baselinev1alpha1.ClusterBaseline{
-		Spec: baselinev1alpha1.ClusterBaselineSpec{ComplianceCatalogSource: "  okd-operators\n"},
-	}
-	if got := desiredComplianceCatalogSource(pad); got != "okd-operators" {
-		t.Fatalf("padded override = %q", got)
-	}
-	cb := &baselinev1alpha1.ClusterBaseline{
-		Spec: baselinev1alpha1.ClusterBaselineSpec{ComplianceCatalogSource: "okd-operators"},
-	}
-	if got := desiredComplianceCatalogSource(cb); got != "okd-operators" {
-		t.Fatalf("override = %q", got)
-	}
-}
-
 func TestEnsureScanConfigCreatesAndPrunes(t *testing.T) {
 	scheme := testScheme(t)
 	scheme.AddKnownTypeWithName(scanSettingGVK, &unstructured.Unstructured{})
