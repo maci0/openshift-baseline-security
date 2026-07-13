@@ -189,3 +189,12 @@ func conditionStatus(cb *baselinev1alpha1.ClusterBaseline, typ string) string {
 	}
 	return ""
 }
+
+func conditionReason(cb *baselinev1alpha1.ClusterBaseline, typ string) string {
+	for _, cond := range cb.Status.Conditions {
+		if cond.Type == typ {
+			return cond.Reason
+		}
+	}
+	return ""
+}

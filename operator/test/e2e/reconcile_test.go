@@ -186,6 +186,100 @@ func TestProfileToggle(t *testing.T) {
 	})
 }
 
+// TestDisableAllProfiles exercises the headline disable-scanning edge case:
+// clearing both spec.profiles and spec.tailoredProfiles must set
+// ScanConfigured=ScanningDisabled, prune every owned ScanSettingBinding, and
+// clear the score, while Available stays True (an intentional off is not a
+// fault). Restoring the profiles brings the bindings back.
+func TestDisableAllProfiles(t *testing.T) {
+	ctx := context.Background()
+	c := newClient(t)
+
+	cb, err := getBaseline(ctx, c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cb.Spec.Profiles) == 0 && len(cb.Spec.TailoredProfiles) == 0 {
+		t.Skip("scanning already disabled; test needs an enabled baseline to toggle")
+	}
+	owned := ownedSuites(cb)
+	origProfiles := append([]baselinev1alpha1.ProfileKey(nil), cb.Spec.Profiles...)
+	origTailored := append([]string(nil), cb.Spec.TailoredProfiles...)
+	t.Cleanup(func() {
+		restore, getErr := getBaseline(ctx, c)
+		if getErr != nil {
+			return
+		}
+		restore.Spec.Profiles = origProfiles
+		restore.Spec.TailoredProfiles = origTailored
+		_ = c.Update(ctx, restore)
+	})
+
+	cb.Spec.Profiles = []baselinev1alpha1.ProfileKey{}
+	cb.Spec.TailoredProfiles = []string{}
+	if err := c.Update(ctx, cb); err != nil {
+		t.Fatalf("disable all profiles: %v", err)
+	}
+
+	eventually(t, 2*time.Minute, "ScanConfigured=ScanningDisabled with score cleared", func() error {
+		cur, getErr := getBaseline(ctx, c)
+		if getErr != nil {
+			return getErr
+		}
+		if r := conditionReason(cur, "ScanConfigured"); r != "ScanningDisabled" {
+			return errf("ScanConfigured reason=%q", r)
+		}
+		if conditionStatus(cur, "Available") != "True" {
+			return errf("Available=%s (disabling scanning is not a fault)", conditionStatus(cur, "Available"))
+		}
+		if cur.Status.Score != nil {
+			return errf("score not cleared: %d", *cur.Status.Score)
+		}
+		return nil
+	})
+
+	for suite := range owned {
+		suite := suite
+		eventually(t, 2*time.Minute, "binding pruned: "+suite, func() error {
+			b := &unstructured.Unstructured{}
+			b.SetGroupVersionKind(bindingGVK)
+			err := c.Get(ctx, client.ObjectKey{Namespace: complianceNamespace, Name: suite}, b)
+			if apierrors.IsNotFound(err) {
+				return nil
+			}
+			if err == nil {
+				return errf("binding %s still present", suite)
+			}
+			return err
+		})
+	}
+
+	restore, _ := getBaseline(ctx, c)
+	restore.Spec.Profiles = origProfiles
+	restore.Spec.TailoredProfiles = origTailored
+	if err := c.Update(ctx, restore); err != nil {
+		t.Fatalf("restore profiles: %v", err)
+	}
+
+	eventually(t, 2*time.Minute, "bindings recreated after restore", func() error {
+		cur, getErr := getBaseline(ctx, c)
+		if getErr != nil {
+			return getErr
+		}
+		if r := conditionReason(cur, "ScanConfigured"); r != "BindingsCreated" {
+			return errf("ScanConfigured reason=%q", r)
+		}
+		for suite := range owned {
+			b := &unstructured.Unstructured{}
+			b.SetGroupVersionKind(bindingGVK)
+			if err := c.Get(ctx, client.ObjectKey{Namespace: complianceNamespace, Name: suite}, b); err != nil {
+				return errf("binding %s not back: %v", suite, err)
+			}
+		}
+		return nil
+	})
+}
+
 func contains(s []string, v string) bool {
 	for _, x := range s {
 		if x == v {

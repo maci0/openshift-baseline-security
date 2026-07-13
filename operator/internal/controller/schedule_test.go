@@ -5,6 +5,63 @@ import (
 	"time"
 )
 
+// TestNormalizedScheduleTable pins the five-field robfig parser's accept/reject
+// decisions on the same token set the console isValidCron validator screens, so
+// the two stay in lockstep: a schedule the UI saves must not later Degrade the
+// operator with InvalidSchedule (and vice versa). Field placement matters:
+// named months/weekdays are only valid in the Month/Dow fields.
+func TestNormalizedScheduleTable(t *testing.T) {
+	cases := []struct {
+		in string
+		ok bool
+	}{
+		// '?' is accepted in every field (both parsers treat it as wildcard).
+		{"? ? ? ? ?", true},
+		{"? * * * *", true},
+		{"0 0 ? * ?", true},
+		{"0 2 * * ?", true},
+		// Named months / weekdays, upper and lower case.
+		{"0 0 * jan mon", true},
+		{"0 0 * JAN MON", true},
+		{"0 0 * * sun", true},
+		{"0 0 * * SUN", true},
+		{"0 0 * * SUN-SAT", true},
+		// Named and numeric ranges with a step, in their correct fields.
+		{"0 0 1 JAN-JUN/2 *", true},
+		{"0 0 1 jan-jun/2 *", true},
+		{"0 0 1 1-12/3 *", true},
+		{"0 0 * * mon-fri/2", true},
+		// Comma lists.
+		{"0,15,30 * * * *", true},
+		// Parseable but never-fires (Feb 31): normalize accepts; nextScanTime nils.
+		{"0 0 31 2 *", true},
+		// Reversed ranges reject.
+		{"0 0 1 dec-jan *", false},
+		{"5-1 * * * *", false},
+		// Out-of-range values reject.
+		{"60 * * * *", false},
+		{"* * * * 7", false},
+		{"*/0 * * * *", false},
+		// Quartz-only and Jenkins-only tokens reject (robfig standard parser).
+		{"0 0 L * *", false},
+		{"0 0 * * 1#2", false},
+		{"H H * * *", false},
+		// Descriptors reject: a spec.schedule cannot request @every 1s scan storms.
+		{"@weekly", false},
+		{"@daily", false},
+		{"@every 1s", false},
+		// Wrong field count rejects.
+		{"* * * *", false},
+		{"* * * * * *", false},
+	}
+	for _, c := range cases {
+		_, err := normalizedSchedule(c.in)
+		if (err == nil) != c.ok {
+			t.Errorf("normalizedSchedule(%q): ok=%v, want %v (err=%v)", c.in, err == nil, c.ok, err)
+		}
+	}
+}
+
 func TestNextScanTime(t *testing.T) {
 	now := time.Date(2026, 7, 10, 3, 0, 0, 0, time.UTC)
 	// Daily at 01:00 -> next is tomorrow 01:00.

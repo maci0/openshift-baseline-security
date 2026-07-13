@@ -97,6 +97,19 @@ describe('waivers throw-safety and no-permanent-grant (fuzz sweep)', () => {
     }
   });
 
+  it('expiresAt exactly equal to now is expired, not active (== now boundary)', () => {
+    // Lockstep with the operator aggregate predicate !ExpiresAt.After(now):
+    // equality counts as expired on both sides. A waiver whose deadline is the
+    // current instant no longer excludes its check.
+    const w = asWaiver(NOW.toISOString());
+    expect(waiverExpired(w, NOW)).toBe(true);
+    expect(isWaived('check-1', [w], NOW)).toBe(false);
+    // One millisecond into the future is still active.
+    const future = asWaiver(new Date(NOW.getTime() + 1).toISOString());
+    expect(waiverExpired(future, NOW)).toBe(false);
+    expect(isWaived('check-1', [future], NOW)).toBe(true);
+  });
+
   it('a missing (undefined) expiresAt is never expired but also never expiring', () => {
     const w = asWaiver(undefined);
     expect(waiverExpired(w, NOW)).toBe(false);

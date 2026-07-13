@@ -192,8 +192,11 @@ func TestResolveCatalogSource(t *testing.T) {
 		want    string
 	}{
 		{"explicit override", "my-catalog", []string{"redhat-operators"}, "my-catalog"},
+		{"explicit override trimmed", "  my-catalog  ", []string{"redhat-operators"}, "my-catalog"},
 		{"OCP: redhat-operators present", "", []string{"redhat-operators", "community-operators"}, "redhat-operators"},
 		{"OKD: only community-operators", "", []string{"community-operators"}, "community-operators"},
+		{"whitespace-only spec auto-detects OKD", "   ", []string{"community-operators"}, "community-operators"},
+		{"whitespace-only spec, neither: default", "\t\n", nil, "redhat-operators"},
 		{"neither: default", "", nil, "redhat-operators"},
 	}
 	for _, c := range cases {
@@ -1333,6 +1336,22 @@ func TestAggregateStatusWaiverExpiry(t *testing.T) {
 	}
 	if cb.Status.Profiles[0].Waived != 1 {
 		t.Fatalf("unexpired waiver should exclude, waived=%d", cb.Status.Profiles[0].Waived)
+	}
+
+	// Boundary: an ExpiresAt at the aggregation instant counts as expired, not
+	// excluded. aggregateStatus reads a now >= this captured time and the
+	// predicate is !ExpiresAt.After(now), so equality (==now) is expired. This
+	// is the lockstep boundary with the console waiverExpired (t <= now).
+	nowBoundary := metav1.NewTime(time.Now())
+	cb.Spec.Waivers = []baselinev1alpha1.WaiverEntry{{Name: "f1", ExpiresAt: &nowBoundary}}
+	if err := r.aggregateStatus(context.Background(), cb); err != nil {
+		t.Fatal(err)
+	}
+	if cb.Status.Score == nil || *cb.Status.Score != 50 {
+		t.Fatalf("now-boundary waiver score = %v, want 50 (expired at ==now)", cb.Status.Score)
+	}
+	if cb.Status.Profiles[0].Waived != 0 {
+		t.Fatalf("now-boundary waiver must not exclude, waived=%d", cb.Status.Profiles[0].Waived)
 	}
 }
 

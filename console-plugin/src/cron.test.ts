@@ -64,6 +64,17 @@ describe('isValidCron accept/reject behavior', () => {
       '5-10 * * * *',
       '0 0 * * MON-FRI',
       '   * * * * *   ',
+      // Lockstep with operator TestNormalizedScheduleTable: '?' in any field,
+      // named/numeric ranges with a step, comma lists, and a parseable
+      // never-fires date (Feb 31) must all be accepted on both sides.
+      '? ? ? ? ?',
+      '0 2 * * ?',
+      '0 0 1 JAN-JUN/2 *',
+      '0 0 1 jan-jun/2 *',
+      '0 0 1 1-12/3 *',
+      '0 0 * * mon-fri/2',
+      '0,15,30 * * * *',
+      '0 0 31 2 *',
     ]) {
       expect(isValidCron(s)).toBe(true);
     }
@@ -81,6 +92,13 @@ describe('isValidCron accept/reject behavior', () => {
       '* * * *',
       '* * * * * *',
       'x'.repeat(200),
+      // Lockstep with operator TestNormalizedScheduleTable: reversed named
+      // range, and Quartz/Jenkins-only tokens the robfig standard parser (and
+      // thus the operator) rejects, must be rejected client-side too.
+      '0 0 1 DEC-JAN *',
+      '0 0 L * *',
+      '0 0 * * 1#2',
+      'H H * * *',
     ]) {
       expect(isValidCron(s)).toBe(false);
     }

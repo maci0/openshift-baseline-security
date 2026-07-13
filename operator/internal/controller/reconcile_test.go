@@ -2,6 +2,8 @@ package controller
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -181,6 +183,47 @@ func TestReconcileOwnedBatchBeforeCOFailure(t *testing.T) {
 	_ = r.Get(context.Background(), types.NamespacedName{Name: "worker"}, gotPool)
 	if paused, _, _ := unstructured.NestedBool(gotPool.Object, "spec", "paused"); !paused {
 		t.Fatal("worker pool must be paused even when CO ensure fails later")
+	}
+}
+
+// TestApplyRemediationBatchGuardrails: the batch-apply annotation is an
+// untrusted trust boundary (a client with ClusterBaseline patch permission
+// controls it). Two guardrails must reject before any MCP is paused or any
+// ComplianceRemediation is mutated: more than batchMaxRemediations names, and
+// any name that is not a DNS-1123 subdomain. Both leave status.remediationBatch
+// unset so no orphaned pause can result.
+func TestApplyRemediationBatchGuardrails(t *testing.T) {
+	scheme := testScheme(t)
+	names := make([]string, batchMaxRemediations+1)
+	for i := range names {
+		names[i] = fmt.Sprintf("rem-%d", i)
+	}
+	cases := []struct {
+		name    string
+		anno    string
+		wantErr string
+	}{
+		{"over the maximum", strings.Join(names, ","), "maximum is"},
+		{"non-DNS-1123 uppercase", "Bad_Name", "invalid remediation name"},
+		{"non-DNS-1123 double dot", "rem..1", "invalid remediation name"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			cb := newCB("cis")
+			cb.SetAnnotations(map[string]string{batchApplyAnnotation: c.anno})
+			r := &ClusterBaselineReconciler{
+				Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(cb).
+					WithStatusSubresource(&baselinev1alpha1.ClusterBaseline{}).Build(),
+				Scheme: scheme,
+			}
+			err := r.applyRemediationBatch(context.Background(), cb)
+			if err == nil || !strings.Contains(err.Error(), c.wantErr) {
+				t.Fatalf("err = %v, want containing %q", err, c.wantErr)
+			}
+			if cb.Status.RemediationBatch != nil {
+				t.Fatalf("no batch must open on rejection, got %+v", cb.Status.RemediationBatch)
+			}
+		})
 	}
 }
 
