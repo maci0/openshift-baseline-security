@@ -52,8 +52,8 @@ test.describe('Baseline Security console plugin', () => {
     });
     await expect(chipGroup.first()).toBeVisible();
     await expect(page.getByRole('button', { name: /Clear all filters/i })).toBeVisible();
-    // And no PASS rows survive the filter.
-    await expect(page.getByText('PASS', { exact: true })).toHaveCount(0);
+    // And no Pass rows survive the filter.
+    await expect(page.getByText('Pass', { exact: true })).toHaveCount(0);
     await shot(page, 'results-fail-filter');
   });
 

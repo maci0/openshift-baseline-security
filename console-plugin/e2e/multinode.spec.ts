@@ -43,8 +43,9 @@ test.describe('Baseline Security multi-node / multi-benchmark', () => {
   test('compliance score deep-links on the cluster Overview details card', async ({ page }) => {
     await page.goto('/dashboards', { waitUntil: 'networkidle' });
     await expect(page.getByText('Compliance score')).toBeVisible();
-    // Rendered as a link "<n> / 100" that navigates to the Compliance page.
-    const scoreLink = page.getByRole('link', { name: /\d+ \/ 100/ });
+    // Rendered as a link showing "<n> / 100"; its accessible name is
+    // "Compliance score <n> of 100". Navigates to the Compliance page.
+    const scoreLink = page.getByRole('link', { name: /\d+ of 100/ });
     await expect(scoreLink).toBeVisible();
     await scoreLink.click();
     await expect(page).toHaveURL(/\/baseline-security/);
@@ -55,10 +56,10 @@ test.describe('Baseline Security multi-node / multi-benchmark', () => {
       waitUntil: 'networkidle',
     });
     await expect(page.getByRole('button', { name: /Clear all filters/i })).toBeVisible();
-    // At least one INCONSISTENT status label survives the filter.
-    await expect(page.getByText('INCONSISTENT', { exact: true }).first()).toBeVisible();
-    // No PASS rows leak through.
-    await expect(page.getByText('PASS', { exact: true })).toHaveCount(0);
+    // At least one Inconsistent status label survives the filter.
+    await expect(page.getByText('Inconsistent', { exact: true }).first()).toBeVisible();
+    // No Pass rows leak through.
+    await expect(page.getByText('Pass', { exact: true })).toHaveCount(0);
   });
 
   test('check detail modal opens and links to the raw resource', async ({ page }) => {
@@ -70,7 +71,7 @@ test.describe('Baseline Security multi-node / multi-benchmark', () => {
     const dialog = page.getByRole('dialog');
     await expect(dialog).toBeVisible();
     // Deep-link to the ComplianceCheckResult resource.
-    await expect(dialog.getByText(/ComplianceCheckResult resource/i)).toBeVisible();
+    await expect(dialog.getByText(/View full check details in OpenShift/i)).toBeVisible();
   });
 
   test('INCONSISTENT check modal shows the per-node breakdown', async ({ page }) => {

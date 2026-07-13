@@ -78,9 +78,21 @@ depend on those tags.
 - Dynamic informer watch on Compliance Operator CRs (event-driven reconcile;
   1-minute poll retained as fallback). Deferred from the 0.4.0 cut; not in
   any published 0.4.0 image/CSV tag.
+- OKD support: when `spec.complianceCatalogSource` is unset, the operator
+  auto-detects the Compliance Operator catalog: `redhat-operators` on OCP,
+  else `community-operators` when only that exists (OKD). An explicit value
+  still wins (disconnected mirrors). Read-only `catalogsources` RBAC added.
+- `registry.ci.openshift.org` build variant (`operator/Dockerfile.ci` +
+  `.ci-operator.yaml`) for OpenShift CI / ci-operator onboarding.
 
 ### Changed
 
+- **BREAKING: API group renamed** `baselinesecurity.io` →
+  `baselinesecurity.openshift.io` (CRD group, `apiVersion`, RBAC, the
+  `.../cleanup` finalizer, and all `baselinesecurity.io/...` annotations:
+  `batch-apply`, `batch-*`, `history-scoring-mode`, `waived`). Hard rename at
+  `v1alpha1`: no conversion. **Upgrade impact**: existing `ClusterBaseline` CRs
+  are under the old group and must be recreated after upgrade (see Migration).
 - `spec.profiles` no longer requires at least one entry (the `MinItems=1`
   constraint was dropped) so scanning can be turned off as above. The field
   remains required in the OpenAPI schema and still defaults to `{cis}` when
@@ -128,6 +140,11 @@ depend on those tags.
   `StartedAt`, transient remediation Get errors, partial pause rollback,
   cancel-resume, resume pools on ClusterBaseline delete, and pool derivation
   for multi-pool node remediations.
+- Reconcile no longer hangs when the operator holds only named (not cluster-wide
+  list/watch) ConfigMap RBAC: ConfigMaps are read uncached, so the console
+  dashboard ConfigMap reconcile cannot block on a never-syncing informer.
+- Console plugin no longer crash-loops: the nginx `access_log` directive needs a
+  format name before `if=`.
 
 ### Migration notes (0.4.x → next)
 

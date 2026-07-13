@@ -9,7 +9,7 @@ test.describe('Baseline Security screenshots', () => {
     // Open the first check's detail modal (title is a link button).
     await page.getByRole('button', { name: /registries|Identity Provider|etcd|audit/i }).first().click();
     await expect(page.getByRole('dialog')).toBeVisible();
-    await expect(page.getByText(/ComplianceCheckResult resource/i)).toBeVisible();
+    await expect(page.getByText(/View full check details in OpenShift/i)).toBeVisible();
     await shot(page, 'result-detail');
   });
 
@@ -70,7 +70,7 @@ test.describe('Baseline Security screenshots', () => {
 
   test('compliance score on the cluster Overview', async ({ page }) => {
     await page.goto('/dashboards', { waitUntil: 'networkidle' });
-    const score = page.getByRole('link', { name: /\d+ \/ 100/ });
+    const score = page.getByRole('link', { name: /\d+ of 100/ });
     await expect(score).toBeVisible();
     await shot(page, 'dashboard-score');
   });
