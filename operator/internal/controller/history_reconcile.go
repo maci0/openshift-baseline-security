@@ -151,10 +151,6 @@ func (r *ClusterBaselineReconciler) recordHistory(
 	cb *baselinev1alpha1.ClusterBaseline,
 	s *int32,
 	currentFails []string,
-	// currentChecks is every evaluated check name this scan (any status), sorted.
-	// The diff base is scoped to it so a check no longer scanned (a deselected
-	// profile) is not reported as Fixed. Nil skips scoping (legacy/test callers).
-	currentChecks []string,
 	weights *scoreWeights,
 	suites map[string]bool,
 ) error {
@@ -250,7 +246,6 @@ func (r *ClusterBaselineReconciler) recordHistory(
 			// after endTimestamp, and correct this scan's diff against its retained
 			// prior-scan baseline. Failure sets are mode-independent.
 			if cb.Status.DiffBaseScanTime != nil && last.Equal(cb.Status.DiffBaseScanTime) {
-				cb.Status.DiffBaseFailures = scopeToEvaluated(cb.Status.DiffBaseFailures, currentChecks)
 				syncFailureDiff(cb, currentFails, cb.Status.DiffBaseFailures)
 			}
 			cb.Status.PreviousFailures = slices.Clone(currentFails)
@@ -281,12 +276,17 @@ func (r *ClusterBaselineReconciler) recordHistory(
 	// A new scan completed: compute regressions vs the previous scan's failures,
 	// then snapshot the current failures for next time, and append a per-profile
 	// history point so each benchmark can be trended.
+	//
+	// Known low-severity limitation: deselecting a profile leaves its failing
+	// checks in PreviousFailures, so the next completed scan of a remaining suite
+	// reports them once as Fixed (display-only, self-heals next scan). A naive fix
+	// (scope the base to currently-evaluated check names) is unsafe: this path can
+	// see a partial informer view, so it would evict a genuinely-fixed check that
+	// is only transiently unlisted and never report it. A correct fix needs
+	// per-check suite tracking or owned-suite-set-change detection; not worth that
+	// weight for a self-healing display glitch.
 	if hadPreviousScan {
-		// Scope the base to still-evaluated checks: a check whose profile was
-		// deselected since the prior scan is no longer scanned, and must not be
-		// reported as Fixed (the disable-all path clears the diff entirely; this
-		// is the partial-deselect analogue).
-		cb.Status.DiffBaseFailures = scopeToEvaluated(cb.Status.PreviousFailures, currentChecks)
+		cb.Status.DiffBaseFailures = slices.Clone(cb.Status.PreviousFailures)
 		cb.Status.DiffBaseScanTime = &last
 		syncFailureDiff(cb, currentFails, cb.Status.DiffBaseFailures)
 	} else {

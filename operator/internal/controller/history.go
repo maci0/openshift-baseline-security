@@ -8,32 +8,6 @@ import (
 	baselinev1alpha1 "github.com/maci0/baseline-security-operator/api/v1alpha1"
 )
 
-// scopeToEvaluated returns base restricted to names also present in evaluated
-// (both sorted ascending). A base check absent from evaluated is no longer
-// scanned (its profile was deselected), so keeping it would make the next diff
-// report it as Fixed though nothing was fixed. When evaluated is nil the base is
-// returned as a fresh clone unchanged (legacy/test callers that omit the set).
-func scopeToEvaluated(base, evaluated []string) []string {
-	if evaluated == nil {
-		return slices.Clone(base)
-	}
-	out := make([]string, 0, len(base))
-	i, j := 0, 0
-	for i < len(base) && j < len(evaluated) {
-		switch {
-		case base[i] == evaluated[j]:
-			out = append(out, base[i])
-			i++
-			j++
-		case base[i] < evaluated[j]:
-			i++
-		default:
-			j++
-		}
-	}
-	return out
-}
-
 func syncFailureDiff(cb *baselinev1alpha1.ClusterBaseline, currentFails, baseFailures []string) {
 	// Production lists are sorted (aggregate sorts currentFails; PreviousFailures /
 	// DiffBaseFailures are clones). Two-pointer set-diff avoids two maps over
