@@ -393,7 +393,9 @@ and annotation keys are duplicated in the Go operator and the TypeScript
 console (no shared codegen). A `make verify-product-lockstep` gate (also in
 CI and `make bundle`) asserts the two surfaces stay equal: ProfileKey set,
 default schedule, MaxItems caps (profiles/tailored/waivers/batch), severity
-weights, history scoring-mode annotation, and batch-apply annotation/key.
+weights, history scoring-mode annotation, batch-apply annotation/key, and
+the operator-side failure-list cap (`FailureListMax` / MaxItems=4096 on
+scan-diff fields; console does not write those lists).
 
 **Alternatives:** Generate TS from Go (or CRD OpenAPI); single shared JSON
 contract file; trust dual unit tests only.
@@ -405,3 +407,59 @@ lockstep covers the constant table.
 
 **Status:** Keep while monorepo holds both deliverables. Drop or replace with
 codegen if the console splits to its own repo without a shared contract.
+
+## ADR-025: Compliance report is client-side printable HTML
+
+**Decision:** The console builds a self-contained printable HTML report in
+the browser from already-watched ClusterBaseline / CheckResult / waiver
+data. No server-side PDF library, no operator endpoint, no extra dependency.
+
+**Alternatives:** Bundle a PDF renderer in the plugin; operator REST export;
+server-side template in a sidecar.
+
+**Tradeoff:** Zero new deps and no second auth surface (ADR-007); report
+fidelity is limited to what the user can already see via RBAC. Large FAIL
+lists and print CSS are the browser's problem. Untrusted rule text and
+waiver reasons are HTML-escaped at build time.
+
+**Status:** Keep. Revisit only if product requires offline PDF packaging or
+bulk multi-cluster reports (out of single-cluster scope).
+
+## ADR-026: Score-trend dashboard is a native console ConfigMap
+
+**Decision:** The operator reconciles a `console.openshift.io/dashboard`
+ConfigMap in `openshift-config-managed` (embedded Grafana-schema JSON, no
+Grafana server). It renders under Observe → Dashboards when user-workload
+monitoring and the bundle ServiceMonitor are present. Dashboard write
+failures are best-effort (log only; never Degrade scanning).
+
+**Alternatives:** Ship a Grafana dashboard CR; require cluster monitoring
+only; omit Observe and keep only the in-console MiniTrend.
+
+**Tradeoff:** Same install path as ODF-style console dashboards; works on
+direct and OLM installs; depends on UWM for live series. Best-effort avoid
+blocking the primary compliance path when the ConfigMap namespace or RBAC is
+missing.
+
+**Status:** Keep.
+
+## ADR-027: Prometheus score gauge has no scoring-mode label
+
+**Decision:** `baseline_security_compliance_score` is a single gauge with no
+`mode` label. Flat and SeverityWeighted both publish into the same series.
+CR history rings are mode-stamped and cleared on the next completed scan
+after a mode flip (ADR-008); Prometheus historical samples are not rewritten
+or split.
+
+**Alternatives:** Label the gauge by mode (two series over time); reset the
+gauge to -1 on mode flip; dual gauges.
+
+**Tradeoff:** Simple alert expressions and one series for Observe dashboards;
+a mode flip reinterprets subsequent samples under the new formula, so
+long-range Prometheus charts can mix incomparable points across the flip.
+Product accepts that discontinuity (same class of issue as pre-clear history
+points). Callers that need mode-aware history should use CR `status.history`
+plus the history-scoring-mode annotation, not raw PromQL ranges across flips.
+
+**Status:** Keep. Add a mode label only if support volume shows mixed-mode
+Prom charts are a real operator pain.

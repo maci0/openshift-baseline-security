@@ -91,6 +91,17 @@ if [[ -z "$go_hist" ]]; then
   die "HistoryMax = 30 missing from API (CRD MaxItems=30)"
 fi
 
+# Scan-diff failure-name list cap (ADR-013). API constant must match every
+# MaxItems=4096 on newlyFailed/fixed/previousFailures/diffBaseFailures.
+go_fail_max=$(grep -E 'FailureListMax\s*=\s*4096' "$API" | head -1 || true)
+if [[ -z "$go_fail_max" ]]; then
+  die "FailureListMax = 4096 missing from API (CRD MaxItems=4096)"
+fi
+fail_maxitems=$(grep -cE 'MaxItems=4096' "$API" || true)
+if [[ "$fail_maxitems" -lt 4 ]]; then
+  die "expected >=4 MaxItems=4096 markers on failure-name lists in $API (got $fail_maxitems)"
+fi
+
 # Severity weights (ADR-022).
 for pair in 'High:10' 'Medium:5' 'Low:2' 'Other:1'; do
   name=${pair%%:*}

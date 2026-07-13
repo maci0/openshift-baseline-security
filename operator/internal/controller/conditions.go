@@ -11,10 +11,8 @@ import (
 	baselinev1alpha1 "github.com/maci0/baseline-security-operator/api/v1alpha1"
 )
 
-// failureListMax matches ClusterBaselineStatus newlyFailed/fixed/
-// previousFailures/diffBaseFailures CRD MaxItems so a hand-edited or
-// pathologically large list cannot brick Status().Update admission.
-const failureListMax = 4096
+// failureListMax aliases the API constant so clamps stay CRD-aligned (ADR-013).
+const failureListMax = baselinev1alpha1.FailureListMax
 
 // sanitizeStatusForUpdate applies admission-safe bounds to status fields the
 // reconciler writes so a hostile or stale status cannot brick updates.

@@ -26,6 +26,11 @@ const (
 // CRD MaxItems on status.history / profiles[].history / tailoredProfiles[].history.
 const HistoryMax = 30
 
+// FailureListMax caps status newlyFailed / fixed / previousFailures /
+// diffBaseFailures. Must match the CRD MaxItems on those fields so the
+// controller clamp and admission bounds cannot drift (ADR-013).
+const FailureListMax = 4096
+
 // DefaultScanSchedule is used when ClusterBaselineSpec.schedule is empty or
 // whitespace-only. Keep in lockstep with the kubebuilder default on Schedule
 // and the console DEFAULT_SCAN_SCHEDULE constant.

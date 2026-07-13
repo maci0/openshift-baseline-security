@@ -424,6 +424,12 @@ func TestProfileNames(t *testing.T) {
 	if baselinev1alpha1.HistoryMax != 30 {
 		t.Fatalf("HistoryMax = %d, want 30 (CRD MaxItems)", baselinev1alpha1.HistoryMax)
 	}
+	if baselinev1alpha1.FailureListMax != 4096 {
+		t.Fatalf("FailureListMax = %d, want 4096 (CRD MaxItems)", baselinev1alpha1.FailureListMax)
+	}
+	if failureListMax != baselinev1alpha1.FailureListMax {
+		t.Fatalf("controller failureListMax = %d, want API FailureListMax %d", failureListMax, baselinev1alpha1.FailureListMax)
+	}
 	// CRD kubebuilder defaults must stay in lockstep with API constants used at reconcile.
 	if baselinev1alpha1.DefaultScanSchedule != "0 1 * * *" {
 		t.Fatalf("DefaultScanSchedule = %q, want CRD schedule default", baselinev1alpha1.DefaultScanSchedule)
