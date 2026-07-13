@@ -425,9 +425,7 @@ const RemediationsTab: React.FC<{
             </div>
           ) : batchable.length > 0 ? (
             withDisabledTip(
-              baselineEditDisabled && baselineEditDisabledReason
-                ? baselineEditDisabledReason
-                : undefined,
+              baselineEditDisabledReason,
               <Button
                 variant="secondary"
                 isDisabled={baselineEditDisabled}
@@ -448,9 +446,7 @@ const RemediationsTab: React.FC<{
         </FlexItem>
         <FlexItem>
           {withDisabledTip(
-            baselineEditDisabled && baselineEditDisabledReason
-              ? baselineEditDisabledReason
-              : undefined,
+            baselineEditDisabledReason,
             <Switch
               id="auto-apply"
               label={t('Auto-apply remediations after each scan')}
@@ -711,7 +707,7 @@ const RemediationsTab: React.FC<{
                   <Td dataLabel={t('Actions')}>
                     {rem.spec.apply ? (
                       withDisabledTip(
-                        applyDisabled && applyDisabledReason ? applyDisabledReason : undefined,
+                        applyDisabledReason,
                         <Button
                           variant="link"
                           isInline
@@ -751,7 +747,7 @@ const RemediationsTab: React.FC<{
                       </Tooltip>
                     ) : (
                       withDisabledTip(
-                        applyDisabled && applyDisabledReason ? applyDisabledReason : undefined,
+                        applyDisabledReason,
                         <Button
                           variant="link"
                           isInline

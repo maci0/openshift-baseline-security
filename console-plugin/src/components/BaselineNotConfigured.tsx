@@ -1,5 +1,6 @@
-// Empty state shown when no ClusterBaseline CR exists. Shared by Overview,
-// Profiles, and Remediations so the copy and OperatorHub link stay in sync.
+// Empty state shown when no ClusterBaseline CR exists. Shared by several tabs
+// (Overview, Results, Profiles, Remediations) so the copy and OperatorHub link
+// stay in sync.
 import * as React from 'react';
 import { useTranslation } from 'react-i18next';
 import {

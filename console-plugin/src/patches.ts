@@ -122,7 +122,8 @@ export const remediationApplyPatch = (hasRemediation: boolean, automatic: boolea
 const rfc3339TimeRe =
   /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
 const isParseableTime = (s: string): boolean => {
-  const m = rfc3339TimeRe.exec(s.trim());
+  const trimmed = s.trim();
+  const m = rfc3339TimeRe.exec(trimmed);
   if (!m) {
     return false;
   }
@@ -138,8 +139,7 @@ const isParseableTime = (s: string): boolean => {
   ) {
     return false;
   }
-  const t = Date.parse(s.trim());
-  return !Number.isNaN(t);
+  return !Number.isNaN(Date.parse(trimmed));
 };
 
 // JSON patch adding a waiver for a check. When the array is absent, create it;

@@ -43,7 +43,10 @@ export const clusterScore = (baselines?: ClusterBaseline[]): number | null => {
   return b?.status?.score ?? null;
 };
 
-const count = (n: number | undefined): number => n ?? 0;
+// Coerce so a tampered non-numeric count (blocked by the CRD integer schema,
+// but defended anyway, matching report.ts) can never string-concatenate into
+// the donut totals; NaN/undefined fold to 0.
+const count = (n: number | undefined): number => Number(n) || 0;
 
 // Sum result counts across profiles (built-in + tailored) for the composition
 // donut, so its slices match the score, which includes all of them.
@@ -172,7 +175,7 @@ export const flatProfileScore = (pass?: number, fail?: number): number | null =>
 export const profileScore = (
   counts: { pass?: number; fail?: number },
   opts?: {
-    mode?: 'Flat' | 'SeverityWeighted';
+    mode?: ScoringMode;
     filterKey?: string;
     results?: ComplianceCheckResult[];
     profiles?: string[];
@@ -211,8 +214,10 @@ export const profileScore = (
     // When Overview pre-buckets by suiteFilterKey + ownership, profiles is
     // omitted and results are already scoped: skip the second membership scan.
     const prefiltered = opts.profiles === undefined && opts.tailoredProfiles === undefined;
-    const profileSet = !prefiltered && opts.profiles ? new Set(opts.profiles) : undefined;
-    const tailoredSet = !prefiltered && opts.tailoredProfiles ? new Set(opts.tailoredProfiles) : undefined;
+    // No !prefiltered guard here: when prefiltered, both are undefined so the
+    // truthiness checks already yield undefined.
+    const profileSet = opts.profiles ? new Set(opts.profiles) : undefined;
+    const tailoredSet = opts.tailoredProfiles ? new Set(opts.tailoredProfiles) : undefined;
     let wPass = 0;
     let wFail = 0;
     for (const r of opts.results) {

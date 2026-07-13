@@ -186,10 +186,10 @@ func TestResolveCatalogSource(t *testing.T) {
 	}
 	ctx := context.Background()
 	cases := []struct {
-		name    string
-		spec    string
+		name     string
+		spec     string
 		catalogs []string
-		want    string
+		want     string
 	}{
 		{"explicit override", "my-catalog", []string{"redhat-operators"}, "my-catalog"},
 		{"explicit override trimmed", "  my-catalog  ", []string{"redhat-operators"}, "my-catalog"},

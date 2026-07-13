@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"cmp"
 	"strconv"
 	"strings"
 )
@@ -76,11 +77,8 @@ func compareVersionParts(a, b []int) int {
 		if i < len(b) {
 			bv = b[i]
 		}
-		if av > bv {
-			return 1
-		}
-		if av < bv {
-			return -1
+		if c := cmp.Compare(av, bv); c != 0 {
+			return c
 		}
 	}
 	return 0

@@ -279,6 +279,5 @@ func (r *ClusterBaselineReconciler) aggregateStatus(ctx context.Context, cb *bas
 		return nil
 	}
 	cb.Status.NextScanTime = nextScanTime(cb.Spec.Schedule, time.Now())
-	// Reuse suites already built for the CCR selector (avoids a second ownedSuites).
 	return r.recordHistory(ctx, cb, cb.Status.Score, currentFails, weights, suites)
 }

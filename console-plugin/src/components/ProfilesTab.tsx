@@ -396,7 +396,7 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
           <SplitItem isFilled />
           <SplitItem>
             {withDisabledTip(
-              editDisabled && editDisabledReason ? editDisabledReason : undefined,
+              editDisabledReason,
               <Button
                 ref={createButtonRef}
                 variant="secondary"
@@ -565,7 +565,7 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
                       )}
                       <FlexItem>
                         {withDisabledTip(
-                          editDisabled && editDisabledReason ? editDisabledReason : undefined,
+                          editDisabledReason,
                           <Switch
                             id={`profile-${key}`}
                             aria-label={
@@ -676,7 +676,7 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
                 <CardHeader
                   actions={{
                     actions: withDisabledTip(
-                      editDisabled && editDisabledReason ? editDisabledReason : undefined,
+                      editDisabledReason,
                       <Button
                         variant="link"
                         isInline

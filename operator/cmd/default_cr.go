@@ -46,17 +46,18 @@ func (d *defaultClusterBaseline) Start(ctx context.Context) error {
 	// outage does not fill the log stream every 10s with the same stack.
 	var attempt int
 	for {
-		if err := d.ensureOnce(ctx); err == nil {
+		err := d.ensureOnce(ctx)
+		if err == nil {
 			return nil
-		} else if isPermanentDefaultCRError(err) {
+		}
+		if isPermanentDefaultCRError(err) {
 			d.Log.Error(err, "permanent error creating default ClusterBaseline; not retrying")
 			return nil
-		} else {
-			attempt++
-			if attempt == 1 || attempt%6 == 0 {
-				d.Log.Error(err, "default ClusterBaseline ensure failed; will retry",
-					"attempt", attempt)
-			}
+		}
+		attempt++
+		if attempt == 1 || attempt%6 == 0 {
+			d.Log.Error(err, "default ClusterBaseline ensure failed; will retry",
+				"attempt", attempt)
 		}
 		timer := time.NewTimer(10 * time.Second)
 		select {

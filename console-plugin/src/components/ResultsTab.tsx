@@ -140,9 +140,8 @@ const ResultsTab: React.FC<{
   results?: ComplianceCheckResult[];
   resultsLoaded?: boolean;
   resultsError?: unknown;
-}> = ({ baseline, results, resultsLoaded = false, resultsError }) => {
+}> = ({ baseline, results, resultsLoaded: loaded = false, resultsError }) => {
   const { t, i18n } = useTranslation('plugin__baseline-security-console-plugin');
-  const loaded = resultsLoaded;
   const [selected, setSelected] = React.useState<ComplianceCheckResult | null>(null);
   const [waiveReason, setWaiveReason] = React.useState('');
   const [waiveRequestedBy, setWaiveRequestedBy] = React.useState('');
@@ -875,10 +874,11 @@ const ResultsTab: React.FC<{
                               <Td>{t('all other nodes')}</Td>
                               <Td>
                                 {(() => {
-                                  const style = statusStyle(mostCommon.toUpperCase());
+                                  const up = mostCommon.toUpperCase();
+                                  const style = statusStyle(up);
                                   return (
                                     <Label isCompact color={style.color} icon={style.icon}>
-                                      {statusDisplayTitle(mostCommon.toUpperCase(), t)}
+                                      {statusDisplayTitle(up, t)}
                                     </Label>
                                   );
                                 })()}

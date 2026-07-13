@@ -242,7 +242,8 @@ func (r *ClusterBaselineReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	}
 	available := condTrue(cb, "Available")
 	progressing := condTrue(cb, "Progressing")
-	degraded := condTrue(cb, "Degraded")
+	degradedCond := meta.FindStatusCondition(cb.Status.Conditions, "Degraded")
+	degraded := degradedCond != nil && degradedCond.Status == metav1.ConditionTrue
 	keysAndValues := []any{
 		"name", cb.Name,
 		"generation", cb.Generation,
@@ -257,9 +258,9 @@ func (r *ClusterBaselineReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		"degraded", degraded,
 		"batchActive", cb.Status.RemediationBatch != nil,
 	}
-	if c := meta.FindStatusCondition(cb.Status.Conditions, "Degraded"); c != nil && c.Status == metav1.ConditionTrue {
+	if degradedCond != nil && degradedCond.Status == metav1.ConditionTrue {
 		logger.Info("reconciled with Degraded condition",
-			append(keysAndValues, "reason", c.Reason, "message", c.Message)...)
+			append(keysAndValues, "reason", degradedCond.Reason, "message", degradedCond.Message)...)
 	} else if !available && !progressing {
 		// Prefer the detail that blocks Available (CO or scan) for on-call triage.
 		reason, message := "NotReady", ""

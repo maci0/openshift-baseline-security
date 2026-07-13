@@ -102,7 +102,6 @@ export const effectiveStatus = (
   let hasFail = false;
   let hasError = false;
   let hasNA = false;
-  let hasSkip = false;
   let hasUnknown = false;
   const add = (st: string): void => {
     switch (st) {
@@ -116,10 +115,9 @@ export const effectiveStatus = (
         hasError = true;
         break;
       case 'NOT-APPLICABLE':
-        hasNA = true;
-        break;
       case 'SKIP':
-        hasSkip = true;
+        // Both CO states collapse to NOT-APPLICABLE (lockstep with the operator).
+        hasNA = true;
         break;
       default:
         hasUnknown = true;
@@ -155,7 +153,7 @@ export const effectiveStatus = (
   if (hasPass) {
     return 'PASS';
   }
-  if (hasNA || hasSkip) {
+  if (hasNA) {
     return 'NOT-APPLICABLE';
   }
   return 'INCONSISTENT';

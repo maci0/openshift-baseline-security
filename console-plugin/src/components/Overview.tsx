@@ -282,8 +282,10 @@ const CountRow: React.FC<{
   const { t, i18n } = useTranslation('plugin__baseline-security-console-plugin');
   // formatCount: underscore BCP 47 + invalid tags (toLocaleString throws RangeError).
   const countText = formatCount(count, i18n.language);
-  // Whole row is the hit target when linked (not only the number): larger click
-  // area, matches user expectation that "Fail" navigates like the count does.
+  // Only linked when there is a target and a non-zero count (zero rows have
+  // nothing to deep-link to). Whole row is the hit target when linked (not only
+  // the number): larger click area, matches "Fail" navigating like the count.
+  const linked = !!href && count > 0;
   const row = (
     <Flex gap={{ default: 'gapSm' }} alignItems={{ default: 'alignItemsCenter' }}>
       <FlexItem>
@@ -293,7 +295,7 @@ const CountRow: React.FC<{
       </FlexItem>
       <FlexItem grow={{ default: 'grow' }}>{label}</FlexItem>
       <FlexItem>
-        {href && count > 0 ? (
+        {linked ? (
           <span
             style={{
               color: 'var(--pf-t--global--text--color--link--default)',
@@ -308,7 +310,7 @@ const CountRow: React.FC<{
       </FlexItem>
     </Flex>
   );
-  if (href && count > 0) {
+  if (linked) {
     return (
       <a
         href={href}

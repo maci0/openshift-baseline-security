@@ -26,7 +26,7 @@ const (
 // Hot path: multi-node pools can yield many INCONSISTENT CCRs per reconcile.
 // Walk annotations with bit flags (no map / Split allocations).
 func effectiveInconsistentStatus(item *unstructured.Unstructured) string {
-	var hasPass, hasFail, hasError, hasNA, hasSkip, hasUnknown bool
+	var hasPass, hasFail, hasError, hasNA, hasUnknown bool
 	visitInconsistentStates(item, func(st string) {
 		switch st {
 		case "PASS":
@@ -35,10 +35,9 @@ func effectiveInconsistentStatus(item *unstructured.Unstructured) string {
 			hasFail = true
 		case "ERROR":
 			hasError = true
-		case "NOT-APPLICABLE":
+		case "NOT-APPLICABLE", "SKIP":
+			// Both CO states collapse to NOT-APPLICABLE.
 			hasNA = true
-		case "SKIP":
-			hasSkip = true
 		default:
 			// Future or malformed states must fail closed; otherwise UNKNOWN+PASS
 			// would be misreported as a benign PASS.
@@ -50,7 +49,7 @@ func effectiveInconsistentStatus(item *unstructured.Unstructured) string {
 		return "INCONSISTENT"
 	case hasPass:
 		return "PASS"
-	case hasNA || hasSkip:
+	case hasNA:
 		return "NOT-APPLICABLE"
 	default:
 		return "INCONSISTENT"

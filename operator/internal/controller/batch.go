@@ -77,12 +77,9 @@ func poolFromRemediation(rem *unstructured.Unstructured) string {
 				return ""
 			}
 			if kind == "MachineConfig" {
-				// Direct label read: NestedString path-walk is unnecessary for one key
-				// (batch path can hit 256 remediations).
-				if meta, _ := obj["metadata"].(map[string]any); meta != nil {
-					if role := stringMapValue(meta["labels"], "machineconfiguration.openshift.io/role"); role != "" {
-						return validMCPPoolName(role)
-					}
+				// Non-allocating single-label read (batch path can hit 256 remediations).
+				if role := unstructuredLabel(obj, "machineconfiguration.openshift.io/role"); role != "" {
+					return validMCPPoolName(role)
 				}
 			}
 		}

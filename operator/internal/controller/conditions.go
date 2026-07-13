@@ -65,12 +65,11 @@ func parseScanEndTimestamp(ts string, now time.Time) (time.Time, bool) {
 	if ts == "" {
 		return time.Time{}, false
 	}
+	// RFC3339Nano is a superset of RFC3339 (fractional seconds optional), so it
+	// parses plain RFC3339 too; no separate fallback needed.
 	t, err := time.Parse(time.RFC3339Nano, ts)
 	if err != nil {
-		t, err = time.Parse(time.RFC3339, ts)
-		if err != nil {
-			return time.Time{}, false
-		}
+		return time.Time{}, false
 	}
 	// Allow modest clock skew; anything further ahead is treated as garbage.
 	if t.After(now.Add(time.Hour)) {

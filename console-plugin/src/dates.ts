@@ -14,7 +14,6 @@ export const localDateInputValue = (d: Date = new Date()): string => {
 // Module-level: form/display paths call date parse/format repeatedly; avoid
 // re-binding pattern objects on every keystroke or waiver-expiry tick.
 const localDateOnlyRe = /^(\d{4})-(\d{2})-(\d{2})$/;
-const localDateOnlyTestRe = /^\d{4}-\d{2}-\d{2}$/;
 
 // Parse YYYY-MM-DD as a local calendar day. Rejects invalid calendar dates
 // (e.g. 2026-02-31). Shared by end-of-day deadlines and display formatting so
@@ -51,7 +50,7 @@ export const dateInputEndOfDayIso = (value: string): string | undefined => {
 // via formatLocalDate instead of expiring at UTC midnight (up to ~24h early for
 // UTC+ users). Returns NaN when unparseable, so callers' Number.isNaN guards hold.
 export const expiresAtMs = (iso: string): number => {
-  if (localDateOnlyTestRe.test(iso)) {
+  if (localDateOnlyRe.test(iso)) {
     const d = parseLocalDateOnly(iso);
     if (!d) return NaN;
     d.setHours(23, 59, 59, 999);
@@ -84,7 +83,7 @@ const parsedLocalDate = (iso: string): Date | null => {
 export const formatLocalDate = (iso: string, locale?: string): string => {
   // Date-only: local calendar day only (never fall through to Date('YYYY-MM-DD'),
   // which is UTC midnight and overflows invalid days like 2026-02-31).
-  if (localDateOnlyTestRe.test(iso)) {
+  if (localDateOnlyRe.test(iso)) {
     const local = parseLocalDateOnly(iso);
     return local ? local.toLocaleDateString(safeLocale(locale)) : iso;
   }

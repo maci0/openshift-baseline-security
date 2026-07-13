@@ -28,10 +28,6 @@ func (r *ClusterBaselineReconciler) ensureScanConfig(ctx context.Context, cb *ba
 	// schedule and all bindings so a bad cron does not freeze profile/tp or
 	// auto-apply changes. Invalid schedule is reported as Degraded at the end.
 	schedule, schedErr := normalizedSchedule(cb.Spec.Schedule)
-	invalidScheduleMessage := ""
-	if schedErr != nil {
-		invalidScheduleMessage = schedErr.Error()
-	}
 
 	ss := u(scanSettingGVK)
 	ss.SetName(scanSettingName)
@@ -122,8 +118,8 @@ func (r *ClusterBaselineReconciler) ensureScanConfig(ctx context.Context, cb *ba
 			"No profiles selected; scanning is disabled.")
 		return nil
 	}
-	if invalidScheduleMessage != "" {
-		msg := fmt.Sprintf("spec.schedule %q is not a valid standard cron schedule: %s", cb.Spec.Schedule, invalidScheduleMessage)
+	if schedErr != nil {
+		msg := fmt.Sprintf("spec.schedule %q is not a valid standard cron schedule: %s", cb.Spec.Schedule, schedErr)
 		// Info once on transition: InvalidSchedule rolls up to Degraded but leaves
 		// last-good cron on the ScanSetting. Without this log, on-call only sees a
 		// generic Degraded reason until the 15m alert (and may miss the bad cron
@@ -132,7 +128,7 @@ func (r *ClusterBaselineReconciler) ensureScanConfig(ctx context.Context, cb *ba
 		setCond(cb, "ScanConfigured", metav1.ConditionFalse, "InvalidSchedule", msg)
 		if prev == nil || prev.Status != metav1.ConditionFalse || prev.Reason != "InvalidSchedule" {
 			log.FromContext(ctx).Info("invalid scan schedule; keeping last-good cron on ScanSetting",
-				"name", cb.Name, "schedule", cb.Spec.Schedule, "error", invalidScheduleMessage)
+				"name", cb.Name, "schedule", cb.Spec.Schedule, "error", schedErr)
 		}
 		return nil
 	}
