@@ -217,6 +217,41 @@ func TestResolveCatalogSource(t *testing.T) {
 	}
 }
 
+// TestCatalogSourceExistsErrorClassification pins the safety in catalogSourceExists:
+// only NotFound / NoMatch mean "catalog absent"; any other error (transient,
+// forbidden) reads as PRESENT so detection does not fall through to the default
+// catalog on a blip and write a Subscription at a nonexistent source (e.g.
+// redhat-operators on OKD). A regression to `return false` would silently break this.
+func TestCatalogSourceExistsErrorClassification(t *testing.T) {
+	scheme := testScheme(t)
+	ctx := context.Background()
+	noMatch := &meta.NoKindMatchError{GroupKind: schema.GroupKind{Group: "operators.coreos.com", Kind: "CatalogSource"}}
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).
+			WithInterceptorFuncs(interceptor.Funcs{
+				Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+					switch key.Name {
+					case "transient-cs":
+						return apierrors.NewServiceUnavailable("apiserver blip")
+					case "nomatch-cs":
+						return noMatch
+					}
+					return c.Get(ctx, key, obj, opts...)
+				},
+			}).Build(),
+		Scheme: scheme,
+	}
+	if !r.catalogSourceExists(ctx, "transient-cs") {
+		t.Fatal("transient error must be treated as present, not absent")
+	}
+	if r.catalogSourceExists(ctx, "nomatch-cs") {
+		t.Fatal("NoMatch (CatalogSource CRD absent) must be treated as absent")
+	}
+	if r.catalogSourceExists(ctx, "no-such-cs") {
+		t.Fatal("NotFound must be treated as absent")
+	}
+}
+
 func machineConfigPool(name string) *unstructured.Unstructured {
 	mcp := &unstructured.Unstructured{}
 	mcp.SetGroupVersionKind(mcpGVK)

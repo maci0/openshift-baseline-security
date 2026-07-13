@@ -192,6 +192,15 @@ func (r *ClusterBaselineReconciler) recordHistory(
 					r.logHistoryStall(ctx, "ComplianceSuite not found; history not advanced",
 						"suite", name, "name", cb.Name,
 						"lastScanTime", cb.Status.LastScanTime.UTC().Format(time.RFC3339))
+				} else if cb.Status.Score != nil {
+					// First generation never completed, yet a partial score is already
+					// published because another selected binding produced results (e.g.
+					// a TailoredProfile whose CO profile is not Ready never yields a
+					// suite). LastScanTime stays nil so ComplianceScanStale (>0 guard)
+					// cannot fire; leave an operator-side breadcrumb so the stuck
+					// binding is not visible only as an empty per-profile card.
+					r.logHistoryStall(ctx, "selected binding has no completed ComplianceSuite; partial score published without a completed first scan",
+						"suite", name, "name", cb.Name)
 				}
 				return nil
 			}

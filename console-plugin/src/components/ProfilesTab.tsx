@@ -48,7 +48,8 @@ import { isValidK8sName, isValidTailoredProfileName } from '../names';
 import { resourceVersionTest, tailoredProfileBindingPatch } from '../patches';
 import { tailoredProfileManifest, toggledProfiles } from '../profiles';
 import BaselineNotConfigured from './BaselineNotConfigured';
-import { restoreFocus, withDisabledTip } from './DisabledTip';
+import { withDisabledTip } from './DisabledTip';
+import { restoreFocus } from './focus';
 import { SUCCESS_DISMISS_MS } from './feedback';
 
 const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = ({

@@ -82,7 +82,8 @@ import {
   waiverExpired,
 } from '../waivers';
 import BaselineNotConfigured from './BaselineNotConfigured';
-import { restoreFocus, withDisabledTip } from './DisabledTip';
+import { withDisabledTip } from './DisabledTip';
+import { restoreFocus } from './focus';
 import { SUCCESS_DISMISS_MS } from './feedback';
 
 const statusLabel: Record<

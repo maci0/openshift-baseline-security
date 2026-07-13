@@ -63,7 +63,8 @@ import {
   remediationObjectText,
 } from '../remediation';
 import BaselineNotConfigured from './BaselineNotConfigured';
-import { regionFocusProps, restoreFocus, withDisabledTip } from './DisabledTip';
+import { regionFocusProps, withDisabledTip } from './DisabledTip';
+import { restoreFocus } from './focus';
 import { SUCCESS_DISMISS_MS } from './feedback';
 
 // Stable empty list when the suite-scoped watch is inactive.
