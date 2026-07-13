@@ -42,22 +42,26 @@ export const activeWaivedNames = (
   return set;
 };
 
+// Epoch ms of a waiver's expiry when it is present, parseable, and still in the
+// future relative to nowMs; null otherwise. Shared active-expiry guard (an
+// unparseable expiresAt is NaN, hence excluded, matching waiverExpired).
+const futureExpiryMs = (w: Waiver | undefined, nowMs: number): number | null => {
+  if (!w?.expiresAt) {
+    return null;
+  }
+  const t = expiresAtMs(w.expiresAt);
+  return Number.isNaN(t) || t <= nowMs ? null : t;
+};
+
 // Active waivers expiring within `withinMs` (not yet expired), for surfacing.
-// Unparseable expiresAt is excluded (NaN is not finite); matches waiverExpired.
 export const expiringWaivers = (
   waivers: Waiver[] | undefined,
   withinMs: number,
   now: Date = new Date(),
 ): Waiver[] =>
   (waivers ?? []).filter((w) => {
-    if (!w.expiresAt) {
-      return false;
-    }
-    const t = expiresAtMs(w.expiresAt);
-    if (Number.isNaN(t)) {
-      return false;
-    }
-    return t > now.getTime() && t <= now.getTime() + withinMs;
+    const t = futureExpiryMs(w, now.getTime());
+    return t !== null && t <= now.getTime() + withinMs;
   });
 
 // Signed 32-bit setTimeout max; larger delays wrap and fire immediately.
@@ -96,11 +100,8 @@ export const futureWaiverDeadlineMs = (
 ): number[] => {
   const out: number[] = [];
   for (const w of waivers ?? []) {
-    if (!w?.expiresAt) {
-      continue;
-    }
-    const t = expiresAtMs(w.expiresAt);
-    if (Number.isNaN(t) || t <= nowMs) {
+    const t = futureExpiryMs(w, nowMs);
+    if (t === null) {
       continue;
     }
     out.push(t);

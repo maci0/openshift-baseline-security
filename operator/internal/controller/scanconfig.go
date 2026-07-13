@@ -10,7 +10,6 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	baselinev1alpha1 "github.com/maci0/baseline-security-operator/api/v1alpha1"
 )
@@ -119,17 +118,13 @@ func (r *ClusterBaselineReconciler) ensureScanConfig(ctx context.Context, cb *ba
 		return nil
 	}
 	if schedErr != nil {
+		// InvalidSchedule rolls up to Degraded but leaves the last-good cron on the
+		// ScanSetting. The transition log names the bad cron so on-call is not left
+		// with only a generic Degraded reason until the 15m alert.
 		msg := fmt.Sprintf("spec.schedule %q is not a valid standard cron schedule: %s", cb.Spec.Schedule, schedErr)
-		// Info once on transition: InvalidSchedule rolls up to Degraded but leaves
-		// last-good cron on the ScanSetting. Without this log, on-call only sees a
-		// generic Degraded reason until the 15m alert (and may miss the bad cron
-		// text if the condition message was truncated). Do not re-log every requeue.
-		prev := meta.FindStatusCondition(cb.Status.Conditions, "ScanConfigured")
-		setCond(cb, "ScanConfigured", metav1.ConditionFalse, "InvalidSchedule", msg)
-		if prev == nil || prev.Status != metav1.ConditionFalse || prev.Reason != "InvalidSchedule" {
-			log.FromContext(ctx).Info("invalid scan schedule; keeping last-good cron on ScanSetting",
-				"name", cb.Name, "schedule", cb.Spec.Schedule, "error", schedErr)
-		}
+		setCondFalseLogOnce(ctx, cb, "ScanConfigured", "InvalidSchedule", msg,
+			"invalid scan schedule; keeping last-good cron on ScanSetting",
+			"name", cb.Name, "schedule", cb.Spec.Schedule, "error", schedErr)
 		return nil
 	}
 	setCond(cb, "ScanConfigured", metav1.ConditionTrue, "BindingsCreated", "")

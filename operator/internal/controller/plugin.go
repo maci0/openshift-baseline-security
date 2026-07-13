@@ -20,7 +20,6 @@ import (
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	baselinev1alpha1 "github.com/maci0/baseline-security-operator/api/v1alpha1"
 )
@@ -317,11 +316,6 @@ func (r *ClusterBaselineReconciler) ensureConsolePlugin(ctx context.Context, cb 
 // status or reason changes. Permanent soft-fails (ImageMissing/ImageInvalid) never
 // Degrade the rollup; transition logs are the only default-level operator signal.
 func logConsolePluginNotReady(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline, reason, msg string) {
-	prev := meta.FindStatusCondition(cb.Status.Conditions, "ConsolePluginReady")
-	setCond(cb, "ConsolePluginReady", metav1.ConditionFalse, reason, msg)
-	if prev != nil && prev.Status == metav1.ConditionFalse && prev.Reason == reason {
-		return
-	}
-	log.FromContext(ctx).Info("console plugin not ready",
-		"name", cb.Name, "reason", reason, "message", msg)
+	setCondFalseLogOnce(ctx, cb, "ConsolePluginReady", reason, msg,
+		"console plugin not ready", "name", cb.Name, "reason", reason, "message", msg)
 }

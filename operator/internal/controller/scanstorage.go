@@ -7,10 +7,8 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	baselinev1alpha1 "github.com/maci0/baseline-security-operator/api/v1alpha1"
 )
@@ -59,12 +57,8 @@ func (r *ClusterBaselineReconciler) checkScanStorage(ctx context.Context, cb *ba
 		// from the grace constant (and TEST-PLAN "Pending >2m" row).
 		msg := fmt.Sprintf("PVC(s) %s/%s Pending >%dm; need a default StorageClass",
 			complianceNamespace, strings.Join(pending, ", "), int(scanStoragePendingGrace.Minutes()))
-		prev := meta.FindStatusCondition(cb.Status.Conditions, "ScanStorageReady")
-		setCond(cb, "ScanStorageReady", metav1.ConditionFalse, "ScanStoragePending", msg)
-		if prev == nil || prev.Status != metav1.ConditionFalse || prev.Reason != "ScanStoragePending" {
-			log.FromContext(ctx).Info("scan storage PVCs pending",
-				"namespace", complianceNamespace, "pvcs", pending, "name", cb.Name)
-		}
+		setCondFalseLogOnce(ctx, cb, "ScanStorageReady", "ScanStoragePending", msg,
+			"scan storage PVCs pending", "namespace", complianceNamespace, "pvcs", pending, "name", cb.Name)
 		return nil
 	}
 	setCond(cb, "ScanStorageReady", metav1.ConditionTrue, "AsExpected", "")

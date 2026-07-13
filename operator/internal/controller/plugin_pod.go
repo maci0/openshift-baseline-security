@@ -27,27 +27,32 @@ func preferredHostnameAntiAffinity(labels map[string]string) *corev1.Affinity {
 	}
 }
 
+// availableCondition returns the Deployment's Available condition, or nil when
+// it has none yet (brand-new object). Shared by the readiness/grace helpers.
+func availableCondition(dep *appsv1.Deployment) *appsv1.DeploymentCondition {
+	for i := range dep.Status.Conditions {
+		if dep.Status.Conditions[i].Type == appsv1.DeploymentAvailable {
+			return &dep.Status.Conditions[i]
+		}
+	}
+	return nil
+}
+
 // deploymentAvailable is true when the Deployment Available condition is True.
 // Missing condition is treated as not yet available.
 func deploymentAvailable(dep *appsv1.Deployment) bool {
-	for _, c := range dep.Status.Conditions {
-		if c.Type == appsv1.DeploymentAvailable {
-			return c.Status == corev1.ConditionTrue
-		}
-	}
-	return false
+	c := availableCondition(dep)
+	return c != nil && c.Status == corev1.ConditionTrue
 }
 
 // deploymentAvailableFalsePastGrace is true when Available has been False longer
 // than pluginUnavailableGrace (distinct from zero-ready; ready pods may exist).
 func deploymentAvailableFalsePastGrace(dep *appsv1.Deployment) bool {
-	for _, c := range dep.Status.Conditions {
-		if c.Type != appsv1.DeploymentAvailable || c.Status != corev1.ConditionFalse {
-			continue
-		}
-		return !c.LastTransitionTime.IsZero() && time.Since(c.LastTransitionTime.Time) > pluginUnavailableGrace
+	c := availableCondition(dep)
+	if c == nil || c.Status != corev1.ConditionFalse {
+		return false
 	}
-	return false
+	return !c.LastTransitionTime.IsZero() && time.Since(c.LastTransitionTime.Time) > pluginUnavailableGrace
 }
 
 // pluginUnavailableGrace is how long the plugin Deployment may be unavailable
@@ -62,19 +67,12 @@ func pluginDeploymentUnavailable(dep *appsv1.Deployment) bool {
 	if dep.Status.ReadyReplicas >= pluginReadyMin {
 		return false
 	}
-	for _, c := range dep.Status.Conditions {
-		if c.Type != appsv1.DeploymentAvailable {
-			continue
-		}
-		if c.LastTransitionTime.IsZero() {
-			break
-		}
-		// Available False: time since it went down. Available True with zero
-		// ready pods is pathological; still time-box from the last transition
-		// so we do not Progress forever.
+	// Available False: time since it went down. Available True with zero ready
+	// pods is pathological; still time-box from the last transition so we do not
+	// Progress forever. No condition yet (brand-new object): use creation time.
+	if c := availableCondition(dep); c != nil && !c.LastTransitionTime.IsZero() {
 		return time.Since(c.LastTransitionTime.Time) > pluginUnavailableGrace
 	}
-	// No Available condition yet (brand-new object): use creation time.
 	return !dep.CreationTimestamp.IsZero() && time.Since(dep.CreationTimestamp.Time) > pluginUnavailableGrace
 }
 

@@ -69,6 +69,14 @@ import { SUCCESS_DISMISS_MS } from './feedback';
 // Stable empty list when the suite-scoped watch is inactive.
 const EMPTY_REMEDIATIONS: ComplianceRemediation[] = [];
 
+// Sub-row detail text (MissingDependencies summary / Error detail).
+const detailStyle: React.CSSProperties = {
+  marginTop: 2,
+  fontSize: 'var(--pf-t--global--font--size--sm)',
+  color: 'var(--pf-t--global--text--color--subtle)',
+  overflowWrap: 'anywhere',
+};
+
 // Color + icon so state is not color-only (matches Results status labels).
 const stateStyle: Record<
   string,
@@ -666,24 +674,14 @@ const RemediationsTab: React.FC<{
                     </Label>
                     {state === 'MissingDependencies' && depsSummary && (
                       <div
-                        style={{
-                          marginTop: 2,
-                          fontSize: 'var(--pf-t--global--font--size--sm)',
-                          color: 'var(--pf-t--global--text--color--subtle)',
-                          overflowWrap: 'anywhere',
-                        }}
+                        style={detailStyle}
                       >
                         {depsSummary}
                       </div>
                     )}
                     {state === 'Error' && errorDetail && (
                       <div
-                        style={{
-                          marginTop: 2,
-                          fontSize: 'var(--pf-t--global--font--size--sm)',
-                          color: 'var(--pf-t--global--text--color--subtle)',
-                          overflowWrap: 'anywhere',
-                        }}
+                        style={detailStyle}
                       >
                         {errorDetail}
                       </div>

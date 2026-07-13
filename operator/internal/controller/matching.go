@@ -55,15 +55,21 @@ func matchesAnyProfile(name string, profiles map[string]bool) bool {
 // base name. Matches ScanSetting roles we set (worker/master) and common extras,
 // including the "node-<role>" form used by CO node profiles.
 func scanRoleSuffix(rest string) bool {
-	switch rest {
-	case "worker", "master", "control-plane", "infra", "node":
+	if rest == "node" || isKnownMCPRole(rest) {
 		return true
 	}
 	if role, ok := strings.CutPrefix(rest, "node-"); ok {
-		switch role {
-		case "worker", "master", "control-plane", "infra":
-			return true
-		}
+		return isKnownMCPRole(role)
+	}
+	return false
+}
+
+// isKnownMCPRole is the MachineConfigPool role allow-list, shared by the bare
+// and "node-<role>" suffix forms so the two cannot drift.
+func isKnownMCPRole(role string) bool {
+	switch role {
+	case "worker", "master", "control-plane", "infra":
+		return true
 	}
 	return false
 }

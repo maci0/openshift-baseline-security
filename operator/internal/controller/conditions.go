@@ -1,12 +1,14 @@
 package controller
 
 import (
+	"context"
 	"fmt"
 	"time"
 	"unicode/utf8"
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	baselinev1alpha1 "github.com/maci0/baseline-security-operator/api/v1alpha1"
 )
@@ -95,6 +97,18 @@ func setCond(cb *baselinev1alpha1.ClusterBaseline, typ string, status metav1.Con
 		Message:            condMessage(msg),
 		ObservedGeneration: cb.Generation,
 	})
+}
+
+// setCondFalseLogOnce sets a False detail condition and Info-logs only when the
+// condition first enters this (False, reason) state, so a sticky failure does
+// not spam the default log on every requeue. keysAndValues are structured log
+// fields. Shared by the storage/schedule/plugin not-ready paths.
+func setCondFalseLogOnce(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline, typ, reason, msg, logMsg string, keysAndValues ...any) {
+	prev := meta.FindStatusCondition(cb.Status.Conditions, typ)
+	setCond(cb, typ, metav1.ConditionFalse, reason, msg)
+	if prev == nil || prev.Status != metav1.ConditionFalse || prev.Reason != reason {
+		log.FromContext(ctx).Info(logMsg, keysAndValues...)
+	}
 }
 
 // conditionProgressing is true for non-terminal False detail reasons that mean
