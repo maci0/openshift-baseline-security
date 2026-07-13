@@ -17,7 +17,7 @@ test.describe('Baseline Security dark theme', () => {
     const [r, g, b] = bg.match(/\d+/g)!.map(Number);
     expect(r + g + b).toBeLessThan(150);
     // Core content still visible.
-    await expect(page.getByText('of 100')).toBeVisible();
+    await expect(page.getByText('of 100', { exact: true })).toBeVisible();
     await expect(page.getByText(/^Inconsistent \(\d+\)$/)).toBeVisible();
     await shot(page, 'overview-dark');
   });

@@ -6,7 +6,7 @@ test.describe('Baseline Security console plugin', () => {
     await goto(page, '');
     // Composition donut center label + legend; the legend proves the
     // non-compliant slices render (not an all-green gauge).
-    await expect(page.getByText('of 100')).toBeVisible();
+    await expect(page.getByText('of 100', { exact: true })).toBeVisible();
     await expect(page.getByText(/^Fail \(\d+\)$/)).toBeVisible();
     await expect(page.getByText('Details')).toBeVisible();
     // Compliance Operator version surfaced in the details card. exact: the
@@ -100,7 +100,8 @@ test.describe('Baseline Security console plugin', () => {
   test('Compliance is reachable under the Administration nav section', async ({ page }) => {
     await page.goto('/dashboards', { waitUntil: 'domcontentloaded' });
     await page.getByRole('button', { name: 'Administration' }).click();
-    const complianceNav = page.getByRole('link', { name: 'Compliance' });
+    // first(): the nav can briefly render both a collapsed and expanded entry.
+    const complianceNav = page.getByRole('link', { name: 'Compliance' }).first();
     await expect(complianceNav).toBeVisible();
     await shot(page, 'nav-administration');
     await complianceNav.click();
