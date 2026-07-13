@@ -61,7 +61,9 @@ const hostileBaseline = (rand: () => number): ClusterBaseline => {
   return {
     metadata: { name: pick(rand) },
     spec: {
-      profiles: [pick(rand)],
+      // Include 'cis' so results labelled suite=baseline-cis pass the ownership
+      // gate and their untrusted cells reach the esc() render path.
+      profiles: ['cis', pick(rand)],
       tailoredProfiles: [pick(rand)],
       waivers,
     },
@@ -86,7 +88,11 @@ const hostileResults = (rand: () => number): ComplianceCheckResult[] =>
       name: pick(rand),
       namespace: 'openshift-compliance',
       // Labels drive isOwnedByBaseline/checkProfileLabel; feed markup + a real key.
+      // The suite label must be an owned "baseline-<key>" (with a matching profile
+      // on the baseline) or every row is skipped and the FAIL-row esc() paths
+      // (name/title/profile/severity) are never exercised by this sweep.
       labels: {
+        'compliance.openshift.io/suite': 'baseline-cis',
         'compliance.openshift.io/profile': pick(rand),
         'compliance.openshift.io/check-severity': pick(rand),
       },

@@ -64,8 +64,11 @@ export const tailoredProfileManifest = (
     extends: extendsName,
   };
   const rule = (n: string) => ({ name: n, rationale: 'set via console' });
-  const enable = cleanRuleNames(enableRules);
   const disable = cleanRuleNames(disableRules);
+  // A rule in both lists is contradictory; disable wins (fail closed) so the
+  // console never ships a self-conflicting enable+disable manifest.
+  const disableSet = new Set(disable);
+  const enable = cleanRuleNames(enableRules).filter((n) => !disableSet.has(n));
   if (enable.length) spec.enableRules = enable.map(rule);
   if (disable.length) spec.disableRules = disable.map(rule);
   return {
