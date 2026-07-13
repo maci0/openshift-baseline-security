@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -1729,7 +1730,7 @@ func TestRecordHistoryRegression(t *testing.T) {
 		},
 	}
 	// Current scan fails a,b (a persists, b new); c was fixed.
-	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(90)), []string{"a", "b"}, nil, nil); err != nil {
+	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(90)), []string{"a", "b"}, nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if got := cb.Status.NewlyFailed; len(got) != 1 || got[0] != "b" {
@@ -1753,7 +1754,7 @@ func TestRecordHistoryFirstScanHasNoFalseRegressions(t *testing.T) {
 	cb := &baselinev1alpha1.ClusterBaseline{
 		Spec: baselinev1alpha1.ClusterBaselineSpec{Profiles: []baselinev1alpha1.ProfileKey{"cis"}},
 	}
-	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(50)), []string{"initial-fail"}, nil, nil); err != nil {
+	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(50)), []string{"initial-fail"}, nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if len(cb.Status.NewlyFailed) != 0 || len(cb.Status.Fixed) != 0 {
@@ -1790,7 +1791,7 @@ func TestRecordHistoryWaitsForEverySuiteGeneration(t *testing.T) {
 
 	// CIS has completed the new run, but PCI-DSS still reports the prior run.
 	// A partial aggregate must not become a history point or regression diff.
-	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(40)), []string{"partial-fail"}, nil, nil); err != nil {
+	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(40)), []string{"partial-fail"}, nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if !cb.Status.LastScanTime.Equal(&previous) || len(cb.Status.History) != 1 {
@@ -1809,7 +1810,7 @@ func TestRecordHistoryWaitsForEverySuiteGeneration(t *testing.T) {
 	if err := r.Update(context.Background(), freshPCI); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(80)), []string{"final-fail"}, nil, nil); err != nil {
+	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(80)), []string{"final-fail"}, nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if cb.Status.LastScanTime == nil || !cb.Status.LastScanTime.Time.Equal(newPCIEnd) {
@@ -1845,7 +1846,7 @@ func TestRecordHistoryWaitsForEveryMemberScan(t *testing.T) {
 			History:      []baselinev1alpha1.ScoreSnapshot{{Time: previous, Score: 90}},
 		},
 	}
-	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(50)), nil, nil, nil); err != nil {
+	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(50)), nil, nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if !cb.Status.LastScanTime.Equal(&previous) || len(cb.Status.History) != 1 {
@@ -1861,7 +1862,7 @@ func TestRecordHistoryWaitsForEveryMemberScan(t *testing.T) {
 	if err := r.Update(context.Background(), fresh); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(75)), nil, nil, nil); err != nil {
+	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(75)), nil, nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if cb.Status.LastScanTime == nil || !cb.Status.LastScanTime.Time.Equal(finalEnd) {
@@ -2062,7 +2063,7 @@ func TestRecordHistoryRing(t *testing.T) {
 			Score: int32(i),
 		})
 	}
-	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(77)), nil, nil, nil); err != nil {
+	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(77)), nil, nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if len(cb.Status.History) != 30 {
@@ -2079,7 +2080,7 @@ func TestRecordHistoryRing(t *testing.T) {
 		t.Fatalf("LastScanTime = %v, foreign scan leaked into history", cb.Status.LastScanTime)
 	}
 	before := len(cb.Status.History)
-	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(88)), nil, nil, nil); err != nil {
+	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(88)), nil, nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if len(cb.Status.History) != before {
@@ -2115,7 +2116,7 @@ func TestRecordHistoryEqualScanRefreshesProfileTrends(t *testing.T) {
 			}},
 		},
 	}
-	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(80)), []string{"late-fail"}, nil, nil); err != nil {
+	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(80)), []string{"late-fail"}, nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if got := cb.Status.Profiles[0].History; len(got) != 1 || got[0].Score != 75 {
@@ -2129,6 +2130,41 @@ func TestRecordHistoryEqualScanRefreshesProfileTrends(t *testing.T) {
 	}
 	if got := cb.Annotations[historyScoringModeAnn]; got != string(baselinev1alpha1.ScoringFlat) {
 		t.Fatalf("history mode stamp = %q, want Flat", got)
+	}
+}
+
+// Deselecting a profile must not report its checks as Fixed on the next scan.
+// The removed profile's failing checks are no longer evaluated, so scoping the
+// diff base to currentChecks drops them from Fixed (they were not fixed, just no
+// longer scanned) while a genuinely-failing kept check stays out of Fixed.
+func TestRecordHistoryPartialProfileRemovalNoFalseFixed(t *testing.T) {
+	scheme := testScheme(t)
+	previous := time.Date(2026, 7, 8, 1, 0, 0, 0, time.UTC)
+	end := time.Date(2026, 7, 9, 1, 0, 0, 0, time.UTC)
+	suite := completedSuite("baseline-cis", end)
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(suite).Build(),
+		Scheme: scheme,
+	}
+	prev := metav1.NewTime(previous)
+	cb := &baselinev1alpha1.ClusterBaseline{
+		Spec:   baselinev1alpha1.ClusterBaselineSpec{Profiles: []baselinev1alpha1.ProfileKey{"cis"}},
+		Status: baselinev1alpha1.ClusterBaselineStatus{LastScanTime: &prev, PreviousFailures: []string{"kept-fail", "removed-fail"}},
+	}
+	// Only the kept profile is now scanned: "kept-fail" still fails, "removed-fail"
+	// is no longer evaluated at all.
+	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(50)),
+		[]string{"kept-fail"}, []string{"kept-fail", "kept-pass"}, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(cb.Status.Fixed, "removed-fail") {
+		t.Fatalf("a deselected profile's check must not be reported Fixed: %v", cb.Status.Fixed)
+	}
+	if len(cb.Status.Fixed) != 0 {
+		t.Fatalf("Fixed = %v, want empty (kept-fail still fails, removed-fail not evaluated)", cb.Status.Fixed)
+	}
+	if len(cb.Status.NewlyFailed) != 0 {
+		t.Fatalf("NewlyFailed = %v, want empty", cb.Status.NewlyFailed)
 	}
 }
 
@@ -2165,7 +2201,7 @@ func TestRecordHistoryNewScanClearsHistoryWhenScoringModeFlips(t *testing.T) {
 			PreviousFailures: []string{"old-fail"},
 		},
 	}
-	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(70)), []string{"new-fail"}, nil, nil); err != nil {
+	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(70)), []string{"new-fail"}, nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if got := cb.Status.History; len(got) != 1 || got[0].Score != 70 {
@@ -2253,7 +2289,7 @@ func TestRecordHistoryEqualScanSkipsHistoryWhenScoringModeFlips(t *testing.T) {
 			}},
 		},
 	}
-	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(90)), []string{"late-fail"}, nil, nil); err != nil {
+	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(90)), []string{"late-fail"}, nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if got := cb.Status.History; len(got) != 1 || got[0].Score != 50 {
@@ -2288,7 +2324,7 @@ func TestRecordHistoryEqualScanCorrectsLateFailureDiff(t *testing.T) {
 		},
 	}
 	// The suite event arrives while only part of the new result set is visible.
-	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(90)), []string{"persistent"}, nil, nil); err != nil {
+	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(90)), []string{"persistent"}, nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if got := cb.Status.Fixed; len(got) != 1 || got[0] != "fixed" {
@@ -2296,7 +2332,7 @@ func TestRecordHistoryEqualScanCorrectsLateFailureDiff(t *testing.T) {
 	}
 	// A late CheckResult event for the same completed suite must recompute against
 	// the prior scan, not against the first partial view of this scan.
-	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(80)), []string{"late", "persistent"}, nil, nil); err != nil {
+	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(80)), []string{"late", "persistent"}, nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if got := cb.Status.NewlyFailed; len(got) != 1 || got[0] != "late" {
@@ -2319,7 +2355,7 @@ func TestRecordHistoryNoOwnedSuites(t *testing.T) {
 	cb := &baselinev1alpha1.ClusterBaseline{
 		Spec: baselinev1alpha1.ClusterBaselineSpec{Profiles: []baselinev1alpha1.ProfileKey{"cis"}},
 	}
-	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(50)), nil, nil, nil); err != nil {
+	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(50)), nil, nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if cb.Status.LastScanTime != nil || len(cb.Status.History) != 0 {
@@ -2347,7 +2383,7 @@ func TestRecordHistoryDoesNotRewind(t *testing.T) {
 			},
 		},
 	}
-	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(10)), nil, nil, nil); err != nil {
+	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(10)), nil, nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if !cb.Status.LastScanTime.Equal(&newer) {
@@ -2370,7 +2406,7 @@ func TestRecordHistoryIgnoresFarFutureEndTimestamp(t *testing.T) {
 	cb := &baselinev1alpha1.ClusterBaseline{
 		Spec: baselinev1alpha1.ClusterBaselineSpec{Profiles: []baselinev1alpha1.ProfileKey{"cis"}},
 	}
-	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(50)), nil, nil, nil); err != nil {
+	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(50)), nil, nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if cb.Status.LastScanTime != nil || len(cb.Status.History) != 0 {
@@ -2396,7 +2432,7 @@ func TestRecordHistoryAppendsWhenScoreAppearsLater(t *testing.T) {
 			LastScanTime: &last,
 		},
 	}
-	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(80)), nil, nil, nil); err != nil {
+	if err := r.recordHistory(context.Background(), cb, ptr.To(int32(80)), nil, nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if len(cb.Status.History) != 1 || cb.Status.History[0].Score != 80 {

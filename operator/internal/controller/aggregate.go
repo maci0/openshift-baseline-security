@@ -174,6 +174,10 @@ func (r *ClusterBaselineReconciler) aggregateStatus(ctx context.Context, cb *bas
 	// Pre-size currentFails for typical fail rates so append does not thrash
 	// under multi-profile FAIL-heavy scans (thousands of CCRs).
 	currentFails := make([]string, 0, len(list.Items)/8+1)
+	// Every evaluated check name (any status), so the scan diff can tell a check
+	// that PASSed (genuinely Fixed) from one no longer scanned (a profile was
+	// deselected) and not report the latter as Fixed.
+	currentChecks := make([]string, 0, len(list.Items))
 	for i := range list.Items {
 		item := &list.Items[i]
 		// Single label key reads: GetLabels() copies the whole map per call and
@@ -224,6 +228,9 @@ func (r *ClusterBaselineReconciler) aggregateStatus(ctx context.Context, cb *bas
 			status = "WAIVED"
 		}
 		tally(rc, status)
+		if name != "" {
+			currentChecks = append(currentChecks, name)
+		}
 		// Empty names never match waivers and must not enter scan-diff lists
 		// (newlyFailed/fixed deep-links and alerts would be meaningless).
 		if rawFail && name != "" {
@@ -234,6 +241,7 @@ func (r *ClusterBaselineReconciler) aggregateStatus(ctx context.Context, cb *bas
 		}
 	}
 	slices.Sort(currentFails)
+	slices.Sort(currentChecks)
 
 	// Preserve per-profile score history across the status.Profiles rebuild.
 	profHist := map[baselinev1alpha1.ProfileKey][]baselinev1alpha1.ScoreSnapshot{}
@@ -279,5 +287,5 @@ func (r *ClusterBaselineReconciler) aggregateStatus(ctx context.Context, cb *bas
 		return nil
 	}
 	cb.Status.NextScanTime = nextScanTime(cb.Spec.Schedule, time.Now())
-	return r.recordHistory(ctx, cb, cb.Status.Score, currentFails, weights, suites)
+	return r.recordHistory(ctx, cb, cb.Status.Score, currentFails, currentChecks, weights, suites)
 }
