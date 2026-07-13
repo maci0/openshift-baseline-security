@@ -83,28 +83,16 @@ const CompliancePage: React.FC = () => {
   );
   // No owned suites (or baseline still loading): skip list watches entirely.
   // useK8sWatchResource(null) returns empty/loaded without a namespace list.
-  const scansWatch = React.useMemo((): WatchK8sResource | null => {
-    if (!loaded || !suiteSel) {
-      return null;
-    }
-    return {
-      groupVersionKind: ComplianceScanGVK,
-      isList: true,
-      namespace: COMPLIANCE_NAMESPACE,
-      selector: suiteSel,
-    };
-  }, [loaded, suiteSel]);
-  const resultsWatch = React.useMemo((): WatchK8sResource | null => {
-    if (!loaded || !suiteSel) {
-      return null;
-    }
-    return {
-      groupVersionKind: ComplianceCheckResultGVK,
-      isList: true,
-      namespace: COMPLIANCE_NAMESPACE,
-      selector: suiteSel,
-    };
-  }, [loaded, suiteSel]);
+  // One shared builder so the two suite-scoped list watches cannot drift.
+  const listWatch = React.useCallback(
+    (groupVersionKind: WatchK8sResource['groupVersionKind']): WatchK8sResource | null =>
+      loaded && suiteSel
+        ? { groupVersionKind, isList: true, namespace: COMPLIANCE_NAMESPACE, selector: suiteSel }
+        : null,
+    [loaded, suiteSel],
+  );
+  const scansWatch = React.useMemo(() => listWatch(ComplianceScanGVK), [listWatch]);
+  const resultsWatch = React.useMemo(() => listWatch(ComplianceCheckResultGVK), [listWatch]);
   const [scans, , scansError] = useK8sWatchResource<Scan[]>(scansWatch);
   const [checkResults, checkResultsHookLoaded, checkResultsError] =
     useK8sWatchResource<ComplianceCheckResult[]>(resultsWatch);

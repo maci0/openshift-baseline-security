@@ -108,6 +108,21 @@ const statusStyle = (status: string) =>
 // Stable empty list for optional results prop (avoids new [] each render).
 const EMPTY_RESULTS: ComplianceCheckResult[] = [];
 
+// A single-value chip filter: no chips -> show all; one chip -> === (lets
+// multi-thousand-row deep-links skip Array.includes); many -> includes. getValue
+// derives the row's value once per filtered row. Shared by the status, severity,
+// and profile facets so their behavior cannot drift.
+const chipFilter =
+  (getValue: (r: ComplianceCheckResult) => string) =>
+  (input: { selected?: string[] }, r: ComplianceCheckResult): boolean => {
+    const sel = input.selected;
+    if (!sel?.length) {
+      return true;
+    }
+    const v = getValue(r);
+    return sel.length === 1 ? v === sel[0] : sel.includes(v);
+  };
+
 // Filter ids and CR status values stay English enums; only the visible title is
 // localized so chips, labels, and deep-links keep matching.
 const statusDisplayTitle = (status: string, t: (k: string) => string): string => {
@@ -546,17 +561,7 @@ const ResultsTab: React.FC<{
         filterGroupName: t('Status'),
         type: 'result-status',
         reducer: rowFilterStatus,
-        // selected is small (chip count); still avoid re-running rowFilterStatus
-        // when no chip is active (common default: show all). Single-chip deep
-        // links (FAIL / WAIVED) use === so multi-thousand rows skip includes.
-        filter: (input, r) => {
-          const sel = input.selected;
-          if (!sel?.length) {
-            return true;
-          }
-          const status = rowFilterStatus(r);
-          return sel.length === 1 ? status === sel[0] : sel.includes(status);
-        },
+        filter: chipFilter(rowFilterStatus),
         // SKIP is folded into NOT-APPLICABLE by effectiveStatus (operator
         // ResultCounts.notApplicable); a separate SKIP chip would never match.
         items: [
@@ -577,14 +582,7 @@ const ResultsTab: React.FC<{
         filterGroupName: t('Severity'),
         type: 'result-severity',
         reducer: (r) => checkSeverity(r),
-        filter: (input, r) => {
-          const sel = input.selected;
-          if (!sel?.length) {
-            return true;
-          }
-          const sev = checkSeverity(r);
-          return sel.length === 1 ? sev === sel[0] : sel.includes(sev);
-        },
+        filter: chipFilter(checkSeverity),
         items: ['high', 'medium', 'low', 'info', 'unknown'].map((s) => ({
           id: s,
           title: severityDisplayTitle(s, t),
@@ -593,17 +591,8 @@ const ResultsTab: React.FC<{
       {
         filterGroupName: t('Profiles'),
         type: 'result-profile',
-        reducer: (r) => suiteFilterKey(r.metadata.labels) ?? '',
-        filter: (input, r) => {
-          const sel = input.selected;
-          if (!sel?.length) {
-            return true;
-          }
-          // Parse suite once per filtered row when chips are active.
-          // Single-chip (Overview CountRow deep-link) uses === for multi-thousand CCRs.
-          const key = suiteFilterKey(r.metadata?.labels) ?? '';
-          return sel.length === 1 ? key === sel[0] : sel.includes(key);
-        },
+        reducer: (r) => suiteFilterKey(r.metadata?.labels) ?? '',
+        filter: chipFilter((r) => suiteFilterKey(r.metadata?.labels) ?? ''),
         items: profileItems,
       },
     ],
