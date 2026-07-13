@@ -16,6 +16,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 )
@@ -164,6 +165,23 @@ func eventually(t *testing.T, timeout time.Duration, desc string, fn func() erro
 		time.Sleep(5 * time.Second)
 	}
 	t.Fatalf("timed out after %s waiting for %s: %v", timeout, desc, last)
+}
+
+// applySpec re-applies desired.Spec under optimistic-lock retry. The operator
+// writes .status on the same singleton continuously, so a plain Update races a
+// status write and returns 409 Conflict; RetryOnConflict re-reads the live
+// object and re-applies the spec so tests do not flake against an active
+// reconciler. Status is never touched.
+func applySpec(ctx context.Context, c client.Client, desired *baselinev1alpha1.ClusterBaseline) error {
+	spec := desired.Spec
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		cur, err := getBaseline(ctx, c)
+		if err != nil {
+			return err
+		}
+		cur.Spec = spec
+		return c.Update(ctx, cur)
+	})
 }
 
 func getBaseline(ctx context.Context, c client.Client) (*baselinev1alpha1.ClusterBaseline, error) {

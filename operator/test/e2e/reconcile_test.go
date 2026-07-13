@@ -152,11 +152,11 @@ func TestProfileToggle(t *testing.T) {
 	t.Cleanup(func() {
 		restore, _ := getBaseline(ctx, c)
 		restore.Spec.Profiles = original
-		_ = c.Update(ctx, restore)
+		_ = applySpec(ctx, c, restore)
 	})
 
 	cb.Spec.Profiles = append(original, "e8")
-	if err := c.Update(ctx, cb); err != nil {
+	if err := applySpec(ctx, c, cb); err != nil {
 		t.Fatalf("add e8: %v", err)
 	}
 
@@ -168,7 +168,7 @@ func TestProfileToggle(t *testing.T) {
 
 	cb, _ = getBaseline(ctx, c)
 	cb.Spec.Profiles = original
-	if err := c.Update(ctx, cb); err != nil {
+	if err := applySpec(ctx, c, cb); err != nil {
 		t.Fatalf("remove e8: %v", err)
 	}
 
@@ -212,12 +212,12 @@ func TestDisableAllProfiles(t *testing.T) {
 		}
 		restore.Spec.Profiles = origProfiles
 		restore.Spec.TailoredProfiles = origTailored
-		_ = c.Update(ctx, restore)
+		_ = applySpec(ctx, c, restore)
 	})
 
 	cb.Spec.Profiles = []baselinev1alpha1.ProfileKey{}
 	cb.Spec.TailoredProfiles = []string{}
-	if err := c.Update(ctx, cb); err != nil {
+	if err := applySpec(ctx, c, cb); err != nil {
 		t.Fatalf("disable all profiles: %v", err)
 	}
 
@@ -254,20 +254,34 @@ func TestDisableAllProfiles(t *testing.T) {
 		})
 	}
 
-	restore, _ := getBaseline(ctx, c)
+	// Re-read for a full, current spec (applySpec replaces the whole spec, so a
+	// partial/empty one would wipe schedule/scoring/etc.). Fail rather than
+	// silently restore an empty spec if the read errors.
+	restore, err := getBaseline(ctx, c)
+	if err != nil {
+		t.Fatalf("re-read baseline for restore: %v", err)
+	}
 	restore.Spec.Profiles = origProfiles
 	restore.Spec.TailoredProfiles = origTailored
-	if err := c.Update(ctx, restore); err != nil {
+	if err := applySpec(ctx, c, restore); err != nil {
 		t.Fatalf("restore profiles: %v", err)
 	}
 
-	eventually(t, 2*time.Minute, "bindings recreated after restore", func() error {
+	// Wait for a fully settled, scored baseline (not just bindings) so a later
+	// e2e test in the shared-CR suite never observes a transient nil score.
+	eventually(t, 3*time.Minute, "baseline rescored after restore", func() error {
 		cur, getErr := getBaseline(ctx, c)
 		if getErr != nil {
 			return getErr
 		}
 		if r := conditionReason(cur, "ScanConfigured"); r != "BindingsCreated" {
 			return errf("ScanConfigured reason=%q", r)
+		}
+		if conditionStatus(cur, "Available") != "True" {
+			return errf("Available=%s", conditionStatus(cur, "Available"))
+		}
+		if cur.Status.Score == nil {
+			return errf("score not recomputed after restore")
 		}
 		for suite := range owned {
 			b := &unstructured.Unstructured{}

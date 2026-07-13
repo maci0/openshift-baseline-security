@@ -32,11 +32,11 @@ func TestInvalidScheduleDegrades(t *testing.T) {
 	t.Cleanup(func() {
 		restore, _ := getBaseline(ctx, c)
 		restore.Spec.Schedule = original
-		_ = c.Update(ctx, restore)
+		_ = applySpec(ctx, c, restore)
 	})
 
 	cb.Spec.Schedule = "not a cron"
-	if err := c.Update(ctx, cb); err != nil {
+	if err := applySpec(ctx, c, cb); err != nil {
 		t.Fatalf("set invalid schedule: %v", err)
 	}
 	eventually(t, 2*time.Minute, "Degraded on invalid schedule", func() error {
@@ -56,7 +56,7 @@ func TestInvalidScheduleDegrades(t *testing.T) {
 	// Restore and confirm it clears.
 	cur, _ := getBaseline(ctx, c)
 	cur.Spec.Schedule = original
-	if err := c.Update(ctx, cur); err != nil {
+	if err := applySpec(ctx, c, cur); err != nil {
 		t.Fatalf("restore schedule: %v", err)
 	}
 	eventually(t, 2*time.Minute, "Degraded clears after valid schedule", func() error {
@@ -87,12 +87,12 @@ func TestScheduleChangeUpdatesNextScan(t *testing.T) {
 	t.Cleanup(func() {
 		restore, _ := getBaseline(ctx, c)
 		restore.Spec.Schedule = original
-		_ = c.Update(ctx, restore)
+		_ = applySpec(ctx, c, restore)
 	})
 
 	// Pick an hour different from the current schedule.
 	cb.Spec.Schedule = "30 5 * * *"
-	if err := c.Update(ctx, cb); err != nil {
+	if err := applySpec(ctx, c, cb); err != nil {
 		t.Fatalf("set schedule: %v", err)
 	}
 	eventually(t, 2*time.Minute, "NextScanTime at 05:30 UTC", func() error {
@@ -123,11 +123,11 @@ func TestConsoleRemovedThenManaged(t *testing.T) {
 	t.Cleanup(func() {
 		restore, _ := getBaseline(ctx, c)
 		restore.Spec.Console.ManagementState = baselinev1alpha1.Managed
-		_ = c.Update(ctx, restore)
+		_ = applySpec(ctx, c, restore)
 	})
 
 	cb.Spec.Console.ManagementState = baselinev1alpha1.Removed
-	if err := c.Update(ctx, cb); err != nil {
+	if err := applySpec(ctx, c, cb); err != nil {
 		t.Fatalf("set console Removed: %v", err)
 	}
 	eventually(t, 3*time.Minute, "plugin Deployment removed + deregistered", func() error {
@@ -151,7 +151,7 @@ func TestConsoleRemovedThenManaged(t *testing.T) {
 	// Restore Managed and confirm the plugin comes back Ready.
 	cur, _ := getBaseline(ctx, c)
 	cur.Spec.Console.ManagementState = baselinev1alpha1.Managed
-	if err := c.Update(ctx, cur); err != nil {
+	if err := applySpec(ctx, c, cur); err != nil {
 		t.Fatalf("restore Managed: %v", err)
 	}
 	eventually(t, 3*time.Minute, "plugin redeployed and Ready", func() error {
