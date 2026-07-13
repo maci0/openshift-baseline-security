@@ -236,6 +236,17 @@ const RemediationsTab: React.FC<{
     [ordered, nodeNames],
   );
 
+  // Reset the confirm flag if the live watch emptied the batchable set while the
+  // modal was open (rows applied by auto-apply / another admin). Adjusting state
+  // during render (React-supported; re-renders before paint, no effect) rather
+  // than in an effect. Without this, batchConfirming stays true: anyModalOpen
+  // would suppress page alerts and the focus-restore effect, and a later watch
+  // update refilling batchable would reopen the confirm modal on a set the admin
+  // never chose.
+  if (batchConfirming && batchable.length === 0) {
+    setBatchConfirming(false);
+  }
+
   const doBatchApply = () => {
     if (!baseline || batchInProgress || batchable.length === 0) return;
     // Empty patch (all names invalid/filtered) would succeed as a no-op RV-only
