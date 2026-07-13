@@ -543,6 +543,25 @@ describe('errorMessage', () => {
       }),
     ).toBe('custom detail');
   });
+  // Every generic HTTP status phrase (not just Conflict) must defer to a real
+  // Status detail; dropping any case label would surface the useless phrase.
+  it('treats every generic HTTP status phrase as generic (json detail wins)', () => {
+    for (const phrase of [
+      'Conflict',
+      'Forbidden',
+      'Bad Request',
+      'Not Found',
+      'Unauthorized',
+      'Too Many Requests',
+      'Service Unavailable',
+      'Gateway Timeout',
+      'Internal Server Error',
+    ]) {
+      expect(errorMessage({ message: phrase, json: { message: 'real detail' } })).toBe(
+        'real detail',
+      );
+    }
+  });
   // Bare objects stringify to "[object Object]", which is useless in Alerts;
   // return null so callers fall back to a translated fail message.
   it('returns null for message-less plain objects (not "[object Object]")', () => {
@@ -1968,6 +1987,17 @@ describe('aggregateCounts', () => {
     const totals = aggregateCounts({ pass: 1, fail: 2 } as ResultCounts);
     expect(totals).toEqual(c(1, 2, 0, 0, 0, 0, 0, 0));
   });
+  it('folds a non-finite (NaN/Infinity) or non-numeric count to 0, never poisoning totals', () => {
+    // A tampered non-numeric/non-finite count must not string-concatenate or
+    // spread NaN/Infinity across the donut totals.
+    const totals = aggregateCounts(
+      { pass: Number.NaN, fail: Number.POSITIVE_INFINITY } as ResultCounts,
+      { pass: '5' as unknown as number, fail: 3 } as ResultCounts,
+    );
+    expect(totals.pass).toBe(5); // NaN -> 0, '5' -> 5
+    expect(totals.fail).toBe(3); // Infinity -> 0, 3 -> 3
+    expect(Number.isFinite(totals.pass + totals.fail)).toBe(true);
+  });
   // Status count fields may be missing, huge, or negative from stale CRs.
   it('fuzz: never throws; all fields are finite numbers', () => {
     for (let i = 0; i < 500; i++) {
@@ -2847,6 +2877,23 @@ describe('buildReportHtml', () => {
 });
 
 describe('tailoredProfileManifest', () => {
+  it('keeps a rule present in both enable and disable only in disable (fail closed)', () => {
+    // (name, extends, disableRules, enableRules); a rule in both must not ship in
+    // both enableRules and disableRules (self-conflicting manifest).
+    const m = tailoredProfileManifest('cis-custom', 'ocp4-cis', ['dup', 'off-only'], [
+      'dup',
+      'on-only',
+    ]);
+    const spec = m.spec as {
+      enableRules?: { name: string }[];
+      disableRules?: { name: string }[];
+    };
+    const enabled = (spec.enableRules ?? []).map((r) => r.name);
+    const disabled = (spec.disableRules ?? []).map((r) => r.name);
+    expect(disabled).toContain('dup');
+    expect(enabled).not.toContain('dup');
+    expect(enabled).toContain('on-only');
+  });
   it('builds a TailoredProfile CR, omitting empty rule lists', () => {
     const m = tailoredProfileManifest('cis-custom', 'ocp4-cis', []);
     expect(m.kind).toBe('TailoredProfile');

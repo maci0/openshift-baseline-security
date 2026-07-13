@@ -14,7 +14,10 @@ test.describe('Baseline Security dark theme', () => {
     await forceDark(page);
     // The page background is dark (near-black), proving the theme applied.
     const bg = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
-    const [r, g, b] = bg.match(/\d+/g)!.map(Number);
+    const [r, g, b, a = 1] = bg.match(/[\d.]+/g)!.map(Number);
+    // A transparent body (rgba(...,0)) would pass r+g+b<150 vacuously; require the
+    // background to actually be opaque before trusting its darkness.
+    expect(a).toBeGreaterThan(0.5);
     expect(r + g + b).toBeLessThan(150);
     // Core content still visible.
     await expect(page.getByText('of 100', { exact: true })).toBeVisible();

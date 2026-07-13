@@ -366,7 +366,11 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
   }
 
   return (
-    <PageSection ref={regionRef} tabIndex={-1}>
+    <PageSection>
+      {/* Real DOM focus fallback: PatternFly PageSection is not forwardRef, so a
+          ref on it is dropped. restoreFocus targets this sentinel when a modal
+          trigger unmounts on success, recovering focus to the tab top. */}
+      <div ref={regionRef} tabIndex={-1} />
       {/* Hide page-top error while a modal owns the same message. */}
       {error && !unbinding && !disablingLast && !creating && (
         <Alert

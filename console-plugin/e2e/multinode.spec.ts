@@ -22,9 +22,10 @@ test.describe('Baseline Security multi-node / multi-benchmark', () => {
     await gotoTab(page, '');
     await expect(page.getByText('CIS', { exact: true }).first()).toBeVisible();
     await expect(page.getByText('PCI-DSS').first()).toBeVisible();
-    // Each card carries Pass/Fail/Manual rows.
-    await expect(page.getByText('Pass').first()).toBeVisible();
-    await expect(page.getByText('Fail').first()).toBeVisible();
+    // Each card carries Pass/Fail rows labelled exactly "Pass"/"Fail"; exact
+    // match so this hits the card rows, not the donut legend "Pass (N)".
+    await expect(page.getByText('Pass', { exact: true }).first()).toBeVisible();
+    await expect(page.getByText('Fail', { exact: true }).first()).toBeVisible();
   });
 
   test('per-profile cards list Inconsistent, matching the donut', async ({ page }) => {

@@ -354,7 +354,11 @@ const RemediationsTab: React.FC<{
   }
 
   return (
-    <PageSection ref={regionRef} tabIndex={-1}>
+    <PageSection>
+      {/* Real DOM focus fallback: PatternFly PageSection is not forwardRef, so a
+          ref on it is dropped. restoreFocus targets this sentinel when a modal
+          trigger unmounts on success, recovering focus to the tab top. */}
+      <div ref={regionRef} tabIndex={-1} />
       {/* Only when node remediations exist: during loading / empty / platform-only
           the reboot warning is irrelevant (or misleading) noise. */}
       {nodeNames.size > 0 && (

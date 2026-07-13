@@ -58,8 +58,8 @@ func TestPublishMetrics(t *testing.T) {
 	if got := testutil.ToFloat64(complianceScore); got != 87 {
 		t.Fatalf("score gauge = %v, want 87", got)
 	}
-	if got := testutil.ToFloat64(statusObservedTimestamp); got <= 0 {
-		t.Fatalf("status observation timestamp = %v, want positive Unix time", got)
+	if got := testutil.ToFloat64(statusObservedTimestamp); got <= 0 || time.Now().Unix()-int64(got) > 60 {
+		t.Fatalf("status observation timestamp = %v, want ~now Unix time (a stale constant must not pass)", got)
 	}
 	if got := testutil.ToFloat64(remediationBatchActive); got != 1 {
 		t.Fatalf("batch active gauge = %v, want 1", got)
@@ -309,7 +309,7 @@ func TestClearPublishedMetrics(t *testing.T) {
 	if got := testutil.ToFloat64(newlyFailedCount); got != 0 {
 		t.Fatalf("newly failed after clear = %v, want 0", got)
 	}
-	if got := testutil.ToFloat64(statusObservedTimestamp); got <= 0 {
-		t.Fatalf("observation timestamp after clear = %v, want positive (avoid StatusStale)", got)
+	if got := testutil.ToFloat64(statusObservedTimestamp); got <= 0 || time.Now().Unix()-int64(got) > 60 {
+		t.Fatalf("observation timestamp after clear = %v, want ~now (avoid StatusStale; stale constant must not pass)", got)
 	}
 }

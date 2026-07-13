@@ -179,6 +179,12 @@ func TestMetricsTLSOptsMinVersion(t *testing.T) {
 	if cfg.GetCertificate == nil {
 		t.Fatal("GetCertificate not set")
 	}
+	// HTTP/2 is disabled on the metrics endpoint as a Rapid Reset (CVE-2023-44487
+	// / CVE-2023-39325) mitigation. Pin it: dropping NextProtos re-enables h2 and
+	// reopens the DoS with no other test noticing.
+	if len(cfg.NextProtos) != 1 || cfg.NextProtos[0] != "http/1.1" {
+		t.Fatalf("NextProtos = %v, want [http/1.1] (HTTP/2 must stay disabled)", cfg.NextProtos)
+	}
 }
 
 // Concurrent handshakes share one self-signed identity and never return nil/err

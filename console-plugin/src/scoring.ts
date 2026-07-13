@@ -43,10 +43,14 @@ export const clusterScore = (baselines?: ClusterBaseline[]): number | null => {
   return b?.status?.score ?? null;
 };
 
-// Coerce so a tampered non-numeric count (blocked by the CRD integer schema,
-// but defended anyway, matching report.ts) can never string-concatenate into
-// the donut totals; NaN/undefined fold to 0.
-const count = (n: number | undefined): number => Number(n) || 0;
+// Coerce so a tampered non-numeric/non-finite count (blocked by the CRD integer
+// schema, but defended anyway) can never string-concatenate or spread NaN /
+// Infinity into the donut totals; NaN, ±Infinity, undefined, and non-numeric
+// all fold to 0.
+const count = (n: number | undefined): number => {
+  const x = Number(n);
+  return Number.isFinite(x) ? x : 0;
+};
 
 // Sum result counts across profiles (built-in + tailored) for the composition
 // donut, so its slices match the score, which includes all of them.

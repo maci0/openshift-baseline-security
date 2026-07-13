@@ -82,6 +82,28 @@ func FuzzBatchRemediationNames(f *testing.F) {
 // FuzzPoolFromRemediation: untrusted remediation object + scan-name label drive
 // which MachineConfigPool is paused during batch apply. Must never panic;
 // non-MachineConfig kinds yield ""; MachineConfig role label wins over scan.
+// TestPoolFromRemediationToleratesNonJSONObject: spec.current.object can hold a
+// non-JSON Go value (int, not int64) on a hand-built or partially-converted
+// remediation. poolFromRemediation must not panic, which is why it reads via
+// NestedFieldNoCopy + type assertions instead of NestedMap (whose deep copy
+// DeepCopyJSON-panics on such values). The fuzz builds only string-valued maps,
+// so this covers the class the no-copy read exists for.
+func TestPoolFromRemediationToleratesNonJSONObject(t *testing.T) {
+	rem := &unstructured.Unstructured{Object: map[string]any{
+		"spec": map[string]any{"current": map[string]any{"object": map[string]any{
+			"kind": "MachineConfig",
+			// int (not int64) is non-JSON: NestedMap over this map would panic.
+			"metadata": map[string]any{"labels": map[string]any{"machineconfiguration.openshift.io/role": 42}},
+		}}},
+	}}
+	rem.SetLabels(map[string]string{"compliance.openshift.io/scan-name": "ocp4-cis-node-worker"})
+	// Must not panic; a non-string role is ignored and the pool falls back to the
+	// scan-name suffix ("worker").
+	if got := poolFromRemediation(rem); got != "worker" {
+		t.Fatalf("poolFromRemediation with non-JSON role = %q, want worker (scan-name fallback)", got)
+	}
+}
+
 func FuzzPoolFromRemediation(f *testing.F) {
 	f.Add("MachineConfig", "worker", "ocp4-cis-node-master")
 	f.Add("ConfigMap", "worker", "ocp4-cis-node-worker")

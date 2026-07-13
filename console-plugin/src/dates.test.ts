@@ -1,11 +1,31 @@
 import {
   dateInputEndOfDayIso,
+  expiresAtMs,
   safeLocale,
   formatLocalDate,
   formatLocalDateTime,
   formatCount,
   formatChartDate,
 } from './dates';
+
+describe('expiresAtMs date-only branch', () => {
+  it('treats a bare YYYY-MM-DD expiry as end of the LOCAL calendar day', () => {
+    const ms = expiresAtMs('2026-07-11');
+    const d = new Date(ms);
+    // Local end-of-day (setHours(23,59,59,999)), regardless of the runner TZ.
+    expect(d.getFullYear()).toBe(2026);
+    expect(d.getMonth()).toBe(6);
+    expect(d.getDate()).toBe(11);
+    expect(d.getHours()).toBe(23);
+    expect(d.getMinutes()).toBe(59);
+    // Strictly later than UTC midnight, the buggy `new Date('YYYY-MM-DD')` value
+    // that would expire the waiver up to ~24h early for UTC+ users.
+    expect(ms).toBeGreaterThan(Date.parse('2026-07-11T00:00:00Z'));
+  });
+  it('returns NaN for an unparseable date-only-shaped string', () => {
+    expect(Number.isNaN(expiresAtMs('2026-02-31'))).toBe(true);
+  });
+});
 
 // dates.ts parses untrusted strings: ISO timestamps from CRs / hand-edits and
 // locale tags from the console document. The comments there claim these never
