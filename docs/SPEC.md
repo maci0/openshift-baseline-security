@@ -96,30 +96,38 @@ defaults and presentation are missing. Both are cheap. That is this project.
 
 Two deliverables, one repo (split-ready, see §9):
 
-```
-                       ┌─────────────────────────────────────────┐
-                       │ OpenShift web console                   │
-                       │  ┌───────────────────────────────────┐  │
-                       │  │ baseline-security console plugin  │  │
-                       │  │ (React/PF6, served by nginx pod)  │  │
-                       │  └───────────────┬───────────────────┘  │
-                       └──────────────────┼──────────────────────┘
-                                          │ user's own bearer token,
-                                          │ k8s API via console proxy
-                                          ▼
- ┌──────────────────────┐   creates   ┌──────────────────────────────┐
- │ baseline-security-   │────────────▶│ compliance.openshift.io CRs  │
- │ operator             │             │ ScanSetting, ScanSetting-    │
- │                      │   watches   │ Binding, ComplianceSuite,    │
- │ reconciles:          │◀────────────│ ComplianceScan, CheckResult, │
- │  - ClusterBaseline   │             │ Remediation                  │
- │  - plugin Deployment │             └──────────────┬───────────────┘
- │  - ConsolePlugin CR  │                            │ reconciled by
- │  - CO Subscription   │             ┌──────────────▼───────────────┐
- └──────────────────────┘             │ Compliance Operator          │
-                                      │ (Red Hat, openshift-         │
-                                      │  compliance ns, OpenSCAP)    │
-                                      └──────────────────────────────┘
+```mermaid
+flowchart TB
+    admin(["Cluster admin"])
+
+    subgraph console["OpenShift web console"]
+        plugin["<b>baseline-security console plugin</b><br/>React · PatternFly 6<br/>served by an nginx pod"]
+    end
+
+    baseline["<b>ClusterBaseline</b> — our CRD<br/>profiles · waivers · schedule · scoring"]
+
+    operator["<b>baseline-security-operator</b><br/>reconciles ClusterBaseline<br/>owns plugin Deployment · ConsolePlugin<br/>ScanSetting · ScanSettingBinding<br/>Compliance Operator Subscription"]
+
+    subgraph comp["openshift-compliance namespace"]
+        co["<b>Compliance Operator</b><br/>Red Hat · OpenSCAP engine"]
+        crs["compliance.openshift.io results<br/>ComplianceSuite · ComplianceScan<br/>ComplianceCheckResult · ComplianceRemediation"]
+    end
+
+    admin --> console
+    plugin -->|"user bearer token,<br/>k8s API via console proxy"| baseline
+    plugin -. reads results .-> crs
+    operator -->|reconciles| baseline
+    operator -->|"creates ScanSetting + Bindings"| co
+    co -->|scans, writes results| crs
+    operator -. watches, aggregates score .-> crs
+
+    classDef ours fill:#004b95,stroke:#002952,color:#ffffff
+    classDef rh fill:#c9190b,stroke:#7d1007,color:#ffffff
+    classDef api fill:#e7f1fa,stroke:#4394e5,color:#151515
+    class plugin,operator ours
+    class co rh
+    class baseline,crs api
+    linkStyle default stroke:#6a6e73,stroke-width:1.5px
 ```
 
 ### 4.1 Operator (`baseline-security-operator`)
