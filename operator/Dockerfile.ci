@@ -1,0 +1,22 @@
+# OpenShift CI build variant (Prow / ci-operator). Base images come from
+# registry.ci.openshift.org instead of registry.access.redhat.com, so the build
+# runs inside the OpenShift CI cluster once the repo is onboarded to
+# openshift/release. Build steps mirror the release Dockerfile; only the FROM
+# lines differ. The builder/base tags must track the target OCP release and are
+# finalized in the openshift/release ci-operator config (see .ci-operator.yaml).
+FROM registry.ci.openshift.org/ocp/builder:rhel-9-golang-1.26-openshift-4.22 AS build
+ENV GOTOOLCHAIN=go1.26.5
+ENV TZ=UTC LC_ALL=C GOFLAGS=-mod=readonly
+WORKDIR /go/src/github.com/maci0/baseline-security-operator
+COPY go.mod go.sum ./
+RUN go mod download && go mod verify
+COPY api/ api/
+COPY cmd/ cmd/
+COPY internal/ internal/
+RUN CGO_ENABLED=0 go build -trimpath -buildvcs=false -mod=readonly -ldflags="-s -w -buildid=" -o /tmp/manager ./cmd \
+	&& test -s /tmp/manager
+
+FROM registry.ci.openshift.org/ocp/4.22:base-rhel9
+COPY --from=build /tmp/manager /usr/bin/manager
+USER 65532:65532
+ENTRYPOINT ["/usr/bin/manager"]

@@ -1,0 +1,9 @@
+# OpenShift CI (ci-operator) build root for this repository. The full ci-operator
+# config (tests, image promotion to registry.ci.openshift.org, release gating)
+# lives in openshift/release once onboarded; this repo-local file only pins the
+# build root so `ci-operator --config` and local `make` agree on the toolchain.
+# Keep the tag in lockstep with go.mod (go1.26.5) and the target OCP release.
+build_root_image:
+  namespace: ocp
+  name: builder
+  tag: rhel-9-golang-1.26-openshift-4.22

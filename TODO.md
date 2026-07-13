@@ -116,10 +116,10 @@ Legend: `[x]` done · `[ ]` planned · **(H/M/L)** rough value.
 
 ## Productization
 
-Rename the API group under an `openshift.io` domain, add a
-`registry.ci.openshift.org` build variant, onboard ci-operator, split the
-plugin into its own repo, and file an enhancement proposal referencing
-`docs/SPEC.md`.
+Done: API group is `baselinesecurity.openshift.io`; a `registry.ci.openshift.org`
+build variant ships (`operator/Dockerfile.ci` + `.ci-operator.yaml`). Remaining:
+finish ci-operator onboarding in openshift/release, split the plugin into its own
+repo, and file an enhancement proposal referencing `docs/SPEC.md`.
 
 ## External
 
