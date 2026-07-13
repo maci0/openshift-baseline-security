@@ -442,7 +442,7 @@ same Makefile targets (`test`, `lint`, `docker-build`).
 | 0.2 | Full profile catalog (G2), rescan button, OLM bundle + catalog. | Done; OLM install path verified on-cluster. community-operators submission pending |
 | 0.3 (S2) | Score history + trendline; tailored profiles; metrics/alerts. | Done (30-entry status ring + trend chart) |
 | 0.4 (S1 + expand-compliance-features) | Remediation gated apply + MCP-paused batch; waivers; scan diff; severity-weighted score; schedule/report UI; TailoredProfile authoring; benign INCONSISTENT→PASS; Helm removed (OLM only). | Done; see CHANGELOG.md 0.4.0 |
-| Post-0.4 (main / Unreleased) | Empty `spec.profiles: []` disables scanning; DNS-1123 `complianceCatalogSource`; raw-FAIL scan-diff; status list-type map-merge; HA-safe score/fail alerts; dynamic informer; post-0.4 metrics/alerts (see CHANGELOG **[Unreleased]**). | On `main`; not in published 0.4.0 tags |
+| 0.5.0 (breaking group rename) | Empty `spec.profiles: []` disables scanning; DNS-1123 `complianceCatalogSource`; raw-FAIL scan-diff; status list-type map-merge; HA-safe score/fail alerts; dynamic informer; post-0.4 metrics/alerts (see CHANGELOG **[Unreleased]**). | Done; see CHANGELOG.md 0.5.0 |
 | Productization | Rename API group to openshift.io namespace, Dockerfile.rhel + ci-operator onboarding, split repos, Red Hat enhancement proposal referencing this spec. | Open |
 
 ## 11. Prerequisites

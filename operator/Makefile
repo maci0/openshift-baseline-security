@@ -1,7 +1,7 @@
 # Release version: keep in lockstep with the CSV and console-plugin package.json.
 # Bump PREV_VERSION when cutting a release that changes the OLM replaces edge.
-VERSION ?= 0.4.0
-PREV_VERSION ?= 0.3.1
+VERSION ?= 0.5.0
+PREV_VERSION ?= 0.4.0
 IMG ?= quay.io/openshift-baseline-security/baseline-security-operator:latest
 # Plugin image the operator injects via RELATED_IMAGE_CONSOLE_PLUGIN on deploy.
 PLUGIN_IMG ?= quay.io/openshift-baseline-security/baseline-security-console-plugin:latest

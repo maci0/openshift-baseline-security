@@ -41,6 +41,16 @@ depend on those tags.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-13
+
+OLM upgrade edge: `baseline-security-operator.v0.5.0` replaces `v0.4.0`.
+
+**Breaking:** the API group was renamed `baselinesecurity.io` →
+`baselinesecurity.openshift.io`. This minor carries it (a hard rename at
+`v1alpha1`, no conversion) per the project's 0.x policy that breaking changes
+land in a minor bump. Existing `ClusterBaseline` CRs are under the old group and
+must be recreated after upgrade (see Migration notes).
+
 ### Added
 
 - Disable scanning by clearing `spec.profiles` to an empty list (with no
@@ -146,7 +156,7 @@ depend on those tags.
 - Console plugin no longer crash-loops: the nginx `access_log` directive needs a
   format name before `if=`.
 
-### Migration notes (0.4.x → next)
+### Migration notes (0.4.x → 0.5.0)
 
 1. If you set `spec.complianceCatalogSource`, ensure it is a DNS-1123 subdomain
    matching a CatalogSource `metadata.name` (for example `redhat-operators`).
@@ -298,7 +308,8 @@ Initial packaged release.
   Remediations, Profiles).
 - OLM bundle + file-based catalog; string-enum spec; OpenShift-style conditions.
 
-[Unreleased]: https://github.com/maci0/openshift-baseline-security/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/maci0/openshift-baseline-security/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/maci0/openshift-baseline-security/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/maci0/openshift-baseline-security/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/maci0/openshift-baseline-security/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/maci0/openshift-baseline-security/compare/v0.2.1...v0.3.0

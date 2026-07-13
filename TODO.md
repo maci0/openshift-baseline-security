@@ -1,6 +1,6 @@
 # Roadmap
 
-Status of **openshift-baseline-security**. Current release **0.4.0**
+Status of **openshift-baseline-security**. Current release **0.5.0**
 (cluster-scoped `ClusterBaseline` API `v1alpha1`, string-enum spec, OLM
 channel `alpha`). See [CHANGELOG.md](CHANGELOG.md) for consumer-facing notes
 and upgrade impact. Verified end to end on a single-node OpenShift 4.22
@@ -60,7 +60,7 @@ Legend: `[x]` done · `[ ]` planned · **(H/M/L)** rough value.
 
 ### Packaging & quality
 - [x] OLM bundle + FBC catalog (`make bundle` validates); upgrade graph
-      0.2.0 → 0.2.1 → 0.3.0 → 0.3.1 → 0.4.0 (`replaces` chain); images/tools
+      0.2.0 → 0.2.1 → 0.3.0 → 0.3.1 → 0.4.0 → 0.5.0 (`replaces` chain); images/tools
       digest-pinned where applicable.
 - [x] CI (unit, fuzz, lint, generated-file drift, image builds).
 - [x] E2E: operator Go (`make test-e2e`) + console Playwright
@@ -68,7 +68,7 @@ Legend: `[x]` done · `[ ]` planned · **(H/M/L)** rough value.
 - [x] Full OLM install + upgrade verified on the SNO via the internal
       registry (no quay dependency).
 
-### On main (CHANGELOG [Unreleased], not in published 0.4.0 tags)
+### In 0.5.0 (CHANGELOG [0.5.0]; the breaking group rename shipped here)
 - [x] Lazy dynamic informer on ComplianceScan/Remediation/CheckResult once
       CRDs register; poll requeue remains (1m steady, 15s Progressing/batch,
       shortens toward soonest active waiver expiry).

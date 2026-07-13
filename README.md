@@ -7,10 +7,10 @@ Install it and the cluster benchmarks itself against the CIS OpenShift
 Benchmark out of the box, rendered natively in the console under
 **Administration → Compliance**.
 
-**Current release: 0.4.0** (OLM channel `alpha`, API `baselinesecurity.openshift.io/v1alpha1`).
+**Current release: 0.5.0** (OLM channel `alpha`, API `baselinesecurity.openshift.io/v1alpha1`).
 Consumer-facing release notes and upgrade notes: [CHANGELOG.md](CHANGELOG.md).
 Work on `main` that is not yet cut lives under CHANGELOG **[Unreleased]** and is
-not part of the published 0.4.0 CSV/image tags until the next version bump
+not part of the published 0.5.0 CSV/image tags until the next version bump
 (`make verify-versions` keeps those tags aligned with **Current release**).
 
 ## Features
@@ -178,7 +178,7 @@ for every publish.
 - **Install path**: OLM bundle + file-based catalog is the only supported
   install. Helm was removed in 0.4.0.
 - **Upgrade path**: OLM `replaces` chain
-  `0.2.0 → 0.2.1 → 0.3.0 → 0.3.1 → 0.4.0`. Do not skip edges when building a
+  `0.2.0 → 0.2.1 → 0.3.0 → 0.3.1 → 0.4.0 → 0.5.0`. Do not skip edges when building a
   multi-version catalog if you need in-place upgrades from older installs.
 - **Notable 0.4.0 behavior change**: benign Compliance Operator `INCONSISTENT`
   results (PASS where applicable, NOT-APPLICABLE elsewhere) now count as PASS
@@ -199,7 +199,7 @@ for every publish.
   `ComplianceScanStale` / `ComplianceRegressions`; dynamic informer watch on
   Compliance CRs. Details and migration notes: [CHANGELOG.md](CHANGELOG.md)
   **[Unreleased]**.
-  Do not push `:0.4.0` (or any current `VERSION`) images from `main` while
+  Do not push `:0.5.0` (or any current `VERSION`) images from `main` while
   this section still has entries; that would re-label unreleased bits as a
   published version.
 - **Version sources** (must stay equal; `make verify-versions` checks them):
