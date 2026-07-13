@@ -1,6 +1,6 @@
 # OpenShift Baseline Security
 
-Design specification for the product on `main` (0.4.x line plus work still under
+Design specification for the product on `main` (0.5.x line plus work still under
 CHANGELOG **[Unreleased]**). Targets OpenShift Container Platform 4.22. What is
 in a published CSV/image tag is defined only by [CHANGELOG.md](../CHANGELOG.md)
 and the **Current release** line in the root README; do not assume every
@@ -193,8 +193,9 @@ Responsibilities:
 
 ### 4.2 API: `ClusterBaseline` CRD
 
-Group `baselinesecurity.openshift.io/v1alpha1` (neutral OSS domain; productization
-would move it under an openshift.io group). Cluster-scoped singleton named
+Group `baselinesecurity.openshift.io/v1alpha1` (renamed from the neutral
+`baselinesecurity.io` in 0.5.0 to sit under an `openshift.io` group).
+Cluster-scoped singleton named
 `cluster`, enforced by CEL validation on metadata.name (openshift config CR
 convention).
 
@@ -366,7 +367,7 @@ ComplianceAsCode/compliance-operator master, and npm dist-tags).
 
 | Tool | Version | Matches |
 |---|---|---|
-| Go | 1.25 | openshift 4.22 builder (`rhel-9-golang-1.25-openshift-4.22`); compliance-operator master is go 1.25.8 |
+| Go | 1.26 | openshift 4.22 builder (`rhel-9-golang-1.26-openshift-4.22`); compliance-operator master is go 1.25.8 |
 | Kubernetes | 1.35 (`k8s.io/*` v0.35.x) | OCP 4.22 kube level (4.21 = 1.34, 4.20 = 1.33) |
 | controller-runtime | v0.23.3 | release-0.23 targets k8s 1.35; same pairing as compliance-operator master |
 | dynamic-plugin-sdk | 4.22.0 (`4.22-latest` dist-tag) | console 4.22 (SDK major.minor == console version since 4.18) |
@@ -442,8 +443,8 @@ same Makefile targets (`test`, `lint`, `docker-build`).
 | 0.2 | Full profile catalog (G2), rescan button, OLM bundle + catalog. | Done; OLM install path verified on-cluster. community-operators submission pending |
 | 0.3 (S2) | Score history + trendline; tailored profiles; metrics/alerts. | Done (30-entry status ring + trend chart) |
 | 0.4 (S1 + expand-compliance-features) | Remediation gated apply + MCP-paused batch; waivers; scan diff; severity-weighted score; schedule/report UI; TailoredProfile authoring; benign INCONSISTENT→PASS; Helm removed (OLM only). | Done; see CHANGELOG.md 0.4.0 |
-| 0.5.0 (breaking group rename) | Empty `spec.profiles: []` disables scanning; DNS-1123 `complianceCatalogSource`; raw-FAIL scan-diff; status list-type map-merge; HA-safe score/fail alerts; dynamic informer; post-0.4 metrics/alerts (see CHANGELOG **[Unreleased]**). | Done; see CHANGELOG.md 0.5.0 |
-| Productization | Rename API group to openshift.io namespace, Dockerfile.rhel + ci-operator onboarding, split repos, Red Hat enhancement proposal referencing this spec. | Open |
+| 0.5.0 (breaking group rename) | Empty `spec.profiles: []` disables scanning; DNS-1123 `complianceCatalogSource`; raw-FAIL scan-diff; status list-type map-merge; HA-safe score/fail alerts; dynamic informer; post-0.4 metrics/alerts (see CHANGELOG **[0.5.0]**). | Done; see CHANGELOG.md 0.5.0 |
+| Productization | Done in 0.5.0: API group renamed to `baselinesecurity.openshift.io`; `registry.ci.openshift.org` build variant (`Dockerfile.ci` + `.ci-operator.yaml`). Remaining: finish ci-operator onboarding in openshift/release, split the plugin into its own repo, Red Hat enhancement proposal referencing this spec. | Partial |
 
 ## 11. Prerequisites
 

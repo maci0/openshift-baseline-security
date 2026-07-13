@@ -47,7 +47,7 @@ window and root `SECURITY.md`. Console host peer range is
 - Payload components: `main` tracks the next OCP; `release-4.y` branches cut
   at feature freeze carry the complete toolchain snapshot. Toolchain is pinned
   by the per-branch build-root image
-  (`registry.ci.openshift.org/ocp/builder:rhel-9-golang-1.25-openshift-4.22`),
+  (`registry.ci.openshift.org/ocp/builder:rhel-9-golang-1.26-openshift-4.22`),
   declared in `.ci-operator.yaml`, bumped centrally by ART.
 - Layered OLM operators (Compliance Operator model): own version stream,
   single branch spanning several OCP versions; compatibility declared in the
@@ -73,7 +73,7 @@ current (`make generate manifests && git diff --exit-code`).
 
 Conventions applied:
 - k8s.io/* modules match the target OCP kube level (4.22 = v0.35.x),
-  controller-runtime matching (v0.23.x), Go per build root (1.25).
+  controller-runtime matching (v0.23.x), Go per build root (1.26).
 - Unstructured clients for foreign CRs touched only lightly (compliance,
   OLM, console operator config) rather than importing their Go modules.
   Typed APIs only for owned CRDs and core objects.

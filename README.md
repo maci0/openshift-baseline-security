@@ -183,11 +183,16 @@ for every publish.
 - **Notable 0.4.0 behavior change**: benign Compliance Operator `INCONSISTENT`
   results (PASS where applicable, NOT-APPLICABLE elsewhere) now count as PASS
   in score, metrics, and UI. Scores can rise on upgrade without remediations.
-- **Unreleased (not yet versioned)**: empty `spec.profiles: []` disables
-  scanning; `spec.complianceCatalogSource` is DNS-1123-validated; scan-diff
-  tracks raw FAIL (waivers no longer clear `newlyFailed` / invent `fixed`);
-  status list-types for conditions/profiles/tailoredProfiles are map-merge;
-  HA-safe score/fail alert expressions; metrics
+- **0.5.0 (breaking)**: API group renamed `baselinesecurity.io` →
+  `baselinesecurity.openshift.io` (existing `ClusterBaseline` CRs must be
+  recreated; see Migration notes). Also in 0.5.0: empty `spec.profiles: []`
+  disables scanning; `spec.complianceCatalogSource` is DNS-1123-validated; OKD
+  catalog auto-detection (`community-operators` when `redhat-operators` is
+  absent); a `registry.ci.openshift.org` build variant (`Dockerfile.ci` +
+  `.ci-operator.yaml`); scan-diff tracks raw FAIL (waivers no longer clear
+  `newlyFailed` / invent `fixed`); status list-types for
+  conditions/profiles/tailoredProfiles are map-merge; HA-safe score/fail alert
+  expressions; metrics
   `baseline_security_status_observed_timestamp_seconds` /
   `baseline_security_remediation_batch_active` /
   `baseline_security_condition` /
@@ -198,10 +203,7 @@ for every publish.
   `ComplianceStatusStale` / `RemediationBatchStuck` / `ClusterBaselineDegraded` /
   `ComplianceScanStale` / `ComplianceRegressions`; dynamic informer watch on
   Compliance CRs. Details and migration notes: [CHANGELOG.md](CHANGELOG.md)
-  **[Unreleased]**.
-  Do not push `:0.5.0` (or any current `VERSION`) images from `main` while
-  this section still has entries; that would re-label unreleased bits as a
-  published version.
+  **[0.5.0]**.
 - **Version sources** (must stay equal; `make verify-versions` checks them):
   `operator/Makefile` (`VERSION` / `PREV_VERSION`), the CSV in
   `operator/bundle/manifests/baseline-security-operator.clusterserviceversion.yaml`
@@ -209,8 +211,10 @@ for every publish.
   `console-plugin/package.json` (`version` + `consolePlugin.version`),
   `operator/catalog/package.yaml` channel entry (name + replaces) when present,
   `CHANGELOG.md` (`## [VERSION]`, `## [PREV_VERSION]`, `## [Unreleased]`, and
-  the `[VERSION]:` / `[PREV_VERSION]:` / `[Unreleased]:` compare footers), and
-  this README's **Current release** line and upgrade path.
+  the `[VERSION]:` / `[PREV_VERSION]:` / `[Unreleased]:` compare footers),
+  this README's **Current release** line and upgrade path, and the Go toolchain
+  lockstep between `go.mod`, the release `Dockerfile`, `Dockerfile.ci`, and
+  `.ci-operator.yaml` (plus Node between `.nvmrc` and the console Dockerfile).
 - **Cutting a release**: bump `VERSION`/`PREV_VERSION`, CSV name/version/images/
   `replaces`, console-plugin versions, move CHANGELOG `[Unreleased]` into
   `## [VERSION]` with a `### Migration notes` section and footer compare

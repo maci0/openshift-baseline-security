@@ -572,7 +572,7 @@ an accepted risk neither inflates nor tanks the score.
       ClusterBaseline not named `cluster` (CEL rule).
 - [ ] **Profiles validation**: duplicate profiles and unknown profile keys are
       rejected by CRD schema; an empty list is allowed (disables scanning when
-      `tailoredProfiles` is also empty; see CHANGELOG Unreleased / SPEC §4.1).
+      `tailoredProfiles` is also empty; see CHANGELOG [0.5.0] / SPEC §4.1).
 - [ ] **TailoredProfiles validation**: duplicate, empty, too-long, uppercase,
       underscore, and path-like values are rejected; DNS-subdomain-like names
       are accepted; max length 51 leaves room for `baseline-tp-` suite labels.

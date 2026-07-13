@@ -80,6 +80,9 @@ endef
 # Escape dots so grep treats VERSION as a literal (0.4.0 must not match 0x4y0).
 VERSION_RE := $(subst .,\.,$(VERSION))
 PREV_VERSION_RE := $(subst .,\.,$(PREV_VERSION))
+GO_VERSION_RE := $(subst .,\.,$(GO_VERSION))
+# Go minor (1.26 from 1.26.5) for the CI builder image tag (golang-1.26-...).
+GO_MINOR := $(basename $(GO_VERSION))
 
 .PHONY: all
 all: build
@@ -353,8 +356,18 @@ verify-versions:
 		|| { echo "CSV Changelog link must point at the GitHub CHANGELOG.md (OLM UI has no local file)"; fail=1; }; \
 	grep -qE 'Migration notes|CHANGELOG' "$$csv" \
 		|| { echo "CSV description must mention Migration notes or CHANGELOG so OLM consumers see the upgrade path"; fail=1; }; \
-	grep -qE "go-toolset $(GO_VERSION)|go-toolset.*$(GO_VERSION)" Dockerfile \
+	grep -qE "go-toolset $(GO_VERSION_RE)|go-toolset.*$(GO_VERSION_RE)" Dockerfile \
 		|| { echo "Dockerfile comment must name go-toolset $(GO_VERSION) (matches go.mod); image/toolchain would drift"; fail=1; }; \
+	grep -qE "golang-$(GO_MINOR)-" Dockerfile.ci \
+		|| { echo "Dockerfile.ci builder FROM must be golang-$(GO_MINOR)- (matches go.mod); CI toolchain would drift"; fail=1; }; \
+	grep -qE "GOTOOLCHAIN=go$(GO_VERSION_RE)" Dockerfile.ci \
+		|| { echo "Dockerfile.ci GOTOOLCHAIN must be go$(GO_VERSION) (matches go.mod)"; fail=1; }; \
+	grep -qE "golang-$(GO_MINOR)-" ../.ci-operator.yaml \
+		|| { echo ".ci-operator.yaml build_root tag must be golang-$(GO_MINOR)- (matches go.mod)"; fail=1; }; \
+	grep -qE 'USER 65532:65532' Dockerfile.ci \
+		|| { echo "Dockerfile.ci must run as USER 65532:65532 (parity with the release Dockerfile; CI variant is never built in GHA so lint it here)"; fail=1; }; \
+	grep -qE -- '-trimpath -buildvcs=false -mod=readonly' Dockerfile.ci \
+		|| { echo "Dockerfile.ci go build flags must match the release Dockerfile (reproducibility parity)"; fail=1; }; \
 	nvm=$$(tr -d '[:space:]' < ../console-plugin/.nvmrc); \
 	grep -qE "Node in this digest is $${nvm}" ../console-plugin/Dockerfile \
 		|| { echo "console-plugin Dockerfile must document Node $${nvm} (matches .nvmrc); image/node would drift"; fail=1; }; \

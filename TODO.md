@@ -44,8 +44,8 @@ Legend: `[x]` done · `[ ]` planned · **(H/M/L)** rough value.
       `baseline_security_compliance_score`,
       `baseline_security_checks{profile,status}`.
 - [x] PrometheusRule (published 0.3/0.4): `ComplianceScoreLow`,
-      `ComplianceChecksFailing`. Further metrics/alerts are on main only
-      (see **On main** / CHANGELOG **[Unreleased]**).
+      `ComplianceChecksFailing`. Further metrics/alerts shipped in 0.5.0
+      (see **In 0.5.0** below / CHANGELOG **[0.5.0]**).
 - [x] Aggregated `baseline-security-viewer` / `-admin` ClusterRoles.
 
 ### 0.3 additions

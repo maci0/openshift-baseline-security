@@ -5,8 +5,11 @@
 # lines differ. The builder/base tags must track the target OCP release and are
 # finalized in the openshift/release ci-operator config (see .ci-operator.yaml).
 FROM registry.ci.openshift.org/ocp/builder:rhel-9-golang-1.26-openshift-4.22 AS build
+ARG SOURCE_DATE_EPOCH=0
 ENV GOTOOLCHAIN=go1.26.5
-ENV TZ=UTC LC_ALL=C GOFLAGS=-mod=readonly
+# Match the release Dockerfile's reproducibility knobs (only the FROM lines and
+# CI-owned promotion differ): pinned epoch, checksum DB on, readonly modules.
+ENV TZ=UTC LC_ALL=C SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH} GOSUMDB=sum.golang.org GOFLAGS=-mod=readonly
 WORKDIR /go/src/github.com/maci0/baseline-security-operator
 COPY go.mod go.sum ./
 RUN go mod download && go mod verify
@@ -21,6 +24,6 @@ RUN --network=none CGO_ENABLED=0 go build -trimpath -buildvcs=false -mod=readonl
 	&& test -s /tmp/manager
 
 FROM registry.ci.openshift.org/ocp/4.22:base-rhel9
-COPY --from=build /tmp/manager /usr/bin/manager
+COPY --from=build --chown=65532:65532 /tmp/manager /usr/bin/manager
 USER 65532:65532
 ENTRYPOINT ["/usr/bin/manager"]
