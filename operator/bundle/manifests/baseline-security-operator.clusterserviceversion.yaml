@@ -181,6 +181,10 @@ spec:
             - apiGroups: [operators.coreos.com]
               resources: [clusterserviceversions]
               verbs: [get, list, watch]
+            # Read-only: auto-detect OKD (community-operators) vs OCP catalog.
+            - apiGroups: [operators.coreos.com]
+              resources: [catalogsources]
+              verbs: [get, list, watch]
             # Fixed name compliance-operator; list/watch unused.
             - apiGroups: [operators.coreos.com]
               resources: [operatorgroups]

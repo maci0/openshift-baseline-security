@@ -52,6 +52,7 @@ func testScheme(t *testing.T) *runtime.Scheme {
 	scheme.AddKnownTypeWithName(csvGVK, &unstructured.Unstructured{})
 	scheme.AddKnownTypeWithName(csvList.GroupVersionKind(), csvList)
 	scheme.AddKnownTypeWithName(subscriptionGVK, &unstructured.Unstructured{})
+	scheme.AddKnownTypeWithName(catalogSourceGVK, &unstructured.Unstructured{})
 	scheme.AddKnownTypeWithName(operatorGroupGVK, &unstructured.Unstructured{})
 	scheme.AddKnownTypeWithName(consolePluginGVK, &unstructured.Unstructured{})
 	scheme.AddKnownTypeWithName(consoleGVK, &unstructured.Unstructured{})
@@ -169,6 +170,47 @@ func TestPoolFromRemediation(t *testing.T) {
 	badScan.SetLabels(map[string]string{"compliance.openshift.io/scan-name": "ocp4-cis-node-UPPER"})
 	if got := poolFromRemediation(badScan); got != "" {
 		t.Fatalf("invalid scan-name pool: got %q, want empty", got)
+	}
+}
+
+// TestResolveCatalogSource: explicit spec wins; otherwise auto-detect OCP
+// (redhat-operators) vs OKD (community-operators), defaulting when neither exists.
+func TestResolveCatalogSource(t *testing.T) {
+	scheme := testScheme(t)
+	catalog := func(name string) *unstructured.Unstructured {
+		cs := &unstructured.Unstructured{}
+		cs.SetGroupVersionKind(catalogSourceGVK)
+		cs.SetName(name)
+		cs.SetNamespace("openshift-marketplace")
+		return cs
+	}
+	ctx := context.Background()
+	cases := []struct {
+		name    string
+		spec    string
+		catalogs []string
+		want    string
+	}{
+		{"explicit override", "my-catalog", []string{"redhat-operators"}, "my-catalog"},
+		{"OCP: redhat-operators present", "", []string{"redhat-operators", "community-operators"}, "redhat-operators"},
+		{"OKD: only community-operators", "", []string{"community-operators"}, "community-operators"},
+		{"neither: default", "", nil, "redhat-operators"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			objs := []client.Object{}
+			for _, n := range c.catalogs {
+				objs = append(objs, catalog(n))
+			}
+			r := &ClusterBaselineReconciler{
+				Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(objs...).Build(),
+				Scheme: scheme,
+			}
+			cb := &baselinev1alpha1.ClusterBaseline{Spec: baselinev1alpha1.ClusterBaselineSpec{ComplianceCatalogSource: c.spec}}
+			if got := r.resolveCatalogSource(ctx, cb); got != c.want {
+				t.Fatalf("resolveCatalogSource = %q, want %q", got, c.want)
+			}
+		})
 	}
 }
 

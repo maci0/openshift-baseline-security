@@ -56,6 +56,7 @@ const (
 // Foreign CRs are unstructured so we do not import their Go API modules.
 var (
 	subscriptionGVK  = schema.GroupVersionKind{Group: "operators.coreos.com", Version: "v1alpha1", Kind: "Subscription"}
+	catalogSourceGVK = schema.GroupVersionKind{Group: "operators.coreos.com", Version: "v1alpha1", Kind: "CatalogSource"}
 	csvGVK           = schema.GroupVersionKind{Group: "operators.coreos.com", Version: "v1alpha1", Kind: "ClusterServiceVersion"}
 	scanSettingGVK   = schema.GroupVersionKind{Group: "compliance.openshift.io", Version: "v1alpha1", Kind: "ScanSetting"}
 	bindingGVK       = schema.GroupVersionKind{Group: "compliance.openshift.io", Version: "v1alpha1", Kind: "ScanSettingBinding"}
@@ -101,6 +102,8 @@ type ClusterBaselineReconciler struct {
 // +kubebuilder:rbac:groups=operators.coreos.com,resources=operatorgroups,verbs=create
 // +kubebuilder:rbac:groups=operators.coreos.com,resources=operatorgroups,resourceNames=compliance-operator,verbs=get;update;patch
 // +kubebuilder:rbac:groups=operators.coreos.com,resources=clusterserviceversions,verbs=get;list;watch
+// CatalogSources: read-only, to auto-detect OKD (community-operators) vs OCP.
+// +kubebuilder:rbac:groups=operators.coreos.com,resources=catalogsources,verbs=get;list;watch
 // Namespaces: createIfMissing only (AlreadyExists is fine); no get/list/watch.
 // +kubebuilder:rbac:groups="",resources=namespaces,verbs=create
 // Plugin Service (fixed name). Create cannot use resourceNames; list/watch for

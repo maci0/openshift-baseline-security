@@ -75,7 +75,7 @@ func (r *ClusterBaselineReconciler) ensureComplianceOperator(ctx context.Context
 	sub.SetNamespace(complianceNamespace)
 	sub.Object["spec"] = map[string]any{
 		"name": "compliance-operator", "channel": "stable",
-		"source": desiredComplianceCatalogSource(cb), "sourceNamespace": "openshift-marketplace",
+		"source": r.resolveCatalogSource(ctx, cb), "sourceNamespace": "openshift-marketplace",
 	}
 	if err := createIfMissing(ctx, r.Client, sub); err != nil {
 		return fmt.Errorf("ensuring compliance-operator Subscription: %w", err)
@@ -100,14 +100,42 @@ func (r *ClusterBaselineReconciler) ensureComplianceOperatorGroup(ctx context.Co
 	return nil
 }
 
-// desiredComplianceCatalogSource is the OLM CatalogSource name for the CO
-// Subscription. Empty/whitespace is treated as unset (same as schedule defaulting)
-// so padding or empty quotes cannot create a Subscription with a junk source.
+// desiredComplianceCatalogSource is the explicit spec value, or the default name
+// when unset. resolveCatalogSource layers OKD auto-detection on top of this.
 func desiredComplianceCatalogSource(cb *baselinev1alpha1.ClusterBaseline) string {
 	if s := strings.TrimSpace(cb.Spec.ComplianceCatalogSource); s != "" {
 		return s
 	}
 	return baselinev1alpha1.DefaultComplianceCatalogSource
+}
+
+// resolveCatalogSource picks the OLM CatalogSource for the CO Subscription. An
+// explicit spec value always wins. When unset it auto-detects the cluster flavor:
+// OCP carries the Compliance Operator in redhat-operators, OKD in
+// community-operators. Prefer redhat-operators when present; fall back to
+// community-operators only if redhat-operators is absent but community-operators
+// exists (OKD); otherwise the default, which surfaces a clear install failure
+// rather than silently picking a wrong catalog.
+func (r *ClusterBaselineReconciler) resolveCatalogSource(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline) string {
+	if s := strings.TrimSpace(cb.Spec.ComplianceCatalogSource); s != "" {
+		return s
+	}
+	if r.catalogSourceExists(ctx, baselinev1alpha1.DefaultComplianceCatalogSource) {
+		return baselinev1alpha1.DefaultComplianceCatalogSource
+	}
+	if r.catalogSourceExists(ctx, baselinev1alpha1.CommunityCatalogSource) {
+		return baselinev1alpha1.CommunityCatalogSource
+	}
+	return baselinev1alpha1.DefaultComplianceCatalogSource
+}
+
+// catalogSourceExists reports whether a CatalogSource of the given name is present
+// in openshift-marketplace. NotFound and NoMatch (CatalogSource CRD absent) both
+// read as "not present" so detection degrades to the default, never blocks.
+func (r *ClusterBaselineReconciler) catalogSourceExists(ctx context.Context, name string) bool {
+	cs := u(catalogSourceGVK)
+	err := r.Get(ctx, types.NamespacedName{Namespace: "openshift-marketplace", Name: name}, cs)
+	return err == nil
 }
 
 // syncComplianceSubscriptionSource updates an existing Subscription's
@@ -117,7 +145,7 @@ func desiredComplianceCatalogSource(cb *baselinev1alpha1.ClusterBaseline) string
 func (r *ClusterBaselineReconciler) syncComplianceSubscriptionSource(
 	ctx context.Context, cb *baselinev1alpha1.ClusterBaseline, sub *unstructured.Unstructured,
 ) error {
-	desired := desiredComplianceCatalogSource(cb)
+	desired := r.resolveCatalogSource(ctx, cb)
 	current, _, err := unstructured.NestedString(sub.Object, "spec", "source")
 	if err != nil {
 		return fmt.Errorf("reading Subscription spec.source: %w", err)

@@ -41,6 +41,11 @@ const DefaultScanSchedule = "0 1 * * *"
 // ComplianceCatalogSource.
 const DefaultComplianceCatalogSource = "redhat-operators"
 
+// CommunityCatalogSource carries the Compliance Operator on OKD, which has no
+// redhat-operators catalog. When complianceCatalogSource is unset, the operator
+// auto-selects this if redhat-operators is absent but community-operators exists.
+const CommunityCatalogSource = "community-operators"
+
 // RemediationBatchPhaseApplying is the only phase written on
 // status.remediationBatch while MachineConfigPools are paused for a batch apply.
 // Absence of remediationBatch means idle; there is no terminal phase.

@@ -145,8 +145,10 @@ Responsibilities:
      string enum `Automatic`|`Manual`, not a boolean): create
      `openshift-compliance` Namespace, OperatorGroup, and a Subscription to
      package `compliance-operator`, channel `stable`, in the
-     `redhat-operators` catalog (catalog source name configurable for
-     disconnected/OKD clusters, where the ghcr.io upstream catalog is used).
+     `redhat-operators` catalog. The catalog source is auto-detected when
+     `spec.complianceCatalogSource` is unset: `redhat-operators` on OCP, else
+     `community-operators` when only that exists (OKD). An explicit
+     `spec.complianceCatalogSource` always wins (disconnected mirrors).
    - An OLM bundle `dependencies.yaml` on the compliance-operator package is
      deliberately NOT used: OLM v0 resolves dependencies into the dependent's
      namespace/OperatorGroup, but compliance-operator expects its own
