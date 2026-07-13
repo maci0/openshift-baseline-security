@@ -123,5 +123,6 @@ plugin into its own repo, and file an enhancement proposal referencing
 
 ## External
 
-- vmetal-openshift lvms playbook bug:
-  [maci0/vmetal-openshift#1](https://github.com/maci0/vmetal-openshift/issues/1).
+- [x] vmetal-openshift lvms playbook bug
+  ([maci0/vmetal-openshift#1](https://github.com/maci0/vmetal-openshift/issues/1))
+  is fixed.
