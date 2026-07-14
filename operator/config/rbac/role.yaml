@@ -122,15 +122,12 @@ rules:
   - list
   - patch
   - update
-  - watch
 - apiGroups:
   - compliance.openshift.io
   resources:
   - scansettings
   verbs:
   - create
-  - list
-  - watch
 - apiGroups:
   - compliance.openshift.io
   resourceNames:
@@ -175,9 +172,7 @@ rules:
   - machineconfigpools
   verbs:
   - get
-  - list
   - patch
-  - watch
 - apiGroups:
   - operator.openshift.io
   resourceNames:

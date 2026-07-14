@@ -398,7 +398,7 @@ verify-product-lockstep:
 # validate CRD/RBAC while controller-gen is still rewriting them.
 .PHONY: bundle
 bundle: manifests
-	$(MAKE) --no-print-directory verify-crd verify-csv-rbac verify-monitoring-bundle verify-versions verify-product-lockstep
+	$(MAKE) --no-print-directory verify-crd verify-csv-rbac verify-monitoring-bundle verify-bundle-static verify-versions verify-product-lockstep
 	cp config/crd/bases/baselinesecurity.openshift.io_clusterbaselines.yaml bundle/manifests/
 	# DOCKER_RUN_FLAGS: pure filesystem I/O (no registry pulls, ro mount).
 	# Ensure the tool image is local first (network=none cannot pull).
@@ -460,6 +460,10 @@ verify-csv-rbac:
 
 # Bundle monitoring CRs are hand-copied without namespace (OLM target NS). Fail
 # if PrometheusRule or ServiceMonitor drift from config/prometheus/.
+.PHONY: verify-bundle-static
+verify-bundle-static:
+	@./hack/verify-bundle-static.sh
+
 .PHONY: verify-monitoring-bundle
 verify-monitoring-bundle:
 	@diff -u <(sed '/^  namespace: openshift-baseline-security$$/d' config/prometheus/prometheusrule.yaml) \

@@ -52,6 +52,7 @@ jobs:
           git diff --exit-code
       - run: make verify-csv-rbac
       - run: make verify-monitoring-bundle
+      - run: make verify-bundle-static
       - run: make verify-versions
       - run: make verify-product-lockstep
       - name: validate OLM bundle

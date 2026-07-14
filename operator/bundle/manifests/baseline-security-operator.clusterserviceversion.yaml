@@ -160,18 +160,19 @@ spec:
               verbs: [get, list, watch, patch]
             - apiGroups: [compliance.openshift.io]
               resources: [scansettingbindings]
-              verbs: [create, delete, get, list, patch, update, watch]
-            # ScanSetting name is fixed (baseline); create/list/watch unscoped.
+              verbs: [create, delete, get, list, patch, update]
+            # ScanSetting name is fixed (baseline); create unscoped, rest name-scoped.
             - apiGroups: [compliance.openshift.io]
               resources: [scansettings]
-              verbs: [create, list, watch]
+              verbs: [create]
             - apiGroups: [compliance.openshift.io]
               resources: [scansettings]
               resourceNames: [baseline]
               verbs: [get, delete, patch, update]
+            # MCPs paused by name only (Get+Patch); never listed or watched.
             - apiGroups: [machineconfiguration.openshift.io]
               resources: [machineconfigpools]
-              verbs: [get, list, watch, patch]
+              verbs: [get, patch]
             - apiGroups: [console.openshift.io]
               resources: [consoleplugins]
               verbs: [create, list, watch]

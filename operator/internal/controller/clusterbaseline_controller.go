@@ -98,12 +98,16 @@ type ClusterBaselineReconciler struct {
 // +kubebuilder:rbac:groups=baselinesecurity.openshift.io,resources=clusterbaselines/finalizers,verbs=update
 // ScanSetting name is fixed (scanSettingName); bindings are profile-derived so
 // they stay unscoped. Create cannot use resourceNames (apiserver limitation).
-// +kubebuilder:rbac:groups=compliance.openshift.io,resources=scansettings,verbs=create;list;watch
+// Neither is watched (only suites/scans/remediations/checkresults are), so no
+// list/watch: the named get/update rule and the List of bindings cover all use.
+// +kubebuilder:rbac:groups=compliance.openshift.io,resources=scansettings,verbs=create
 // +kubebuilder:rbac:groups=compliance.openshift.io,resources=scansettings,resourceNames=baseline,verbs=get;update;patch;delete
-// +kubebuilder:rbac:groups=compliance.openshift.io,resources=scansettingbindings,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=compliance.openshift.io,resources=scansettingbindings,verbs=get;list;create;update;patch;delete
 // +kubebuilder:rbac:groups=compliance.openshift.io,resources=compliancecheckresults;compliancescans;compliancesuites,verbs=get;list;watch
 // +kubebuilder:rbac:groups=compliance.openshift.io,resources=complianceremediations,verbs=get;list;watch;patch
-// +kubebuilder:rbac:groups=machineconfiguration.openshift.io,resources=machineconfigpools,verbs=get;list;watch;patch
+// MCPs are read and paused by name only (setMCPPaused Get+Patch), never listed
+// or watched, so get;patch is sufficient.
+// +kubebuilder:rbac:groups=machineconfiguration.openshift.io,resources=machineconfigpools,verbs=get;patch
 // Subscriptions: fixed name compliance-operator; update/patch for catalog sync.
 // Create cannot use resourceNames; list/watch unused (Get by name only).
 // +kubebuilder:rbac:groups=operators.coreos.com,resources=subscriptions,verbs=create
