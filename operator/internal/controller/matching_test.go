@@ -2,6 +2,7 @@ package controller
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -409,6 +410,35 @@ func TestSetCondCapsMessage(t *testing.T) {
 	}
 	if !strings.HasSuffix(c.Message, "...") {
 		t.Fatalf("expected truncated message, got %q", c.Message[len(c.Message)-20:])
+	}
+}
+
+// TestProfileNamesExact pins each profile key to the EXACT Compliance Operator
+// Profile names its ScanSettingBinding references. A typo (e.g. "ocp4-moderat")
+// compiles and passes the prefix-only check in TestProfileNames, but produces a
+// binding that silently never scans that profile. Assert the strings, not just
+// the ocp4-/rhcos4- prefix.
+func TestProfileNamesExact(t *testing.T) {
+	want := map[baselinev1alpha1.ProfileKey][]string{
+		"cis":           {"ocp4-cis", "ocp4-cis-node"},
+		"pci-dss":       {"ocp4-pci-dss", "ocp4-pci-dss-node"},
+		"nist-moderate": {"ocp4-moderate", "ocp4-moderate-node", "rhcos4-moderate"},
+		"nist-high":     {"ocp4-high", "ocp4-high-node", "rhcos4-high"},
+		"stig":          {"ocp4-stig", "ocp4-stig-node", "rhcos4-stig"},
+		"nerc-cip":      {"ocp4-nerc-cip", "ocp4-nerc-cip-node", "rhcos4-nerc-cip"},
+		"e8":            {"ocp4-e8", "rhcos4-e8"},
+		"bsi":           {"ocp4-bsi", "ocp4-bsi-node", "rhcos4-bsi"},
+	}
+	for k, exp := range want {
+		if got := k.ProfileNames(); !slices.Equal(got, exp) {
+			t.Errorf("ProfileNames(%q) = %v, want %v", k, got, exp)
+		}
+	}
+	// Every enum key must be pinned above (a new key added without an exact pin fails).
+	for _, k := range baselinev1alpha1.AllProfileKeys() {
+		if _, ok := want[k]; !ok {
+			t.Errorf("enum key %q has no exact-name pin in TestProfileNamesExact", k)
+		}
 	}
 }
 
