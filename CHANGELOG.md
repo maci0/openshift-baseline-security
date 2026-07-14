@@ -41,6 +41,29 @@ depend on those tags.
 
 ## [Unreleased]
 
+## [0.5.6] - 2026-07-14
+
+### Changed
+
+- Dependency maintenance: CI actions (actions/checkout v7, docker/setup-buildx
+  v4, the latter clearing the Node 20 deprecation warning), ubi9 base-image
+  digests (same Node 22.23.1 / Go 1.26.5), and console-plugin
+  @patternfly/react-charts 8.6.0, eslint 10, webpack-dev-server 6. k8s.io/*
+  0.36, controller-runtime 0.24, @types/node 26, and react 19 were held back to
+  stay on the OpenShift 4.22 / k8s 1.35 / React 18 support baseline.
+
+### Added
+
+- Console e2e coverage for the Overview/Remediations governance affordances
+  (inline schedule edit, invalid-cron rejection, scoring-mode readout, score
+  trend card, HTML report export, batch-apply confirmation).
+
+### Fixed
+
+- e2e: the remediation apply-confirmation screenshot spec matched the wrong
+  button (name-scoped "Apply <name>") and silently skipped; it now captures the
+  confirmation modal.
+
 ## [0.5.5] - 2026-07-14
 
 ### Fixed
@@ -338,7 +361,8 @@ Initial packaged release.
   Remediations, Profiles).
 - OLM bundle + file-based catalog; string-enum spec; OpenShift-style conditions.
 
-[Unreleased]: https://github.com/maci0/openshift-baseline-security/compare/v0.5.5...HEAD
+[Unreleased]: https://github.com/maci0/openshift-baseline-security/compare/v0.5.6...HEAD
+[0.5.6]: https://github.com/maci0/openshift-baseline-security/compare/v0.5.5...v0.5.6
 [0.5.5]: https://github.com/maci0/openshift-baseline-security/compare/v0.5.0...v0.5.5
 [0.5.0]: https://github.com/maci0/openshift-baseline-security/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/maci0/openshift-baseline-security/compare/v0.3.1...v0.4.0
