@@ -1107,6 +1107,18 @@ func TestClampListsDedupeSetTypes(t *testing.T) {
 	if got := clampStringList([]string{"a", "a", "b"}, 2); !slices.Equal(got, []string{"a", "b"}) {
 		t.Fatalf("clampStringList dedupe-before-cap = %v, want [a b]", got)
 	}
+	// Prefix collision: two DISTINCT names longer than the 253-rune item cap that
+	// share the first 253 runes (only reachable from corrupt/restored etcd) must
+	// not survive as a set-list duplicate. Per-item clamp runs before dedup, so
+	// both collapse to one 253-rune entry.
+	pfx := strings.Repeat("a", failureNameMaxLen)
+	a, b := pfx+"X", pfx+"Y"
+	if got := clampFailureList([]string{a, b}); len(got) != 1 || got[0] != pfx {
+		t.Fatalf("clampFailureList prefix-collision = %v, want one entry", got)
+	}
+	if got := clampStringList([]string{a, b}, 16); len(got) != 1 || got[0] != pfx {
+		t.Fatalf("clampStringList prefix-collision = %v, want one entry", got)
+	}
 }
 
 func FuzzClampFailureList(f *testing.F) {
@@ -1138,40 +1150,36 @@ func FuzzClampFailureList(f *testing.F) {
 				t.Fatalf("item runes %d > failureNameMaxLen %d", len([]rune(s)), failureNameMaxLen)
 			}
 		}
-		// clampFailureList dedupes (set-typed status list) first-wins, then keeps the
-		// leading failureListMax survivors, then clamps each to failureNameMaxLen
-		// runes. Build that exact expectation and compare; this single invariant
-		// covers both under- and over-limit, including all-duplicate inputs that
-		// dedup below the limit.
-		dedup := dedupeStable(in)
-		limit := len(dedup)
-		if limit > failureListMax {
-			limit = failureListMax
+		// clampFailureList clamps each name to failureNameMaxLen runes FIRST, then
+		// dedupes (set-typed, first-wins), then trims to failureListMax. Build that
+		// exact expectation; the clamp-before-dedupe order is what stops a
+		// prefix-collision from reintroducing a duplicate.
+		clampedWant := make([]string, len(in))
+		for i, s := range in {
+			clampedWant[i] = clampString(s, failureNameMaxLen)
 		}
-		want := make([]string, limit)
-		for i := 0; i < limit; i++ {
-			want[i] = clampString(dedup[i], failureNameMaxLen)
+		want := dedupeStable(clampedWant)
+		if len(want) > failureListMax {
+			want = want[:failureListMax]
 		}
 		if !slices.Equal(got, want) {
 			t.Fatalf("clampFailureList(%d items) = %v, want %v", len(in), got, want)
 		}
-		// Result must not alias the caller's backing array once any dedup or
-		// per-item truncation happened (a fresh slice is required then). When the
-		// input was already unique and short, aliasing is allowed, so only assert
-		// non-aliasing when a copy was forced.
-		forcedCopy := len(dedup) != len(in) || len(in) > failureListMax
-		if !forcedCopy {
-			for _, s := range in {
-				if len(s) > failureNameMaxLen {
-					forcedCopy = true
-					break
-				}
+		// The output must contain NO set-list duplicates even when the input had
+		// over-length names sharing a 253-rune prefix (they truncate equal). This
+		// is the admission invariant the sanitizer exists to hold.
+		seen := make(map[string]struct{}, len(got))
+		for _, s := range got {
+			if _, dup := seen[s]; dup {
+				t.Fatalf("clampFailureList returned a set-list duplicate %q: %v", s, got)
 			}
+			seen[s] = struct{}{}
 		}
-		if forcedCopy && len(in) > 0 && len(got) > 0 {
-			in[0] = "mutated"
-			if got[0] == "mutated" {
-				t.Fatal("clampFailureList must not alias input after dedup/clamp")
+		// Output is always a fresh slice; mutating the input never affects it.
+		if len(in) > 0 && len(got) > 0 {
+			in[0] = "mutated-input-sentinel"
+			if got[0] == "mutated-input-sentinel" {
+				t.Fatal("clampFailureList must not alias input")
 			}
 		}
 	})
