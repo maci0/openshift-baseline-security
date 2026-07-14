@@ -766,6 +766,49 @@ func FuzzCondMessage(f *testing.F) {
 	})
 }
 
+// FuzzClampString exercises the rune-truncation branch of clampString, which
+// caps the untrusted CSV-derived status.complianceOperatorVersion at the CRD
+// MaxLength. A regression that splits a multibyte rune (invalid UTF-8 in the CR
+// JSON) or overshoots the cap would fail Status().Update admission and freeze
+// reconcile. FuzzSanitizeStatusForUpdate never sets that field, so this is the
+// only fuzz that reaches the non-empty truncation path.
+func FuzzClampString(f *testing.F) {
+	for _, s := range []string{
+		"", "abc", "héllo", "日本語テスト",
+		"\x80\x81",               // invalid UTF-8 lead bytes
+		strings.Repeat("a", 500), // long ASCII (byte fast path never hits)
+		strings.Repeat("語", 300), // long multibyte: forces rune-slice truncation
+	} {
+		for _, m := range []int{-1, 0, 1, 3, 128} {
+			f.Add(s, m)
+		}
+	}
+	f.Fuzz(func(t *testing.T, s string, max int) {
+		out := clampString(s, max)
+		if max <= 0 {
+			if out != "" {
+				t.Fatalf("clampString(%q, %d) = %q, want empty for max<=0", s, max, out)
+			}
+			return
+		}
+		// Rune cap holds for any input (truncation counts replacement runes).
+		if n := utf8.RuneCountInString(out); n > max {
+			t.Fatalf("clampString(%q, %d) = %q: %d runes exceed cap %d", s, max, out, n, max)
+		}
+		// For valid input (the real case: a CSV-derived version), truncation must
+		// keep valid UTF-8 and stay a prefix. Invalid input round-trips through
+		// []rune, which rewrites bad bytes, so those invariants do not apply.
+		if utf8.ValidString(s) {
+			if !utf8.ValidString(out) {
+				t.Fatalf("clampString(%q, %d) = %q: split a rune into invalid UTF-8", s, max, out)
+			}
+			if !strings.HasPrefix(s, out) {
+				t.Fatalf("clampString(%q, %d) = %q: not a prefix of the input", s, max, out)
+			}
+		}
+	})
+}
+
 // FuzzClampFailureList: hand-edited or pathologically large newlyFailed/fixed/
 // previousFailures/diffBaseFailures lists must stay <= CRD MaxItems=4096 so
 // Status().Update cannot fail admission and freeze reconciliation.

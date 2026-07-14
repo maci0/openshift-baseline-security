@@ -194,7 +194,7 @@ fuzz:
 	go test ./cmd/ -run=^$$ -fuzz=^FuzzValidateListenAddr$$ -fuzztime=3s
 	go test ./cmd/ -run=^$$ -fuzz=^FuzzValidateMetricsCertDir$$ -fuzztime=3s
 	go test ./internal/controller/ -run=^$$ -fuzz=^FuzzDashboardConfigMapCurrent$$ -fuzztime=3s
-	go test ./internal/controller/ -run=^$$ -fuzz=^FuzzDesiredComplianceCatalogSource$$ -fuzztime=3s
+	go test ./internal/controller/ -run=^$$ -fuzz=^FuzzClampString$$ -fuzztime=3s
 
 GOLANGCI_LINT_VERSION ?= v2.12.2
 .PHONY: lint
