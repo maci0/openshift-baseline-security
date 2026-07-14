@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -1000,6 +1001,51 @@ func TestRemediationBatchRestartsFromAnnotation(t *testing.T) {
 	}
 	if cb.Annotations[batchStartedAtAnnotation] == "" || cb.Annotations[batchPoolsAnnotation] != "worker" {
 		t.Fatalf("durable recovery metadata missing: %v", cb.Annotations)
+	}
+}
+
+// TestRemediationBatchPartialReopenKeepsPreCrashPool: after a status-lost crash,
+// re-opening the batch rebuilds pools from only the surviving remediations. A
+// pool paused before the crash whose remediation vanished in the restart window
+// must still be tracked (via the batch-pools annotation) so it is resumed, not
+// left paused forever.
+func TestRemediationBatchPartialReopenKeepsPreCrashPool(t *testing.T) {
+	scheme := testScheme(t)
+	// rem1 -> worker survives; rem2 -> master was deleted during the restart window
+	// (not created here), but master was paused before the crash.
+	rem1 := nodeRemediation("rem1", "worker")
+	worker := machineConfigPool("worker")
+	master := machineConfigPool("master")
+	for _, p := range []*unstructured.Unstructured{worker, master} {
+		_ = unstructured.SetNestedField(p.Object, true, "spec", "paused")
+		p.SetAnnotations(map[string]string{batchPauseOwnerAnnotation: "cluster"})
+	}
+	cb := newBatchCB()
+	cb.SetAnnotations(map[string]string{
+		batchApplyAnnotation:     "rem1,rem2",
+		batchPoolsAnnotation:     "master,worker", // both paused pre-crash
+		batchStartedAtAnnotation: time.Now().Add(-time.Minute).UTC().Format(time.RFC3339Nano),
+	})
+	// No RemediationBatch in status: models the lost status write.
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).
+			WithObjects(cb, rem1, worker, master).
+			WithStatusSubresource(&baselinev1alpha1.ClusterBaseline{}).Build(),
+		Scheme: scheme,
+	}
+	if err := r.applyRemediationBatch(context.Background(), cb); err != nil {
+		t.Fatal(err)
+	}
+	if cb.Status.RemediationBatch == nil {
+		t.Fatal("batch not re-opened from annotation")
+	}
+	// master (rem2 gone) must survive in the tracked pool set, not just worker.
+	got := cb.Status.RemediationBatch.Pools
+	if !slices.Contains(got, "master") || !slices.Contains(got, "worker") {
+		t.Fatalf("status.remediationBatch.pools = %v, want both master and worker (pre-crash pool must not drop)", got)
+	}
+	if cb.Annotations[batchPoolsAnnotation] != "master,worker" {
+		t.Fatalf("batch-pools annotation = %q, want master,worker", cb.Annotations[batchPoolsAnnotation])
 	}
 }
 

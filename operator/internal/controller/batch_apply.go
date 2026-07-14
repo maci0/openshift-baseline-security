@@ -86,6 +86,20 @@ func (r *ClusterBaselineReconciler) applyRemediationBatch(ctx context.Context, c
 		}
 		requested := batchRemediationNames(names)
 		list = keep
+		// Union with pools recorded on a prior (pre-crash) open. This runs when
+		// status.remediationBatch was lost (crash/leader handoff) and the batch is
+		// re-opened from the annotation; poolList is then rebuilt from only the
+		// surviving remediations. A pool paused before the crash whose remediation
+		// vanished in the restart window is no longer in poolList, so without this
+		// it drops out of the pause set, status.Pools, and every resume path and is
+		// left paused forever (nodes stuck). Re-pausing an already-paused pool is an
+		// idempotent no-op, and the union stays within batchMaxPools (it is a subset
+		// of the original open, which the guard already bounded).
+		for _, p := range batchRemediationNames(cb.Annotations[batchPoolsAnnotation]) {
+			if p != "" {
+				pools[p] = true
+			}
+		}
 		poolList := slices.Sorted(maps.Keys(pools))
 		if len(poolList) > batchMaxPools {
 			// More target pools than status.remediationBatch.pools can hold. Refuse
