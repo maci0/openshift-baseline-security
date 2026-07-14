@@ -212,8 +212,12 @@ boolean "prior scan exists" signal).
 history; omit late-arrival correction.
 
 **Tradeoff:** Zero external state and correct diffs under slow CCR delivery;
-status carries larger fail-name lists (capped at 4096 each). Consumers must not
-build external tools on the bookkeeping fields.
+status carries larger fail-name lists (capped at 4096 each). Because four such
+lists at max length would exceed the ~1.5 MiB apiserver object limit and freeze
+`Status().Update`, `sanitizeStatusForUpdate` also trims the four lists jointly to
+a combined byte budget (`clampFailureListsToBudget`), degrading the diff on an
+extreme cluster rather than wedging the reconcile. Consumers must not build
+external tools on the bookkeeping fields.
 
 **Status:** Keep; promote to a versioned subresource or annotation store only if
 CR size or API clarity becomes a problem.
