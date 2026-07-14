@@ -191,10 +191,11 @@ spec:
             - apiGroups: [operators.coreos.com]
               resources: [catalogsources]
               verbs: [get, list, watch]
-            # Fixed name compliance-operator; list/watch unused.
+            # list detects a pre-existing user OperatorGroup (defer, no duplicate);
+            # write access stays scoped to our own compliance-operator OG below.
             - apiGroups: [operators.coreos.com]
               resources: [operatorgroups]
-              verbs: [create]
+              verbs: [create, list]
             - apiGroups: [operators.coreos.com]
               resources: [operatorgroups]
               resourceNames: [compliance-operator]

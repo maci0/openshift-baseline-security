@@ -228,14 +228,20 @@ func (r *ClusterBaselineReconciler) ensureConsolePlugin(ctx context.Context, cb 
 	cp := u(consolePluginGVK)
 	cp.SetName(pluginName)
 	if _, err := controllerutil.CreateOrUpdate(ctx, r.Client, cp, func() error {
-		cp.Object["spec"] = map[string]any{
-			"displayName": "Baseline Security",
-			"backend": map[string]any{
-				"type": "Service",
-				"service": map[string]any{
-					"name": pluginName, "namespace": pluginNS, "port": int64(9443), "basePath": "/",
-				},
-			},
+		// Set only the fields we own (field-wise, not a wholesale spec replace):
+		// the ConsolePlugin CRD may server-default sibling spec fields (e.g. i18n)
+		// that we do not set, and overwriting the whole spec each reconcile would
+		// diff against those defaults into a hot update loop with the console operator.
+		if err := unstructured.SetNestedField(cp.Object, "Baseline Security", "spec", "displayName"); err != nil {
+			return err
+		}
+		if err := unstructured.SetNestedField(cp.Object, "Service", "spec", "backend", "type"); err != nil {
+			return err
+		}
+		if err := unstructured.SetNestedField(cp.Object, map[string]any{
+			"name": pluginName, "namespace": pluginNS, "port": int64(9443), "basePath": "/",
+		}, "spec", "backend", "service"); err != nil {
+			return err
 		}
 		return controllerutil.SetControllerReference(cb, cp, r.Scheme)
 	}); err != nil {

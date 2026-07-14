@@ -104,7 +104,9 @@ type ClusterBaselineReconciler struct {
 // +kubebuilder:rbac:groups=operators.coreos.com,resources=subscriptions,resourceNames=compliance-operator,verbs=get;update;patch
 // OperatorGroups: fixed name; update/patch so targetNamespaces stays scoped to
 // openshift-compliance after create (empty OG installs CO cluster-wide).
-// +kubebuilder:rbac:groups=operators.coreos.com,resources=operatorgroups,verbs=create
+// list (unscopable by resourceNames) detects a pre-existing user OperatorGroup so
+// we defer instead of creating a duplicate that would break OLM for the namespace.
+// +kubebuilder:rbac:groups=operators.coreos.com,resources=operatorgroups,verbs=create;list
 // +kubebuilder:rbac:groups=operators.coreos.com,resources=operatorgroups,resourceNames=compliance-operator,verbs=get;update;patch
 // +kubebuilder:rbac:groups=operators.coreos.com,resources=clusterserviceversions,verbs=get;list;watch
 // CatalogSources: read-only, to auto-detect OKD (community-operators) vs OCP.

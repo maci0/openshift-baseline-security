@@ -193,9 +193,9 @@ rules:
   - operators.coreos.com
   resources:
   - operatorgroups
-  - subscriptions
   verbs:
   - create
+  - list
 - apiGroups:
   - operators.coreos.com
   resourceNames:
@@ -207,6 +207,12 @@ rules:
   - get
   - patch
   - update
+- apiGroups:
+  - operators.coreos.com
+  resources:
+  - subscriptions
+  verbs:
+  - create
 - apiGroups:
   - policy
   resources:

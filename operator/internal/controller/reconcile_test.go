@@ -323,6 +323,44 @@ func TestEnsureComplianceOperatorCreatesSubscription(t *testing.T) {
 	}
 }
 
+// A differently-named OperatorGroup already owning openshift-compliance (user
+// pre-staged the namespace) must be deferred to, not duplicated: a second OG
+// makes OLM reject the namespace (MultipleOperatorGroupsFound) and wedges the
+// install. We leave the user OG untouched (write RBAC is scoped to our own name).
+func TestEnsureComplianceOperatorDefersToExistingOperatorGroup(t *testing.T) {
+	scheme := testScheme(t)
+	foreign := u(operatorGroupGVK)
+	foreign.SetName("user-og")
+	foreign.SetNamespace(complianceNamespace)
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(foreign).Build(),
+		Scheme: scheme,
+	}
+	cb := newCB("cis")
+	if err := r.ensureComplianceOperator(context.Background(), cb); err != nil {
+		t.Fatal(err)
+	}
+	ogs := uList(operatorGroupGVK)
+	if err := r.List(context.Background(), ogs, client.InNamespace(complianceNamespace)); err != nil {
+		t.Fatal(err)
+	}
+	if len(ogs.Items) != 1 {
+		t.Fatalf("OperatorGroup count = %d, want 1 (no duplicate created)", len(ogs.Items))
+	}
+	if n := ogs.Items[0].GetName(); n != "user-og" {
+		t.Fatalf("OG name = %q, want the pre-existing user-og left in place", n)
+	}
+	if err := r.Get(context.Background(), types.NamespacedName{Namespace: complianceNamespace, Name: "compliance-operator"},
+		u(operatorGroupGVK)); !apierrors.IsNotFound(err) {
+		t.Fatalf("no compliance-operator OG should be created alongside user-og, err=%v", err)
+	}
+	// Install still proceeds through the user's OG: the Subscription is created.
+	if err := r.Get(context.Background(), types.NamespacedName{Namespace: complianceNamespace, Name: "compliance-operator"},
+		u(subscriptionGVK)); err != nil {
+		t.Fatalf("Subscription should be created through the existing OG: %v", err)
+	}
+}
+
 func TestEnsureComplianceOperatorOptOut(t *testing.T) {
 	scheme := testScheme(t)
 	r := &ClusterBaselineReconciler{

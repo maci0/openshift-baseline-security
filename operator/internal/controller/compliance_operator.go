@@ -84,10 +84,30 @@ func (r *ClusterBaselineReconciler) ensureComplianceOperator(ctx context.Context
 	return nil
 }
 
-// ensureComplianceOperatorGroup creates or updates the compliance-operator
-// OperatorGroup so targetNamespaces is exactly openshift-compliance. create-only
-// would leave a pre-existing empty OG (cluster-wide install) as a silent hazard.
+// ensureComplianceOperatorGroup makes the openshift-compliance namespace carry
+// a single OperatorGroup scoped to itself. targetNamespaces must stay set on our
+// own OG: create-only would leave a pre-existing empty one (cluster-wide install)
+// as a silent hazard. OLM permits only one OperatorGroup per namespace, so if a
+// differently-named one already exists (user pre-staged the namespace, or it is
+// shared), creating our fixed-name OG would make a second and invalidate the
+// namespace (MultipleOperatorGroupsFound), wedging the install. Defer to that
+// user-managed OG rather than duplicate it; we only manage our own named OG
+// (write RBAC is scoped to compliance-operator, so we cannot repair a foreign one).
 func (r *ClusterBaselineReconciler) ensureComplianceOperatorGroup(ctx context.Context) error {
+	existing := uList(operatorGroupGVK)
+	if err := r.List(ctx, existing, client.InNamespace(complianceNamespace)); err != nil {
+		return fmt.Errorf("listing OperatorGroups in %s: %w", complianceNamespace, err)
+	}
+	for i := range existing.Items {
+		if existing.Items[i].GetName() != "compliance-operator" {
+			// A user-managed OperatorGroup already owns the namespace. Leave it and
+			// add nothing: the Compliance Operator installs through it, and a second
+			// OG here would break OLM for the whole namespace.
+			log.FromContext(ctx).Info("deferring to existing OperatorGroup in compliance namespace",
+				"operatorGroup", existing.Items[i].GetName(), "namespace", complianceNamespace)
+			return nil
+		}
+	}
 	og := u(operatorGroupGVK)
 	og.SetName("compliance-operator")
 	og.SetNamespace(complianceNamespace)
