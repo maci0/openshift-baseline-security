@@ -38,14 +38,14 @@ go_keys=$(
   sed -n '/^const (/,/^)/p' "$API" \
     | grep -E 'ProfileKey = "' \
     | sed -E 's/.*ProfileKey = "([^"]+)".*/\1/' \
-    | sort
+    | sort || true
 )
 # Console PROFILE_KEYS array string literals.
 ts_keys=$(
   sed -n '/export const PROFILE_KEYS/,/] as const/p' "$MODELS" \
     | grep -oE "'[^']+'" \
     | tr -d "'" \
-    | sort
+    | sort || true
 )
 if [[ -z "$go_keys" ]]; then
   die "no ProfileKey constants in $API"
@@ -58,8 +58,8 @@ elif [[ "$go_keys" != "$ts_keys" ]]; then
 fi
 
 # Default scan schedule.
-go_sched=$(grep -E 'DefaultScanSchedule\s*=\s*"' "$API" | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
-ts_sched=$(grep -E "DEFAULT_SCAN_SCHEDULE\s*=" "$MODELS" | head -1 | sed -E "s/.*'([^']+)'.*/\1/")
+go_sched=$(grep -E 'DefaultScanSchedule\s*=\s*"' "$API" | head -1 | sed -E 's/.*"([^"]+)".*/\1/' || true)
+ts_sched=$(grep -E "DEFAULT_SCAN_SCHEDULE\s*=" "$MODELS" | head -1 | sed -E "s/.*'([^']+)'.*/\1/" || true)
 if [[ -z "$go_sched" || -z "$ts_sched" ]]; then
   die "could not read DefaultScanSchedule / DEFAULT_SCAN_SCHEDULE"
 elif [[ "$go_sched" != "$ts_sched" ]]; then
@@ -119,8 +119,8 @@ for pair in 'HIGH:10' 'MEDIUM:5' 'LOW:2' 'OTHER:1'; do
 done
 
 # History scoring-mode annotation key.
-go_ann=$(grep -E 'historyScoringModeAnn\s*=' "$SCORE" | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
-ts_ann=$(grep -E 'HISTORY_SCORING_MODE_ANN\s*=' "$SCORING_TS" | head -1 | sed -E "s/.*'([^']+)'.*/\1/")
+go_ann=$(grep -E 'historyScoringModeAnn\s*=' "$SCORE" | head -1 | sed -E 's/.*"([^"]+)".*/\1/' || true)
+ts_ann=$(grep -E 'HISTORY_SCORING_MODE_ANN\s*=' "$SCORING_TS" | head -1 | sed -E "s/.*'([^']+)'.*/\1/" || true)
 if [[ -z "$go_ann" || -z "$ts_ann" ]]; then
   die "could not read history scoring-mode annotation key"
 elif [[ "$go_ann" != "$ts_ann" ]]; then
@@ -128,16 +128,16 @@ elif [[ "$go_ann" != "$ts_ann" ]]; then
 fi
 
 # Batch apply annotation + cap.
-go_batch_ann=$(grep -E 'batchApplyAnnotation\s*=' "$BATCH" | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
-ts_batch_ann=$(grep -E 'BATCH_APPLY_ANNOTATION\s*=' "$PATCHES" | head -1 | sed -E "s/.*'([^']+)'.*/\1/")
+go_batch_ann=$(grep -E 'batchApplyAnnotation\s*=' "$BATCH" | head -1 | sed -E 's/.*"([^"]+)".*/\1/' || true)
+ts_batch_ann=$(grep -E 'BATCH_APPLY_ANNOTATION\s*=' "$PATCHES" | head -1 | sed -E "s/.*'([^']+)'.*/\1/" || true)
 if [[ -z "$go_batch_ann" || -z "$ts_batch_ann" ]]; then
   die "could not read batch-apply annotation key"
 elif [[ "$go_batch_ann" != "$ts_batch_ann" ]]; then
   die "batchApplyAnnotation ($go_batch_ann) != BATCH_APPLY_ANNOTATION ($ts_batch_ann)"
 fi
 
-go_batch_max=$(grep -E 'batchMaxRemediations\s*=' "$BATCH" | head -1 | sed -E 's/.*=\s*([0-9]+).*/\1/')
-ts_batch_max=$(grep -E 'batchApplyMaxNames\s*=' "$PATCHES" | head -1 | sed -E 's/.*=\s*([0-9]+).*/\1/')
+go_batch_max=$(grep -E 'batchMaxRemediations\s*=' "$BATCH" | head -1 | sed -E 's/.*=\s*([0-9]+).*/\1/' || true)
+ts_batch_max=$(grep -E 'batchApplyMaxNames\s*=' "$PATCHES" | head -1 | sed -E 's/.*=\s*([0-9]+).*/\1/' || true)
 if [[ -z "$go_batch_max" || -z "$ts_batch_max" ]]; then
   die "could not read batch max remediations"
 elif [[ "$go_batch_max" != "$ts_batch_max" ]]; then
