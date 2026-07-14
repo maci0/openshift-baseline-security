@@ -566,8 +566,8 @@ func TestRemediationBatchRejectsForeignAndBlockedTargets(t *testing.T) {
 					WithStatusSubresource(&baselinev1alpha1.ClusterBaseline{}).Build(),
 				Scheme: scheme,
 			}
-			// Permanent rejects must not sticky-Degrade: refuse apply/pause, clear
-			// the one-shot annotation, return nil (same class as invalid names).
+			// All-permanent-reject: skip targets, clear one-shot annotation, no
+			// sticky Degrade, no pause, no apply (empty-keep path).
 			if err := r.applyRemediationBatch(context.Background(), cb); err != nil {
 				t.Fatalf("permanent reject must not sticky-error: %v", err)
 			}
@@ -586,7 +586,7 @@ func TestRemediationBatchRejectsForeignAndBlockedTargets(t *testing.T) {
 				t.Fatal(err)
 			}
 			if paused, _, _ := unstructured.NestedBool(gotPool.Object, "spec", "paused"); paused {
-				t.Fatal("pool was paused before all targets passed validation")
+				t.Fatal("pool was paused for an empty/rejected batch")
 			}
 			gotRem := u(remediationGVK)
 			if err := r.Get(context.Background(), types.NamespacedName{Namespace: complianceNamespace, Name: "rem1"}, gotRem); err != nil {
@@ -596,6 +596,50 @@ func TestRemediationBatchRejectsForeignAndBlockedTargets(t *testing.T) {
 				t.Fatal("unsafe remediation was applied through operator permissions")
 			}
 		})
+	}
+}
+
+// TestRemediationBatchSkipsPermanentRejectsKeepsValid: a mixed list with one
+// foreign (or blocked) name must still open a batch for the owned, applyable
+// remediations. Aborting the whole request on the first permanent reject would
+// drop valid work and was a sticky-Degrade risk class when only rejects remain.
+func TestRemediationBatchSkipsPermanentRejectsKeepsValid(t *testing.T) {
+	scheme := testScheme(t)
+	good := nodeRemediation("rem-good", "worker")
+	foreign := nodeRemediation("rem-foreign", "worker")
+	foreign.SetLabels(map[string]string{suiteLabel: "someone-elses-suite"})
+	pool := machineConfigPool("worker")
+	cb := newBatchCB()
+	cb.SetAnnotations(map[string]string{batchApplyAnnotation: "rem-good,rem-foreign"})
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).
+			WithObjects(cb, good, foreign, pool).
+			WithStatusSubresource(&baselinev1alpha1.ClusterBaseline{}).Build(),
+		Scheme: scheme,
+	}
+	ctx := context.Background()
+	if err := r.applyRemediationBatch(ctx, cb); err != nil {
+		t.Fatal(err)
+	}
+	if cb.Status.RemediationBatch == nil {
+		t.Fatal("batch must open for the valid remediation")
+	}
+	if got := cb.Status.RemediationBatch.Remediations; len(got) != 1 || got[0] != "rem-good" {
+		t.Fatalf("batch remediations = %v, want [rem-good] only", got)
+	}
+	gotGood := u(remediationGVK)
+	if err := r.Get(ctx, types.NamespacedName{Namespace: complianceNamespace, Name: "rem-good"}, gotGood); err != nil {
+		t.Fatal(err)
+	}
+	if apply, _, _ := unstructured.NestedBool(gotGood.Object, "spec", "apply"); !apply {
+		t.Fatal("valid remediation must be applied")
+	}
+	gotForeign := u(remediationGVK)
+	if err := r.Get(ctx, types.NamespacedName{Namespace: complianceNamespace, Name: "rem-foreign"}, gotForeign); err != nil {
+		t.Fatal(err)
+	}
+	if apply, _, _ := unstructured.NestedBool(gotForeign.Object, "spec", "apply"); apply {
+		t.Fatal("foreign remediation must not be applied")
 	}
 }
 

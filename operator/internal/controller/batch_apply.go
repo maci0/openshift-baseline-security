@@ -70,9 +70,10 @@ func (r *ClusterBaselineReconciler) applyRemediationBatch(ctx context.Context, c
 		// Drop race-deleted (NotFound) names so status only lists remediations we
 		// will actually apply. If none remain, clear the one-shot annotation
 		// instead of opening a fake batch that "succeeds" with no work.
-		// Permanent validation rejects (foreign suite, MissingDependencies) clear
-		// the one-shot request and return nil: a sticky error would Degrade every
-		// reconcile forever while MCPs stay unpaused (same class as invalid names).
+		// Permanent validation rejects (foreign suite, MissingDependencies) skip
+		// that name only: applying a mixed list must not drop valid remediations
+		// or sticky-Degrade forever. Same as NotFound race drops. If none remain
+		// eligible, clear the one-shot request (empty-keep path below).
 		// Transient Get/API errors still return so the request is retried.
 		// Build owned suites once for the whole list (up to batchMaxRemediations).
 		suites := ownedSuites(cb)
@@ -82,12 +83,9 @@ func (r *ClusterBaselineReconciler) applyRemediationBatch(ctx context.Context, c
 			rem, err := r.getBatchRemediation(ctx, name, suites)
 			if err != nil {
 				if isPermanentBatchTargetReject(err) {
-					log.FromContext(ctx).Info("remediation batch skipped: permanent target reject",
+					log.FromContext(ctx).Info("remediation batch: permanent target reject, skipping",
 						"name", cb.Name, "remediation", name, "error", err.Error())
-					if cerr := r.clearBatchAnnotations(ctx, cb, requested, false); cerr != nil {
-						return fmt.Errorf("clearing rejected batch-apply annotation: %w", cerr)
-					}
-					return nil
+					continue
 				}
 				return err
 			}
@@ -109,6 +107,7 @@ func (r *ClusterBaselineReconciler) applyRemediationBatch(ctx context.Context, c
 			// Drop the one-shot request only (recovery keys were never written).
 			// Match on the request we evaluated so a console resubmit that landed
 			// after we read the annotation is preserved, not silently deleted.
+			// Covers all-NotFound and all-permanent-reject (foreign/MissingDeps).
 			if err := r.clearBatchAnnotations(ctx, cb, requested, false); err != nil {
 				return fmt.Errorf("clearing empty batch-apply annotation: %w", err)
 			}
