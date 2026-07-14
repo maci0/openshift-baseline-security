@@ -177,7 +177,9 @@ func TestRelatedObjectsPopulated(t *testing.T) {
 }
 
 // TestNodeScanCoversAllNodes verifies the node-scan fan-out on a multi-node
-// cluster: the worker node scan's results carry per-node data for every worker.
+// cluster: with >=2 workers the worker node scan reaches DONE and produces
+// aggregated per-rule ComplianceCheckResults (CO folds each rule across all
+// worker nodes into one result labeled with the scan name).
 // Skips gracefully on SNO (one node, no separate worker node scan).
 func TestNodeScanCoversAllNodes(t *testing.T) {
 	ctx := context.Background()
@@ -217,7 +219,20 @@ func TestNodeScanCoversAllNodes(t *testing.T) {
 	if workers < 2 {
 		t.Skipf("only %d worker nodes; multi-node fan-out not exercised", workers)
 	}
-	t.Logf("worker node scan DONE across %d worker nodes", workers)
+
+	// A DONE node scan across >=2 workers must have produced results. Filter CCRs
+	// by the scan-name label: zero results despite a DONE multi-node scan means
+	// the fan-out silently yielded nothing, which the phase check alone misses.
+	results := &unstructured.UnstructuredList{}
+	results.SetGroupVersionKind(checkResultGVK.GroupVersion().WithKind(checkResultGVK.Kind + "List"))
+	if err := c.List(ctx, results, client.InNamespace(complianceNamespace),
+		client.MatchingLabels{"compliance.openshift.io/scan-name": "ocp4-cis-node-worker"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(results.Items) == 0 {
+		t.Fatalf("node-worker scan DONE across %d workers but produced no ComplianceCheckResults", workers)
+	}
+	t.Logf("worker node scan DONE with %d results across %d workers", len(results.Items), workers)
 }
 
 // TestTailoredProfileScored asserts a bound TailoredProfile is scored: it appears

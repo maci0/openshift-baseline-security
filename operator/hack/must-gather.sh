@@ -13,6 +13,13 @@ mkdir -p -- "$OUT"
 # Owner-only: dumps include logs/events that may carry cluster-sensitive data.
 chmod 700 -- "$OUT"
 
+# Bound every API call. must-gather is run precisely when the cluster is
+# unhealthy, so a wedged apiserver (stuck webhook, slow etcd) would otherwise
+# hang the whole collector on a single oc call with no output. command avoids
+# recursing into this wrapper; the flag applies to every oc below, including the
+# auth gate and the relatedObjects loop.
+oc() { command oc --request-timeout=30s "$@"; }
+
 # Fail fast when the kubeconfig is missing or expired so support does not get
 # an empty directory that looks like a successful collection.
 if ! oc whoami >/dev/null 2>&1; then
