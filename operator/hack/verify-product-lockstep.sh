@@ -67,37 +67,37 @@ elif [[ "$go_sched" != "$ts_sched" ]]; then
 fi
 
 # CRD MaxItems vs console client caps.
-go_prof_max=$(grep -E 'MaxItems=8' "$API" | head -1 || true)
-ts_prof_max=$(grep -E 'PROFILE_MAX_ITEMS\s*=\s*8' "$MODELS" | head -1 || true)
+go_prof_max=$(grep -E 'MaxItems=8([^0-9]|$)' "$API" | head -1 || true)
+ts_prof_max=$(grep -E 'PROFILE_MAX_ITEMS\s*=\s*8([^0-9]|$)' "$MODELS" | head -1 || true)
 if [[ -z "$go_prof_max" || -z "$ts_prof_max" ]]; then
   die "Profiles MaxItems=8 / PROFILE_MAX_ITEMS=8 lockstep missing"
 fi
 
-go_tp_max=$(grep -E 'MaxItems=32' "$API" | head -1 || true)
-ts_tp_max=$(grep -E 'TAILORED_PROFILE_MAX_ITEMS\s*=\s*32' "$MODELS" | head -1 || true)
+go_tp_max=$(grep -E 'MaxItems=32([^0-9]|$)' "$API" | head -1 || true)
+ts_tp_max=$(grep -E 'TAILORED_PROFILE_MAX_ITEMS\s*=\s*32([^0-9]|$)' "$MODELS" | head -1 || true)
 if [[ -z "$go_tp_max" || -z "$ts_tp_max" ]]; then
   die "TailoredProfiles MaxItems=32 / TAILORED_PROFILE_MAX_ITEMS=32 lockstep missing"
 fi
 
-go_w_max=$(grep -E 'MaxItems=256' "$API" | head -1 || true)
-ts_w_max=$(grep -E 'WAIVER_MAX_ITEMS\s*=\s*256' "$MODELS" | head -1 || true)
+go_w_max=$(grep -E 'MaxItems=256([^0-9]|$)' "$API" | head -1 || true)
+ts_w_max=$(grep -E 'WAIVER_MAX_ITEMS\s*=\s*256([^0-9]|$)' "$MODELS" | head -1 || true)
 if [[ -z "$go_w_max" || -z "$ts_w_max" ]]; then
   die "Waivers MaxItems=256 / WAIVER_MAX_ITEMS=256 lockstep missing"
 fi
 
 # History ring cap.
-go_hist=$(grep -E 'HistoryMax\s*=\s*30' "$API" | head -1 || true)
+go_hist=$(grep -E 'HistoryMax\s*=\s*30([^0-9]|$)' "$API" | head -1 || true)
 if [[ -z "$go_hist" ]]; then
   die "HistoryMax = 30 missing from API (CRD MaxItems=30)"
 fi
 
 # Scan-diff failure-name list cap (ADR-013). API constant must match every
 # MaxItems=4096 on newlyFailed/fixed/previousFailures/diffBaseFailures.
-go_fail_max=$(grep -E 'FailureListMax\s*=\s*4096' "$API" | head -1 || true)
+go_fail_max=$(grep -E 'FailureListMax\s*=\s*4096([^0-9]|$)' "$API" | head -1 || true)
 if [[ -z "$go_fail_max" ]]; then
   die "FailureListMax = 4096 missing from API (CRD MaxItems=4096)"
 fi
-fail_maxitems=$(grep -cE 'MaxItems=4096' "$API" || true)
+fail_maxitems=$(grep -cE 'MaxItems=4096([^0-9]|$)' "$API" || true)
 if [[ "$fail_maxitems" -lt 4 ]]; then
   die "expected >=4 MaxItems=4096 markers on failure-name lists in $API (got $fail_maxitems)"
 fi
@@ -106,14 +106,14 @@ fi
 for pair in 'High:10' 'Medium:5' 'Low:2' 'Other:1'; do
   name=${pair%%:*}
   val=${pair##*:}
-  if ! grep -qE "severityWeight${name}\\s+int64\\s*=\\s*${val}" "$SCORE"; then
+  if ! grep -qE "severityWeight${name}\\s+int64\\s*=\\s*${val}([^0-9]|$)" "$SCORE"; then
     die "operator severityWeight${name} != ${val}"
   fi
 done
 for pair in 'HIGH:10' 'MEDIUM:5' 'LOW:2' 'OTHER:1'; do
   name=${pair%%:*}
   val=${pair##*:}
-  if ! grep -qE "SEVERITY_WEIGHT_${name}\\s*=\\s*${val}" "$SCORING_TS"; then
+  if ! grep -qE "SEVERITY_WEIGHT_${name}\\s*=\\s*${val}([^0-9]|$)" "$SCORING_TS"; then
     die "console SEVERITY_WEIGHT_${name} != ${val}"
   fi
 done

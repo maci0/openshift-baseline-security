@@ -358,6 +358,8 @@ verify-versions:
 		|| { echo "CSV description must mention Migration notes or CHANGELOG so OLM consumers see the upgrade path"; fail=1; }; \
 	grep -qE "go-toolset $(GO_VERSION_RE)|go-toolset.*$(GO_VERSION_RE)" Dockerfile \
 		|| { echo "Dockerfile comment must name go-toolset $(GO_VERSION) (matches go.mod); image/toolchain would drift"; fail=1; }; \
+	grep -qE "GOTOOLCHAIN=go$(GO_VERSION_RE)([^0-9]|$$)" Dockerfile \
+		|| { echo "release Dockerfile ENV GOTOOLCHAIN must be go$(GO_VERSION) (matches go.mod); the load-bearing toolchain pin, not just the comment, must be checked"; fail=1; }; \
 	grep -qE "golang-$(GO_MINOR)-" Dockerfile.ci \
 		|| { echo "Dockerfile.ci builder FROM must be golang-$(GO_MINOR)- (matches go.mod); CI toolchain would drift"; fail=1; }; \
 	grep -qE "GOTOOLCHAIN=go$(GO_VERSION_RE)" Dockerfile.ci \
@@ -415,15 +417,28 @@ verify-crd:
 test-alerts:
 	./hack/test-alerts.sh
 
-# CSV clusterPermissions are hand-maintained; fail if they drift from role.yaml
-# on verbs we know matter for zero-config (clusterbaselines create) and for
-# complianceCatalogSource sync (subscriptions update/patch), or omit a watched
-# Compliance API required for history aggregation.
+# CSV clusterPermissions are hand-maintained and MUST stay in sync with the
+# generated config/rbac/role.yaml. This is a set of targeted spot-checks (not a
+# full role<->CSV diff) on the grants whose omission silently breaks an OLM
+# install at runtime: any RBAC change to role.yaml must add a check here.
 .PHONY: verify-csv-rbac
 verify-csv-rbac:
 	@grep -A1 'resources: \[clusterbaselines\]' bundle/manifests/baseline-security-operator.clusterserviceversion.yaml \
 		| grep -q 'create' \
 		|| (echo "CSV missing create on clusterbaselines; sync with config/rbac/role.yaml" && exit 1)
+	# operatorgroups need create;list (list detects a pre-existing user OG so we
+	# defer instead of duplicating, wedging the CO install); write stays name-scoped.
+	@grep -A3 'resources: \[operatorgroups\]' bundle/manifests/baseline-security-operator.clusterserviceversion.yaml \
+		| grep -q 'create, list' \
+		|| (echo "CSV missing create,list on operatorgroups; OG-duplicate avoidance needs list" && exit 1)
+	# machineconfigpools patch: batch remediation pauses/resumes MCPs (reboot once).
+	@grep -A3 'resources: \[machineconfigpools\]' bundle/manifests/baseline-security-operator.clusterserviceversion.yaml \
+		| grep -q 'patch' \
+		|| (echo "CSV missing patch on machineconfigpools; batch pause/resume needs it" && exit 1)
+	# consoles update: register/deregister the dynamic plugin on the console CR.
+	@grep -A3 'resources: \[consoles\]' bundle/manifests/baseline-security-operator.clusterserviceversion.yaml \
+		| grep -q 'update' \
+		|| (echo "CSV missing update on consoles; console-plugin registration needs it" && exit 1)
 	# Name-scoped rules put resourceNames between resources and verbs; -A3 covers both
 	# create-only and get/update/patch blocks. Catalog source sync needs update/patch.
 	@grep -A3 'resources: \[subscriptions\]' bundle/manifests/baseline-security-operator.clusterserviceversion.yaml \
