@@ -42,7 +42,7 @@ test.describe('Baseline Security multi-node / multi-benchmark', () => {
   });
 
   test('compliance score deep-links on the cluster Overview details card', async ({ page }) => {
-    await page.goto('/dashboards', { waitUntil: 'networkidle' });
+    await page.goto('/dashboards', { waitUntil: 'domcontentloaded' });
     await expect(page.getByText('Compliance score')).toBeVisible();
     // Rendered as a link showing "<n> / 100"; its accessible name is
     // "Compliance score <n> of 100". Navigates to the Compliance page.
@@ -54,11 +54,13 @@ test.describe('Baseline Security multi-node / multi-benchmark', () => {
 
   test('Results filter to INCONSISTENT returns rows', async ({ page }) => {
     await page.goto('/baseline-security/results?rowFilter-result-status=INCONSISTENT', {
-      waitUntil: 'networkidle',
+      waitUntil: 'domcontentloaded',
     });
     await expect(page.getByRole('button', { name: /Clear all filters/i })).toBeVisible();
-    // At least one Inconsistent status label survives the filter.
-    await expect(page.getByText('Inconsistent', { exact: true }).first()).toBeVisible();
+    // A matching row actually rendered. getByText('Inconsistent') alone is
+    // vacuous: the applied-filter chip renders that same localized title, so it
+    // passes even on an empty table. Assert a row via its title button instead.
+    await expect(page.getByRole('button', { name: /View details for/i }).first()).toBeVisible();
     // No Pass rows leak through.
     await expect(page.getByText('Pass', { exact: true })).toHaveCount(0);
   });
@@ -77,7 +79,7 @@ test.describe('Baseline Security multi-node / multi-benchmark', () => {
 
   test('INCONSISTENT check modal shows the per-node breakdown', async ({ page }) => {
     await page.goto('/baseline-security/results?rowFilter-result-status=INCONSISTENT', {
-      waitUntil: 'networkidle',
+      waitUntil: 'domcontentloaded',
     });
     // Only genuine PASS-vs-FAIL node splits stay INCONSISTENT after the operator
     // collapses benign PASS/NOT-APPLICABLE ones; open the first such check. Avoid
@@ -95,7 +97,7 @@ test.describe('Baseline Security multi-node / multi-benchmark', () => {
 
   test('a failing check offers a Waive action (with patch permission)', async ({ page }) => {
     await page.goto('/baseline-security/results?rowFilter-result-status=FAIL', {
-      waitUntil: 'networkidle',
+      waitUntil: 'domcontentloaded',
     });
     // Avoid "file" in the regex: it matches the "Profile" column-header button.
     await page
@@ -112,7 +114,7 @@ test.describe('Baseline Security multi-node / multi-benchmark', () => {
 
   test('Export CSV downloads a file of the filtered results', async ({ page }) => {
     await page.goto('/baseline-security/results?rowFilter-result-status=FAIL', {
-      waitUntil: 'networkidle',
+      waitUntil: 'domcontentloaded',
     });
     const exportBtn = page.getByRole('button', { name: 'Export CSV' });
     await expect(exportBtn).toBeEnabled();

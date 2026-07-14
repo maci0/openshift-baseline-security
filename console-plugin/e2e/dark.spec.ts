@@ -27,7 +27,7 @@ test.describe('Baseline Security dark theme', () => {
 
   test('Results and a check modal render on the dark theme', async ({ page }) => {
     await page.goto('/baseline-security/results?rowFilter-result-status=INCONSISTENT', {
-      waitUntil: 'networkidle',
+      waitUntil: 'domcontentloaded',
     });
     await forceDark(page);
     // Only genuine PASS-vs-FAIL node splits stay INCONSISTENT after the operator

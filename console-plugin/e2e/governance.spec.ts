@@ -81,6 +81,9 @@ test.describe('Baseline Security governance affordances', () => {
   test('Batch apply opens a confirmation and cancels without applying', async ({ page }) => {
     await gotoTab(page, '/remediations');
     const batch = page.getByRole('button', { name: /Batch apply \d+ node remediation/ });
+    // The batchable set arrives from a watch after the tab heading renders; wait
+    // (bounded) for the button so a slow load is not mistaken for an empty cluster.
+    await batch.waitFor({ timeout: 10_000 }).catch(() => {});
     // Skip (not soft-pass) if the cluster currently has no batchable node
     // remediations; a bare pass would be false confidence.
     test.skip((await batch.count()) === 0, 'no batchable node remediations on cluster');

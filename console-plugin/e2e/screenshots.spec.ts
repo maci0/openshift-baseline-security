@@ -5,7 +5,7 @@ import { shot } from './helpers';
 
 test.describe('Baseline Security screenshots', () => {
   test('check result detail modal', async ({ page }) => {
-    await page.goto('/baseline-security/results', { waitUntil: 'networkidle' });
+    await page.goto('/baseline-security/results', { waitUntil: 'domcontentloaded' });
     // Open the first check's detail modal (title is a link button).
     await page.getByRole('button', { name: /registries|Identity Provider|etcd|audit/i }).first().click();
     await expect(page.getByRole('dialog')).toBeVisible();
@@ -15,7 +15,7 @@ test.describe('Baseline Security screenshots', () => {
 
   test('results filtered by high severity', async ({ page }) => {
     await page.goto('/baseline-security/results?rowFilter-result-severity=high', {
-      waitUntil: 'networkidle',
+      waitUntil: 'domcontentloaded',
     });
     // Applied-filter chip proves the severity filter took effect (a bare
     // "Clear all filters" check would also pass for an unrelated filter).
@@ -28,8 +28,12 @@ test.describe('Baseline Security screenshots', () => {
   });
 
   test('remediation rendered-object view', async ({ page }) => {
-    await page.goto('/baseline-security/remediations', { waitUntil: 'networkidle' });
+    await page.goto('/baseline-security/remediations', { waitUntil: 'domcontentloaded' });
     const view = page.getByRole('button', { name: 'View' }).first();
+    // Remediation rows arrive from a watch after domcontentloaded; wait for the
+    // first row (bounded) so a slow load is not mistaken for an empty cluster.
+    // A genuinely-empty cluster falls through the timeout and skips honestly.
+    await view.waitFor({ timeout: 10_000 }).catch(() => {});
     // Skip (do not soft-pass) when the cluster has no remediations yet.
     test.skip((await view.count()) === 0, 'no remediations on cluster');
     await view.click();
@@ -38,11 +42,14 @@ test.describe('Baseline Security screenshots', () => {
   });
 
   test('remediation apply confirmation', async ({ page }) => {
-    await page.goto('/baseline-security/remediations', { waitUntil: 'networkidle' });
+    await page.goto('/baseline-security/remediations', { waitUntil: 'domcontentloaded' });
     // The per-row Apply button is name-scoped ("Apply <remediation-name>") so it
     // stays distinct from the "Batch apply ..." button and the modal's confirm
     // "Apply"; match the row action by that prefix.
     const apply = page.getByRole('button', { name: /^Apply \S/ }).first();
+    // Wait (bounded) for the watch-delivered rows before the skip decision so a
+    // slow load is not misread as an empty cluster; empty falls through and skips.
+    await apply.waitFor({ timeout: 10_000 }).catch(() => {});
     // Skip (do not soft-pass) when Apply is absent; a bare pass is false confidence.
     test.skip((await apply.count()) === 0, 'no applyable remediations on cluster');
     await apply.click();
@@ -53,15 +60,17 @@ test.describe('Baseline Security screenshots', () => {
   });
 
   test('overview with a tailored profile card', async ({ page }) => {
-    await page.goto('/baseline-security', { waitUntil: 'networkidle' });
-    await expect(page.getByText('cis-custom')).toBeVisible();
-    await expect(page.getByText('Tailored')).toBeVisible();
+    await page.goto('/baseline-security', { waitUntil: 'domcontentloaded' });
+    // .first(): a second bound TailoredProfile would render multiple cards, and a
+    // bare getByText would throw a strict-mode "resolved to N elements".
+    await expect(page.getByText('cis-custom').first()).toBeVisible();
+    await expect(page.getByText('Tailored').first()).toBeVisible();
     await shot(page, 'overview-tailored');
   });
 
   test('results filtered to a tailored profile', async ({ page }) => {
     await page.goto('/baseline-security/results?rowFilter-result-profile=tp-cis-custom', {
-      waitUntil: 'networkidle',
+      waitUntil: 'domcontentloaded',
     });
     // Applied-filter chip proves the profile filter took effect (not just any
     // residual filter from a previous navigation).
@@ -74,7 +83,7 @@ test.describe('Baseline Security screenshots', () => {
   });
 
   test('compliance score on the cluster Overview', async ({ page }) => {
-    await page.goto('/dashboards', { waitUntil: 'networkidle' });
+    await page.goto('/dashboards', { waitUntil: 'domcontentloaded' });
     const score = page.getByRole('link', { name: /\d+ of 100/ });
     await expect(score).toBeVisible();
     // The injected "Compliance score" row sits low in the Details card, below the

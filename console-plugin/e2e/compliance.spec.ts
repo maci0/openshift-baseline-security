@@ -43,7 +43,7 @@ test.describe('Baseline Security console plugin', () => {
 
   test('Results deep-link applies the FAIL status filter', async ({ page }) => {
     await page.goto('/baseline-security/results?rowFilter-result-status=FAIL', {
-      waitUntil: 'networkidle',
+      waitUntil: 'domcontentloaded',
     });
     // The applied-filter chip proves the filter took effect (a bare "FAIL" text
     // check would pass on an unfiltered table via the status column labels).
@@ -52,6 +52,11 @@ test.describe('Baseline Security console plugin', () => {
     });
     await expect(chipGroup.first()).toBeVisible();
     await expect(page.getByRole('button', { name: /Clear all filters/i })).toBeVisible();
+    // A matching row actually rendered: the row title button carries a
+    // "View details for <title>" aria-label. Without this the test is vacuous,
+    // an empty table (filter regressed to zero rows) satisfies the chip and the
+    // no-Pass negative but proves nothing filtered in.
+    await expect(page.getByRole('button', { name: /View details for/i }).first()).toBeVisible();
     // And no Pass rows survive the filter.
     await expect(page.getByText('Pass', { exact: true })).toHaveCount(0);
     await shot(page, 'results-fail-filter');
