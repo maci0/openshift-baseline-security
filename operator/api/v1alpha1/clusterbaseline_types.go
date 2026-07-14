@@ -130,12 +130,15 @@ type ClusterBaselineSpec struct {
 	// complianceCatalogSource is the OLM CatalogSource providing the
 	// compliance-operator package (override for OKD or disconnected clusters).
 	// Must be a DNS-1123 subdomain (CatalogSource metadata.name).
-	// +kubebuilder:default="redhat-operators"
+	// No CRD default on purpose: an omitted field must stay empty so the reconciler
+	// auto-detects the cluster flavor (redhat-operators on OCP, community-operators
+	// on OKD). A CRD default here would make the field never-empty and silently
+	// defeat that detection, breaking zero-config CO install on OKD. MinLength only
+	// validates present values, so absent stays "" and reaches auto-detection.
 	// +kubebuilder:validation:MaxLength=253
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`
 	// +optional
-	// Empty/whitespace uses DefaultComplianceCatalogSource at reconcile (same as CRD default).
 	ComplianceCatalogSource string `json:"complianceCatalogSource,omitempty"`
 
 	// console configures the console plugin deployment.

@@ -50,12 +50,15 @@ spec:
               posture.
             properties:
               complianceCatalogSource:
-                default: redhat-operators
                 description: |-
                   complianceCatalogSource is the OLM CatalogSource providing the
                   compliance-operator package (override for OKD or disconnected clusters).
                   Must be a DNS-1123 subdomain (CatalogSource metadata.name).
-                  Empty/whitespace uses DefaultComplianceCatalogSource at reconcile (same as CRD default).
+                  No CRD default on purpose: an omitted field must stay empty so the reconciler
+                  auto-detects the cluster flavor (redhat-operators on OCP, community-operators
+                  on OKD). A CRD default here would make the field never-empty and silently
+                  defeat that detection, breaking zero-config CO install on OKD. MinLength only
+                  validates present values, so absent stays "" and reaches auto-detection.
                 maxLength: 253
                 minLength: 1
                 pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$

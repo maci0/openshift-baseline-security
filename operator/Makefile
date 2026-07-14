@@ -384,6 +384,12 @@ bundle: manifests
 verify-crd:
 	@! grep -q 'uniqueItems' config/crd/bases/*.yaml \
 		|| (echo "CRD uses uniqueItems (forbidden by kube); use +listType=set instead" && exit 1)
+	# complianceCatalogSource must have NO schema default: the apiserver would
+	# inject it on every omitted field, so spec.complianceCatalogSource would never
+	# be empty and the reconciler's OKD (community-operators) auto-detection would
+	# be dead code, breaking zero-config CO install on OKD.
+	@! grep -qE '^[[:space:]]*default: redhat-operators' config/crd/bases/*.yaml \
+		|| (echo "CRD defaults complianceCatalogSource; drop the +kubebuilder:default so an omitted field reaches auto-detection" && exit 1)
 
 # Unit-test the PrometheusRule alerts with promtool (containerized).
 .PHONY: test-alerts
