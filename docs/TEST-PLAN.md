@@ -467,8 +467,9 @@ an accepted risk neither inflates nor tanks the score.
 - [x] **Remediation batch started-at gauge**: tracks
       `status.remediationBatch.startedAt`, clears when the batch ends
       (`TestPublishMetricsBatchStartedTimestamp`).
-- [ ] **ServiceMonitor scrape**: with UWM + scraper SA token, metrics endpoint
-      returns 200 and includes custom gauges (live or kind).
+- [ ] **ServiceMonitor scrape**: with cluster monitoring (namespace
+      openshift.io/cluster-monitoring label) + scraper SA token, metrics
+      endpoint returns 200 and includes custom gauges (live or kind).
 
 ## J. Deletion & finalizer
 
@@ -1328,8 +1329,9 @@ Classic boundary table. Automate as table-driven unit tests where possible.
       modals (screenshot diff optional).
 - [ ] **Cluster with Monitoring disabled**: no PrometheusRule install; operator
       still healthy; metrics endpoint still scrapable manually.
-- [ ] **Cluster with user-workload monitoring only**: ServiceMonitor in our NS
-      scraped when labeled correctly; document required labels.
+- [ ] **Cluster monitoring scrape**: openshift-* install NS carries the
+      openshift.io/cluster-monitoring label so platform Prometheus scrapes the
+      ServiceMonitor (UWM never scrapes openshift-* namespaces).
 - [ ] **Hosted control plane / HyperShift**: operator in management vs guest
       (document support boundary; skip if unsupported).
 - [ ] **ROSA / managed offering constraints**: if SCCs or webhooks block

@@ -33,6 +33,31 @@ func sanitizeStatusForUpdate(cb *baselinev1alpha1.ClusterBaseline) {
 	cb.Status.Fixed = clampFailureList(cb.Status.Fixed)
 	cb.Status.PreviousFailures = clampFailureList(cb.Status.PreviousFailures)
 	cb.Status.DiffBaseFailures = clampFailureList(cb.Status.DiffBaseFailures)
+	// complianceOperatorVersion is derived from a CSV name (object names allow up
+	// to 253 chars), but the CRD caps the field at 128; clamp so a pathologically
+	// long CSV name cannot fail Status().Update admission and freeze reconcile.
+	cb.Status.ComplianceOperatorVersion = clampString(cb.Status.ComplianceOperatorVersion, complianceOperatorVersionMax)
+}
+
+// complianceOperatorVersionMax mirrors the CRD MaxLength on
+// status.complianceOperatorVersion.
+const complianceOperatorVersionMax = 128
+
+// clampString truncates s to at most max runes (fast path when it already fits
+// by byte length, which implies it fits by rune count). Rune-aware so truncation
+// never splits a multibyte character into invalid UTF-8.
+func clampString(s string, max int) string {
+	if max <= 0 {
+		return ""
+	}
+	if len(s) <= max {
+		return s
+	}
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	return string(r[:max])
 }
 
 // clampFailureList trims a status failure-name list to failureListMax (keeps

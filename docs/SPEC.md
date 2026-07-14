@@ -78,7 +78,8 @@ defaults and presentation are missing. Both are cheap. That is this project.
   (operator writes a compact history into the `ClusterBaseline` status,
   oldest first, capped at 30; optional per-profile history) and render a
   trendline on the dashboard. A native console dashboard ConfigMap under
-  Observe → Dashboards exposes the Prometheus score series when UWM is on.
+  Observe → Dashboards exposes the Prometheus score series once cluster
+  monitoring scrapes the score metric.
 
 ### Non-goals
 

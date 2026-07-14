@@ -429,15 +429,19 @@ bulk multi-cluster reports (out of single-cluster scope).
 
 **Decision:** The operator reconciles a `console.openshift.io/dashboard`
 ConfigMap in `openshift-config-managed` (embedded Grafana-schema JSON, no
-Grafana server). It renders under Observe → Dashboards when user-workload
-monitoring and the bundle ServiceMonitor are present. Dashboard write
-failures are best-effort (log only; never Degrade scanning).
+Grafana server). It renders under Observe → Dashboards once cluster (platform)
+monitoring scrapes the bundle ServiceMonitor (the install namespace is
+openshift-*, which user-workload monitoring never scrapes; the
+`openshift.io/cluster-monitoring` namespace label opts it into platform
+Prometheus). Dashboard write failures are best-effort (log only; never Degrade
+scanning).
 
 **Alternatives:** Ship a Grafana dashboard CR; require cluster monitoring
 only; omit Observe and keep only the in-console MiniTrend.
 
 **Tradeoff:** Same install path as ODF-style console dashboards; works on
-direct and OLM installs; depends on UWM for live series. Best-effort avoid
+direct and OLM installs; depends on cluster monitoring for live series.
+Best-effort avoid
 blocking the primary compliance path when the ConfigMap namespace or RBAC is
 missing.
 

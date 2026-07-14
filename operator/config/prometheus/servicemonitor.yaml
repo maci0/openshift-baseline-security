@@ -1,7 +1,10 @@
-# Optional: scrape secure metrics via user-workload monitoring (UWM).
-# UWM denies on-disk credentials (bearerTokenFile / caFile), so the scrape
-# token comes from a Secret bound to a dedicated scraper ServiceAccount that
-# holds the baseline-security-metrics-reader ClusterRole.
+# Scrape secure metrics via cluster (platform) monitoring. The operator lives in
+# an openshift-* namespace, which user-workload monitoring never scrapes; the
+# openshift.io/cluster-monitoring label on the namespace (config/manager) opts it
+# into platform Prometheus instead. Cluster monitoring denies on-disk credentials
+# (bearerTokenFile / caFile), so the scrape token comes from a Secret bound to a
+# dedicated scraper ServiceAccount that holds the baseline-security-metrics-reader
+# ClusterRole.
 apiVersion: v1
 kind: ServiceAccount
 metadata:

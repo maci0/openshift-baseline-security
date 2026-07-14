@@ -375,6 +375,45 @@ const ResultsTab: React.FC<{
     );
   };
 
+  // Rendered in both the main list and the empty-results early return, so that
+  // when every check is gone (the case where orphan waivers matter most) the
+  // removal affordance is still reachable.
+  const orphanWaiverAlert =
+    canWaive && orphanWaivers.length > 0 ? (
+      <Alert
+        variant="warning"
+        isInline
+        title={t('Waivers referencing a removed check ({{count}})', {
+          count: orphanWaivers.length,
+          formattedCount: formatCount(orphanWaivers.length, i18n.language),
+        })}
+        style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}
+      >
+        <p>
+          {t(
+            'The rule was removed or its profile unbound, so these waivers no longer match a result but still exclude it from scoring. Remove any that are no longer needed.',
+          )}
+        </p>
+        <Flex
+          gap={{ default: 'gapSm' }}
+          flexWrap={{ default: 'wrap' }}
+          style={{ marginTop: 'var(--pf-t--global--spacer--sm)' }}
+        >
+          {orphanWaivers.map(({ name, index }) => (
+            <FlexItem key={name}>
+              <Button
+                variant="secondary"
+                isDisabled={busy}
+                onClick={() => removeWaiverByIndex(index, name)}
+              >
+                {t('Remove waiver for {{name}}', { name })}
+              </Button>
+            </FlexItem>
+          ))}
+        </Flex>
+      </Alert>
+    ) : null;
+
   const addSelectedWaiver = () => {
     if (!selectedLive) return;
     // MaxItems is a different failure mode from field validation; do not
@@ -675,6 +714,7 @@ const ResultsTab: React.FC<{
       (baseline?.spec.tailoredProfiles?.length ?? 0) === 0;
     return (
       <ListPageBody>
+        {orphanWaiverAlert}
         <EmptyState
           titleText={
             scanningDisabled ? t('Scanning is disabled') : t('No check results yet')
@@ -728,40 +768,7 @@ const ResultsTab: React.FC<{
           }
         />
       )}
-      {canWaive && orphanWaivers.length > 0 && (
-        <Alert
-          variant="warning"
-          isInline
-          title={t('Waivers referencing a removed check ({{count}})', {
-            count: orphanWaivers.length,
-            formattedCount: formatCount(orphanWaivers.length, i18n.language),
-          })}
-          style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}
-        >
-          <p>
-            {t(
-              'The rule was removed or its profile unbound, so these waivers no longer match a result but still exclude it from scoring. Remove any that are no longer needed.',
-            )}
-          </p>
-          <Flex
-            gap={{ default: 'gapSm' }}
-            flexWrap={{ default: 'wrap' }}
-            style={{ marginTop: 'var(--pf-t--global--spacer--sm)' }}
-          >
-            {orphanWaivers.map(({ name, index }) => (
-              <FlexItem key={name}>
-                <Button
-                  variant="secondary"
-                  isDisabled={busy}
-                  onClick={() => removeWaiverByIndex(index, name)}
-                >
-                  {t('Remove waiver for {{name}}', { name })}
-                </Button>
-              </FlexItem>
-            ))}
-          </Flex>
-        </Alert>
-      )}
+      {orphanWaiverAlert}
       <Flex
         justifyContent={{ default: 'justifyContentSpaceBetween' }}
         alignItems={{ default: 'alignItemsFlexStart' }}

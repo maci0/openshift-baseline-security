@@ -261,6 +261,9 @@ func TestSanitizeStatusForUpdate(t *testing.T) {
 	cb := &baselinev1alpha1.ClusterBaseline{
 		Status: baselinev1alpha1.ClusterBaselineStatus{
 			Score: &badScore,
+			// A pathologically long CSV-derived version must be clamped to the
+			// CRD MaxLength=128 so Status().Update does not fail admission.
+			ComplianceOperatorVersion: strings.Repeat("v", 200),
 			History: []baselinev1alpha1.ScoreSnapshot{
 				{Score: -1}, {Score: 999},
 			},
@@ -295,6 +298,9 @@ func TestSanitizeStatusForUpdate(t *testing.T) {
 		cb.Status.DiffBaseFailures = append(cb.Status.DiffBaseFailures, name)
 	}
 	sanitizeStatusForUpdate(cb)
+	if got := len(cb.Status.ComplianceOperatorVersion); got != complianceOperatorVersionMax {
+		t.Fatalf("version length = %d, want %d (clamped to CRD MaxLength)", got, complianceOperatorVersionMax)
+	}
 	if cb.Status.Score == nil || *cb.Status.Score != 100 {
 		t.Fatalf("score = %v, want 100", cb.Status.Score)
 	}

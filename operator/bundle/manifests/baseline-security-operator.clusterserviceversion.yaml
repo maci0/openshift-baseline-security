@@ -15,6 +15,12 @@ metadata:
       ]
     capabilities: Seamless Upgrades
     categories: Security
+    # openshift-* namespaces are platform-reserved and unscraped by default;
+    # create the install namespace pre-labeled for cluster monitoring so the
+    # bundled ServiceMonitor/PrometheusRule have targets and fire alerts.
+    operatorframework.io/suggested-namespace: openshift-baseline-security
+    operatorframework.io/suggested-namespace-template: |-
+      {"apiVersion":"v1","kind":"Namespace","metadata":{"name":"openshift-baseline-security","labels":{"openshift.io/cluster-monitoring":"true"}}}
     containerImage: quay.io/openshift-baseline-security/baseline-security-operator:0.5.0
     repository: https://github.com/maci0/openshift-baseline-security
     description: Baseline benchmark compliance scanning with a native console UI,

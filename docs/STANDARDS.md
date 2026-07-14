@@ -83,8 +83,9 @@ HTTPS with authn/authz (`filters.WithAuthenticationAndAuthorization` on
 `:8443`), service-ca serving cert when present. Metrics scrape objects
 (ServiceMonitor, PrometheusRule, scraper SA/RBAC) live under
 `operator/config/prometheus/` and ship in the OLM bundle; non-OLM
-`make deploy` includes them via `config/default` (inert until
-user-workload monitoring is enabled). OLM installs the deployment into
+`make deploy` includes them via `config/default` (scraped by cluster
+monitoring via the `openshift.io/cluster-monitoring` namespace label, since
+user-workload monitoring never scrapes openshift-* namespaces). OLM installs the deployment into
 `openshift-baseline-security` with cluster-wide `AllNamespaces` scope so the
 cluster-scoped controller, metrics Service, and RBAC subjects all match their
 intended namespaces and watch scope.

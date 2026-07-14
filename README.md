@@ -54,7 +54,7 @@ Install from published OLM image/CSV tags for only the released surface.
   `ComplianceStatusStale`, `ComplianceScanStale`, `ComplianceRegressions`,
   `RemediationBatchStuck`, `ClusterBaselineDegraded`);
   native Observe →
-  Dashboards ConfigMap when user-workload monitoring is enabled.
+  Dashboards ConfigMap scraped by cluster (platform) monitoring.
 - **Support**: `operator/hack/must-gather.sh` collects operator + compliance state.
 
 ## Layout
@@ -141,9 +141,11 @@ with `BASELINE_SECURITY_SKIP_DEFAULT_CR=true` on the CSV deployment.
 Metrics: the OLM bundle ships ServiceMonitor, PrometheusRule, and a metrics
 scrape ServiceAccount bound to ClusterRole `baseline-security-metrics-reader`
 (`GET /metrics`). Non-OLM `make deploy` applies the same objects via
-`operator/config/default` (includes `config/prometheus/`). Scrapes stay inert
-until user-workload monitoring is enabled; monitoring CRDs are required on
-the cluster (present on OpenShift).
+`operator/config/default` (includes `config/prometheus/`). The install
+namespace is openshift-* (platform-reserved), so it carries the
+`openshift.io/cluster-monitoring: "true"` label and platform Prometheus scrapes
+it; user-workload monitoring never scrapes openshift-* namespaces. Monitoring
+CRDs are required on the cluster (present on OpenShift).
 
 Deleting the `ClusterBaseline` (or uninstalling this operator) does **not**
 remove the Compliance Operator Subscription; CO is treated as a shared
