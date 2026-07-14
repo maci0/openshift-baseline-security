@@ -152,6 +152,12 @@ func parseScanEndTimestamp(ts string, now time.Time) (time.Time, bool) {
 	if t.After(now.Add(time.Hour)) {
 		return time.Time{}, false
 	}
+	// Reject pre-epoch timestamps (corrupt / skewed CO clock): no real scan
+	// predates 1970, and a negative Unix value would pin LastScanTime and poison
+	// the age-based ComplianceScanStale alert. Symmetric with the far-future guard.
+	if t.Before(time.Unix(0, 0)) {
+		return time.Time{}, false
+	}
 	return t, true
 }
 

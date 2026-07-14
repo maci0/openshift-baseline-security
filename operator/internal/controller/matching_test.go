@@ -359,6 +359,17 @@ func TestParseScanEndTimestamp(t *testing.T) {
 	if _, valid = parseScanEndTimestamp(skew, now); !valid {
 		t.Fatal("near-future within 1h should be accepted")
 	}
+	// Pre-epoch (corrupt/skewed clock) must be rejected: a negative Unix value
+	// would pin LastScanTime and poison the ComplianceScanStale age alert.
+	for _, pre := range []string{"0001-01-01T00:00:01Z", "1950-01-01T00:00:00Z", "1969-12-31T23:59:59Z"} {
+		if _, valid = parseScanEndTimestamp(pre, now); valid {
+			t.Fatalf("pre-epoch endTimestamp %q must be rejected", pre)
+		}
+	}
+	// The Unix epoch itself and after are accepted (real scans are post-1970).
+	if _, valid = parseScanEndTimestamp("1970-01-01T00:00:00Z", now); !valid {
+		t.Fatal("epoch endTimestamp should be accepted")
+	}
 }
 
 func TestCondMessage(t *testing.T) {
