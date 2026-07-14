@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-logr/logr"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -85,6 +86,10 @@ type ClusterBaselineReconciler struct {
 	// V(1) alone leaves production logs silent until ComplianceScanStale (36h).
 	// Single-threaded reconcile (singleton + leader-elected) so no mutex.
 	lastHistoryStallLog time.Time
+	// lastPostureLogSig is the last Degraded/not-Available posture logged at Info,
+	// so a steady state logs once on transition (not every 1m reconcile) while a
+	// new posture still surfaces at default level. Same single-threaded safety.
+	lastPostureLogSig string
 }
 
 // +kubebuilder:rbac:groups=baselinesecurity.openshift.io,resources=clusterbaselines,verbs=get;list;watch;create;update;patch
@@ -283,10 +288,15 @@ func (r *ClusterBaselineReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		"degraded", degraded,
 		"batchActive", cb.Status.RemediationBatch != nil,
 	}
-	if degradedCond != nil && degradedCond.Status == metav1.ConditionTrue {
-		logger.Info("reconciled with Degraded condition",
-			append(keysAndValues, "reason", degradedCond.Reason, "message", degradedCond.Message)...)
-	} else if !available && !progressing {
+	// Log the Degraded / not-Available summary at Info only when the posture first
+	// enters this (state, reason); a steady failing state at the 1m poll drops to
+	// V(1) so it does not spam ~1440 lines/day, matching setCondFalseLogOnce and
+	// logHistoryStall. A genuine change (new Degraded reason, or recovery) logs.
+	switch {
+	case degradedCond != nil && degradedCond.Status == metav1.ConditionTrue:
+		r.postureLog(logger, "degraded/"+degradedCond.Reason, "reconciled with Degraded condition",
+			append(keysAndValues, "reason", degradedCond.Reason, "message", degradedCond.Message))
+	case !available && !progressing:
 		// Prefer the detail that blocks Available (CO or scan) for on-call triage.
 		reason, message := "NotReady", ""
 		if c := meta.FindStatusCondition(cb.Status.Conditions, "ComplianceOperatorReady"); c != nil && c.Status != metav1.ConditionTrue {
@@ -294,12 +304,26 @@ func (r *ClusterBaselineReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		} else if c := meta.FindStatusCondition(cb.Status.Conditions, "ScanConfigured"); c != nil && c.Status != metav1.ConditionTrue {
 			reason, message = c.Reason, c.Message
 		}
-		logger.Info("reconciled not Available",
-			append(keysAndValues, "reason", reason, "message", message)...)
-	} else {
+		r.postureLog(logger, "notAvailable/"+reason, "reconciled not Available",
+			append(keysAndValues, "reason", reason, "message", message))
+	default:
+		r.lastPostureLogSig = "" // healthy: re-entering a failing state logs again
 		logger.V(1).Info("reconciled", keysAndValues...)
 	}
 	return ctrl.Result{RequeueAfter: requeueAfter(cb)}, nil
+}
+
+// postureLog logs a Degraded / not-Available summary at Info the first time this
+// posture (sig = state + reason) is seen, then at V(1) while it persists, so a
+// steady failing state does not spam the default log on every 1m reconcile while
+// a new posture (different reason, or recovery-then-relapse) still surfaces.
+func (r *ClusterBaselineReconciler) postureLog(logger logr.Logger, sig, msg string, keysAndValues []any) {
+	if sig == r.lastPostureLogSig {
+		logger.V(1).Info(msg, keysAndValues...)
+		return
+	}
+	r.lastPostureLogSig = sig
+	logger.Info(msg, keysAndValues...)
 }
 
 // condTrue is true when the named status condition is present and True.

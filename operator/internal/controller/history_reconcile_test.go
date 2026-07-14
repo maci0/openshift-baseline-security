@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 // FuzzCompletedSuiteTimes: ComplianceSuite status.phase, scanStatuses[].phase,
@@ -124,5 +125,28 @@ func TestLogHistoryStallRateLimit(t *testing.T) {
 	r.logHistoryStall(ctx, "stall c", "k", "v")
 	if !r.lastHistoryStallLog.After(first) {
 		t.Fatal("stall after interval should refresh lastHistoryStallLog")
+	}
+}
+
+// postureLog logs at Info only when the posture signature changes (a transition),
+// tracked via lastPostureLogSig, so a steady Degraded / not-Available state does
+// not spam the default log on every 1m reconcile.
+func TestPostureLogTransitionGate(t *testing.T) {
+	r := &ClusterBaselineReconciler{}
+	logger := log.FromContext(t.Context())
+
+	r.postureLog(logger, "degraded/CSVFailed", "msg", nil)
+	if r.lastPostureLogSig != "degraded/CSVFailed" {
+		t.Fatalf("first posture not recorded: %q", r.lastPostureLogSig)
+	}
+	// Same posture again: signature unchanged (this call would log at V(1)).
+	r.postureLog(logger, "degraded/CSVFailed", "msg", nil)
+	if r.lastPostureLogSig != "degraded/CSVFailed" {
+		t.Fatalf("signature mutated on an unchanged posture: %q", r.lastPostureLogSig)
+	}
+	// A different posture is a transition: signature updates (logs at Info).
+	r.postureLog(logger, "notAvailable/NotInstalled", "msg", nil)
+	if r.lastPostureLogSig != "notAvailable/NotInstalled" {
+		t.Fatalf("new posture not recorded: %q", r.lastPostureLogSig)
 	}
 }

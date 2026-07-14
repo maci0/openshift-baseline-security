@@ -9,6 +9,18 @@ export type NodeStatus = { node: string; status: string };
 const inconsistentSourceAnn = 'compliance.openshift.io/inconsistent-source';
 const mostCommonStatusAnn = 'compliance.openshift.io/most-common-status';
 
+// Recognized CO result statuses that effectiveStatus passes through unchanged.
+// SKIP folds to NOT-APPLICABLE and INCONSISTENT collapses separately; anything
+// else non-empty folds to ERROR (the operator tally's default bucket).
+const KNOWN_EFFECTIVE_STATUSES = new Set([
+  'PASS',
+  'FAIL',
+  'ERROR',
+  'INFO',
+  'MANUAL',
+  'NOT-APPLICABLE',
+]);
+
 // Uppercase a CO status token without allocating when the value is already a
 // common uppercase enum (PASS/FAIL/…) or has no ASCII lowercase letters.
 // Lockstep with operator upperStatusToken: multi-node INCONSISTENT annotations
@@ -93,7 +105,12 @@ export const effectiveStatus = (
     return 'NOT-APPLICABLE';
   }
   if (r.status !== 'INCONSISTENT') {
-    return r.status;
+    // Pass through only recognized statuses. A non-empty but unknown token (a
+    // future CO status, corruption, or a wrong-case value) folds to ERROR, the
+    // same bucket the operator tally uses, so the row stays visible under the
+    // Error filter and matches the Overview donut instead of showing a bogus
+    // label that matches no status filter chip.
+    return KNOWN_EFFECTIVE_STATUSES.has(r.status) ? r.status : 'ERROR';
   }
   // One annotations object read for both CO keys (filter/CSV/score hot path).
   const ann = r.metadata?.annotations;

@@ -1129,8 +1129,13 @@ describe('resultsCsv', () => {
       r('|DDE', 'PASS', 'low'), // legacy Excel DDE
     ]);
     const lines = csvLines(csv);
-    expect(lines[1]).toBe(`'=cmd,"'+SUM(1,1)",'-1,'@import,false`);
-    expect(csv).toContain(`"'\tTabbed","'\tTabbed","'\nNewline",low,false`);
+    // status "-1" is an unknown CO status: effectiveStatus folds it to ERROR (the
+    // operator tally's default bucket), so the status cell is a fixed enum, not a
+    // passed-through formula. name/title/severity still exercise formula-escaping.
+    expect(lines[1]).toBe(`'=cmd,"'+SUM(1,1)",ERROR,'@import,false`);
+    // status "\nNewline" is unknown too -> ERROR; the escaped name/title cols still
+    // exercise tab/newline quoting.
+    expect(csv).toContain(`"'\tTabbed","'\tTabbed",ERROR,low,false`);
     expect(csv).toContain(`"'\rCarriage","'\rCarriage",PASS,low,false`);
     expect(csv).toContain(`' =cmd`);
     expect(csv).toContain('ab,ab,PASS,low,false');
