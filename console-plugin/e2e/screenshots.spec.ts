@@ -39,12 +39,17 @@ test.describe('Baseline Security screenshots', () => {
 
   test('remediation apply confirmation', async ({ page }) => {
     await page.goto('/baseline-security/remediations', { waitUntil: 'networkidle' });
-    const apply = page.getByRole('button', { name: 'Apply', exact: true }).first();
+    // The per-row Apply button is name-scoped ("Apply <remediation-name>") so it
+    // stays distinct from the "Batch apply ..." button and the modal's confirm
+    // "Apply"; match the row action by that prefix.
+    const apply = page.getByRole('button', { name: /^Apply \S/ }).first();
     // Skip (do not soft-pass) when Apply is absent; a bare pass is false confidence.
     test.skip((await apply.count()) === 0, 'no applyable remediations on cluster');
     await apply.click();
     await expect(page.getByText('Apply remediation?')).toBeVisible();
     await shot(page, 'remediation-apply');
+    // Cancel: opening the confirm for a screenshot must not apply anything.
+    await page.getByRole('button', { name: 'Cancel' }).click();
   });
 
   test('overview with a tailored profile card', async ({ page }) => {
