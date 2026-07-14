@@ -289,7 +289,7 @@ func (r *ClusterBaselineReconciler) resumeOrphanedBatch(
 // clears any present request (skip-empty path). Keeps cb annotations + RV aligned.
 func (r *ClusterBaselineReconciler) clearBatchAnnotations(
 	ctx context.Context, cb *baselinev1alpha1.ClusterBaseline,
-	clearRequest bool, requestMatch []string, clearRecovery bool,
+	requestMatch []string, clearRecovery bool,
 ) error {
 	if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		latest := &baselinev1alpha1.ClusterBaseline{}
@@ -303,13 +303,11 @@ func (r *ClusterBaselineReconciler) clearBatchAnnotations(
 			return nil
 		}
 		changed := false
-		if clearRequest {
-			if value, ok := ann[batchApplyAnnotation]; ok {
-				if requestMatch == nil ||
-					slices.Equal(batchRemediationNames(value), uniqueSortedStrings(requestMatch)) {
-					delete(ann, batchApplyAnnotation)
-					changed = true
-				}
+		if value, ok := ann[batchApplyAnnotation]; ok {
+			if requestMatch == nil ||
+				slices.Equal(batchRemediationNames(value), uniqueSortedStrings(requestMatch)) {
+				delete(ann, batchApplyAnnotation)
+				changed = true
 			}
 		}
 		if clearRecovery {

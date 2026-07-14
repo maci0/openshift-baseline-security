@@ -48,7 +48,7 @@ func (r *ClusterBaselineReconciler) applyRemediationBatch(ctx context.Context, c
 		if len(list) > batchMaxRemediations {
 			log.FromContext(ctx).Info("remediation batch skipped: too many remediations",
 				"name", cb.Name, "count", len(list), "max", batchMaxRemediations)
-			if err := r.clearBatchAnnotations(ctx, cb, true, requested, false); err != nil {
+			if err := r.clearBatchAnnotations(ctx, cb, requested, false); err != nil {
 				return fmt.Errorf("clearing oversize batch-apply annotation: %w", err)
 			}
 			return nil
@@ -57,7 +57,7 @@ func (r *ClusterBaselineReconciler) applyRemediationBatch(ctx context.Context, c
 			if errs := utilvalidation.IsDNS1123Subdomain(name); len(errs) > 0 {
 				log.FromContext(ctx).Info("remediation batch skipped: invalid remediation name",
 					"name", cb.Name, "remediation", name)
-				if err := r.clearBatchAnnotations(ctx, cb, true, requested, false); err != nil {
+				if err := r.clearBatchAnnotations(ctx, cb, requested, false); err != nil {
 					return fmt.Errorf("clearing invalid batch-apply annotation: %w", err)
 				}
 				return nil
@@ -84,7 +84,7 @@ func (r *ClusterBaselineReconciler) applyRemediationBatch(ctx context.Context, c
 				if isPermanentBatchTargetReject(err) {
 					log.FromContext(ctx).Info("remediation batch skipped: permanent target reject",
 						"name", cb.Name, "remediation", name, "error", err.Error())
-					if cerr := r.clearBatchAnnotations(ctx, cb, true, requested, false); cerr != nil {
+					if cerr := r.clearBatchAnnotations(ctx, cb, requested, false); cerr != nil {
 						return fmt.Errorf("clearing rejected batch-apply annotation: %w", cerr)
 					}
 					return nil
@@ -109,7 +109,7 @@ func (r *ClusterBaselineReconciler) applyRemediationBatch(ctx context.Context, c
 			// Drop the one-shot request only (recovery keys were never written).
 			// Match on the request we evaluated so a console resubmit that landed
 			// after we read the annotation is preserved, not silently deleted.
-			if err := r.clearBatchAnnotations(ctx, cb, true, requested, false); err != nil {
+			if err := r.clearBatchAnnotations(ctx, cb, requested, false); err != nil {
 				return fmt.Errorf("clearing empty batch-apply annotation: %w", err)
 			}
 			return nil
@@ -138,7 +138,7 @@ func (r *ClusterBaselineReconciler) applyRemediationBatch(ctx context.Context, c
 				"name", cb.Name, "pools", len(poolList), "max", batchMaxPools)
 			// Match on the evaluated request so a console resubmit that raced this
 			// reconcile is preserved rather than unconditionally deleted.
-			if err := r.clearBatchAnnotations(ctx, cb, true, requested, false); err != nil {
+			if err := r.clearBatchAnnotations(ctx, cb, requested, false); err != nil {
 				return fmt.Errorf("clearing oversized batch-apply annotation: %w", err)
 			}
 			return nil
@@ -251,7 +251,7 @@ func (r *ClusterBaselineReconciler) applyRemediationBatch(ctx context.Context, c
 		// Clear one-shot + recovery annotations after pools are resumed.
 		// Conflict retry: concurrent console patches must not leave the request
 		// annotation stuck (would re-enter Applying forever while pools are free).
-		if err := r.clearBatchAnnotations(ctx, cb, true, batch.Remediations, true); err != nil {
+		if err := r.clearBatchAnnotations(ctx, cb, batch.Remediations, true); err != nil {
 			return fmt.Errorf("clearing batch annotations after resume: %w", err)
 		}
 		reason := "applied"

@@ -34,14 +34,14 @@ const failureListMax = baselinev1alpha1.FailureListMax
 // CRD MaxItems / MaxLength mirrors for status fields sanitized below. Keep in
 // lockstep with the kubebuilder markers on ClusterBaselineStatus.
 const (
-	statusProfilesMax     = 16
-	statusTailoredMax     = 32
-	relatedObjectsMax     = 64
-	profileNamesMaxItems  = 16
-	tailoredNameMaxLen    = 51
-	objectRefFieldMaxLen  = 253
-	objectRefNSMaxLen     = 63
-	failureNameMaxLen     = 253
+	statusProfilesMax    = 16
+	statusTailoredMax    = 32
+	relatedObjectsMax    = 64
+	profileNamesMaxItems = 16
+	tailoredNameMaxLen   = 51
+	objectRefFieldMaxLen = 253
+	objectRefNSMaxLen    = 63
+	failureNameMaxLen    = 253
 )
 
 // sanitizeStatusForUpdate applies admission-safe bounds to status fields the
