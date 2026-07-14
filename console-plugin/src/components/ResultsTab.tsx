@@ -169,6 +169,9 @@ const ResultsTab: React.FC<{
   const busyRef = React.useRef(false);
   // Return focus to the row control that opened the detail modal (WCAG 2.4.3).
   const returnFocusRef = React.useRef<HTMLElement | null>(null);
+  // Sentinel focus target for when the trigger row was virtualized out of the DOM
+  // while the modal was open (VirtualizedTable), so focus never drops to <body>.
+  const regionRef = React.useRef<HTMLDivElement>(null);
   const detailWasOpen = React.useRef(false);
   const [waiveError, setWaiveError] = React.useState<string | null>(null);
   // Page-level (not modal-only): CSV export failures must surface outside the detail modal.
@@ -308,6 +311,14 @@ const ResultsTab: React.FC<{
     return selected;
   }, [ownedResults, selected]);
 
+  // Gate the waiver add-form/button on the status captured when the modal OPENED
+  // (the snapshot `selected`), not the live object. Otherwise a check that
+  // self-heals FAIL -> PASS while an admin is typing a reason would flip
+  // showWaiver false and unmount the form, silently discarding the typed input.
+  // showWaiver still reads live `waivers`, so removing an existing waiver stays
+  // available even after the check starts passing.
+  const showWaiverForm = !!selected && showWaiver(selected);
+
   // Restore focus to the check-title control when the detail modal closes.
   React.useEffect(() => {
     if (selectedLive) {
@@ -320,8 +331,9 @@ const ResultsTab: React.FC<{
     returnFocusRef.current = null;
     // Defer until the modal unmounts so focus is not stolen by the backdrop; if
     // the row was virtualized away while the modal was open, the trigger is
-    // detached and restoreFocus no-ops rather than dropping focus somewhere odd.
-    restoreFocus(el);
+    // detached and restoreFocus falls back to the region sentinel rather than
+    // dropping focus to <body>.
+    restoreFocus(el, regionRef);
   }, [selectedLive]);
 
   // Named event handlers (not inline IIFE onClick) so react-hooks/refs does not
@@ -738,6 +750,10 @@ const ResultsTab: React.FC<{
 
   return (
     <ListPageBody>
+      {/* Real DOM focus fallback: when the detail modal's trigger row is
+          virtualized out of the table while the modal is open, restoreFocus
+          targets this sentinel instead of dropping focus to <body>. */}
+      <div ref={regionRef} tabIndex={-1} />
       {waiveSuccess && (
         <Alert
           variant="success"
@@ -972,7 +988,7 @@ const ResultsTab: React.FC<{
               {/* Waivers: accept a failing check as risk so it leaves the score.
                   Only FAIL affects the score, so waiving is offered for FAIL (and
                   any already-waived check, so a stale waiver stays removable). */}
-              {showWaiver(selectedLive) &&
+              {showWaiverForm &&
                 (() => {
                   const w = findWaiver(selectedLive.metadata.name, waivers);
                   const expired = !!w && waiverExpired(w);
@@ -1146,7 +1162,7 @@ const ResultsTab: React.FC<{
         </ModalBody>
         {selectedLive && (
           <ModalFooter>
-            {showWaiver(selectedLive) &&
+            {showWaiverForm &&
               (findWaiver(selectedLive.metadata.name, waivers)
                 ? withDisabledTip(
                     waiveDisabled && waiveDisabledReason ? waiveDisabledReason : undefined,
@@ -1171,7 +1187,7 @@ const ResultsTab: React.FC<{
                     </Button>,
                   ))}
             <Button variant="link" isDisabled={busy} onClick={closeModal}>
-              {showWaiver(selectedLive) ? t('Cancel') : t('Close')}
+              {showWaiverForm ? t('Cancel') : t('Close')}
             </Button>
           </ModalFooter>
         )}
