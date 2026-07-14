@@ -109,9 +109,24 @@ describe('waivers throw-safety and no-permanent-grant (fuzz sweep)', () => {
     expect(activeWaivedNames(bothExpired, NOW).has('y')).toBe(false);
   });
 
-  it('expiringWaivers only returns waivers strictly inside the window', () => {
-    const waivers = HOSTILE_EXPIRY.map((e, i) => ({ name: `c-${i}`, expiresAt: e }));
+  it('expiringWaivers returns waivers in (now, now+window], excluding past/beyond/permanent', () => {
     const windowMs = 24 * 3600 * 1000;
+    const at = (offsetMs: number) => new Date(NOW.getTime() + offsetMs).toISOString();
+    const waivers: Waiver[] = [
+      { name: 'in', expiresAt: at(12 * 3600 * 1000) }, // inside window
+      { name: 'edge', expiresAt: at(windowMs) }, // exactly at window end (inclusive)
+      { name: 'beyond', expiresAt: at(48 * 3600 * 1000) }, // past window end
+      { name: 'past', expiresAt: at(-3600 * 1000) }, // already expired
+      { name: 'permanent' }, // no expiry
+      ...HOSTILE_EXPIRY.map((e, i) => ({ name: `c-${i}`, expiresAt: e })),
+    ];
+    const got = expiringWaivers(waivers, windowMs, NOW).map((w) => w.name);
+    expect(got).toContain('in');
+    expect(got).toContain('edge');
+    expect(got).not.toContain('beyond');
+    expect(got).not.toContain('past');
+    expect(got).not.toContain('permanent');
+    // Every returned waiver is genuinely inside (now, now+window].
     for (const w of expiringWaivers(waivers, windowMs, NOW)) {
       const t = new Date(w.expiresAt!).getTime();
       expect(t).toBeGreaterThan(NOW.getTime());
