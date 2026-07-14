@@ -191,7 +191,8 @@ func TestReconcileOwnedBatchBeforeCOFailure(t *testing.T) {
 // controls it). Two guardrails must reject before any MCP is paused or any
 // ComplianceRemediation is mutated: more than batchMaxRemediations names, and
 // any name that is not a DNS-1123 subdomain. Both leave status.remediationBatch
-// unset so no orphaned pause can result.
+// unset and clear the one-shot annotation so a hostile value cannot
+// sticky-Degrade every reconcile (mirrors too-many-pools).
 func TestApplyRemediationBatchGuardrails(t *testing.T) {
 	scheme := testScheme(t)
 	names := make([]string, batchMaxRemediations+1)
@@ -199,13 +200,12 @@ func TestApplyRemediationBatchGuardrails(t *testing.T) {
 		names[i] = fmt.Sprintf("rem-%d", i)
 	}
 	cases := []struct {
-		name    string
-		anno    string
-		wantErr string
+		name string
+		anno string
 	}{
-		{"over the maximum", strings.Join(names, ","), "maximum is"},
-		{"non-DNS-1123 uppercase", "Bad_Name", "invalid remediation name"},
-		{"non-DNS-1123 double dot", "rem..1", "invalid remediation name"},
+		{"over the maximum", strings.Join(names, ",")},
+		{"non-DNS-1123 uppercase", "Bad_Name"},
+		{"non-DNS-1123 double dot", "rem..1"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -216,12 +216,18 @@ func TestApplyRemediationBatchGuardrails(t *testing.T) {
 					WithStatusSubresource(&baselinev1alpha1.ClusterBaseline{}).Build(),
 				Scheme: scheme,
 			}
-			err := r.applyRemediationBatch(context.Background(), cb)
-			if err == nil || !strings.Contains(err.Error(), c.wantErr) {
-				t.Fatalf("err = %v, want containing %q", err, c.wantErr)
+			if err := r.applyRemediationBatch(context.Background(), cb); err != nil {
+				t.Fatalf("guardrail must skip without error (sticky Degrade), got %v", err)
 			}
 			if cb.Status.RemediationBatch != nil {
 				t.Fatalf("no batch must open on rejection, got %+v", cb.Status.RemediationBatch)
+			}
+			got := &baselinev1alpha1.ClusterBaseline{}
+			if err := r.Get(context.Background(), types.NamespacedName{Name: "cluster"}, got); err != nil {
+				t.Fatal(err)
+			}
+			if got.Annotations[batchApplyAnnotation] != "" {
+				t.Fatal("rejected batch-apply annotation not cleared (would sticky-Degrade)")
 			}
 		})
 	}

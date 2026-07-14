@@ -39,12 +39,28 @@ func (r *ClusterBaselineReconciler) applyRemediationBatch(ctx context.Context, c
 		if len(list) == 0 {
 			return r.resumeOrphanedBatch(ctx, cb)
 		}
+		// Match finish/skip clears on the evaluated request so a concurrent
+		// console resubmit (different CSV) is preserved, not silently deleted.
+		requested := batchRemediationNames(names)
+		// Untrusted annotation: refuse before any MCP pause / remediation apply.
+		// Clear the one-shot request (like too-many-pools) so a hostile or
+		// console-buggy value cannot sticky-Degrade every reconcile forever.
 		if len(list) > batchMaxRemediations {
-			return fmt.Errorf("batch requests %d remediations; maximum is %d", len(list), batchMaxRemediations)
+			log.FromContext(ctx).Info("remediation batch skipped: too many remediations",
+				"name", cb.Name, "count", len(list), "max", batchMaxRemediations)
+			if err := r.clearBatchAnnotations(ctx, cb, true, requested, false); err != nil {
+				return fmt.Errorf("clearing oversize batch-apply annotation: %w", err)
+			}
+			return nil
 		}
 		for _, name := range list {
 			if errs := utilvalidation.IsDNS1123Subdomain(name); len(errs) > 0 {
-				return fmt.Errorf("invalid remediation name %q: %s", name, strings.Join(errs, "; "))
+				log.FromContext(ctx).Info("remediation batch skipped: invalid remediation name",
+					"name", cb.Name, "remediation", name)
+				if err := r.clearBatchAnnotations(ctx, cb, true, requested, false); err != nil {
+					return fmt.Errorf("clearing invalid batch-apply annotation: %w", err)
+				}
+				return nil
 			}
 		}
 
@@ -81,12 +97,11 @@ func (r *ClusterBaselineReconciler) applyRemediationBatch(ctx context.Context, c
 			// Drop the one-shot request only (recovery keys were never written).
 			// Match on the request we evaluated so a console resubmit that landed
 			// after we read the annotation is preserved, not silently deleted.
-			if err := r.clearBatchAnnotations(ctx, cb, true, batchRemediationNames(names), false); err != nil {
+			if err := r.clearBatchAnnotations(ctx, cb, true, requested, false); err != nil {
 				return fmt.Errorf("clearing empty batch-apply annotation: %w", err)
 			}
 			return nil
 		}
-		requested := batchRemediationNames(names)
 		list = keep
 		// Union with pools recorded on a prior (pre-crash) open. This runs when
 		// status.remediationBatch was lost (crash/leader handoff) and the batch is
