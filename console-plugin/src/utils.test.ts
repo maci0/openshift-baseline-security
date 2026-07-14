@@ -1909,8 +1909,9 @@ describe('remediation helpers', () => {
       expect(summary === null || typeof summary === 'string').toBe(true);
     }
   });
-  // Kind + scan-name are untrusted CO fields; reboot/batch eligibility must not throw.
-  it('fuzz: isNodeRemediation never throws; non-MachineConfig kind is never node', () => {
+  // Kind + scan-name are untrusted CO fields; reboot/batch eligibility must not
+  // throw, and node-ness is MachineConfig OR a DNS-valid "-node-<pool>" scan name.
+  it('fuzz: isNodeRemediation never throws and matches the node-scan invariant', () => {
     for (let i = 0; i < 500; i++) {
       const kind =
         i % 7 === 0 ? 'MachineConfig' : i % 7 === 1 ? '' : randomString(i % 12);
@@ -1928,9 +1929,15 @@ describe('remediation helpers', () => {
         }),
       );
       expect(typeof out).toBe('boolean');
-      if (kind && kind !== 'MachineConfig') {
-        expect(out).toBe(false);
-      }
+      // Exact invariant (lockstep with operator poolFromRemediation): a
+      // MachineConfig is always a node remediation; any other kind is node iff its
+      // scan name ends in a DNS-valid "-node-<pool>". Non-vacuous: asserts the
+      // real boolean, so a kind that wrongly short-circuits the scan fallback
+      // (the round-10 bug) would fail here.
+      const di = scan.lastIndexOf('-node-');
+      const pool = di < 0 ? '' : scan.slice(di + '-node-'.length);
+      const want = kind === 'MachineConfig' || (pool !== '' && isValidK8sName(pool));
+      expect(out).toBe(want);
     }
   });
   it('fuzz: compareRemediationsForApplyOrder is antisymmetric and total', () => {
