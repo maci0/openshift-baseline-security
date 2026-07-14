@@ -478,6 +478,56 @@ func TestEnsureComplianceOperatorSyncsCatalogSource(t *testing.T) {
 	}
 }
 
+// A transient error on the redhat-operators CatalogSource check must NOT flap an
+// OKD Subscription off community-operators: detection is then unconfident, so the
+// sync path leaves the working source untouched (a confident reconcile corrects
+// any real drift).
+func TestEnsureComplianceOperatorTransientCatalogErrorDoesNotFlapSource(t *testing.T) {
+	scheme := testScheme(t)
+	sub := u(subscriptionGVK)
+	sub.SetName("compliance-operator")
+	sub.SetNamespace(complianceNamespace)
+	sub.Object["spec"] = map[string]any{
+		"name": "compliance-operator", "channel": "stable",
+		"source": "community-operators", "sourceNamespace": "openshift-marketplace",
+	}
+	_ = unstructured.SetNestedField(sub.Object, "compliance-operator.v1.0.0", "status", "installedCSV")
+	csv := u(csvGVK)
+	csv.SetName("compliance-operator.v1.0.0")
+	csv.SetNamespace(complianceNamespace)
+	_ = unstructured.SetNestedField(csv.Object, "Succeeded", "status", "phase")
+	community := u(catalogSourceGVK)
+	community.SetName("community-operators")
+	community.SetNamespace("openshift-marketplace")
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(sub, csv, community).
+			WithInterceptorFuncs(interceptor.Funcs{
+				Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+					// Only the redhat-operators CatalogSource check blips; the real
+					// community-operators source and everything else read normally.
+					if key.Name == "redhat-operators" {
+						return apierrors.NewServiceUnavailable("apiserver blip")
+					}
+					return c.Get(ctx, key, obj, opts...)
+				},
+			}).Build(),
+		Scheme: scheme,
+	}
+	cb := newCB("cis") // no explicit spec.complianceCatalogSource: auto-detect
+	if err := r.ensureComplianceOperator(context.Background(), cb); err != nil {
+		t.Fatal(err)
+	}
+	got := u(subscriptionGVK)
+	if err := r.Get(context.Background(), types.NamespacedName{
+		Namespace: complianceNamespace, Name: "compliance-operator",
+	}, got); err != nil {
+		t.Fatal(err)
+	}
+	if source, _, _ := unstructured.NestedString(got.Object, "spec", "source"); source != "community-operators" {
+		t.Fatalf("subscription source flapped to %q on a transient redhat-operators error, want community-operators preserved", source)
+	}
+}
+
 // Manual install must not rewrite a pre-existing Subscription's catalog source.
 func TestEnsureComplianceOperatorManualDoesNotRewriteSource(t *testing.T) {
 	scheme := testScheme(t)

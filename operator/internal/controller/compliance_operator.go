@@ -73,9 +73,13 @@ func (r *ClusterBaselineReconciler) ensureComplianceOperator(ctx context.Context
 	sub = u(subscriptionGVK)
 	sub.SetName("compliance-operator")
 	sub.SetNamespace(complianceNamespace)
+	// Create uses the best-guess source even if detection was unconfident: a wrong
+	// first guess surfaces as InstallStalled and self-corrects once the sync path
+	// re-resolves confidently.
+	createSource, _ := r.resolveCatalogSource(ctx, cb)
 	sub.Object["spec"] = map[string]any{
 		"name": "compliance-operator", "channel": "stable",
-		"source": r.resolveCatalogSource(ctx, cb), "sourceNamespace": "openshift-marketplace",
+		"source": createSource, "sourceNamespace": "openshift-marketplace",
 	}
 	if err := createIfMissing(ctx, r.Client, sub); err != nil {
 		return fmt.Errorf("ensuring compliance-operator Subscription: %w", err)
@@ -120,42 +124,50 @@ func (r *ClusterBaselineReconciler) ensureComplianceOperatorGroup(ctx context.Co
 	return nil
 }
 
-// resolveCatalogSource picks the OLM CatalogSource for the CO Subscription. An
-// explicit spec value always wins. When unset it auto-detects the cluster flavor:
-// OCP carries the Compliance Operator in redhat-operators, OKD in
-// community-operators. Prefer redhat-operators when present; fall back to
-// community-operators only if redhat-operators is absent but community-operators
-// exists (OKD); otherwise the default, which surfaces a clear install failure
-// rather than silently picking a wrong catalog.
-func (r *ClusterBaselineReconciler) resolveCatalogSource(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline) string {
+// resolveCatalogSource picks the OLM CatalogSource for the CO Subscription and
+// reports whether the choice is confident. An explicit spec value always wins
+// (and is confident). When unset it auto-detects the cluster flavor: OCP carries
+// the Compliance Operator in redhat-operators, OKD in community-operators. Prefer
+// redhat-operators when present; fall back to community-operators only if
+// redhat-operators is definitely absent (OKD); otherwise the default.
+//
+// confident is false when detection had to assume-present on a transient API
+// error (so the answer is a best guess, not a verified choice). The create path
+// uses the source regardless (a wrong first guess surfaces as InstallStalled and
+// self-corrects next reconcile); syncComplianceSubscriptionSource must NOT rewrite
+// a working Subscription on a non-confident guess, or a transient error on the
+// redhat-operators check would flap an OKD Subscription off community-operators.
+func (r *ClusterBaselineReconciler) resolveCatalogSource(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline) (source string, confident bool) {
 	if s := strings.TrimSpace(cb.Spec.ComplianceCatalogSource); s != "" {
-		return s
+		return s, true
 	}
-	if r.catalogSourceExists(ctx, baselinev1alpha1.DefaultComplianceCatalogSource) {
-		return baselinev1alpha1.DefaultComplianceCatalogSource
+	if present, definite := r.catalogSourcePresent(ctx, baselinev1alpha1.DefaultComplianceCatalogSource); present {
+		return baselinev1alpha1.DefaultComplianceCatalogSource, definite
 	}
-	if r.catalogSourceExists(ctx, baselinev1alpha1.CommunityCatalogSource) {
-		return baselinev1alpha1.CommunityCatalogSource
+	if present, definite := r.catalogSourcePresent(ctx, baselinev1alpha1.CommunityCatalogSource); present {
+		return baselinev1alpha1.CommunityCatalogSource, definite
 	}
-	return baselinev1alpha1.DefaultComplianceCatalogSource
+	// Neither found (both definitely absent, or both errored): default, unconfident.
+	return baselinev1alpha1.DefaultComplianceCatalogSource, false
 }
 
-// catalogSourceExists reports whether a CatalogSource of the given name is present
-// in openshift-marketplace. Only a genuine absence counts as "not present":
-// NotFound (no such CatalogSource) or NoMatch (the CatalogSource CRD is not
-// installed) degrade detection to the default. A transient/forbidden error is
-// NOT read as absent: doing so would wrongly fall through to the default catalog
-// (for example redhat-operators on OKD) and write a Subscription pointing at a
-// source that does not exist. On such an error assume present so detection keeps
-// its priority-ordered choice; syncComplianceSubscriptionSource re-resolves on
-// the next reconcile once the API recovers.
-func (r *ClusterBaselineReconciler) catalogSourceExists(ctx context.Context, name string) bool {
+// catalogSourcePresent reports whether a CatalogSource of the given name exists in
+// openshift-marketplace, and whether that answer is definite. A clean Get is a
+// definite presence; NotFound / NoMatch (the CatalogSource CRD absent) is a
+// definite absence. A transient/forbidden error assumes present (so detection
+// keeps its priority-ordered choice rather than wrongly falling through to the
+// default catalog) but marks the answer NOT definite, so a writing caller can
+// decline to act on a guess.
+func (r *ClusterBaselineReconciler) catalogSourcePresent(ctx context.Context, name string) (present, definite bool) {
 	cs := u(catalogSourceGVK)
 	err := r.Get(ctx, types.NamespacedName{Namespace: "openshift-marketplace", Name: name}, cs)
 	if err == nil {
-		return true
+		return true, true
 	}
-	return !apierrors.IsNotFound(err) && !meta.IsNoMatchError(err)
+	if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) {
+		return false, true
+	}
+	return true, false
 }
 
 // syncComplianceSubscriptionSource updates an existing Subscription's
@@ -165,12 +177,20 @@ func (r *ClusterBaselineReconciler) catalogSourceExists(ctx context.Context, nam
 func (r *ClusterBaselineReconciler) syncComplianceSubscriptionSource(
 	ctx context.Context, cb *baselinev1alpha1.ClusterBaseline, sub *unstructured.Unstructured,
 ) error {
-	desired := r.resolveCatalogSource(ctx, cb)
+	desired, confident := r.resolveCatalogSource(ctx, cb)
 	current, _, err := unstructured.NestedString(sub.Object, "spec", "source")
 	if err != nil {
 		return fmt.Errorf("reading Subscription spec.source: %w", err)
 	}
 	if current == desired {
+		return nil
+	}
+	if !confident {
+		// Auto-detection was uncertain (a transient API error made a CatalogSource
+		// check assume-present). Do not rewrite a working Subscription onto a guessed
+		// source; a confident reconcile corrects any real drift. Prevents flapping an
+		// OKD Subscription off community-operators when the redhat-operators check
+		// transiently errors.
 		return nil
 	}
 	if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {

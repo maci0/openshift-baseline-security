@@ -211,19 +211,19 @@ func TestResolveCatalogSource(t *testing.T) {
 				Scheme: scheme,
 			}
 			cb := &baselinev1alpha1.ClusterBaseline{Spec: baselinev1alpha1.ClusterBaselineSpec{ComplianceCatalogSource: c.spec}}
-			if got := r.resolveCatalogSource(ctx, cb); got != c.want {
+			if got, _ := r.resolveCatalogSource(ctx, cb); got != c.want {
 				t.Fatalf("resolveCatalogSource = %q, want %q", got, c.want)
 			}
 		})
 	}
 }
 
-// TestCatalogSourceExistsErrorClassification pins the safety in catalogSourceExists:
-// only NotFound / NoMatch mean "catalog absent"; any other error (transient,
-// forbidden) reads as PRESENT so detection does not fall through to the default
-// catalog on a blip and write a Subscription at a nonexistent source (e.g.
-// redhat-operators on OKD). A regression to `return false` would silently break this.
-func TestCatalogSourceExistsErrorClassification(t *testing.T) {
+// TestCatalogSourcePresent pins the safety in catalogSourcePresent: only
+// NotFound / NoMatch mean a definite "catalog absent"; any other error
+// (transient, forbidden) reads as PRESENT but NOT definite, so detection keeps
+// its priority-ordered choice on a blip yet a writing caller (the Subscription
+// sync) can decline to act on that guess.
+func TestCatalogSourcePresent(t *testing.T) {
 	scheme := testScheme(t)
 	ctx := context.Background()
 	noMatch := &meta.NoKindMatchError{GroupKind: schema.GroupKind{Group: "operators.coreos.com", Kind: "CatalogSource"}}
@@ -242,14 +242,14 @@ func TestCatalogSourceExistsErrorClassification(t *testing.T) {
 			}).Build(),
 		Scheme: scheme,
 	}
-	if !r.catalogSourceExists(ctx, "transient-cs") {
-		t.Fatal("transient error must be treated as present, not absent")
+	if present, definite := r.catalogSourcePresent(ctx, "transient-cs"); !present || definite {
+		t.Fatalf("transient error: got (present=%v, definite=%v), want (true, false)", present, definite)
 	}
-	if r.catalogSourceExists(ctx, "nomatch-cs") {
-		t.Fatal("NoMatch (CatalogSource CRD absent) must be treated as absent")
+	if present, definite := r.catalogSourcePresent(ctx, "nomatch-cs"); present || !definite {
+		t.Fatalf("NoMatch: got (present=%v, definite=%v), want (false, true)", present, definite)
 	}
-	if r.catalogSourceExists(ctx, "no-such-cs") {
-		t.Fatal("NotFound must be treated as absent")
+	if present, definite := r.catalogSourcePresent(ctx, "no-such-cs"); present || !definite {
+		t.Fatalf("NotFound: got (present=%v, definite=%v), want (false, true)", present, definite)
 	}
 }
 
