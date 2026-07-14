@@ -32,6 +32,14 @@ const batchPauseOwnerAnnotation = "baselinesecurity.openshift.io/batch-pause-own
 // Bound the work a single metadata annotation can make the controller perform.
 const batchMaxRemediations = 256
 
+// batchMaxPools mirrors the CRD MaxItems on status.remediationBatch.pools. A
+// batch spanning more distinct MachineConfigPools than this cannot be recorded
+// in status, so it must be refused before any pool is paused; otherwise the
+// oversized Pools list fails Status().Update admission and freezes reconcile
+// with pools stuck paused. Clamping the status field instead would drop pools
+// the operator actually paused, leaking them from the resume path.
+const batchMaxPools = 32
+
 // batchResumeGrace forces a resume even if remediations never reach Applied, so
 // a MachineConfigPool is never left paused.
 const batchResumeGrace = 10 * time.Minute

@@ -87,6 +87,17 @@ func (r *ClusterBaselineReconciler) applyRemediationBatch(ctx context.Context, c
 		requested := batchRemediationNames(names)
 		list = keep
 		poolList := slices.Sorted(maps.Keys(pools))
+		if len(poolList) > batchMaxPools {
+			// More target pools than status.remediationBatch.pools can hold. Refuse
+			// before pausing anything (a paused-but-unrecorded pool would leak) and
+			// drop the one-shot request so this does not retry-freeze the reconcile.
+			log.FromContext(ctx).Info("remediation batch skipped: too many target MachineConfigPools",
+				"name", cb.Name, "pools", len(poolList), "max", batchMaxPools)
+			if err := r.clearBatchAnnotations(ctx, cb, true, nil, false); err != nil {
+				return fmt.Errorf("clearing oversized batch-apply annotation: %w", err)
+			}
+			return nil
+		}
 		startedAt, err := r.ensureBatchMetadata(ctx, cb, poolList, requested, list)
 		if err != nil {
 			return err

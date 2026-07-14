@@ -343,6 +343,53 @@ func TestRemediationBatch(t *testing.T) {
 	}
 }
 
+// TestRemediationBatchTooManyPoolsRejected: a batch spanning more distinct
+// MachineConfigPools than status.remediationBatch.pools can hold (CRD MaxItems)
+// must be refused before any pool is paused and the one-shot request dropped, so
+// the oversized Pools list cannot fail Status().Update and freeze the reconcile.
+func TestRemediationBatchTooManyPoolsRejected(t *testing.T) {
+	scheme := testScheme(t)
+	objs := []client.Object{}
+	names := make([]string, 0, batchMaxPools+1)
+	for i := 0; i <= batchMaxPools; i++ { // batchMaxPools+1 distinct pools
+		pool := fmt.Sprintf("pool%d", i)
+		remName := fmt.Sprintf("rem%d", i)
+		objs = append(objs, nodeRemediation(remName, pool), machineConfigPool(pool))
+		names = append(names, remName)
+	}
+	cb := newBatchCB()
+	cb.SetAnnotations(map[string]string{batchApplyAnnotation: strings.Join(names, ",")})
+	objs = append(objs, cb)
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).
+			WithObjects(objs...).
+			WithStatusSubresource(&baselinev1alpha1.ClusterBaseline{}).Build(),
+		Scheme: scheme,
+	}
+	ctx := context.Background()
+	if err := r.applyRemediationBatch(ctx, cb); err != nil {
+		t.Fatal(err)
+	}
+	if cb.Status.RemediationBatch != nil {
+		t.Fatalf("oversized batch must not start: %+v", cb.Status.RemediationBatch)
+	}
+	gotCB := &baselinev1alpha1.ClusterBaseline{}
+	if err := r.Get(ctx, types.NamespacedName{Name: "cluster"}, gotCB); err != nil {
+		t.Fatal(err)
+	}
+	if gotCB.Annotations[batchApplyAnnotation] != "" {
+		t.Fatal("oversized batch-apply annotation not cleared (would retry-freeze)")
+	}
+	for i := 0; i <= batchMaxPools; i++ {
+		name := fmt.Sprintf("pool%d", i)
+		p := machineConfigPool(name)
+		_ = r.Get(ctx, types.NamespacedName{Name: name}, p)
+		if paused, _, _ := unstructured.NestedBool(p.Object, "spec", "paused"); paused {
+			t.Fatalf("%s paused despite rejected batch", name)
+		}
+	}
+}
+
 // TestRemediationBatchAllMissingClearsAnnotation: a batch of only NotFound
 // remediations must not open a fake Applying batch; clear the one-shot request.
 func TestRemediationBatchAllMissingClearsAnnotation(t *testing.T) {
