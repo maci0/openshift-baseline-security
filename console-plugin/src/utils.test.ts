@@ -1750,14 +1750,30 @@ describe('remediation helpers', () => {
         }),
       ),
     ).toBe(false);
-    // Known non-MachineConfig kind wins over a node-looking scan-name.
+    // A non-MachineConfig kind rendered by a node scan (e.g. a KubeletConfig, which
+    // the MCO applies with a reboot) is STILL a node remediation: the "…-node-<pool>"
+    // scan-name is authoritative, matching operator poolFromRemediation. The kind
+    // must not short-circuit the fallback, or such a remediation would reboot the
+    // pool with no warning and outside the batch pause window.
     expect(
       isNodeRemediation(
-        rem('ConfigMap', undefined, {
+        rem('KubeletConfig', undefined, {
           metadata: {
             name: 'r',
             namespace: 'openshift-compliance',
             labels: { 'compliance.openshift.io/scan-name': 'ocp4-cis-node-worker' },
+          },
+        }),
+      ),
+    ).toBe(true);
+    // But a platform kind on a scan with no "-node-" is not a node remediation.
+    expect(
+      isNodeRemediation(
+        rem('APIServer', undefined, {
+          metadata: {
+            name: 'r',
+            namespace: 'openshift-compliance',
+            labels: { 'compliance.openshift.io/scan-name': 'ocp4-cis-api-server' },
           },
         }),
       ),

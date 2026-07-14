@@ -107,9 +107,12 @@ func TestPoolFromRemediationToleratesNonJSONObject(t *testing.T) {
 func FuzzPoolFromRemediation(f *testing.F) {
 	f.Add("MachineConfig", "worker", "ocp4-cis-node-master")
 	f.Add("ConfigMap", "worker", "ocp4-cis-node-worker")
+	f.Add("KubeletConfig", "", "ocp4-cis-node-worker")
+	f.Add("APIServer", "", "ocp4-cis-api-server")
 	f.Add("", "", "ocp4-cis-node-worker")
 	f.Add("", "", "no-node-suffix")
 	f.Add("MachineConfig", "", "profile-node-infra")
+	f.Add("MachineConfig", "bad role", "profile-node-infra")
 	f.Add("MachineConfig", "master", "")
 	f.Add("", "ignored", "x-node-")
 	f.Fuzz(func(t *testing.T, kind, role, scan string) {
@@ -130,28 +133,22 @@ func FuzzPoolFromRemediation(f *testing.F) {
 			_ = unstructured.SetNestedMap(rem.Object, obj, "spec", "current", "object")
 		}
 		got := poolFromRemediation(rem)
-		if kind != "" && kind != "MachineConfig" {
-			if got != "" {
-				t.Fatalf("non-MachineConfig kind %q returned pool %q", kind, got)
-			}
-			return
-		}
+		// Expected pool: a MachineConfig with a DNS-valid role label names it
+		// precisely; otherwise ANY remediation from a "…-node-<pool>" scan
+		// (KubeletConfig, partial render, or a MachineConfig with no/invalid role)
+		// uses the scan-name pool. A non-node kind on a scan without "-node-"
+		// yields "". The rendered kind never short-circuits the scan-name fallback.
+		var want string
 		if kind == "MachineConfig" && role != "" {
-			// Invalid DNS-1123 role labels are dropped (same as validMCPPoolName).
-			want := validMCPPoolName(role)
-			if got != want {
-				t.Fatalf("MachineConfig role %q, got pool %q want %q", role, got, want)
-			}
-			return
+			want = validMCPPoolName(role)
 		}
-		// Scan-name fallback: last "-node-" segment when DNS-valid, or empty.
-		if i := strings.LastIndex(scan, "-node-"); i >= 0 {
-			want := validMCPPoolName(scan[i+len("-node-"):])
-			if got != want {
-				t.Fatalf("scan fallback: scan=%q got %q want %q", scan, got, want)
+		if want == "" {
+			if i := strings.LastIndex(scan, "-node-"); i >= 0 {
+				want = validMCPPoolName(scan[i+len("-node-"):])
 			}
-		} else if got != "" {
-			t.Fatalf("no role/scan pool, got %q", got)
+		}
+		if got != want {
+			t.Fatalf("poolFromRemediation(kind=%q role=%q scan=%q) = %q, want %q", kind, role, scan, got, want)
 		}
 	})
 }

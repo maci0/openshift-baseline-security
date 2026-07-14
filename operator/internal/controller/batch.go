@@ -77,21 +77,23 @@ func poolFromRemediation(rem *unstructured.Unstructured) string {
 	// Wrong-type object: ignore it and fall through to the scan-name label.
 	if err == nil && found {
 		if obj, ok := raw.(map[string]any); ok {
-			kind, _, _ := unstructured.NestedString(obj, "kind")
-			// Only reject known non-node kinds. Missing/empty kind still allows the
-			// scan-name fallback so a partially rendered MachineConfig does not
-			// skip MCP pause during batch apply.
-			if kind != "" && kind != "MachineConfig" {
-				return ""
-			}
-			if kind == "MachineConfig" {
+			// A MachineConfig names its pool precisely via the role label.
+			if kind, _, _ := unstructured.NestedString(obj, "kind"); kind == "MachineConfig" {
 				// Non-allocating single-label read (batch path can hit 256 remediations).
 				if role := unstructuredLabel(obj, "machineconfiguration.openshift.io/role"); role != "" {
-					return validMCPPoolName(role)
+					if pool := validMCPPoolName(role); pool != "" {
+						return pool
+					}
 				}
 			}
 		}
 	}
+	// Fallback for any node remediation the MCO reboots but that has no usable
+	// MachineConfig role label: a KubeletConfig, a partially rendered object, or a
+	// MachineConfig with a missing/invalid role. A "…-node-<pool>" scan name
+	// identifies the pool to pause, so it must NOT be skipped just because the
+	// rendered kind is not MachineConfig. Platform scans have no "-node-" and
+	// correctly yield no pool (not a node remediation).
 	// Single-key read: GetLabels copies the whole map (batch path can hit 256 remediations).
 	scan := unstructuredLabel(rem.Object, scanNameLabel)
 	if i := strings.LastIndex(scan, "-node-"); i >= 0 {

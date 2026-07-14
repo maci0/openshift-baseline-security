@@ -8,20 +8,19 @@ const dependsOnAnn = 'compliance.openshift.io/depends-on';
 const dependsOnObjAnn = 'compliance.openshift.io/depends-on-obj';
 const unsetValueAnn = 'compliance.openshift.io/unset-value';
 
-// A node remediation renders into a MachineConfig; applying it reboots nodes.
-// Prefer the rendered object kind; when kind is empty, fall back to the scan-name
-// label the same way the operator's poolFromRemediation does ("…-node-<pool>"),
-// so reboot warnings and batch eligibility stay accurate for partially rendered
-// remediations. Pool suffix must be DNS-1123 (operator validMCPPoolName) so the
-// UI does not mark batch-eligible remediations the controller cannot pause.
-// A known non-MachineConfig kind is never treated as node.
+// A node remediation reboots nodes when applied. A MachineConfig always does.
+// So does any other object rendered by a node scan ("…-node-<pool>") that the MCO
+// applies, notably a KubeletConfig, plus a partially rendered remediation with no
+// kind yet. So fall back to the scan-name label (the same signal the operator's
+// poolFromRemediation uses) for ANY non-MachineConfig kind, not only an empty one,
+// or such a remediation gets no reboot warning and is silently excluded from the
+// batch reboot-coalescing while still rebooting the pool. Pool suffix must be
+// DNS-1123 (operator validMCPPoolName) so the UI never marks a remediation
+// batch-eligible that the controller cannot pause. Kept in lockstep with the
+// operator: node iff a MachineConfig, or a valid "…-node-<pool>" scan name.
 export const isNodeRemediation = (rem: ComplianceRemediation): boolean => {
-  const kind = rem.spec.current?.object?.kind;
-  if (kind === 'MachineConfig') {
+  if (rem.spec.current?.object?.kind === 'MachineConfig') {
     return true;
-  }
-  if (kind) {
-    return false;
   }
   const pool = nodePoolFromScanName(rem.metadata.labels?.[SCAN_NAME_LABEL] ?? '');
   return pool != null && isValidK8sName(pool);

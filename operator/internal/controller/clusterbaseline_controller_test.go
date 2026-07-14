@@ -147,12 +147,23 @@ func TestPoolFromRemediation(t *testing.T) {
 	if got := poolFromRemediation(rem); got != "worker" {
 		t.Fatalf("last scan-name delimiter: got %q, want worker", got)
 	}
-	// Non-node remediation (not a MachineConfig) -> no pool.
+	// Platform remediation (non-MachineConfig kind, no "-node-" scan) -> no pool.
 	pl := &unstructured.Unstructured{}
 	pl.SetGroupVersionKind(remediationGVK)
-	_ = unstructured.SetNestedMap(pl.Object, map[string]any{"kind": "ConfigMap"}, "spec", "current", "object")
+	_ = unstructured.SetNestedMap(pl.Object, map[string]any{"kind": "APIServer"}, "spec", "current", "object")
+	pl.SetLabels(map[string]string{"compliance.openshift.io/scan-name": "ocp4-cis-api-server"})
 	if got := poolFromRemediation(pl); got != "" {
-		t.Fatalf("non-node: got %q, want empty", got)
+		t.Fatalf("platform remediation: got %q, want empty", got)
+	}
+	// Non-MachineConfig node remediation (e.g. a KubeletConfig rendered by a node
+	// scan) reboots the pool via the MCO, so the kind must NOT short-circuit the
+	// scan-name fallback -> pool derived from "…-node-<pool>".
+	kc := &unstructured.Unstructured{}
+	kc.SetGroupVersionKind(remediationGVK)
+	_ = unstructured.SetNestedMap(kc.Object, map[string]any{"kind": "KubeletConfig"}, "spec", "current", "object")
+	kc.SetLabels(map[string]string{"compliance.openshift.io/scan-name": "ocp4-cis-node-worker"})
+	if got := poolFromRemediation(kc); got != "worker" {
+		t.Fatalf("KubeletConfig node remediation: got %q, want worker", got)
 	}
 	// Partial MachineConfig (no kind yet) still uses scan-name for the pool so
 	// batch apply does not skip MCP pause.
