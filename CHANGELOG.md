@@ -41,6 +41,36 @@ depend on those tags.
 
 ## [Unreleased]
 
+## [0.5.5] - 2026-07-14
+
+### Fixed
+
+- Single-node OpenShift (SNO) console-plugin drain deadlock. On `SingleReplica`
+  infrastructure topology the plugin now deploys a single replica and no
+  PodDisruptionBudget, so draining the one node during a cluster upgrade is no
+  longer refused by an un-evictable second plugin pod. Multi-node clusters keep
+  the 2-replica Deployment plus the `minAvailable=1` PDB. Topology is read from
+  the cluster `Infrastructure` singleton; any read error fails safe to the HA
+  layout.
+- History scoring-mode stamp is now realigned on the reconcile error path. A
+  scoring-mode change (flat vs severity-weighted) coinciding with a transient
+  post-aggregation error no longer leaves the durable stamp lagging its rings,
+  which had fired a spurious `historyScoringModeMismatch` for one scan interval.
+
+### Changed
+
+- Operator RBAC tightened to least privilege: dropped unused `list`/`watch` on
+  `scansettings` and `machineconfigpools`, and `watch` on `scansettingbindings`.
+  These are accessed by name (Get/Patch) or a one-shot List only, never watched,
+  so the verbs were dead grants. OLM applies the narrowed ClusterRole on upgrade.
+
+### Added
+
+- `make verify-bundle-static` (run in CI and `make bundle`): fails if a
+  hand-copied `bundle/manifests/` file drifts from its `config/` source, closing
+  the last unguarded release-packaging path (CRD, PrometheusRule, ServiceMonitor,
+  and CSV RBAC were already checked).
+
 ## [0.5.0] - 2026-07-13
 
 OLM upgrade edge: `baseline-security-operator.v0.5.0` replaces `v0.4.0`.
@@ -308,7 +338,8 @@ Initial packaged release.
   Remediations, Profiles).
 - OLM bundle + file-based catalog; string-enum spec; OpenShift-style conditions.
 
-[Unreleased]: https://github.com/maci0/openshift-baseline-security/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/maci0/openshift-baseline-security/compare/v0.5.5...HEAD
+[0.5.5]: https://github.com/maci0/openshift-baseline-security/compare/v0.5.0...v0.5.5
 [0.5.0]: https://github.com/maci0/openshift-baseline-security/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/maci0/openshift-baseline-security/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/maci0/openshift-baseline-security/compare/v0.3.0...v0.3.1

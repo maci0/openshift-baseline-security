@@ -1,7 +1,7 @@
 apiVersion: operators.coreos.com/v1alpha1
 kind: ClusterServiceVersion
 metadata:
-  name: baseline-security-operator.v0.5.0
+  name: baseline-security-operator.v0.5.5
   namespace: placeholder
   annotations:
     alm-examples: |-
@@ -21,7 +21,7 @@ metadata:
     operatorframework.io/suggested-namespace: openshift-baseline-security
     operatorframework.io/suggested-namespace-template: |-
       {"apiVersion":"v1","kind":"Namespace","metadata":{"name":"openshift-baseline-security","labels":{"openshift.io/cluster-monitoring":"true"}}}
-    containerImage: quay.io/openshift-baseline-security/baseline-security-operator:0.5.0
+    containerImage: quay.io/openshift-baseline-security/baseline-security-operator:0.5.5
     repository: https://github.com/maci0/openshift-baseline-security
     description: Baseline benchmark compliance scanning with a native console UI,
       built on the Red Hat Compliance Operator.
@@ -53,8 +53,7 @@ spec:
     (minKubeVersion 1.35.0). Requires a default StorageClass for scan result
     storage.
   maturity: alpha
-  version: 0.5.0
-  replaces: baseline-security-operator.v0.4.0
+  version: 0.5.5
   minKubeVersion: 1.35.0
   keywords: [security, compliance, cis, benchmark, openscap]
   maintainers:
@@ -254,7 +253,7 @@ spec:
                           topologyKey: kubernetes.io/hostname
                 containers:
                   - name: manager
-                    image: quay.io/openshift-baseline-security/baseline-security-operator:0.5.0
+                    image: quay.io/openshift-baseline-security/baseline-security-operator:0.5.5
                     args:
                       - --leader-elect
                       - --metrics-bind-address=:8443
@@ -263,7 +262,7 @@ spec:
                       - --health-probe-bind-address=:8081
                     env:
                       - name: RELATED_IMAGE_CONSOLE_PLUGIN
-                        value: quay.io/openshift-baseline-security/baseline-security-console-plugin:0.5.0
+                        value: quay.io/openshift-baseline-security/baseline-security-console-plugin:0.5.5
                       # Optional: set to "true" (also accepts 1/yes) to skip creating
                       # ClusterBaseline/cluster when none exist. Must match envSkipDefaultCR
                       # in cmd/main.go (BASELINE_SECURITY_SKIP_DEFAULT_CR).
@@ -328,6 +327,6 @@ spec:
                       sizeLimit: 64Mi
   relatedImages:
     - name: manager
-      image: quay.io/openshift-baseline-security/baseline-security-operator:0.5.0
+      image: quay.io/openshift-baseline-security/baseline-security-operator:0.5.5
     - name: console-plugin
-      image: quay.io/openshift-baseline-security/baseline-security-console-plugin:0.5.0
+      image: quay.io/openshift-baseline-security/baseline-security-console-plugin:0.5.5

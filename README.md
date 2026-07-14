@@ -7,10 +7,10 @@ Install it and the cluster benchmarks itself against the CIS OpenShift
 Benchmark out of the box, rendered natively in the console under
 **Administration → Compliance**.
 
-**Current release: 0.5.0** (OLM channel `alpha`, API `baselinesecurity.openshift.io/v1alpha1`).
+**Current release: 0.5.5** (OLM channel `alpha`, API `baselinesecurity.openshift.io/v1alpha1`).
 Consumer-facing release notes and upgrade notes: [CHANGELOG.md](CHANGELOG.md).
 Work on `main` that is not yet cut lives under CHANGELOG **[Unreleased]** and is
-not part of the published 0.5.0 CSV/image tags until the next version bump
+not part of the published 0.5.5 CSV/image tags until the next version bump
 (`make verify-versions` keeps those tags aligned with **Current release**).
 
 ## Features
@@ -179,9 +179,6 @@ for every publish.
   [SECURITY.md](SECURITY.md).
 - **Install path**: OLM bundle + file-based catalog is the only supported
   install. Helm was removed in 0.4.0.
-- **Upgrade path**: OLM `replaces` chain
-  `0.2.0 → 0.2.1 → 0.3.0 → 0.3.1 → 0.4.0 → 0.5.0`. Do not skip edges when building a
-  multi-version catalog if you need in-place upgrades from older installs.
 - **Notable 0.4.0 behavior change**: benign Compliance Operator `INCONSISTENT`
   results (PASS where applicable, NOT-APPLICABLE elsewhere) now count as PASS
   in score, metrics, and UI. Scores can rise on upgrade without remediations.
@@ -207,29 +204,26 @@ for every publish.
   Compliance CRs. Details and migration notes: [CHANGELOG.md](CHANGELOG.md)
   **[0.5.0]**.
 - **Version sources** (must stay equal; `make verify-versions` checks them):
-  `operator/Makefile` (`VERSION` / `PREV_VERSION`), the CSV in
+  `operator/Makefile` (`VERSION`), the CSV in
   `operator/bundle/manifests/baseline-security-operator.clusterserviceversion.yaml`
-  (name, version, replaces, containerImage, relatedImages),
+  (name, version, containerImage, relatedImages),
   `console-plugin/package.json` (`version` + `consolePlugin.version`),
-  `operator/catalog/package.yaml` channel entry (name + replaces) when present,
-  `CHANGELOG.md` (`## [VERSION]`, `## [PREV_VERSION]`, `## [Unreleased]`, and
-  the `[VERSION]:` / `[PREV_VERSION]:` / `[Unreleased]:` compare footers),
-  this README's **Current release** line and upgrade path, and the Go toolchain
-  lockstep between `go.mod`, the release `Dockerfile`, `Dockerfile.ci`, and
-  `.ci-operator.yaml` (plus Node between `.nvmrc` and the console Dockerfile).
-- **Cutting a release**: bump `VERSION`/`PREV_VERSION`, CSV name/version/images/
-  `replaces`, console-plugin versions, move CHANGELOG `[Unreleased]` into
-  `## [VERSION]` with a `### Migration notes` section and footer compare
-  links (including `[VERSION]: ...compare/vPREV...vVERSION` and
-  `[Unreleased]: ...compare/vVERSION...HEAD`), update **Current release** and
-  the upgrade path above, create an immutable git tag `vVERSION` pointing at
-  that commit (CHANGELOG compare URLs require it; never force-move a published
-  tag), then run `RELEASE_GATE=1 REQUIRE_GIT_TAGS=1 make verify-versions`
-  (also plain `make verify-versions` in CI; the gate refuses a cut while
-  `[Unreleased]` still has bullets or when `vVERSION` / `vPREV_VERSION` tags
-  are missing), then publish **new** image tags only (never overwrite an
-  existing version tag). Keep the CSV `links` Changelog entry pointed at
-  `CHANGELOG.md` so OperatorHub consumers can find Migration notes.
+  `operator/catalog/package.yaml` channel entry (name) when present,
+  `CHANGELOG.md` (`## [VERSION]`, `## [Unreleased]`, and the `[VERSION]:` /
+  `[Unreleased]:` compare footers), this README's **Current release** line, and
+  the Go toolchain lockstep between `go.mod`, the release `Dockerfile`,
+  `Dockerfile.ci`, and `.ci-operator.yaml` (plus Node between `.nvmrc` and the
+  console Dockerfile). No OLM `replaces` upgrade graph is maintained: this is
+  pre-release with no installed base, so each build is a standalone channel head.
+- **Cutting a release**: bump `VERSION`, CSV name/version/images, console-plugin
+  versions, move CHANGELOG `[Unreleased]` into `## [VERSION]` with footer compare
+  links (`[VERSION]: ...compare/vPREV...vVERSION` and
+  `[Unreleased]: ...compare/vVERSION...HEAD`), update **Current release**, create
+  an immutable git tag `vVERSION` pointing at that commit (CHANGELOG compare URLs
+  require it; never force-move a published tag), then run
+  `make verify-versions`, then publish **new** image tags only (never overwrite
+  an existing version tag). Keep the CSV `links` Changelog entry pointed at
+  `CHANGELOG.md` so consumers can find release notes.
 
 ## Development
 

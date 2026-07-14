@@ -1,7 +1,7 @@
 # Release version: keep in lockstep with the CSV and console-plugin package.json.
-# Bump PREV_VERSION when cutting a release that changes the OLM replaces edge.
-VERSION ?= 0.5.0
-PREV_VERSION ?= 0.4.0
+# No OLM replaces graph is maintained (pre-release, no installed base): each
+# build is a standalone channel head, so there is no PREV_VERSION.
+VERSION ?= 0.5.5
 IMG ?= quay.io/openshift-baseline-security/baseline-security-operator:latest
 # Plugin image the operator injects via RELATED_IMAGE_CONSOLE_PLUGIN on deploy.
 PLUGIN_IMG ?= quay.io/openshift-baseline-security/baseline-security-console-plugin:latest
@@ -79,7 +79,6 @@ endef
 
 # Escape dots so grep treats VERSION as a literal (0.4.0 must not match 0x4y0).
 VERSION_RE := $(subst .,\.,$(VERSION))
-PREV_VERSION_RE := $(subst .,\.,$(PREV_VERSION))
 GO_VERSION_RE := $(subst .,\.,$(GO_VERSION))
 # Go minor (1.26 from 1.26.5) for the CI builder image tag (golang-1.26-...).
 GO_MINOR := $(basename $(GO_VERSION))
@@ -268,19 +267,19 @@ BUNDLE_IMG ?= quay.io/openshift-baseline-security/baseline-security-operator-bun
 CATALOG_IMG ?= quay.io/openshift-baseline-security/baseline-security-operator-catalog:latest
 
 # Fail if CSV, console-plugin package.json, catalog channel entry, README,
-# CHANGELOG, and Makefile VERSION disagree. Release process: bump
-# VERSION/PREV_VERSION here, the CSV name/version/images/replaces,
-# console-plugin package.json (version + consolePlugin.version), move
-# CHANGELOG [Unreleased] into ## [VERSION] with ### Migration notes and a
-# [VERSION]: compare footer plus [Unreleased]: ...vVERSION...HEAD, set
-# README "Current release" and upgrade path, create immutable git tag
-# vVERSION (never force-move; compare footers 404 without it), run
-# REQUIRE_GIT_TAGS=1 make verify-versions once tags exist, and never
-# re-tag or overwrite a published image/CSV version. Do not push :VERSION
-# images from HEAD while [Unreleased] still has consumer-facing entries;
-# cut a new version first. When cutting: move [Unreleased] into ## [VERSION],
-# then run RELEASE_GATE=1 REQUIRE_GIT_TAGS=1 make verify-versions (fails if
-# Unreleased still has bullets or git tags are missing).
+# CHANGELOG, and Makefile VERSION disagree. No OLM replaces graph is maintained
+# (pre-release, no installed base), so there is no PREV_VERSION and no upgrade
+# edge to keep in sync. Release process: bump VERSION here, the CSV
+# name/version/images, console-plugin package.json (version +
+# consolePlugin.version), move CHANGELOG [Unreleased] into ## [VERSION] with a
+# [VERSION]: compare footer plus [Unreleased]: ...vVERSION...HEAD, set README
+# "Current release", create immutable git tag vVERSION (never force-move;
+# compare footers 404 without it), run REQUIRE_GIT_TAGS=1 make verify-versions
+# once the tag exists, and never re-tag or overwrite a published image/CSV
+# version. Do not push :VERSION images from HEAD while [Unreleased] still has
+# consumer-facing entries; cut a new version first. When cutting: move
+# [Unreleased] into ## [VERSION], then run RELEASE_GATE=1 REQUIRE_GIT_TAGS=1
+# make verify-versions (fails if Unreleased still has bullets or the tag is missing).
 .PHONY: verify-versions
 verify-versions:
 	@csv=bundle/manifests/baseline-security-operator.clusterserviceversion.yaml; \
@@ -293,8 +292,6 @@ verify-versions:
 		|| { echo "CSV name is not baseline-security-operator.v$(VERSION)"; fail=1; }; \
 	grep -qE '^  version: $(VERSION_RE)$$' "$$csv" \
 		|| { echo "CSV spec.version is not $(VERSION)"; fail=1; }; \
-	grep -qE "replaces: baseline-security-operator\.v$(PREV_VERSION_RE)$$" "$$csv" \
-		|| { echo "CSV replaces is not baseline-security-operator.v$(PREV_VERSION)"; fail=1; }; \
 	grep -qE "containerImage:.*:$(VERSION_RE)$$" "$$csv" \
 		|| { echo "CSV containerImage annotation is not tagged :$(VERSION); OLM UI would show the wrong operator image"; fail=1; }; \
 	grep -qE '^  "version": "$(VERSION_RE)"' "$$pkg" \
@@ -310,13 +307,9 @@ verify-versions:
 	if [ -f "$$catpkg" ]; then \
 		grep -qE 'name: baseline-security-operator\.v$(VERSION_RE)$$' "$$catpkg" \
 			|| { echo "catalog/package.yaml channel entry is not baseline-security-operator.v$(VERSION); FBC would advertise the wrong CSV"; fail=1; }; \
-		grep -qE 'replaces: baseline-security-operator\.v$(PREV_VERSION_RE)$$' "$$catpkg" \
-			|| { echo "catalog/package.yaml replaces is not baseline-security-operator.v$(PREV_VERSION); upgrade edge would disagree with the CSV"; fail=1; }; \
 	fi; \
 	grep -qE "^## \[$(VERSION_RE)\]" "$$cl" \
 		|| { echo "CHANGELOG.md missing ## [$(VERSION)] section; consumers would have no release notes for this version"; fail=1; }; \
-	grep -qE "^## \[$(PREV_VERSION_RE)\]" "$$cl" \
-		|| { echo "CHANGELOG.md missing ## [$(PREV_VERSION)] section (PREV_VERSION); replaces edge has no prior notes"; fail=1; }; \
 	grep -qE "^## \[Unreleased\]" "$$cl" \
 		|| { echo "CHANGELOG.md missing ## [Unreleased] section; post-release work has nowhere to land"; fail=1; }; \
 	unrel_line=$$(grep -nE '^## \[Unreleased\]' "$$cl" | head -1 | cut -d: -f1); \
@@ -324,32 +317,14 @@ verify-versions:
 	if [ -n "$$unrel_line" ] && [ -n "$$ver_line" ] && [ "$$unrel_line" -ge "$$ver_line" ]; then \
 		echo "CHANGELOG.md ## [Unreleased] must appear above ## [$(VERSION)] (Keep a Changelog order)"; fail=1; \
 	fi; \
-	if [ -n "$$ver_line" ]; then \
-		next_line=$$(awk -v s="$$ver_line" 'NR>s && /^## \[/{print NR; exit}' "$$cl"); \
-		if [ -z "$$next_line" ]; then next_line=$$(($$(wc -l < "$$cl")+1)); fi; \
-		if ! awk -v s="$$ver_line" -v e="$$next_line" 'NR>s && NR<e && /^### Migration notes/' "$$cl" | grep -q .; then \
-			echo "CHANGELOG.md ## [$(VERSION)] missing ### Migration notes; consumers would lack an upgrade path"; fail=1; \
-		fi; \
-	fi; \
-	if [ -n "$$unrel_line" ] && [ -n "$$ver_line" ]; then \
-		if awk -v s="$$unrel_line" -v e="$$ver_line" 'NR>s && NR<e && /^### (Changed|Removed)$$/{sec=1; next} sec && /^### /{sec=0} sec && /^- /{found=1} END{exit !found}' "$$cl"; then \
-			if ! awk -v s="$$unrel_line" -v e="$$ver_line" 'NR>s && NR<e && /^### Migration notes/' "$$cl" | grep -q .; then \
-				echo "CHANGELOG.md ## [Unreleased] has Changed/Removed entries but no ### Migration notes; cut would ship breaks without an upgrade path"; fail=1; \
-			fi; \
-		fi; \
-	fi; \
 	grep -qE '"@console/pluginAPI": ">=4\.22\.0-0 <4\.23\.0-0"' "$$pkg" \
 		|| { echo "console-plugin package.json @console/pluginAPI must be >=4.22.0-0 <4.23.0-0 (matches =v4.22 host pin); looser ranges would load on untested consoles"; fail=1; }; \
-	grep -qE "^\[$(VERSION_RE)\]: .*compare/v$(PREV_VERSION_RE)\.\.\.v$(VERSION_RE)" "$$cl" \
-		|| { echo "CHANGELOG.md [$(VERSION)] footer must compare v$(PREV_VERSION)...v$(VERSION); release notes would not deep-link the delta"; fail=1; }; \
-	grep -qE "^\[$(PREV_VERSION_RE)\]:" "$$cl" \
-		|| { echo "CHANGELOG.md missing [$(PREV_VERSION)]: footer link; replaces-edge notes would not deep-link"; fail=1; }; \
+	grep -qE "^\[$(VERSION_RE)\]: .*compare/.*v$(VERSION_RE)$$" "$$cl" \
+		|| { echo "CHANGELOG.md [$(VERSION)] footer must deep-link a compare ending at v$(VERSION)"; fail=1; }; \
 	grep -qE "^\[Unreleased\]: .*compare/v$(VERSION_RE)\.\.\.HEAD" "$$cl" \
 		|| { echo "CHANGELOG.md [Unreleased] footer must compare v$(VERSION)...HEAD; post-cut notes would point at the wrong base"; fail=1; }; \
 	grep -qE "\*\*Current release: $(VERSION_RE)\*\*" "$$readme" \
 		|| { echo "README.md Current release line is not $(VERSION); docs would advertise the wrong version"; fail=1; }; \
-	grep -qE "→ $(VERSION_RE)" "$$readme" \
-		|| { echo "README.md upgrade path does not end at → $(VERSION); consumers would not see the OLM replaces chain end"; fail=1; }; \
 	grep -qE 'name: Changelog' "$$csv" \
 		|| { echo "CSV links must include name: Changelog so OperatorHub consumers can find release notes"; fail=1; }; \
 	grep -qE 'url: https://github.com/maci0/openshift-baseline-security/blob/.*/CHANGELOG\.md' "$$csv" \
@@ -376,8 +351,6 @@ verify-versions:
 	if [ "$${REQUIRE_GIT_TAGS:-}" = 1 ]; then \
 		git -C .. rev-parse -q --verify "refs/tags/v$(VERSION)" >/dev/null \
 			|| { echo "git tag v$(VERSION) missing; CHANGELOG compare URLs and release immutability require it (create after cutting, never force-move)"; fail=1; }; \
-		git -C .. rev-parse -q --verify "refs/tags/v$(PREV_VERSION)" >/dev/null \
-			|| { echo "git tag v$(PREV_VERSION) missing; CHANGELOG [$(VERSION)] compare footer and replaces edge need the previous tag"; fail=1; }; \
 	fi; \
 	if [ "$${RELEASE_GATE:-}" = 1 ]; then \
 		if [ -n "$$unrel_line" ] && [ -n "$$ver_line" ] && \
@@ -511,7 +484,7 @@ catalog-prepare: bundle
 		| sed 's|^image: ""$$|image: $(BUNDLE_IMG)|' > catalog/bundle.yaml
 	@grep -qE '^image: .+' catalog/bundle.yaml \
 		|| { echo "catalog/bundle.yaml missing image pullspec after inject"; exit 1; }
-	printf 'schema: olm.package\nname: baseline-security-operator\ndefaultChannel: alpha\n---\nschema: olm.channel\npackage: baseline-security-operator\nname: alpha\nentries:\n  - name: baseline-security-operator.v$(VERSION)\n    replaces: baseline-security-operator.v$(PREV_VERSION)\n' > catalog/package.yaml
+	printf 'schema: olm.package\nname: baseline-security-operator\ndefaultChannel: alpha\n---\nschema: olm.channel\npackage: baseline-security-operator\nname: alpha\nentries:\n  - name: baseline-security-operator.v$(VERSION)\n' > catalog/package.yaml
 	# Clamp mtimes so COPY layers / opm cache do not embed host checkout times.
 	# touch -t is portable (GNU + BSD); avoid GNU-only touch -d @epoch.
 	@epoch="$(SOURCE_DATE_EPOCH)"; \
