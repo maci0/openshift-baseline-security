@@ -44,6 +44,50 @@ func sanitizeStatusForUpdate(cb *baselinev1alpha1.ClusterBaseline) {
 	// to 253 chars), but the CRD caps the field at 128; clamp so a pathologically
 	// long CSV name cannot fail Status().Update admission and freeze reconcile.
 	cb.Status.ComplianceOperatorVersion = clampString(cb.Status.ComplianceOperatorVersion, complianceOperatorVersionMax)
+	// status.remediationBatch has CRD MaxItems on pools (32) and remediations
+	// (256), MaxLength on pauseOwner and list items, and Enum on phase. Hand-edits
+	// or an old bug that overfilled the object must not brick every Status().Update.
+	sanitizeRemediationBatch(cb)
+}
+
+// sanitizeRemediationBatch clamps status.remediationBatch to the CRD schema so
+// an oversize or invalid batch cannot fail status admission and freeze reconcile
+// (pools would stay paused with no successful status write path).
+func sanitizeRemediationBatch(cb *baselinev1alpha1.ClusterBaseline) {
+	b := cb.Status.RemediationBatch
+	if b == nil {
+		return
+	}
+	// Only Applying is in the Enum; anything else (including empty) is rewritten
+	// so the object still admits while the wait path can force-resume.
+	if b.Phase != baselinev1alpha1.RemediationBatchPhaseApplying {
+		b.Phase = baselinev1alpha1.RemediationBatchPhaseApplying
+	}
+	b.PauseOwner = clampString(b.PauseOwner, 253)
+	b.Pools = clampStringList(b.Pools, batchMaxPools, 253)
+	b.Remediations = clampStringList(b.Remediations, batchMaxRemediations, 253)
+}
+
+// clampStringList keeps at most maxItems entries, truncates each to maxLen runes,
+// and drops empty results after truncation. Does not alias after truncation.
+func clampStringList(in []string, maxItems, maxLen int) []string {
+	if len(in) == 0 {
+		return in
+	}
+	if maxItems > 0 && len(in) > maxItems {
+		in = in[:maxItems]
+	}
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		s = clampString(s, maxLen)
+		if s != "" {
+			out = append(out, s)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // complianceOperatorVersionMax mirrors the CRD MaxLength on

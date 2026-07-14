@@ -334,6 +334,53 @@ func TestSanitizeStatusForUpdate(t *testing.T) {
 	}
 }
 
+// TestSanitizeRemediationBatch clamps status.remediationBatch to CRD MaxItems /
+// MaxLength / Enum so a hand-edited oversize batch cannot fail every
+// Status().Update and freeze reconcile with MCPs paused.
+func TestSanitizeRemediationBatch(t *testing.T) {
+	pools := make([]string, 0, batchMaxPools+5)
+	for i := 0; i < batchMaxPools+5; i++ {
+		pools = append(pools, fmt.Sprintf("pool-%d", i))
+	}
+	rems := make([]string, 0, batchMaxRemediations+3)
+	for i := 0; i < batchMaxRemediations+3; i++ {
+		rems = append(rems, fmt.Sprintf("rem-%d", i))
+	}
+	cb := &baselinev1alpha1.ClusterBaseline{
+		Status: baselinev1alpha1.ClusterBaselineStatus{
+			RemediationBatch: &baselinev1alpha1.RemediationBatchStatus{
+				Phase:        "NotAValidPhase",
+				Pools:        pools,
+				Remediations: rems,
+				PauseOwner:   strings.Repeat("o", 300),
+			},
+		},
+	}
+	sanitizeStatusForUpdate(cb)
+	b := cb.Status.RemediationBatch
+	if b == nil {
+		t.Fatal("batch must remain present after sanitize")
+	}
+	if b.Phase != baselinev1alpha1.RemediationBatchPhaseApplying {
+		t.Fatalf("phase = %q, want %q", b.Phase, baselinev1alpha1.RemediationBatchPhaseApplying)
+	}
+	if len(b.Pools) != batchMaxPools {
+		t.Fatalf("pools len = %d, want %d", len(b.Pools), batchMaxPools)
+	}
+	if len(b.Remediations) != batchMaxRemediations {
+		t.Fatalf("remediations len = %d, want %d", len(b.Remediations), batchMaxRemediations)
+	}
+	if got := len([]rune(b.PauseOwner)); got != 253 {
+		t.Fatalf("pauseOwner runes = %d, want 253", got)
+	}
+	// Empty batch pointer stays nil.
+	cb2 := &baselinev1alpha1.ClusterBaseline{}
+	sanitizeStatusForUpdate(cb2)
+	if cb2.Status.RemediationBatch != nil {
+		t.Fatal("nil batch must stay nil")
+	}
+}
+
 func TestParseScanEndTimestamp(t *testing.T) {
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
 	ok, valid := parseScanEndTimestamp("2026-07-09T01:00:00Z", now)
