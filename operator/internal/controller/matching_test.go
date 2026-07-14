@@ -1087,6 +1087,28 @@ func TestClampFailureListsToBudget(t *testing.T) {
 	}
 }
 
+func TestClampListsDedupeSetTypes(t *testing.T) {
+	// status set-lists (x-kubernetes-list-type: set) reject duplicates at
+	// admission; the clamps must strip dupes from restored/migrated etcd,
+	// first-wins and order-preserving.
+	if got := clampFailureList([]string{"b", "a", "b", "a", "c"}); !slices.Equal(got, []string{"b", "a", "c"}) {
+		t.Fatalf("clampFailureList dedupe = %v, want [b a c]", got)
+	}
+	if got := clampStringList([]string{"x", "x", "y", "x"}, 16); !slices.Equal(got, []string{"x", "y"}) {
+		t.Fatalf("clampStringList dedupe = %v, want [x y]", got)
+	}
+	// Already-unique input is returned unchanged (no needless allocation/reorder).
+	uniq := []string{"a", "b", "c"}
+	if got := clampFailureList(uniq); !slices.Equal(got, uniq) {
+		t.Fatalf("clampFailureList mangled a unique list: %v", got)
+	}
+	// Dedupe runs before the maxItems cut, so duplicates cannot crowd out
+	// distinct entries: 3 unique survive a maxItems=2 only after dedupe caps first.
+	if got := clampStringList([]string{"a", "a", "b"}, 2); !slices.Equal(got, []string{"a", "b"}) {
+		t.Fatalf("clampStringList dedupe-before-cap = %v, want [a b]", got)
+	}
+}
+
 func FuzzClampFailureList(f *testing.F) {
 	f.Add("", 0)
 	f.Add("a,b,c", 3)

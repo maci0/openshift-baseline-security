@@ -154,7 +154,7 @@ func sanitizeStatusProfiles(cb *baselinev1alpha1.ClusterBaseline) {
 			continue
 		}
 		seen[p.Key] = struct{}{}
-		p.ProfileNames = clampStringList(p.ProfileNames, profileNamesMaxItems, objectRefFieldMaxLen)
+		p.ProfileNames = clampStringList(p.ProfileNames, profileNamesMaxItems)
 		p.History = clampHistory(p.History, historyMax)
 		clampResultCounts(&p.ResultCounts)
 		out = append(out, p)
@@ -281,22 +281,60 @@ func sanitizeRemediationBatch(cb *baselinev1alpha1.ClusterBaseline) {
 		b.StartedAt = metav1.NewTime(time.Unix(0, 0).UTC())
 	}
 	b.PauseOwner = clampString(b.PauseOwner, 253)
-	b.Pools = clampStringList(b.Pools, batchMaxPools, 253)
-	b.Remediations = clampStringList(b.Remediations, batchMaxRemediations, 253)
+	b.Pools = clampStringList(b.Pools, batchMaxPools)
+	b.Remediations = clampStringList(b.Remediations, batchMaxRemediations)
 }
 
-// clampStringList keeps at most maxItems entries, truncates each to maxLen runes,
-// and drops empty results after truncation. Does not alias after truncation.
-func clampStringList(in []string, maxItems, maxLen int) []string {
+// dedupeStable removes duplicate strings, keeping the first occurrence and the
+// original order. Returns in unchanged when already unique so the common path
+// (the operator's own writes never duplicate) does not allocate. CRD status
+// set-lists (x-kubernetes-list-type: set) reject duplicates at admission, so
+// sanitize must strip any that reach it from restored or migrated etcd, or every
+// Status().Update would fail and freeze reconcile.
+func dedupeStable(in []string) []string {
+	if len(in) < 2 {
+		return in
+	}
+	seen := make(map[string]struct{}, len(in))
+	dup := false
+	for _, s := range in {
+		if _, ok := seen[s]; ok {
+			dup = true
+			break
+		}
+		seen[s] = struct{}{}
+	}
+	if !dup {
+		return in
+	}
+	clear(seen)
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		if _, ok := seen[s]; ok {
+			continue
+		}
+		seen[s] = struct{}{}
+		out = append(out, s)
+	}
+	return out
+}
+
+// clampStringList dedupes, keeps at most maxItems entries, truncates each to
+// objectRefFieldMaxLen (253) runes, and drops empty results after truncation.
+// Every status set-list item it clamps (profile names, MCP pool names,
+// remediation names) is a DNS-1123 / object-ref name bounded at 253 in the CRD.
+// Does not alias after truncation.
+func clampStringList(in []string, maxItems int) []string {
 	if len(in) == 0 {
 		return in
 	}
+	in = dedupeStable(in)
 	if maxItems > 0 && len(in) > maxItems {
 		in = in[:maxItems]
 	}
 	out := make([]string, 0, len(in))
 	for _, s := range in {
-		s = clampString(s, maxLen)
+		s = clampString(s, objectRefFieldMaxLen)
 		if s != "" {
 			out = append(out, s)
 		}
@@ -335,6 +373,7 @@ func clampFailureList(in []string) []string {
 	if len(in) == 0 {
 		return in
 	}
+	in = dedupeStable(in)
 	limit := len(in)
 	if limit > failureListMax {
 		limit = failureListMax
