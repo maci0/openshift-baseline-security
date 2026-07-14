@@ -201,8 +201,12 @@ func applyPluginContainer(pod *corev1.PodSpec, image string) {
 	pod.Containers = []corev1.Container{container}
 	pod.InitContainers = nil
 
-	// 0400: only the nginx UID can read the private key (default is 0644).
-	const certMode int32 = 0o400
+	// 0440 (owner+group read), not 0400: secret-volume files are owned by root,
+	// not by the container's UID, so owner-only would be unreadable by the non-root
+	// nginx process. On OpenShift the restricted-v2 SCC assigns an fsGroup that
+	// group-owns this volume, so group-read lets nginx read its serving-cert key
+	// while still keeping the private key off world-read (unlike the 0644 default).
+	const certMode int32 = 0o440
 	// Bound /tmp so a compromised nginx process cannot fill the node disk.
 	tmpLimit := resource.MustParse("32Mi")
 	pod.Volumes = []corev1.Volume{

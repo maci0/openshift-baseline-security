@@ -1641,8 +1641,10 @@ func TestApplyPluginContainerRemovesUnownedPodPayloads(t *testing.T) {
 		switch v.Name {
 		case "serving-cert":
 			haveCert = true
-			if v.Secret == nil || v.Secret.DefaultMode == nil || *v.Secret.DefaultMode != 0o400 {
-				t.Fatalf("serving-cert DefaultMode = %v, want 0400", v.Secret)
+			// 0440: group-read so the non-root nginx (member of the SCC-injected
+			// fsGroup that owns the volume) can read the root-owned serving cert.
+			if v.Secret == nil || v.Secret.DefaultMode == nil || *v.Secret.DefaultMode != 0o440 {
+				t.Fatalf("serving-cert DefaultMode = %v, want 0440", v.Secret)
 			}
 		case "tmp":
 			haveTmp = true

@@ -892,8 +892,10 @@ func TestEnsureConsolePlugin(t *testing.T) {
 	if certVol == nil || certVol.Optional == nil || !*certVol.Optional {
 		t.Fatal("serving-cert volume must be optional until service-ca mints the Secret")
 	}
-	if certVol.DefaultMode == nil || *certVol.DefaultMode != 0o400 {
-		t.Fatalf("serving-cert DefaultMode = %v, want 0400", certVol.DefaultMode)
+	// 0440: root-owned secret volume, group-readable so the non-root nginx (in the
+	// SCC-injected fsGroup) can read the serving-cert key.
+	if certVol.DefaultMode == nil || *certVol.DefaultMode != 0o440 {
+		t.Fatalf("serving-cert DefaultMode = %v, want 0440", certVol.DefaultMode)
 	}
 	if !haveTmp {
 		t.Fatal("tmp emptyDir with 32Mi SizeLimit required for read-only rootfs")
