@@ -33,6 +33,13 @@ func sanitizeStatusForUpdate(cb *baselinev1alpha1.ClusterBaseline) {
 	cb.Status.Fixed = clampFailureList(cb.Status.Fixed)
 	cb.Status.PreviousFailures = clampFailureList(cb.Status.PreviousFailures)
 	cb.Status.DiffBaseFailures = clampFailureList(cb.Status.DiffBaseFailures)
+	// Each list above is within MaxItems=4096, but four full lists of long
+	// (253-char) names serialize to ~4 MiB, over the apiserver ~1.5 MiB object
+	// limit: Status().Update would be rejected and freeze reconcile on a large,
+	// heavily-failing cluster. Bound the four lists together so the whole status
+	// stays well under the limit (per-list MaxItems is not enough).
+	clampFailureListsToBudget(&cb.Status.NewlyFailed, &cb.Status.Fixed,
+		&cb.Status.PreviousFailures, &cb.Status.DiffBaseFailures)
 	// complianceOperatorVersion is derived from a CSV name (object names allow up
 	// to 253 chars), but the CRD caps the field at 128; clamp so a pathologically
 	// long CSV name cannot fail Status().Update admission and freeze reconcile.
@@ -67,6 +74,49 @@ func clampFailureList(in []string) []string {
 		return in
 	}
 	return append([]string(nil), in[:failureListMax]...)
+}
+
+// failureListsSizeBudget bounds the combined serialized size of the four status
+// failure-name lists. The apiserver/etcd object limit is ~1.5 MiB; reserve the
+// rest of the budget for history rings, per-profile counts, relatedObjects,
+// conditions, spec, and metadata.
+const failureListsSizeBudget = 768 * 1024
+
+// clampFailureListsToBudget trims the given failure-name lists together so their
+// combined serialized size (name + JSON quoting/comma overhead) stays under
+// failureListsSizeBudget. It repeatedly drops the tail of whichever list is
+// currently largest, so no single list dominates and the whole status cannot
+// exceed the apiserver object-size limit and freeze Status().Update. Truncating
+// the tails degrades the diff on an extreme cluster (some regressions/fixes drop
+// out) but keeps reconcile alive, which a frozen status write would not.
+func clampFailureListsToBudget(lists ...*[]string) {
+	const perEntryOverhead = 3 // two quotes + a comma
+	sizes := make([]int, len(lists))
+	total := 0
+	for i, l := range lists {
+		s := 0
+		for _, name := range *l {
+			s += len(name) + perEntryOverhead
+		}
+		sizes[i] = s
+		total += s
+	}
+	for total > failureListsSizeBudget {
+		largest := -1
+		for i := range lists {
+			if len(*lists[i]) > 0 && (largest < 0 || sizes[i] > sizes[largest]) {
+				largest = i
+			}
+		}
+		if largest < 0 {
+			return // all empty; nothing left to trim
+		}
+		l := lists[largest]
+		removed := len((*l)[len(*l)-1]) + perEntryOverhead
+		*l = (*l)[:len(*l)-1]
+		sizes[largest] -= removed
+		total -= removed
+	}
 }
 
 // condMessage caps condition messages so a huge wrapped error, invalid cron,

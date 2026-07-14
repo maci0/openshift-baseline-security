@@ -812,6 +812,40 @@ func FuzzClampString(f *testing.F) {
 // FuzzClampFailureList: hand-edited or pathologically large newlyFailed/fixed/
 // previousFailures/diffBaseFailures lists must stay <= CRD MaxItems=4096 so
 // Status().Update cannot fail admission and freeze reconciliation.
+// TestClampFailureListsToBudget: four failure lists each within MaxItems=4096 of
+// long names serialize past the apiserver object limit; the joint clamp must
+// bring the combined size under budget without emptying any single list.
+func TestClampFailureListsToBudget(t *testing.T) {
+	longName := strings.Repeat("a", 253) // CRD items:MaxLength
+	full := func() []string {
+		l := make([]string, failureListMax)
+		for i := range l {
+			l[i] = longName
+		}
+		return l
+	}
+	a, b, c, d := full(), full(), full(), full()
+	clampFailureListsToBudget(&a, &b, &c, &d)
+	total := 0
+	for _, l := range [][]string{a, b, c, d} {
+		if len(l) == 0 {
+			t.Fatal("a list was fully emptied; trim should balance across the lists")
+		}
+		for _, s := range l {
+			total += len(s) + 3
+		}
+	}
+	if total > failureListsSizeBudget {
+		t.Fatalf("combined size %d exceeds budget %d", total, failureListsSizeBudget)
+	}
+	// A small set that already fits is left untouched.
+	small := []string{"chk-a", "chk-b"}
+	clampFailureListsToBudget(&small)
+	if len(small) != 2 {
+		t.Fatalf("small list trimmed unnecessarily: %v", small)
+	}
+}
+
 func FuzzClampFailureList(f *testing.F) {
 	f.Add("", 0)
 	f.Add("a,b,c", 3)

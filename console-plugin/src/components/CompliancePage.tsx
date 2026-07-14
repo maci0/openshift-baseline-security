@@ -198,12 +198,16 @@ const CompliancePage: React.FC = () => {
   const ctx = React.useMemo(
     () => ({
       baseline,
-      loaded,
+      // Treat the baseline as resolved once its watch loads OR errors, so a
+      // failed baseline watch (RBAC-denied, CRD absent) that leaves loaded=false
+      // does not perpetually skeleton the tab bodies. The error itself is shown
+      // in the page banner; the tabs then fall to their empty/error state.
+      loaded: loaded || !!baselineError,
       checkResults: ownedResults,
       checkResultsLoaded,
       checkResultsError,
     }),
-    [baseline, loaded, ownedResults, checkResultsLoaded, checkResultsError],
+    [baseline, loaded, baselineError, ownedResults, checkResultsLoaded, checkResultsError],
   );
 
   // Page component types are module-level (stable). Only labels depend on t.
