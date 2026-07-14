@@ -439,6 +439,11 @@ verify-csv-rbac:
 	@grep -A3 'resources: \[consoles\]' bundle/manifests/baseline-security-operator.clusterserviceversion.yaml \
 		| grep -q 'update' \
 		|| (echo "CSV missing update on consoles; console-plugin registration needs it" && exit 1)
+	# infrastructures get: read status.infrastructureTopology to detect SNO and drop
+	# the console-plugin PDB that would otherwise deadlock a single node's drain.
+	@grep -A3 'resources: \[infrastructures\]' bundle/manifests/baseline-security-operator.clusterserviceversion.yaml \
+		| grep -q 'get' \
+		|| (echo "CSV missing get on infrastructures; SNO topology detection needs it" && exit 1)
 	# Name-scoped rules put resourceNames between resources and verbs; -A3 covers both
 	# create-only and get/update/patch blocks. Catalog source sync needs update/patch.
 	@grep -A3 'resources: \[subscriptions\]' bundle/manifests/baseline-security-operator.clusterserviceversion.yaml \

@@ -59,6 +59,7 @@ func testScheme(t *testing.T) *runtime.Scheme {
 	scheme.AddKnownTypeWithName(consoleGVK, &unstructured.Unstructured{})
 	scheme.AddKnownTypeWithName(remediationGVK, &unstructured.Unstructured{})
 	scheme.AddKnownTypeWithName(mcpGVK, &unstructured.Unstructured{})
+	scheme.AddKnownTypeWithName(infrastructureGVK, &unstructured.Unstructured{})
 	return scheme
 }
 

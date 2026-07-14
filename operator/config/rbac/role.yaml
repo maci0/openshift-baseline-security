@@ -143,6 +143,14 @@ rules:
   - patch
   - update
 - apiGroups:
+  - config.openshift.io
+  resourceNames:
+  - cluster
+  resources:
+  - infrastructures
+  verbs:
+  - get
+- apiGroups:
   - console.openshift.io
   resources:
   - consoleplugins

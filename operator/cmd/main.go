@@ -181,6 +181,10 @@ func main() {
 		// sync and the reconcile blocks forever on the dashboard read.
 		Client: client.Options{
 			Cache: &client.CacheOptions{
+				// Named dashboard CM only, held with named get/update (no cluster-wide
+				// list/watch a cache informer needs). Unstructured reads (Infrastructure,
+				// consoles, subscriptions, ...) already bypass the cache by default, so
+				// they need no entry here.
 				DisableFor: []client.Object{&corev1.ConfigMap{}},
 			},
 		},

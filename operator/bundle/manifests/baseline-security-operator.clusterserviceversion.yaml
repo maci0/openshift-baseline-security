@@ -184,6 +184,11 @@ spec:
               resources: [consoles]
               resourceNames: [cluster]
               verbs: [get, patch, update]
+            # Singleton infrastructures/cluster only: read topology to detect SNO.
+            - apiGroups: [config.openshift.io]
+              resources: [infrastructures]
+              resourceNames: [cluster]
+              verbs: [get]
             - apiGroups: [operators.coreos.com]
               resources: [clusterserviceversions]
               verbs: [get, list, watch]

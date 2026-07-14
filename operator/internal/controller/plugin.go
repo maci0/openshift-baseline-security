@@ -121,6 +121,23 @@ func (r *ClusterBaselineReconciler) removeConsolePlugin(ctx context.Context, cb 
 	return nil
 }
 
+// infrastructureSingleReplica reports whether the cluster is single-node (SNO)
+// by reading the cluster Infrastructure singleton's status.infrastructureTopology.
+// It fails safe to false (assume HA) on any read or parse error: a false negative
+// only keeps the 2-replica+PDB HA layout, which is correct on a real multi-node
+// cluster and merely suboptimal (never deadlocking) if we ever misread an SNO.
+func (r *ClusterBaselineReconciler) infrastructureSingleReplica(ctx context.Context) bool {
+	infra := u(infrastructureGVK)
+	if err := r.Get(ctx, types.NamespacedName{Name: "cluster"}, infra); err != nil {
+		return false
+	}
+	topology, _, err := unstructured.NestedString(infra.Object, "status", "infrastructureTopology")
+	if err != nil {
+		return false
+	}
+	return topology == "SingleReplica"
+}
+
 func (r *ClusterBaselineReconciler) ensureConsolePlugin(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline) error {
 	if cb.Spec.Console.ManagementState == baselinev1alpha1.Removed {
 		return r.removeConsolePlugin(ctx, cb)
@@ -145,6 +162,16 @@ func (r *ClusterBaselineReconciler) ensureConsolePlugin(ctx context.Context, cb 
 	// Fresh map per consumer: Service/Deployment/PDB/Affinity must not share one
 	// map header (client-go and API machinery may retain object graphs).
 	pluginLabels := func() map[string]string { return map[string]string{"app": pluginName} }
+
+	// On single-node OpenShift there is only one node, so a 2-replica Deployment
+	// plus a minAvailable=1 PDB would refuse eviction of the last pod and deadlock
+	// the node's drain during an upgrade. Collapse to one replica and drop the PDB.
+	// Default to HA (2 + PDB) whenever topology cannot be read.
+	singleNode := r.infrastructureSingleReplica(ctx)
+	replicas := pluginReplicas
+	if singleNode {
+		replicas = 1
+	}
 
 	// Service first so service-ca can mint the serving-cert Secret before pods start.
 	svc := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: pluginName, Namespace: pluginNS}}
@@ -184,7 +211,7 @@ func (r *ClusterBaselineReconciler) ensureConsolePlugin(ctx context.Context, cb 
 		if dep.Spec.Selector == nil {
 			dep.Spec.Selector = &metav1.LabelSelector{MatchLabels: pluginLabels()}
 		}
-		dep.Spec.Replicas = ptr.To(pluginReplicas)
+		dep.Spec.Replicas = ptr.To(replicas)
 		// maxUnavailable=1 makes DeploymentAvailable True at 1/2 ready, matching
 		// pluginReadyMin=1: a single drained node must not false-Degrade the plugin.
 		dep.Spec.Strategy = appsv1.DeploymentStrategy{
@@ -213,16 +240,24 @@ func (r *ClusterBaselineReconciler) ensureConsolePlugin(ctx context.Context, cb 
 		return fmt.Errorf("ensuring plugin Deployment %s/%s: %w", pluginNS, pluginName, err)
 	}
 
-	// Preferred anti-affinity alone does not block eviction of both pods on drain.
 	pdb := &policyv1.PodDisruptionBudget{ObjectMeta: metav1.ObjectMeta{Name: pluginName, Namespace: pluginNS}}
-	if _, err := controllerutil.CreateOrUpdate(ctx, r.Client, pdb, func() error {
-		pdb.Spec.MinAvailable = ptr.To(intstr.FromInt32(pluginReadyMin))
-		pdb.Spec.Selector = &metav1.LabelSelector{MatchLabels: pluginLabels()}
-		// Clear maxUnavailable when minAvailable is set (mutually exclusive).
-		pdb.Spec.MaxUnavailable = nil
-		return controllerutil.SetControllerReference(cb, pdb, r.Scheme)
-	}); err != nil {
-		return fmt.Errorf("ensuring plugin PodDisruptionBudget %s/%s: %w", pluginNS, pluginName, err)
+	if singleNode {
+		// A single-replica plugin has no HA to protect, and a PDB here can only
+		// block the one node's drain. Remove any PDB left from a prior HA topology.
+		if err := r.Delete(ctx, pdb); err != nil && !apierrors.IsNotFound(err) {
+			return fmt.Errorf("removing plugin PodDisruptionBudget %s/%s on single-node: %w", pluginNS, pluginName, err)
+		}
+	} else {
+		// Preferred anti-affinity alone does not block eviction of both pods on drain.
+		if _, err := controllerutil.CreateOrUpdate(ctx, r.Client, pdb, func() error {
+			pdb.Spec.MinAvailable = ptr.To(intstr.FromInt32(pluginReadyMin))
+			pdb.Spec.Selector = &metav1.LabelSelector{MatchLabels: pluginLabels()}
+			// Clear maxUnavailable when minAvailable is set (mutually exclusive).
+			pdb.Spec.MaxUnavailable = nil
+			return controllerutil.SetControllerReference(cb, pdb, r.Scheme)
+		}); err != nil {
+			return fmt.Errorf("ensuring plugin PodDisruptionBudget %s/%s: %w", pluginNS, pluginName, err)
+		}
 	}
 
 	cp := u(consolePluginGVK)
