@@ -125,7 +125,10 @@ func (r *ClusterBaselineReconciler) ensureScanConfig(ctx context.Context, cb *ba
 		setCondFalseLogOnce(ctx, cb, "ScanConfigured", "InvalidSchedule", msg,
 			"invalid scan schedule; keeping last-good cron on ScanSetting",
 			"name", cb.Name, "schedule", cb.Spec.Schedule, "error", schedErr)
-		return nil
+		// A bad user-supplied cron is surfaced as InvalidSchedule/Degraded, not a
+		// reconcile error: returning schedErr would spin controller-runtime backoff
+		// on input that only an admin edit can fix.
+		return nil //nolint:nilerr // invalid schedule is a Degraded condition, not a retryable error
 	}
 	setCond(cb, "ScanConfigured", metav1.ConditionTrue, "BindingsCreated", "")
 	return nil
