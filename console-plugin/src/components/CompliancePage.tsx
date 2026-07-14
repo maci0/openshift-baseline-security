@@ -285,9 +285,14 @@ const CompliancePage: React.FC = () => {
                         // must not leak the blob URL for the session.
                         const url = URL.createObjectURL(blob);
                         try {
-                          // noopener: drop window.opener at open time (avoids a
-                          // race with post-open assignment on slow tabs).
-                          const w = window.open(url, '_blank', 'noopener,noreferrer');
+                          // Do NOT pass noopener/noreferrer in the feature string:
+                          // per the HTML spec that forces window.open to return null
+                          // even when the tab opens, which would make the block below
+                          // always take the "popup was blocked" path (false notice +
+                          // redundant download + early blob revoke). Open plainly so a
+                          // real block is the only null, then drop opener manually (the
+                          // report is our own static, script-free, CSP-locked HTML).
+                          const w = window.open(url, '_blank');
                           if (w) {
                             w.opener = null;
                             // Keep the blob alive long enough for the tab to load.

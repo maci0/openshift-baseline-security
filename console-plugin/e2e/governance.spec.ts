@@ -71,6 +71,10 @@ test.describe('Baseline Security governance affordances', () => {
     await popup.waitForLoadState('domcontentloaded');
     await expect(popup.getByText(/Compliance/i).first()).toBeVisible();
     await expect(popup.getByText(/of 100|Score/i).first()).toBeVisible();
+    // The tab opened, so the origin page must NOT claim the popup was blocked
+    // (regression guard: a noopener feature string forces window.open -> null and
+    // would always show this false notice plus a redundant download).
+    await expect(page.getByText(/popup was blocked/i)).toHaveCount(0);
     await popup.close();
   });
 
