@@ -142,3 +142,58 @@ describe('buildReportHtml fuzz sweep', () => {
     expect(() => buildReportHtml(empty)).not.toThrow();
   });
 });
+
+// The report must show the same numbers as the on-screen UI: all eight status
+// categories per profile, and the donut's "no evaluated checks" score guard.
+describe('buildReportHtml data correctness', () => {
+  const NOW = new Date('2026-07-13T00:00:00Z');
+  const withStatus = (status: Record<string, unknown>): ClusterBaseline => ({
+    metadata: { name: 'cluster' },
+    spec: { profiles: ['cis'] },
+    status,
+  });
+
+  it('renders all eight per-profile status columns, including Info/Error/Not applicable', () => {
+    const html = buildReportHtml(
+      withStatus({
+        score: 83,
+        profiles: [
+          { key: 'cis', pass: 10, fail: 2, manual: 0, info: 41, error: 37, inconsistent: 0, waived: 0, notApplicable: 59 },
+        ],
+      }),
+      [],
+      NOW,
+    );
+    for (const header of ['>Info<', '>Error<', '>Not applicable<']) {
+      expect(html).toContain(header);
+    }
+    // The Info/Error/N-A counts the old five-column report dropped now appear.
+    for (const count of ['>41<', '>37<', '>59<']) {
+      expect(html).toContain(count);
+    }
+  });
+
+  it('shows "Not scanned" (not a stale score) when no checks were evaluated', () => {
+    const html = buildReportHtml(
+      withStatus({
+        score: 42,
+        profiles: [
+          { key: 'cis', pass: 0, fail: 0, manual: 0, info: 0, error: 0, inconsistent: 0, waived: 0, notApplicable: 0 },
+        ],
+      }),
+      [],
+      NOW,
+    );
+    expect(html).toContain('Not scanned');
+    expect(html).not.toContain('42 / 100');
+  });
+
+  it('shows the score when at least one check was evaluated', () => {
+    const html = buildReportHtml(
+      withStatus({ score: 88, profiles: [{ key: 'cis', pass: 5, fail: 0 }] }),
+      [],
+      NOW,
+    );
+    expect(html).toContain('88 / 100');
+  });
+});

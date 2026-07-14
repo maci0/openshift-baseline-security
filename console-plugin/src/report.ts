@@ -8,7 +8,7 @@ import {
   profileTitle,
 } from './models';
 import { checkTitle, severityDisplayTitle } from './results';
-import { checkSeverity } from './scoring';
+import { aggregateCounts, checkSeverity } from './scoring';
 import { effectiveStatus } from './status';
 import { formatCount, formatLocalDate, formatLocalDateTime, safeLocale } from './dates';
 import { waiverExpired } from './waivers';
@@ -78,8 +78,22 @@ export const buildReportHtml = (
   // Same non-finite guard and locale validation as Overview counts.
   const fmt = (n: number): string => formatCount(n, locale);
   const st = baseline.status ?? {};
+  // Aggregate all eight status categories across built-in + tailored profiles,
+  // the same set the on-screen composition donut and per-profile cards show.
+  const totals = aggregateCounts(...(st.profiles ?? []), ...(st.tailoredProfiles ?? []));
+  const totalChecks =
+    totals.pass +
+    totals.fail +
+    totals.manual +
+    totals.info +
+    totals.error +
+    totals.inconsistent +
+    totals.waived +
+    totals.notApplicable;
+  // Match the donut: with zero evaluated checks a non-null status.score is stale
+  // (0/0) and the UI shows "—", so the report must not print a number over it.
   const score =
-    st.score != null
+    totalChecks > 0 && st.score != null
       ? t('{{score}} / 100', { score: fmt(Number(st.score)) })
       : t('Not scanned');
   const profileRows = [
@@ -92,9 +106,12 @@ export const buildReportHtml = (
     .map(
       ({ name, c }) =>
         // Coerce counts to numbers: the CR status is not runtime type-checked,
-        // so a tampered non-numeric value cannot inject markup here.
+        // so a tampered non-numeric value cannot inject markup here. All eight
+        // categories, same order as the on-screen per-profile card rows.
         `<tr><td>${esc(name)}</td><td>${fmt(Number(c.pass) || 0)}</td><td>${fmt(Number(c.fail) || 0)}</td>` +
-        `<td>${fmt(Number(c.manual) || 0)}</td><td>${fmt(Number(c.inconsistent) || 0)}</td><td>${fmt(Number(c.waived) || 0)}</td></tr>`,
+        `<td>${fmt(Number(c.manual) || 0)}</td><td>${fmt(Number(c.info) || 0)}</td>` +
+        `<td>${fmt(Number(c.inconsistent) || 0)}</td><td>${fmt(Number(c.error) || 0)}</td>` +
+        `<td>${fmt(Number(c.waived) || 0)}</td><td>${fmt(Number(c.notApplicable) || 0)}</td></tr>`,
     )
     .join('');
   const activeWaivers = (baseline.spec.waivers ?? []).filter(
@@ -137,7 +154,7 @@ export const buildReportHtml = (
         `<td>${w.reviewBy ? esc(formatLocalDate(w.reviewBy, locale)) : ''}</td></tr>`,
     )
     .join('');
-  const emptyProfiles = `<tr><td colspan="6" class="muted">${esc(t('No profiles'))}</td></tr>`;
+  const emptyProfiles = `<tr><td colspan="9" class="muted">${esc(t('No profiles'))}</td></tr>`;
   const emptyFailing = `<tr><td colspan="4" class="muted">${esc(t('None'))}</td></tr>`;
   const emptyWaivers = `<tr><td colspan="6" class="muted">${esc(t('None'))}</td></tr>`;
   const whenText = now.toLocaleString(locale);
@@ -159,7 +176,7 @@ table{border-collapse:collapse;margin:1rem 0;width:100%}th,td{border:1px solid #
   }))}</p>
 <h2>${esc(t('Score: {{score}}', { score }))}</h2>
 <h3>${esc(t('Profiles'))}</h3>
-<table><thead><tr><th>${esc(t('Profile'))}</th><th>${esc(t('Pass'))}</th><th>${esc(t('Fail'))}</th><th>${esc(t('Manual'))}</th><th>${esc(t('Inconsistent'))}</th><th>${esc(t('Waived'))}</th></tr></thead>
+<table><thead><tr><th>${esc(t('Profile'))}</th><th>${esc(t('Pass'))}</th><th>${esc(t('Fail'))}</th><th>${esc(t('Manual'))}</th><th>${esc(t('Info'))}</th><th>${esc(t('Inconsistent'))}</th><th>${esc(t('Error'))}</th><th>${esc(t('Waived'))}</th><th>${esc(t('Not applicable'))}</th></tr></thead>
 <tbody>${profileRows || emptyProfiles}</tbody></table>
 <h3>${esc(t('Failing checks'))}</h3>
 <table><thead><tr><th>${esc(t('Check'))}</th><th>${esc(t('Title'))}</th><th>${esc(t('Profile'))}</th><th>${esc(t('Severity'))}</th></tr></thead>

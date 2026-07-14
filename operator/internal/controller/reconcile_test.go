@@ -922,14 +922,22 @@ func TestReconcileNotFound(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.RequeueAfter != 0 {
-		t.Fatalf("unexpected requeue: %+v", res)
+	// Re-enqueue at the heartbeat interval so clearPublishedMetrics keeps the
+	// freshness timestamp ticking; an absent object emits no watch event, so
+	// without this the timestamp freezes and ComplianceStatusStale false-pages.
+	if res.RequeueAfter != goneHeartbeat {
+		t.Fatalf("requeue = %v, want %v (freshness heartbeat)", res.RequeueAfter, goneHeartbeat)
 	}
 	if got := testutil.ToFloat64(complianceScore); got != -1 {
 		t.Fatalf("score after NotFound = %v, want -1", got)
 	}
 	if got := testutil.CollectAndCount(complianceChecks); got != 0 {
 		t.Fatalf("checks after NotFound: %d series remain", got)
+	}
+	// The heartbeat's purpose: observed timestamp stays fresh (not the 0 seed),
+	// so the stale-status alert cannot fire while the operator is healthy.
+	if got := testutil.ToFloat64(statusObservedTimestamp); got <= 0 {
+		t.Fatalf("observed timestamp after NotFound = %v, want fresh (>0)", got)
 	}
 }
 

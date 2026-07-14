@@ -46,6 +46,11 @@ const (
 	// Grace before a not-ready Compliance Operator install rolls up to Degraded
 	// (OLM resolve + CSV install + pods can take several minutes on a slow cluster).
 	coInstallGrace = 15 * time.Minute
+	// goneHeartbeat re-runs the deleted-CR reconcile so clearPublishedMetrics keeps
+	// statusObservedTimestamp fresh. Without it the timestamp freezes at the delete
+	// instant and ComplianceStatusStale false-pages ~15m later on a healthy operator.
+	// Matches the steady (slow) poll so the metric never crosses the 900s threshold.
+	goneHeartbeat = time.Minute
 	// Desired HA for the console plugin Deployment.
 	pluginReplicas = int32(2)
 	// Ready threshold for ConsolePluginReady=True: one ready pod is enough for
@@ -141,12 +146,15 @@ func (r *ClusterBaselineReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		if client.IgnoreNotFound(err) == nil {
 			logger.Info("ClusterBaseline gone; cleared published metrics", "name", req.Name)
 			clearPublishedMetrics()
-		} else {
-			// API/timeout failures: CRT also logs the reconcile error, but without
-			// the object name or that metrics were intentionally left unchanged.
-			logger.Error(err, "get ClusterBaseline failed", "name", req.Name)
+			// Re-enqueue so the freshness heartbeat keeps ticking while the operator
+			// is healthy but the singleton is gone (no watch event will fire on an
+			// absent object). Stops when the CR is recreated or the process exits.
+			return ctrl.Result{RequeueAfter: goneHeartbeat}, nil
 		}
-		return ctrl.Result{}, client.IgnoreNotFound(err)
+		// API/timeout failures: CRT also logs the reconcile error, but without
+		// the object name or that metrics were intentionally left unchanged.
+		logger.Error(err, "get ClusterBaseline failed", "name", req.Name)
+		return ctrl.Result{}, err
 	}
 
 	if !cb.DeletionTimestamp.IsZero() {
