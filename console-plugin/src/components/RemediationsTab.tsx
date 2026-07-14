@@ -51,6 +51,7 @@ import {
 import { formatCount } from '../dates';
 import { errorMessage } from '../errors';
 import {
+  batchApplyMaxNames,
   batchApplyPatch,
   batchApplyRequested,
   remediationApplyPatch,
@@ -235,6 +236,12 @@ const RemediationsTab: React.FC<{
       }),
     [ordered, nodeNames],
   );
+  // batchApplyPatch caps the annotation at batchApplyMaxNames (lockstep with the
+  // operator's batchMaxRemediations), so a batch applies at most that many. Show
+  // the count that will actually apply, not the full batchable set, and flag the
+  // overflow so the promise never overstates what happens.
+  const applyCount = Math.min(batchable.length, batchApplyMaxNames);
+  const batchTruncated = batchable.length > applyCount;
 
   // Reset the confirm flag if the live watch emptied the batchable set while the
   // modal was open (rows applied by auto-apply / another admin). Adjusting state
@@ -464,8 +471,8 @@ const RemediationsTab: React.FC<{
                 }}
               >
                 {t('Batch apply {{count}} node remediation', {
-                  count: batchable.length,
-                  formattedCount: formatCount(batchable.length, i18n.language),
+                  count: applyCount,
+                  formattedCount: formatCount(applyCount, i18n.language),
                 })}
               </Button>,
             )
@@ -564,9 +571,23 @@ const RemediationsTab: React.FC<{
           {t(
             'The affected MachineConfigPools are paused, all {{count}} node remediations are applied, then the pools resume so nodes reboot once instead of per remediation. A rescan is required afterwards.',
             {
-              count: batchable.length,
-              formattedCount: formatCount(batchable.length, i18n.language),
+              count: applyCount,
+              formattedCount: formatCount(applyCount, i18n.language),
             },
+          )}
+          {batchTruncated && (
+            <Alert
+              variant="warning"
+              isInline
+              title={t(
+                'Only the first {{formattedCount}} of {{formattedTotal}} node remediations apply in this batch. Run another batch after these converge and the cluster rescans.',
+                {
+                  formattedCount: formatCount(applyCount, i18n.language),
+                  formattedTotal: formatCount(batchable.length, i18n.language),
+                },
+              )}
+              style={{ marginTop: 'var(--pf-t--global--spacer--md)' }}
+            />
           )}
           {error && (
             <Alert

@@ -6,7 +6,7 @@ import { isValidK8sName, isValidTailoredProfileName } from './names';
 // Matches operator batchApplyAnnotation / batchMaxRemediations so the console
 // and reconciler cannot drift on key or size.
 export const BATCH_APPLY_ANNOTATION = 'baselinesecurity.openshift.io/batch-apply';
-const batchApplyMaxNames = 256;
+export const batchApplyMaxNames = 256;
 
 // True when the batch-apply annotation names at least one remediation.
 // Operator parity (batchRemediationNames / splitCSV): key presence alone is not

@@ -77,6 +77,7 @@
   "Apply remediation?": "Apply remediation?",
   "Auto-apply remediations after each scan": "Auto-apply remediations after each scan",
   "Node remediations render into MachineConfigs. Applying them triggers rolling node reboots.": "Node remediations render into MachineConfigs. Applying them triggers rolling node reboots.",
+  "Only the first {{formattedCount}} of {{formattedTotal}} node remediations apply in this batch. Run another batch after these converge and the cluster rescans.": "Only the first {{formattedCount}} of {{formattedTotal}} node remediations apply in this batch. Run another batch after these converge and the cluster rescans.",
   "Failed to rescan {{formattedCount}} of {{formattedTotal}} scans. Check permissions and try again.": "Failed to rescan {{formattedCount}} of {{formattedTotal}} scans. Check permissions and try again.",
   "Failed to rescan {{formattedCount}} of {{formattedTotal}} scans: {{detail}}": "Failed to rescan {{formattedCount}} of {{formattedTotal}} scans: {{detail}}",
   "Failed to update auto-apply setting.": "Failed to update auto-apply setting.",
