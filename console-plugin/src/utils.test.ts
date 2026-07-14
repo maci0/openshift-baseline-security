@@ -42,6 +42,7 @@ import {
   batchApplyRequested,
   buildReportHtml,
   tailoredProfileManifest,
+  tailoredProfileSpecMatches,
   tailoredProfileBindingPatch,
   isAlreadyExists,
   changedChecks,
@@ -2994,6 +2995,43 @@ describe('tailoredProfileManifest', () => {
         }
       }
     }
+  });
+});
+
+// On an AlreadyExists create, the authoring form adopts the existing CR only if
+// its content matches what we would have created (a genuine retry). A collision
+// with an unrelated profile must NOT match, or the user's edits are silently
+// discarded and a foreign profile is bound under a false success.
+describe('tailoredProfileSpecMatches', () => {
+  const specOf = (extendsBase: string, disable: string[], enable: string[] = []) =>
+    tailoredProfileManifest('x', extendsBase, disable, enable) as { spec: Record<string, unknown> };
+  it('matches an identical spec regardless of rule order', () => {
+    const existing = specOf('ocp4-cis', ['b-rule', 'a-rule']);
+    expect(tailoredProfileSpecMatches(existing, 'ocp4-cis', ['a-rule', 'b-rule'])).toBe(true);
+  });
+  it('matches when both sides default extends to ocp4-cis', () => {
+    const existing = specOf('ocp4-cis', []);
+    expect(tailoredProfileSpecMatches(existing, '', [])).toBe(true);
+  });
+  it('does not match a different base profile', () => {
+    const existing = specOf('ocp4-cis', ['a-rule']);
+    expect(tailoredProfileSpecMatches(existing, 'ocp4-pci-dss', ['a-rule'])).toBe(false);
+  });
+  it('does not match a different disable-rule set (the collision case)', () => {
+    const existing = specOf('ocp4-cis', ['rule-x']);
+    expect(tailoredProfileSpecMatches(existing, 'ocp4-cis', ['rule-y'])).toBe(false);
+  });
+  it('ignores invalid rule names the manifest would have dropped', () => {
+    const existing = specOf('ocp4-cis', ['good-rule']);
+    expect(tailoredProfileSpecMatches(existing, 'ocp4-cis', ['good-rule', 'bad name'])).toBe(true);
+  });
+  it('treats a rule in both enable and disable as disabled (mirrors the manifest)', () => {
+    const existing = specOf('ocp4-cis', ['dup'], ['dup', 'on-only']);
+    expect(tailoredProfileSpecMatches(existing, 'ocp4-cis', ['dup'], ['dup', 'on-only'])).toBe(true);
+  });
+  it('does not match undefined / empty existing against a real spec', () => {
+    expect(tailoredProfileSpecMatches(undefined, 'ocp4-cis', ['a-rule'])).toBe(false);
+    expect(tailoredProfileSpecMatches({}, 'ocp4-cis', ['a-rule'])).toBe(false);
   });
 });
 

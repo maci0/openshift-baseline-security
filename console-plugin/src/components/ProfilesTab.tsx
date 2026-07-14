@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { useTranslation } from 'react-i18next';
-import { k8sCreate, k8sPatch, useAccessReview } from '@openshift-console/dynamic-plugin-sdk';
+import { k8sCreate, k8sGet, k8sPatch, useAccessReview } from '@openshift-console/dynamic-plugin-sdk';
 import {
   Alert,
   AlertActionCloseButton,
@@ -46,7 +46,11 @@ import { formatCount } from '../dates';
 import { errorMessage, isAlreadyExists } from '../errors';
 import { isValidK8sName, isValidTailoredProfileName } from '../names';
 import { resourceVersionTest, tailoredProfileBindingPatch } from '../patches';
-import { tailoredProfileManifest, toggledProfiles } from '../profiles';
+import {
+  tailoredProfileManifest,
+  tailoredProfileSpecMatches,
+  toggledProfiles,
+} from '../profiles';
 import BaselineNotConfigured from './BaselineNotConfigured';
 import { withDisabledTip } from './DisabledTip';
 import { restoreFocus } from './focus';
@@ -169,6 +173,25 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
         });
       } catch (e) {
         if (!isAlreadyExists(e)) throw e;
+        // The name is taken. Adopt it only if its content matches what we would
+        // have created (a genuine retry, e.g. after a prior bind failure). A
+        // collision with an unrelated profile must not be bound as if it were
+        // ours, or the user's rule edits are silently discarded and a different
+        // profile is scanned under a false "created and bound" success.
+        const existing = (await k8sGet({
+          model: TailoredProfileModel,
+          name,
+          ns: COMPLIANCE_NAMESPACE,
+        })) as Record<string, unknown>;
+        if (!tailoredProfileSpecMatches(existing, extendsBase, disable)) {
+          setError(
+            t(
+              'A tailored profile named "{{name}}" already exists with different settings. Choose another name.',
+              { name },
+            ),
+          );
+          return;
+        }
       }
       created = true;
       const bindPatch = tailoredProfileBindingPatch(

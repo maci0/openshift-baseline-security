@@ -42,6 +42,11 @@ func TestNormalizedScheduleTable(t *testing.T) {
 		{"60 * * * *", false},
 		{"* * * * 7", false},
 		{"*/0 * * * *", false},
+		// A step that overflows int64 rejects (strconv.Atoi out of range). The
+		// console's isValidCron rejects the same string so the UI never reports a
+		// schedule saved that then Degrades the CR. Lockstep with cron.test.ts.
+		{"*/99999999999999999999 * * * *", false},
+		{"0 0 1 1 1/99999999999999999999", false},
 		// Quartz-only and Jenkins-only tokens reject (robfig standard parser).
 		{"0 0 L * *", false},
 		{"0 0 * * 1#2", false},

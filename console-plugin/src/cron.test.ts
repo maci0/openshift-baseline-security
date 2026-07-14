@@ -30,6 +30,8 @@ const HOSTILE = [
   '5-1 * * * *', // inverted range
   '*/0 * * * *', // zero step
   '*/-1 * * * *',
+  '*/99999999999999999999 * * * *', // step overflows int64: operator rejects
+  '0 0 1 1 1/99999999999999999999', // overflow step in the weekday field
   '1/2/3 * * * *', // too many step parts
   '1-2-3 * * * *', // too many range parts
   '? ? ? ? ?',
@@ -75,6 +77,9 @@ describe('isValidCron accept/reject behavior', () => {
       '0 0 * * mon-fri/2',
       '0,15,30 * * * *',
       '0 0 31 2 *',
+      // A large but int64-parseable step must stay accepted on both sides: the
+      // overflow guard must not over-reject what the operator's robfig accepts.
+      '*/1000000 * * * *',
     ]) {
       expect(isValidCron(s)).toBe(true);
     }

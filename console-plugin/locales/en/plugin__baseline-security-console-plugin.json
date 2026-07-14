@@ -1,5 +1,6 @@
 {
   "Compliance": "Compliance",
+  "A tailored profile named \"{{name}}\" already exists with different settings. Choose another name.": "A tailored profile named \"{{name}}\" already exists with different settings. Choose another name.",
   "Cluster benchmark compliance, scanned by the Compliance Operator.": "Cluster benchmark compliance, scanned by the Compliance Operator.",
   "Rescan now": "Rescan now",
   "Close": "Close",

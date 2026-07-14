@@ -98,5 +98,5 @@ export {
 export { downloadBlob } from './download';
 export { ReportTranslate, buildReportHtml } from './report';
 export { errorMessage, isAlreadyExists } from './errors';
-export { toggledProfiles, tailoredProfileManifest } from './profiles';
+export { toggledProfiles, tailoredProfileManifest, tailoredProfileSpecMatches } from './profiles';
 export { PROFILE_INFO, profileTitle } from './models';

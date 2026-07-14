@@ -78,3 +78,37 @@ export const tailoredProfileManifest = (
     spec,
   };
 };
+
+// tailoredProfileSpecMatches reports whether an existing TailoredProfile's spec
+// equals what tailoredProfileManifest would build for the same inputs. A create
+// that returns AlreadyExists uses this to tell a genuine retry (same settings,
+// safe to adopt and bind) from a name collision with an unrelated profile
+// (different settings, which must not be silently bound as if it were ours).
+export const tailoredProfileSpecMatches = (
+  existing: Record<string, unknown> | undefined,
+  extendsProfile: string,
+  disableRules: string[],
+  enableRules: string[] = [],
+): boolean => {
+  const spec = (existing?.spec ?? {}) as Record<string, unknown>;
+  const names = (v: unknown): string[] =>
+    (Array.isArray(v) ? (v as Array<Record<string, unknown>>) : [])
+      .map((r) => String(r?.name ?? ''))
+      .filter(Boolean)
+      .sort();
+  const eq = (a: string[], b: string[]) =>
+    a.length === b.length && a.every((x, i) => x === b[i]);
+  // Mirror the manifest's normalization: default extends, drop invalid rule
+  // names, and let disable win over enable so the comparison sees the same set.
+  const extendsName = extendsProfile.trim() || 'ocp4-cis';
+  const disable = cleanRuleNames(disableRules).sort();
+  const disableSet = new Set(disable);
+  const enable = cleanRuleNames(enableRules)
+    .filter((n) => !disableSet.has(n))
+    .sort();
+  return (
+    String(spec.extends ?? '') === extendsName &&
+    eq(names(spec.disableRules), disable) &&
+    eq(names(spec.enableRules), enable)
+  );
+};
