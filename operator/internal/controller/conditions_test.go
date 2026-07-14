@@ -25,6 +25,81 @@ func TestSetCondEmptyReasonDefaults(t *testing.T) {
 	}
 }
 
+// TestSanitizeStatusConditions repairs hand-edited conditions that would fail
+// CRD admission (empty/invalid reason, bad status Enum, invalid type, zero
+// lastTransitionTime) so Status().Update cannot freeze reconcile.
+func TestSanitizeStatusConditions(t *testing.T) {
+	cb := &baselinev1alpha1.ClusterBaseline{
+		Status: baselinev1alpha1.ClusterBaselineStatus{
+			Conditions: []metav1.Condition{
+				{
+					Type:               "Available",
+					Status:             "NotAStatus",
+					Reason:             "", // empty fails minLength=1
+					Message:            "ok",
+					LastTransitionTime: metav1.Time{}, // zero fails format
+				},
+				{
+					Type:               "Progressing",
+					Status:             metav1.ConditionFalse,
+					Reason:             "bad reason with spaces", // fails pattern
+					Message:            "x",
+					LastTransitionTime: metav1.Now(),
+				},
+				{
+					Type:               "!!!invalid-type!!!",
+					Status:             metav1.ConditionTrue,
+					Reason:             "Ok",
+					Message:            "drop me",
+					LastTransitionTime: metav1.Now(),
+				},
+				{
+					Type:               "Available", // duplicate type; keep first repaired
+					Status:             metav1.ConditionTrue,
+					Reason:             "AsExpected",
+					Message:            "dup",
+					LastTransitionTime: metav1.Now(),
+				},
+				{
+					Type:               "Degraded",
+					Status:             metav1.ConditionFalse,
+					Reason:             "AsExpected",
+					Message:            "fine",
+					LastTransitionTime: metav1.Now(),
+				},
+			},
+		},
+	}
+	sanitizeStatusForUpdate(cb)
+	if got := len(cb.Status.Conditions); got != 3 {
+		t.Fatalf("conditions len = %d, want 3 (invalid type dropped, dup collapsed)", got)
+	}
+	avail := meta.FindStatusCondition(cb.Status.Conditions, "Available")
+	if avail == nil {
+		t.Fatal("Available missing")
+	}
+	if avail.Status != metav1.ConditionUnknown {
+		t.Fatalf("bad status Enum must become Unknown, got %q", avail.Status)
+	}
+	if avail.Reason != "Unknown" {
+		t.Fatalf("empty reason must become Unknown, got %q", avail.Reason)
+	}
+	if avail.LastTransitionTime.IsZero() {
+		t.Fatal("zero lastTransitionTime must be filled")
+	}
+	prog := meta.FindStatusCondition(cb.Status.Conditions, "Progressing")
+	if prog == nil || prog.Reason != "Unknown" {
+		t.Fatalf("invalid reason pattern must become Unknown, got %+v", prog)
+	}
+	if meta.FindStatusCondition(cb.Status.Conditions, "!!!invalid-type!!!") != nil {
+		t.Fatal("invalid type must be dropped")
+	}
+	deg := meta.FindStatusCondition(cb.Status.Conditions, "Degraded")
+	if deg == nil || deg.Reason != "AsExpected" || deg.Message != "fine" {
+		t.Fatalf("valid condition must be preserved: %+v", deg)
+	}
+}
+
 func TestSetCond(t *testing.T) {
 	cb := &baselinev1alpha1.ClusterBaseline{}
 	cb.Generation = 7

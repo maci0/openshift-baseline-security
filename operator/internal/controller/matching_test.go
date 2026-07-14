@@ -381,6 +381,141 @@ func TestSanitizeRemediationBatch(t *testing.T) {
 	}
 }
 
+// TestSanitizeStatusProfilesTailoredRelated clamps status.profiles,
+// tailoredProfiles, and relatedObjects to CRD MaxItems / Enum / Pattern /
+// MaxLength / Minimum=0 so hand-edits cannot freeze Status().Update.
+func TestSanitizeStatusProfilesTailoredRelated(t *testing.T) {
+	// Pad profiles past MaxItems=16 with mixed valid, unknown, and duplicate keys.
+	profiles := make([]baselinev1alpha1.ProfileStatus, 0, statusProfilesMax+5)
+	for i := 0; i < statusProfilesMax+5; i++ {
+		profiles = append(profiles, baselinev1alpha1.ProfileStatus{
+			Key:          baselinev1alpha1.ProfileCIS, // duplicates after first
+			ProfileNames: []string{strings.Repeat("p", 300), "ok-name"},
+			ResultCounts: baselinev1alpha1.ResultCounts{Pass: -3, Fail: -1, Manual: -2},
+			History:      []baselinev1alpha1.ScoreSnapshot{{Score: 200}},
+		})
+	}
+	// First few with distinct known keys so MaxItems can fill with valid rows.
+	keys := baselinev1alpha1.AllProfileKeys() // 8 known
+	for i, k := range keys {
+		profiles[i] = baselinev1alpha1.ProfileStatus{
+			Key:          k,
+			ProfileNames: []string{"n1", "n2"},
+			ResultCounts: baselinev1alpha1.ResultCounts{Pass: 1},
+		}
+	}
+	// Inject an unknown key that must be dropped.
+	profiles[len(keys)] = baselinev1alpha1.ProfileStatus{Key: "not-a-key"}
+
+	tps := make([]baselinev1alpha1.TailoredProfileStatus, 0, statusTailoredMax+3)
+	for i := 0; i < statusTailoredMax+3; i++ {
+		tps = append(tps, baselinev1alpha1.TailoredProfileStatus{
+			Name:         fmt.Sprintf("tp-%d", i),
+			ResultCounts: baselinev1alpha1.ResultCounts{Fail: -9},
+			History:      []baselinev1alpha1.ScoreSnapshot{{Score: -5}},
+		})
+	}
+	// Invalid names must be dropped (empty, oversize, non-DNS1123).
+	tps = append(tps,
+		baselinev1alpha1.TailoredProfileStatus{Name: ""},
+		baselinev1alpha1.TailoredProfileStatus{Name: "UPPER"},
+		baselinev1alpha1.TailoredProfileStatus{Name: strings.Repeat("a", tailoredNameMaxLen+1)},
+		baselinev1alpha1.TailoredProfileStatus{Name: "tp-0"}, // duplicate of first
+	)
+
+	refs := make([]baselinev1alpha1.ObjectRef, 0, relatedObjectsMax+5)
+	for i := 0; i < relatedObjectsMax+5; i++ {
+		refs = append(refs, baselinev1alpha1.ObjectRef{
+			Group:     strings.Repeat("g", 300),
+			Resource:  "scansettings",
+			Name:      fmt.Sprintf("obj-%d", i),
+			Namespace: strings.Repeat("n", 80),
+		})
+	}
+	// Missing required fields must be dropped.
+	refs = append(refs,
+		baselinev1alpha1.ObjectRef{Resource: "", Name: "x"},
+		baselinev1alpha1.ObjectRef{Resource: "r", Name: ""},
+	)
+
+	// Oversize failure name must clamp to items:MaxLength=253.
+	longFail := strings.Repeat("f", failureNameMaxLen+40)
+
+	cb := &baselinev1alpha1.ClusterBaseline{
+		Status: baselinev1alpha1.ClusterBaselineStatus{
+			Profiles:         profiles,
+			TailoredProfiles: tps,
+			RelatedObjects:   refs,
+			NewlyFailed:      []string{longFail, "short"},
+		},
+	}
+	sanitizeStatusForUpdate(cb)
+
+	if got := len(cb.Status.Profiles); got != len(keys) {
+		t.Fatalf("profiles len = %d, want %d (known keys only, MaxItems)", got, len(keys))
+	}
+	for _, p := range cb.Status.Profiles {
+		if !p.Key.Known() {
+			t.Fatalf("unknown key survived: %q", p.Key)
+		}
+		if p.Pass < 0 || p.Fail < 0 || p.Manual < 0 {
+			t.Fatalf("negative ResultCounts survived: %+v", p.ResultCounts)
+		}
+		for _, n := range p.ProfileNames {
+			if len([]rune(n)) > objectRefFieldMaxLen {
+				t.Fatalf("profileName runes %d > %d", len([]rune(n)), objectRefFieldMaxLen)
+			}
+		}
+		for _, h := range p.History {
+			if h.Score < 0 || h.Score > 100 {
+				t.Fatalf("profile history score %d out of range", h.Score)
+			}
+		}
+	}
+
+	if got := len(cb.Status.TailoredProfiles); got != statusTailoredMax {
+		t.Fatalf("tailoredProfiles len = %d, want %d", got, statusTailoredMax)
+	}
+	for _, tp := range cb.Status.TailoredProfiles {
+		if tp.Name == "" || len(tp.Name) > tailoredNameMaxLen {
+			t.Fatalf("invalid tailored name survived: %q", tp.Name)
+		}
+		if tp.Fail < 0 {
+			t.Fatalf("negative tailored Fail survived: %d", tp.Fail)
+		}
+		for _, h := range tp.History {
+			if h.Score < 0 || h.Score > 100 {
+				t.Fatalf("tailored history score %d out of range", h.Score)
+			}
+		}
+	}
+
+	if got := len(cb.Status.RelatedObjects); got != relatedObjectsMax {
+		t.Fatalf("relatedObjects len = %d, want %d", got, relatedObjectsMax)
+	}
+	for _, ref := range cb.Status.RelatedObjects {
+		if ref.Resource == "" || ref.Name == "" {
+			t.Fatalf("empty required ObjectRef field survived: %+v", ref)
+		}
+		if len([]rune(ref.Group)) > objectRefFieldMaxLen {
+			t.Fatalf("group runes %d > %d", len([]rune(ref.Group)), objectRefFieldMaxLen)
+		}
+		if len([]rune(ref.Namespace)) > objectRefNSMaxLen {
+			t.Fatalf("namespace runes %d > %d", len([]rune(ref.Namespace)), objectRefNSMaxLen)
+		}
+	}
+
+	if len(cb.Status.NewlyFailed) != 2 {
+		t.Fatalf("newlyFailed len = %d, want 2", len(cb.Status.NewlyFailed))
+	}
+	if got := len([]rune(cb.Status.NewlyFailed[0])); got != failureNameMaxLen {
+		t.Fatalf("failure name runes = %d, want %d", got, failureNameMaxLen)
+	}
+	if cb.Status.NewlyFailed[1] != "short" {
+		t.Fatalf("short failure name mutated: %q", cb.Status.NewlyFailed[1])
+	}
+}
+
 func TestParseScanEndTimestamp(t *testing.T) {
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
 	ok, valid := parseScanEndTimestamp("2026-07-09T01:00:00Z", now)
@@ -963,23 +1098,46 @@ func FuzzClampFailureList(f *testing.F) {
 		if len(got) > failureListMax {
 			t.Fatalf("len %d > failureListMax %d", len(got), failureListMax)
 		}
+		for _, s := range got {
+			if len([]rune(s)) > failureNameMaxLen {
+				t.Fatalf("item runes %d > failureNameMaxLen %d", len([]rune(s)), failureNameMaxLen)
+			}
+		}
 		if len(in) <= failureListMax {
 			if len(got) != len(in) {
 				t.Fatalf("under-limit len %d want %d", len(got), len(in))
 			}
 			for i := range got {
-				if got[i] != in[i] {
-					t.Fatalf("under-limit mutated index %d", i)
+				want := clampString(in[i], failureNameMaxLen)
+				if got[i] != want {
+					t.Fatalf("under-limit index %d = %q want %q", i, got[i], want)
+				}
+			}
+			// When no per-item clamp was needed the result may alias input; when
+			// any name was truncated it must not alias.
+			anyLong := false
+			for _, s := range in {
+				if len(s) > failureNameMaxLen {
+					anyLong = true
+					break
+				}
+			}
+			if anyLong && len(in) > 0 && len(got) > 0 {
+				in[0] = "mutated"
+				if got[0] == "mutated" {
+					t.Fatal("clampFailureList must not alias input after item clamp")
 				}
 			}
 			return
 		}
-		// Truncation keeps the prefix and must not alias the input backing array.
+		// Truncation keeps the prefix (with per-item MaxLength) and must not
+		// alias the input backing array.
 		if len(got) != failureListMax {
 			t.Fatalf("over-limit len %d want %d", len(got), failureListMax)
 		}
 		for i := range got {
-			if got[i] != prefixCopy[i] {
+			want := clampString(prefixCopy[i], failureNameMaxLen)
+			if got[i] != want {
 				t.Fatalf("truncated prefix mismatch at %d", i)
 			}
 		}
@@ -1371,7 +1529,8 @@ func FuzzCheckSeverity(f *testing.F) {
 
 // FuzzSanitizeStatusForUpdate: hostile/stale status fields must be admission-safe
 // (score [0,100] or nil, history rings <= historyMax with scores clamped,
-// failure-name lists <= failureListMax).
+// failure-name lists <= failureListMax with items:MaxLength, profiles/tailored/
+// relatedObjects within CRD MaxItems).
 func FuzzSanitizeStatusForUpdate(f *testing.F) {
 	f.Add(int32(200), 40, 5000)
 	f.Add(int32(-5), 0, 0)
@@ -1399,6 +1558,33 @@ func FuzzSanitizeStatusForUpdate(f *testing.F) {
 			fails[i] = fmt.Sprintf("chk-%d", i)
 		}
 		s := scoreVal
+		// Pad profiles/related past MaxItems with some invalid rows mixed in.
+		profiles := make([]baselinev1alpha1.ProfileStatus, statusProfilesMax+3)
+		for i := range profiles {
+			profiles[i] = baselinev1alpha1.ProfileStatus{
+				Key:          "cis",
+				History:      append([]baselinev1alpha1.ScoreSnapshot(nil), hist...),
+				ResultCounts: baselinev1alpha1.ResultCounts{Pass: scoreVal, Fail: scoreVal},
+			}
+		}
+		profiles[0].Key = "not-a-real-key"
+		if len(profiles) > 1 {
+			profiles[1].Key = "cis"
+		}
+		tps := make([]baselinev1alpha1.TailoredProfileStatus, statusTailoredMax+2)
+		for i := range tps {
+			tps[i] = baselinev1alpha1.TailoredProfileStatus{
+				Name:    fmt.Sprintf("tp-%d", i),
+				History: append([]baselinev1alpha1.ScoreSnapshot(nil), hist...),
+			}
+		}
+		if len(tps) > 0 {
+			tps[0].Name = "INVALID"
+		}
+		refs := make([]baselinev1alpha1.ObjectRef, relatedObjectsMax+4)
+		for i := range refs {
+			refs[i] = baselinev1alpha1.ObjectRef{Resource: "r", Name: fmt.Sprintf("n-%d", i)}
+		}
 		cb := &baselinev1alpha1.ClusterBaseline{
 			Status: baselinev1alpha1.ClusterBaselineStatus{
 				Score:            &s,
@@ -1407,14 +1593,9 @@ func FuzzSanitizeStatusForUpdate(f *testing.F) {
 				Fixed:            append([]string(nil), fails...),
 				PreviousFailures: append([]string(nil), fails...),
 				DiffBaseFailures: append([]string(nil), fails...),
-				Profiles: []baselinev1alpha1.ProfileStatus{{
-					Key:     "cis",
-					History: append([]baselinev1alpha1.ScoreSnapshot(nil), hist...),
-				}},
-				TailoredProfiles: []baselinev1alpha1.TailoredProfileStatus{{
-					Name:    "custom",
-					History: append([]baselinev1alpha1.ScoreSnapshot(nil), hist...),
-				}},
+				Profiles:         profiles,
+				TailoredProfiles: tps,
+				RelatedObjects:   refs,
 			},
 		}
 		sanitizeStatusForUpdate(cb)
@@ -1437,11 +1618,29 @@ func FuzzSanitizeStatusForUpdate(f *testing.F) {
 			}
 		}
 		assertHistorySafe(cb.Status.History, "history")
-		if len(cb.Status.Profiles) > 0 {
-			assertHistorySafe(cb.Status.Profiles[0].History, "profile history")
+		if len(cb.Status.Profiles) > statusProfilesMax {
+			t.Fatalf("profiles len %d > max %d", len(cb.Status.Profiles), statusProfilesMax)
 		}
-		if len(cb.Status.TailoredProfiles) > 0 {
-			assertHistorySafe(cb.Status.TailoredProfiles[0].History, "tailored history")
+		for _, p := range cb.Status.Profiles {
+			if !p.Key.Known() {
+				t.Fatalf("unknown profile key %q", p.Key)
+			}
+			assertHistorySafe(p.History, "profile history")
+			if p.Pass < 0 || p.Fail < 0 {
+				t.Fatalf("negative counts: %+v", p.ResultCounts)
+			}
+		}
+		if len(cb.Status.TailoredProfiles) > statusTailoredMax {
+			t.Fatalf("tailored len %d > max %d", len(cb.Status.TailoredProfiles), statusTailoredMax)
+		}
+		for _, tp := range cb.Status.TailoredProfiles {
+			assertHistorySafe(tp.History, "tailored history")
+			if tp.Name == "" || len(tp.Name) > tailoredNameMaxLen {
+				t.Fatalf("bad tailored name %q", tp.Name)
+			}
+		}
+		if len(cb.Status.RelatedObjects) > relatedObjectsMax {
+			t.Fatalf("relatedObjects len %d > max %d", len(cb.Status.RelatedObjects), relatedObjectsMax)
 		}
 		for name, list := range map[string][]string{
 			"newlyFailed":      cb.Status.NewlyFailed,
@@ -1451,6 +1650,11 @@ func FuzzSanitizeStatusForUpdate(f *testing.F) {
 		} {
 			if len(list) > failureListMax {
 				t.Fatalf("%s len %d > failureListMax", name, len(list))
+			}
+			for _, s := range list {
+				if len([]rune(s)) > failureNameMaxLen {
+					t.Fatalf("%s item over MaxLength", name)
+				}
 			}
 		}
 	})
