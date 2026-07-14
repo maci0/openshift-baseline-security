@@ -16,11 +16,13 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
@@ -162,6 +164,16 @@ func main() {
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,
 		LeaderElectionID:       "baseline-security-operator-lock",
+		// Release the lease on graceful shutdown so a standby takes over immediately
+		// instead of waiting out the ~15s lease on every rollout/drain. Safe because
+		// the process exits right after mgr.Start returns (no post-Start work that
+		// could race a new leader).
+		LeaderElectionReleaseOnCancel: true,
+		// Finish (or time out) draining well before the pod's 30s
+		// terminationGracePeriodSeconds so the manager exits cleanly rather than
+		// being SIGKILLed mid-shutdown. Reconciles are single atomic API calls that
+		// fail fast once the context is cancelled, so 20s is ample.
+		GracefulShutdownTimeout: ptr.To(20 * time.Second),
 		// Read ConfigMaps uncached (direct API). The operator only touches the one
 		// named console dashboard ConfigMap in openshift-config-managed and holds
 		// only named get/update on it, not the cluster-wide list/watch a cache
