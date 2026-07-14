@@ -810,6 +810,108 @@ func TestSetMCPPausedSkipsCorruptPausedField(t *testing.T) {
 	}
 }
 
+// TestSetMCPPausedForeignOwnerDoesNotSticky: a pause marker from another owner
+// (recreated CR UID, hand-edit) must not error and sticky-Degrade batch start.
+// We take over the marker so finish-path resume can unpause (skipping resume when
+// marker != owner would leave the pool paused forever).
+func TestSetMCPPausedForeignOwnerDoesNotSticky(t *testing.T) {
+	scheme := testScheme(t)
+	cb := newBatchCB()
+	owner := batchPauseOwner(cb)
+
+	t.Run("paused under foreign owner", func(t *testing.T) {
+		pool := machineConfigPool("worker")
+		_ = unstructured.SetNestedField(pool.Object, true, "spec", "paused")
+		pool.SetAnnotations(map[string]string{batchPauseOwnerAnnotation: "old-uid-from-previous-cr"})
+		r := &ClusterBaselineReconciler{
+			Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(pool).Build(),
+			Scheme: scheme,
+		}
+		if err := r.setMCPPaused(context.Background(), "worker", true, owner); err != nil {
+			t.Fatalf("foreign owner while paused must not error: %v", err)
+		}
+		got := machineConfigPool("worker")
+		if err := r.Get(context.Background(), types.NamespacedName{Name: "worker"}, got); err != nil {
+			t.Fatal(err)
+		}
+		if got.GetAnnotations()[batchPauseOwnerAnnotation] != owner {
+			t.Fatalf("must take over foreign pause owner, got %q want %q",
+				got.GetAnnotations()[batchPauseOwnerAnnotation], owner)
+		}
+		if paused, _, _ := unstructured.NestedBool(got.Object, "spec", "paused"); !paused {
+			t.Fatal("pool must stay paused after takeover")
+		}
+	})
+
+	t.Run("stale marker unpaused", func(t *testing.T) {
+		pool := machineConfigPool("worker")
+		_ = unstructured.SetNestedField(pool.Object, false, "spec", "paused")
+		pool.SetAnnotations(map[string]string{batchPauseOwnerAnnotation: "old-uid-from-previous-cr"})
+		r := &ClusterBaselineReconciler{
+			Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(pool).Build(),
+			Scheme: scheme,
+		}
+		if err := r.setMCPPaused(context.Background(), "worker", true, owner); err != nil {
+			t.Fatalf("stale marker must claim, not error: %v", err)
+		}
+		got := machineConfigPool("worker")
+		if err := r.Get(context.Background(), types.NamespacedName{Name: "worker"}, got); err != nil {
+			t.Fatal(err)
+		}
+		if got.GetAnnotations()[batchPauseOwnerAnnotation] != owner {
+			t.Fatalf("pause owner = %q, want %q", got.GetAnnotations()[batchPauseOwnerAnnotation], owner)
+		}
+		if paused, _, _ := unstructured.NestedBool(got.Object, "spec", "paused"); !paused {
+			t.Fatal("pool must be paused after reclaim")
+		}
+	})
+
+	// Full batch start path: foreign marker must not sticky-error; finish can resume.
+	t.Run("batch start and finish with foreign paused marker", func(t *testing.T) {
+		rem := nodeRemediation("rem1", "worker")
+		pool := machineConfigPool("worker")
+		_ = unstructured.SetNestedField(pool.Object, true, "spec", "paused")
+		pool.SetAnnotations(map[string]string{batchPauseOwnerAnnotation: "stale-other-owner"})
+		cb2 := newBatchCB()
+		cb2.SetAnnotations(map[string]string{batchApplyAnnotation: "rem1"})
+		r := &ClusterBaselineReconciler{
+			Client: fake.NewClientBuilder().WithScheme(scheme).
+				WithObjects(cb2, rem, pool).
+				WithStatusSubresource(&baselinev1alpha1.ClusterBaseline{}).Build(),
+			Scheme: scheme,
+		}
+		ctx := context.Background()
+		if err := r.applyRemediationBatch(ctx, cb2); err != nil {
+			t.Fatalf("batch start must not sticky-error on foreign pause owner: %v", err)
+		}
+		if cb2.Status.RemediationBatch == nil {
+			t.Fatal("batch must open when foreign pause is already held")
+		}
+		// Finish: mark rem Applied, wait path resumes because we took over marker.
+		gotRem := u(remediationGVK)
+		if err := r.Get(ctx, types.NamespacedName{Namespace: complianceNamespace, Name: "rem1"}, gotRem); err != nil {
+			t.Fatal(err)
+		}
+		_ = unstructured.SetNestedField(gotRem.Object, "Applied", "status", "applicationState")
+		if err := r.Update(ctx, gotRem); err != nil {
+			t.Fatal(err)
+		}
+		if err := r.applyRemediationBatch(ctx, cb2); err != nil {
+			t.Fatal(err)
+		}
+		if cb2.Status.RemediationBatch != nil {
+			t.Fatal("batch must finish after Applied")
+		}
+		gotPool := machineConfigPool("worker")
+		if err := r.Get(ctx, types.NamespacedName{Name: "worker"}, gotPool); err != nil {
+			t.Fatal(err)
+		}
+		if paused, _, _ := unstructured.NestedBool(gotPool.Object, "spec", "paused"); paused {
+			t.Fatal("pool must resume after batch finish (takeover enables resume)")
+		}
+	})
+}
+
 // TestApplyOwnedRemediationSkipsPermanentReject: post-pause apply path must not
 // sticky-error when a target races to foreign/MissingDeps/corrupt after validation.
 func TestApplyOwnedRemediationSkipsPermanentReject(t *testing.T) {

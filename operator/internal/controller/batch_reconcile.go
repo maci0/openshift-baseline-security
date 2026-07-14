@@ -69,8 +69,16 @@ func (r *ClusterBaselineReconciler) setMCPPaused(ctx context.Context, pool strin
 			if owner == "" {
 				return fmt.Errorf("pause owner is empty for MachineConfigPool %q", pool)
 			}
+			// Foreign/stale pause owner must not sticky-Degrade batch start (annotation
+			// kept, no grace). A recreated ClusterBaseline gets a new UID while MCPs
+			// may still carry the old marker; hand-edits leave the same shape.
+			// Always claim the marker when we proceed so resume can unpause: using a
+			// foreign pause without claiming would skip resume (marker != owner) and
+			// leave the pool paused forever after the batch finishes.
 			if marker != "" && marker != owner {
-				return fmt.Errorf("MachineConfigPool %q pause is owned by another batch", pool)
+				log.FromContext(ctx).Info("taking over MachineConfigPool pause from previous owner",
+					"pool", pool, "owner", owner, "marker", marker, "alreadyPaused", current)
+				// Fall through: write our marker (and pause if not already).
 			}
 			if current && marker == "" {
 				// Administrator-owned pause: use it, but never claim or undo it.
