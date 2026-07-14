@@ -70,6 +70,10 @@ func (r *ClusterBaselineReconciler) applyRemediationBatch(ctx context.Context, c
 		// Drop race-deleted (NotFound) names so status only lists remediations we
 		// will actually apply. If none remain, clear the one-shot annotation
 		// instead of opening a fake batch that "succeeds" with no work.
+		// Permanent validation rejects (foreign suite, MissingDependencies) clear
+		// the one-shot request and return nil: a sticky error would Degrade every
+		// reconcile forever while MCPs stay unpaused (same class as invalid names).
+		// Transient Get/API errors still return so the request is retried.
 		// Build owned suites once for the whole list (up to batchMaxRemediations).
 		suites := ownedSuites(cb)
 		pools := map[string]bool{}
@@ -77,6 +81,14 @@ func (r *ClusterBaselineReconciler) applyRemediationBatch(ctx context.Context, c
 		for _, name := range list {
 			rem, err := r.getBatchRemediation(ctx, name, suites)
 			if err != nil {
+				if isPermanentBatchTargetReject(err) {
+					log.FromContext(ctx).Info("remediation batch skipped: permanent target reject",
+						"name", cb.Name, "remediation", name, "error", err.Error())
+					if cerr := r.clearBatchAnnotations(ctx, cb, true, requested, false); cerr != nil {
+						return fmt.Errorf("clearing rejected batch-apply annotation: %w", cerr)
+					}
+					return nil
+				}
 				return err
 			}
 			if rem == nil {

@@ -566,8 +566,20 @@ func TestRemediationBatchRejectsForeignAndBlockedTargets(t *testing.T) {
 					WithStatusSubresource(&baselinev1alpha1.ClusterBaseline{}).Build(),
 				Scheme: scheme,
 			}
-			if err := r.applyRemediationBatch(context.Background(), cb); err == nil {
-				t.Fatal("unsafe batch target was accepted")
+			// Permanent rejects must not sticky-Degrade: refuse apply/pause, clear
+			// the one-shot annotation, return nil (same class as invalid names).
+			if err := r.applyRemediationBatch(context.Background(), cb); err != nil {
+				t.Fatalf("permanent reject must not sticky-error: %v", err)
+			}
+			if cb.Status.RemediationBatch != nil {
+				t.Fatalf("unsafe batch must not open: %+v", cb.Status.RemediationBatch)
+			}
+			gotCB := &baselinev1alpha1.ClusterBaseline{}
+			if err := r.Get(context.Background(), types.NamespacedName{Name: "cluster"}, gotCB); err != nil {
+				t.Fatal(err)
+			}
+			if gotCB.Annotations[batchApplyAnnotation] != "" {
+				t.Fatal("rejected batch-apply annotation not cleared (would sticky-Degrade)")
 			}
 			gotPool := machineConfigPool("worker")
 			if err := r.Get(context.Background(), types.NamespacedName{Name: "worker"}, gotPool); err != nil {

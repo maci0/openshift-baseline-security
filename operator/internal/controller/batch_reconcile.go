@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -350,6 +351,20 @@ func remediationOwnedByBaseline(suites map[string]bool, rem *unstructured.Unstru
 	return suites[unstructuredLabel(rem.Object, suiteLabel)]
 }
 
+// Permanent batch-start rejects: the request cannot succeed without an external
+// change (profiles/deps). Callers clear the one-shot annotation instead of
+// sticky-Degrading every reconcile. Transient API errors stay plain errors.
+var (
+	errBatchForeignSuite = fmt.Errorf("does not belong to a selected baseline suite")
+	errBatchMissingDeps  = fmt.Errorf("has missing dependencies")
+)
+
+// isPermanentBatchTargetReject is true for foreign-suite and MissingDependencies
+// validation failures from getBatchRemediation (not transient Get failures).
+func isPermanentBatchTargetReject(err error) bool {
+	return err != nil && (errors.Is(err, errBatchForeignSuite) || errors.Is(err, errBatchMissingDeps))
+}
+
 // getBatchRemediation validates the confused-deputy boundary before the
 // operator uses its stronger service-account permissions to apply a request.
 // NotFound returns (nil, nil) so a race-deleted remediation can be skipped.
@@ -367,14 +382,14 @@ func (r *ClusterBaselineReconciler) getBatchRemediation(
 		return nil, fmt.Errorf("getting remediation %q: %w", name, err)
 	}
 	if !remediationOwnedByBaseline(suites, rem) {
-		return nil, fmt.Errorf("remediation %q does not belong to a selected baseline suite", name)
+		return nil, fmt.Errorf("remediation %q: %w", name, errBatchForeignSuite)
 	}
 	state, _, err := unstructured.NestedString(rem.Object, "status", "applicationState")
 	if err != nil {
 		return nil, fmt.Errorf("reading applicationState for remediation %q: %w", name, err)
 	}
 	if state == "MissingDependencies" {
-		return nil, fmt.Errorf("remediation %q has missing dependencies", name)
+		return nil, fmt.Errorf("remediation %q: %w", name, errBatchMissingDeps)
 	}
 	return rem, nil
 }
