@@ -171,18 +171,16 @@ const CompliancePage: React.FC = () => {
         // Surface the first rejection so a 403/409 is actionable, not just a count.
         const detail = errorMessage(failed[0].reason);
         const counts = {
-          count: failed.length,
-          total: results.length,
           formattedCount: formatCount(failed.length, i18n.language),
           formattedTotal: formatCount(results.length, i18n.language),
         };
         setRescanError(
           detail
-            ? t('Failed to rescan {{count}} of {{total}} scans: {{detail}}', {
+            ? t('Failed to rescan {{formattedCount}} of {{formattedTotal}} scans: {{detail}}', {
                 ...counts,
                 detail,
               })
-            : t('Failed to rescan {{count}} of {{total}} scans. Check permissions and try again.', counts),
+            : t('Failed to rescan {{formattedCount}} of {{formattedTotal}} scans. Check permissions and try again.', counts),
         );
       }
     } finally {

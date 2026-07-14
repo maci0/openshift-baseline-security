@@ -1058,8 +1058,7 @@ const Overview: React.FC<{
                   {newlyFailedItems.length > 0 && (
                     <DescriptionListGroup>
                       <DescriptionListTerm>
-                        {t('Newly failing ({{count}})', {
-                          count: newlyFailedItems.length,
+                        {t('Newly failing ({{formattedCount}})', {
                           formattedCount: formatCount(newlyFailedItems.length, locale),
                         })}
                       </DescriptionListTerm>
@@ -1078,8 +1077,7 @@ const Overview: React.FC<{
                   {fixedItems.length > 0 && (
                     <DescriptionListGroup>
                       <DescriptionListTerm>
-                        {t('Fixed ({{count}})', {
-                          count: fixedItems.length,
+                        {t('Fixed ({{formattedCount}})', {
                           formattedCount: formatCount(fixedItems.length, locale),
                         })}
                       </DescriptionListTerm>

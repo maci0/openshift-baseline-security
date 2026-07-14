@@ -395,8 +395,7 @@ const ResultsTab: React.FC<{
       <Alert
         variant="warning"
         isInline
-        title={t('Waivers referencing a removed check ({{count}})', {
-          count: orphanWaivers.length,
+        title={t('Waivers referencing a removed check ({{formattedCount}})', {
           formattedCount: formatCount(orphanWaivers.length, i18n.language),
         })}
         style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}
