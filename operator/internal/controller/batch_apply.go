@@ -221,17 +221,23 @@ func (r *ClusterBaselineReconciler) applyRemediationBatch(ctx context.Context, c
 			continue
 		}
 		if s, _, err := unstructured.NestedString(rem.Object, "status", "applicationState"); err != nil {
-			// Wrong-type status must not look like Applied (would unpause early).
-			getErr = fmt.Errorf("reading applicationState for remediation %q: %w", name, err)
-			applied = false
+			// Permanent corruption: treat as done (like NotFound). Do not set getErr
+			// or the wait path sticky-Degrades every reconcile until grace even when
+			// sibling remediations are Applied / not applying.
+			log.FromContext(ctx).Info("remediation unreadable applicationState while waiting; treating as done",
+				"remediation", name, "name", cb.Name, "error", err.Error())
+			missing = append(missing, name)
 			continue
 		} else if s != "Applied" {
 			applied = false
 		}
 		if a, _, err := unstructured.NestedBool(rem.Object, "spec", "apply"); err != nil {
-			// Corrupt apply must not cancel the batch (false negative on anyApplying).
-			getErr = fmt.Errorf("reading spec.apply for remediation %q: %w", name, err)
-			applied = false
+			// Permanent corruption: not Applied, not applying, not getErr. Allows
+			// cancel when no healthy rem is still apply=true, and applied when
+			// every other rem is Applied (this name counts as terminal).
+			log.FromContext(ctx).Info("remediation unreadable spec.apply while waiting; treating as done",
+				"remediation", name, "name", cb.Name, "error", err.Error())
+			missing = append(missing, name)
 			continue
 		} else if a {
 			anyApplying = true

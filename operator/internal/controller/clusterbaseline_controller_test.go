@@ -673,6 +673,143 @@ func TestRemediationBatchSkipsCorruptApplicationState(t *testing.T) {
 	}
 }
 
+// TestRemediationBatchSkipsCorruptSpecApply: wrong-type spec.apply is a permanent
+// start reject (same class as corrupt applicationState). Alone clears annotation;
+// mixed with a valid rem keeps only the valid name in the batch.
+func TestRemediationBatchSkipsCorruptSpecApply(t *testing.T) {
+	scheme := testScheme(t)
+	// Alone: empty-keep clears annotation, no sticky Degrade, no pause.
+	t.Run("alone", func(t *testing.T) {
+		rem := nodeRemediation("rem-bad", "worker")
+		_ = unstructured.SetNestedField(rem.Object, "yes", "spec", "apply") // not bool
+		pool := machineConfigPool("worker")
+		cb := newBatchCB()
+		cb.SetAnnotations(map[string]string{batchApplyAnnotation: "rem-bad"})
+		r := &ClusterBaselineReconciler{
+			Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(cb, rem, pool).
+				WithStatusSubresource(&baselinev1alpha1.ClusterBaseline{}).Build(),
+			Scheme: scheme,
+		}
+		if err := r.applyRemediationBatch(context.Background(), cb); err != nil {
+			t.Fatalf("corrupt apply must not sticky-error: %v", err)
+		}
+		if cb.Status.RemediationBatch != nil {
+			t.Fatal("batch must not open for corrupt-apply-only request")
+		}
+		gotCB := &baselinev1alpha1.ClusterBaseline{}
+		if err := r.Get(context.Background(), types.NamespacedName{Name: "cluster"}, gotCB); err != nil {
+			t.Fatal(err)
+		}
+		if gotCB.Annotations[batchApplyAnnotation] != "" {
+			t.Fatal("annotation not cleared for all-corrupt-apply reject")
+		}
+		gotPool := machineConfigPool("worker")
+		_ = r.Get(context.Background(), types.NamespacedName{Name: "worker"}, gotPool)
+		if paused, _, _ := unstructured.NestedBool(gotPool.Object, "spec", "paused"); paused {
+			t.Fatal("pool must not pause for corrupt-apply-only batch")
+		}
+	})
+	// Mixed: valid rem opens batch; corrupt apply sibling is not listed.
+	t.Run("mixed", func(t *testing.T) {
+		good := nodeRemediation("rem-good", "worker")
+		bad := nodeRemediation("rem-bad", "worker")
+		_ = unstructured.SetNestedField(bad.Object, "yes", "spec", "apply")
+		pool := machineConfigPool("worker")
+		cb := newBatchCB()
+		cb.SetAnnotations(map[string]string{batchApplyAnnotation: "rem-good,rem-bad"})
+		r := &ClusterBaselineReconciler{
+			Client: fake.NewClientBuilder().WithScheme(scheme).
+				WithObjects(cb, good, bad, pool).
+				WithStatusSubresource(&baselinev1alpha1.ClusterBaseline{}).Build(),
+			Scheme: scheme,
+		}
+		if err := r.applyRemediationBatch(context.Background(), cb); err != nil {
+			t.Fatal(err)
+		}
+		if cb.Status.RemediationBatch == nil {
+			t.Fatal("batch must open for the valid remediation")
+		}
+		if got := cb.Status.RemediationBatch.Remediations; len(got) != 1 || got[0] != "rem-good" {
+			t.Fatalf("batch remediations = %v, want [rem-good] only", got)
+		}
+	})
+}
+
+// TestRemediationBatchWaitTreatsCorruptApplyAsDone: a listed rem with unreadable
+// spec.apply must not set wait getErr (sticky Degrade until grace) when siblings
+// are finished. Cancel/finish proceeds without waiting 10m.
+func TestRemediationBatchWaitTreatsCorruptApplyAsDone(t *testing.T) {
+	scheme := testScheme(t)
+	// In-flight batch: one rem never applying (apply=false), one with corrupt apply.
+	// Wait should cancel immediately (no anyApplying, no getErr).
+	good := nodeRemediation("rem-good", "worker")
+	_ = unstructured.SetNestedField(good.Object, false, "spec", "apply")
+	_ = unstructured.SetNestedField(good.Object, "Pending", "status", "applicationState")
+	corrupt := nodeRemediation("rem-corrupt", "worker")
+	_ = unstructured.SetNestedField(corrupt.Object, "yes", "spec", "apply")
+	_ = unstructured.SetNestedField(corrupt.Object, "Pending", "status", "applicationState")
+	pool := machineConfigPool("worker")
+	_ = unstructured.SetNestedField(pool.Object, true, "spec", "paused")
+	cb := newBatchCB()
+	owner := batchPauseOwner(cb)
+	pool.SetAnnotations(map[string]string{batchPauseOwnerAnnotation: owner})
+	cb.Status.RemediationBatch = &baselinev1alpha1.RemediationBatchStatus{
+		Phase:        baselinev1alpha1.RemediationBatchPhaseApplying,
+		Pools:        []string{"worker"},
+		Remediations: []string{"rem-good", "rem-corrupt"},
+		StartedAt:    metav1.Now(),
+		PauseOwner:   owner,
+	}
+	cb.SetAnnotations(map[string]string{batchApplyAnnotation: "rem-good,rem-corrupt"})
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).
+			WithObjects(cb, good, corrupt, pool).
+			WithStatusSubresource(&baselinev1alpha1.ClusterBaseline{}).Build(),
+		Scheme: scheme,
+	}
+	if err := r.applyRemediationBatch(context.Background(), cb); err != nil {
+		t.Fatalf("wait must not sticky-error on corrupt apply: %v", err)
+	}
+	if cb.Status.RemediationBatch != nil {
+		t.Fatal("batch must finish (cancel) when no rem is apply=true")
+	}
+	gotPool := machineConfigPool("worker")
+	if err := r.Get(context.Background(), types.NamespacedName{Name: "worker"}, gotPool); err != nil {
+		t.Fatal(err)
+	}
+	if paused, _, _ := unstructured.NestedBool(gotPool.Object, "spec", "paused"); paused {
+		t.Fatal("pool must resume after cancel with corrupt sibling treated as done")
+	}
+}
+
+// TestSetMCPPausedSkipsCorruptPausedField: wrong-type MCP spec.paused must not
+// fail setMCPPaused (would sticky-Degrade batch start with annotation kept).
+func TestSetMCPPausedSkipsCorruptPausedField(t *testing.T) {
+	scheme := testScheme(t)
+	pool := machineConfigPool("worker")
+	_ = unstructured.SetNestedField(pool.Object, "yes", "spec", "paused") // not bool
+	cb := newBatchCB()
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(pool).Build(),
+		Scheme: scheme,
+	}
+	if err := r.setMCPPaused(context.Background(), "worker", true, batchPauseOwner(cb)); err != nil {
+		t.Fatalf("corrupt paused must skip, not error: %v", err)
+	}
+	// Batch start with a node rem targeting that pool must not sticky-error.
+	rem := nodeRemediation("rem1", "worker")
+	cb.SetAnnotations(map[string]string{batchApplyAnnotation: "rem1"})
+	r2 := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).
+			WithObjects(cb, rem, pool).
+			WithStatusSubresource(&baselinev1alpha1.ClusterBaseline{}).Build(),
+		Scheme: scheme,
+	}
+	if err := r2.applyRemediationBatch(context.Background(), cb); err != nil {
+		t.Fatalf("batch start with corrupt MCP paused must not sticky-error: %v", err)
+	}
+}
+
 // TestApplyOwnedRemediationSkipsPermanentReject: post-pause apply path must not
 // sticky-error when a target races to foreign/MissingDeps/corrupt after validation.
 func TestApplyOwnedRemediationSkipsPermanentReject(t *testing.T) {
