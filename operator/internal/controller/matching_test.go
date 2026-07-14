@@ -1129,11 +1129,6 @@ func FuzzClampFailureList(f *testing.F) {
 		} else {
 			in = splitCSV(csv)
 		}
-		// Capture prefix before clamp so we can assert no mutation of over-limit input.
-		var prefixCopy []string
-		if len(in) > failureListMax {
-			prefixCopy = append([]string(nil), in[:failureListMax]...)
-		}
 		got := clampFailureList(in)
 		if len(got) > failureListMax {
 			t.Fatalf("len %d > failureListMax %d", len(got), failureListMax)
@@ -1143,48 +1138,40 @@ func FuzzClampFailureList(f *testing.F) {
 				t.Fatalf("item runes %d > failureNameMaxLen %d", len([]rune(s)), failureNameMaxLen)
 			}
 		}
-		if len(in) <= failureListMax {
-			if len(got) != len(in) {
-				t.Fatalf("under-limit len %d want %d", len(got), len(in))
-			}
-			for i := range got {
-				want := clampString(in[i], failureNameMaxLen)
-				if got[i] != want {
-					t.Fatalf("under-limit index %d = %q want %q", i, got[i], want)
-				}
-			}
-			// When no per-item clamp was needed the result may alias input; when
-			// any name was truncated it must not alias.
-			anyLong := false
+		// clampFailureList dedupes (set-typed status list) first-wins, then keeps the
+		// leading failureListMax survivors, then clamps each to failureNameMaxLen
+		// runes. Build that exact expectation and compare; this single invariant
+		// covers both under- and over-limit, including all-duplicate inputs that
+		// dedup below the limit.
+		dedup := dedupeStable(in)
+		limit := len(dedup)
+		if limit > failureListMax {
+			limit = failureListMax
+		}
+		want := make([]string, limit)
+		for i := 0; i < limit; i++ {
+			want[i] = clampString(dedup[i], failureNameMaxLen)
+		}
+		if !slices.Equal(got, want) {
+			t.Fatalf("clampFailureList(%d items) = %v, want %v", len(in), got, want)
+		}
+		// Result must not alias the caller's backing array once any dedup or
+		// per-item truncation happened (a fresh slice is required then). When the
+		// input was already unique and short, aliasing is allowed, so only assert
+		// non-aliasing when a copy was forced.
+		forcedCopy := len(dedup) != len(in) || len(in) > failureListMax
+		if !forcedCopy {
 			for _, s := range in {
 				if len(s) > failureNameMaxLen {
-					anyLong = true
+					forcedCopy = true
 					break
 				}
 			}
-			if anyLong && len(in) > 0 && len(got) > 0 {
-				in[0] = "mutated"
-				if got[0] == "mutated" {
-					t.Fatal("clampFailureList must not alias input after item clamp")
-				}
-			}
-			return
 		}
-		// Truncation keeps the prefix (with per-item MaxLength) and must not
-		// alias the input backing array.
-		if len(got) != failureListMax {
-			t.Fatalf("over-limit len %d want %d", len(got), failureListMax)
-		}
-		for i := range got {
-			want := clampString(prefixCopy[i], failureNameMaxLen)
-			if got[i] != want {
-				t.Fatalf("truncated prefix mismatch at %d", i)
-			}
-		}
-		if len(in) > 0 && len(got) > 0 {
+		if forcedCopy && len(in) > 0 && len(got) > 0 {
 			in[0] = "mutated"
 			if got[0] == "mutated" {
-				t.Fatal("clampFailureList must not alias input after truncation")
+				t.Fatal("clampFailureList must not alias input after dedup/clamp")
 			}
 		}
 	})
