@@ -289,8 +289,10 @@ func isLoopbackMetricsAddr(addr string) bool {
 // envTruthy is true for common affirmative env values (true/1/yes), after
 // trim and case-fold. Empty, "false", "0", and junk are false.
 func envTruthy(key string) bool {
+	// Accept the common boolean spellings so a skip opt-out written as `on`/`y`/`t`
+	// is honored rather than silently creating the default CR anyway.
 	switch strings.ToLower(strings.TrimSpace(os.Getenv(key))) {
-	case "1", "true", "yes":
+	case "1", "true", "yes", "on", "y", "t", "enable", "enabled":
 		return true
 	default:
 		return false

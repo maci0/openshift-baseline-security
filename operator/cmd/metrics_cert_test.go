@@ -148,13 +148,13 @@ func TestValidateMetricsCertDir(t *testing.T) {
 }
 
 func TestEnvTruthy(t *testing.T) {
-	for _, v := range []string{"true", "TRUE", " True ", "1", "yes", "YES"} {
+	for _, v := range []string{"true", "TRUE", " True ", "1", "yes", "YES", "on", "ON", "y", "t", "enable", "enabled"} {
 		t.Setenv("BASELINE_SECURITY_SKIP_DEFAULT_CR", v)
 		if !envTruthy("BASELINE_SECURITY_SKIP_DEFAULT_CR") {
 			t.Fatalf("%q should be truthy", v)
 		}
 	}
-	for _, v := range []string{"", "false", "0", "no", "maybe", " truex"} {
+	for _, v := range []string{"", "false", "0", "no", "maybe", " truex", "onx", "disable"} {
 		t.Setenv("BASELINE_SECURITY_SKIP_DEFAULT_CR", v)
 		if envTruthy("BASELINE_SECURITY_SKIP_DEFAULT_CR") {
 			t.Fatalf("%q should be falsy", v)

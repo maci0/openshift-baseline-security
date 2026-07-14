@@ -116,6 +116,12 @@ func TestIsPermanentDefaultCRError(t *testing.T) {
 	if !isPermanentDefaultCRError(apierrors.NewUnauthorized("no token")) {
 		t.Fatal("Unauthorized must be permanent")
 	}
+	// Invalid (422, e.g. an admission webhook rejecting the CR) is deterministic:
+	// retrying the identical object cannot succeed, so treat it as permanent.
+	if !isPermanentDefaultCRError(apierrors.NewInvalid(
+		schema.GroupKind{Group: gvr.Group, Kind: "ClusterBaseline"}, "cluster", nil)) {
+		t.Fatal("Invalid must be permanent")
+	}
 	if isPermanentDefaultCRError(apierrors.NewServiceUnavailable("blip")) {
 		t.Fatal("ServiceUnavailable must not be permanent")
 	}

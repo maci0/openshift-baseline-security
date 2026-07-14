@@ -72,7 +72,11 @@ func (d *defaultClusterBaseline) Start(ctx context.Context) error {
 // isPermanentDefaultCRError is true for auth/RBAC failures that will not clear
 // without a config change (and usually a process restart to re-read SA tokens).
 func isPermanentDefaultCRError(err error) bool {
-	return apierrors.IsForbidden(err) || apierrors.IsUnauthorized(err)
+	// Invalid (422) is deterministic: the shipped default spec is provably valid,
+	// so a rejection means an admission webhook (Kyverno/Gatekeeper) refuses it.
+	// Retrying the identical object every 10s forever cannot succeed, so give up
+	// (log once) instead of spinning until an admin changes the policy.
+	return apierrors.IsForbidden(err) || apierrors.IsUnauthorized(err) || apierrors.IsInvalid(err)
 }
 
 func (d *defaultClusterBaseline) ensureOnce(ctx context.Context) error {
