@@ -7,11 +7,12 @@ on:
     - cron: '0 3 * * *'
   workflow_dispatch:
 
-# Least privilege: read the repo; write Actions cache (setup-go/yarn + buildx).
-# Secrets (e.g. E2E_KUBECONFIG) remain available to steps that reference them.
+# Least privilege: read-only. The cache (actions/cache, setup-go/node, buildx
+# type=gha) authenticates with the runner-injected ACTIONS_RUNTIME_TOKEN, not the
+# GITHUB_TOKEN, so no `actions` scope is needed. Secrets (e.g. E2E_KUBECONFIG)
+# remain available to steps that reference them.
 permissions:
   contents: read
-  actions: write
 
 # Cancel superseded runs on the same ref so PRs do not pile up queue time.
 concurrency:
