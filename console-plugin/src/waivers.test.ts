@@ -87,6 +87,28 @@ describe('waivers throw-safety and no-permanent-grant (fuzz sweep)', () => {
     }
   });
 
+  it('isWaived agrees with activeWaivedNames on duplicate names (any active entry wins)', () => {
+    // spec.waivers is listType=map keyed on name so the apiserver forbids dupes,
+    // but the helpers must still agree defensively: a name is waived if ANY entry
+    // is active, regardless of array order.
+    const expiredFirst: Waiver[] = [
+      { name: 'x', expiresAt: '2000-01-01T00:00:00Z' }, // expired, listed first
+      { name: 'x', expiresAt: '3000-01-01T00:00:00Z' }, // active
+    ];
+    expect(isWaived('x', expiredFirst, NOW)).toBe(true);
+    expect(activeWaivedNames(expiredFirst, NOW).has('x')).toBe(true);
+    // Reverse order: same answer.
+    const activeFirst = [...expiredFirst].reverse();
+    expect(isWaived('x', activeFirst, NOW)).toBe(true);
+    // All duplicates expired -> not waived.
+    const bothExpired: Waiver[] = [
+      { name: 'y', expiresAt: '2000-01-01T00:00:00Z' },
+      { name: 'y', expiresAt: '2001-01-01T00:00:00Z' },
+    ];
+    expect(isWaived('y', bothExpired, NOW)).toBe(false);
+    expect(activeWaivedNames(bothExpired, NOW).has('y')).toBe(false);
+  });
+
   it('expiringWaivers only returns waivers strictly inside the window', () => {
     const waivers = HOSTILE_EXPIRY.map((e, i) => ({ name: `c-${i}`, expiresAt: e }));
     const windowMs = 24 * 3600 * 1000;

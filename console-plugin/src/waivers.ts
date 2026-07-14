@@ -18,12 +18,26 @@ export const findWaiver = (name: string, waivers?: Waiver[]): Waiver | undefined
   name ? waivers?.find((w) => w.name === name) : undefined;
 
 // True when a check is actively waived (has a non-expired waiver), i.e. excluded
-// from the score. Empty names never match. Expired waivers do not count.
-// `now` is optional so callers (and the default) only construct a Date when a
-// matching waiver exists; Results filters call this for every check.
+// from the score. Empty names never match. Expired waivers do not count. A name
+// is waived when ANY entry for it is active, matching activeWaivedNames, so the
+// two agree even on a (CRD-forbidden but defensively handled) duplicate-name
+// spec. `now` is built lazily only on the first name match; Results filters call
+// this for every check and most checks have no waiver.
 export const isWaived = (name: string, waivers?: Waiver[], now?: Date): boolean => {
-  const w = findWaiver(name, waivers);
-  return !!w && !waiverExpired(w, now ?? new Date());
+  if (!name || !waivers) {
+    return false;
+  }
+  let at: Date | undefined;
+  for (const w of waivers) {
+    if (w.name !== name) {
+      continue;
+    }
+    at = at ?? now ?? new Date();
+    if (!waiverExpired(w, at)) {
+      return true;
+    }
+  }
+  return false;
 };
 
 // Names of currently-active (non-expired) waivers as a Set, so score math and
