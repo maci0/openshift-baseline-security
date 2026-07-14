@@ -77,6 +77,11 @@ test.describe('Baseline Security screenshots', () => {
     await page.goto('/dashboards', { waitUntil: 'networkidle' });
     const score = page.getByRole('link', { name: /\d+ of 100/ });
     await expect(score).toBeVisible();
+    // The injected "Compliance score" row sits low in the Details card, below the
+    // default viewport fold; scroll it into view so the screenshot actually shows
+    // the feature the docs caption points at (toBeVisible alone does not scroll).
+    await score.scrollIntoViewIfNeeded();
+    await expect(page.getByText('Compliance score')).toBeVisible();
     await shot(page, 'dashboard-score');
   });
 });
