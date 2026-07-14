@@ -67,6 +67,13 @@ spec:
             # Must match liveness/readiness probe ports below (not only flag default).
             - --health-probe-bind-address=:8081
           env:
+            # Soft heap target below the memory limit so Go's GC becomes
+            # container-aware and collects harder as the informer cache of
+            # ComplianceCheckResults/Remediations grows on a large cluster,
+            # instead of letting a transient allocation spike breach the cgroup
+            # cap and OOMKill. Keep ~85% of limits.memory (512Mi -> 440MiB).
+            - name: GOMEMLIMIT
+              value: 440MiB
             # Image the operator deploys for the console plugin. OLM maps
             # relatedImages; make deploy rewrites this from PLUGIN_IMG.
             - name: RELATED_IMAGE_CONSOLE_PLUGIN
@@ -131,7 +138,9 @@ spec:
               memory: 64Mi
             limits:
               cpu: 500m
-              memory: 256Mi
+              # Headroom for the full-body informer cache of CCRs/Remediations on
+              # a large cluster; paired with GOMEMLIMIT=440MiB above.
+              memory: 512Mi
           # Prefer logs when the process dies before writing /dev/termination-log.
           terminationMessagePolicy: FallbackToLogsOnError
       volumes:

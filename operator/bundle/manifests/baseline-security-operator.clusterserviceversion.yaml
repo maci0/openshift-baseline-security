@@ -261,6 +261,11 @@ spec:
                       - --metrics-cert-dir=/var/run/metrics-certs
                       - --health-probe-bind-address=:8081
                     env:
+                      # Container-aware soft heap target below limits.memory so
+                      # Go's GC collects harder as the CCR/Remediation informer
+                      # cache grows on a large cluster instead of OOMKilling.
+                      - name: GOMEMLIMIT
+                        value: 440MiB
                       - name: RELATED_IMAGE_CONSOLE_PLUGIN
                         value: quay.io/openshift-baseline-security/baseline-security-console-plugin:0.5.6
                       # Optional: set to "true" (also accepts 1/yes) to skip creating
@@ -314,7 +319,9 @@ spec:
                         memory: 64Mi
                       limits:
                         cpu: 500m
-                        memory: 256Mi
+                        # Headroom for the full-body CCR/Remediation informer
+                        # cache on a large cluster; paired with GOMEMLIMIT above.
+                        memory: 512Mi
                     terminationMessagePolicy: FallbackToLogsOnError
                 volumes:
                   - name: metrics-certs
