@@ -19,31 +19,37 @@ import (
 	baselinev1alpha1 "github.com/maci0/baseline-security-operator/api/v1alpha1"
 )
 
-// stampHistoryScoringMode records the scoring mode that wrote history ring
-// points. Status-only updates do not persist metadata, so this patches
-// annotations after a history write. Always updates the in-memory object;
-// API patch is best-effort when the CR is named (unit tests often omit Name).
-//
-// RetryOnConflict + re-Get: a concurrent console patch (waiver, schedule,
-// batch-apply) must not fail history stamping after rings were advanced in
-// memory; without a stable mode stamp, late CCR refresh can rewrite snapshots
-// under a flipped Flat/SeverityWeighted formula.
-func (r *ClusterBaselineReconciler) stampHistoryScoringMode(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline) error {
+// stampHistoryScoringMode records IN MEMORY the scoring mode that wrote this
+// reconcile's history ring points, so a later historyModeMatches (and unit tests)
+// see it. It deliberately does NOT touch the API: the annotation must not become
+// durable before the history it guards. persistHistoryScoringMode writes it only
+// after the trailing Status().Update succeeds, so a failed status write can never
+// leave the stamp ahead of the rings (which would hide a Flat/SeverityWeighted
+// flip and let late CCR refresh mix weighted and unweighted points).
+func (r *ClusterBaselineReconciler) stampHistoryScoringMode(cb *baselinev1alpha1.ClusterBaseline) {
 	mode := string(scoringMode(cb))
 	if cb.Annotations[historyScoringModeAnn] == mode {
-		return nil
+		return
 	}
-	// In-memory stamp first so this reconcile's historyModeMatches sees the mode
-	// even when Name is empty (unit tests) or the API patch is skipped.
 	if cb.Annotations == nil {
 		cb.Annotations = map[string]string{historyScoringModeAnn: mode}
-	} else {
-		cb.Annotations = maps.Clone(cb.Annotations)
-		cb.Annotations[historyScoringModeAnn] = mode
+		return
 	}
+	cb.Annotations = maps.Clone(cb.Annotations)
+	cb.Annotations[historyScoringModeAnn] = mode
+}
+
+// persistHistoryScoringMode durably writes the mode annotation set in memory by
+// stampHistoryScoringMode. The caller invokes it only after Status().Update
+// persists the rings, so the stamp can never lead the history it guards. If the
+// patch fails, the annotation simply stays behind the mode: historyModeMatches
+// then reads false next reconcile and the rings are re-cleared under the new
+// mode, so the failure is self-healing and visible (never a silent mix).
+func (r *ClusterBaselineReconciler) persistHistoryScoringMode(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline) error {
 	if cb.Name == "" || r.Client == nil {
 		return nil
 	}
+	mode := string(scoringMode(cb))
 	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		latest := &baselinev1alpha1.ClusterBaseline{}
 		if err := r.Get(ctx, types.NamespacedName{Name: cb.Name}, latest); err != nil {
@@ -54,30 +60,27 @@ func (r *ClusterBaselineReconciler) stampHistoryScoringMode(ctx context.Context,
 			ann = map[string]string{}
 		}
 		if ann[historyScoringModeAnn] == mode {
-			// Keep RV aligned for the end-of-reconcile Status().Update.
-			cb.SetAnnotations(ann)
 			cb.SetResourceVersion(latest.GetResourceVersion())
 			return nil
 		}
 		before := latest.DeepCopy()
 		ann[historyScoringModeAnn] = mode
 		latest.SetAnnotations(ann)
-		// OptimisticLock: concurrent console annotation patches (waiver/schedule/
-		// batch-apply) must 409 so RetryOnConflict re-Gets rather than merging
-		// onto a stale ResourceVersion and silently dropping the mode stamp.
+		// OptimisticLock: a concurrent console annotation patch (waiver/schedule/
+		// batch-apply) must 409 so RetryOnConflict re-Gets rather than merging onto
+		// a stale ResourceVersion and dropping the mode stamp.
 		if err := r.Patch(ctx, latest, client.MergeFromWithOptions(before, client.MergeFromWithOptimisticLock{})); err != nil {
 			return err
 		}
-		cb.SetAnnotations(ann)
 		cb.SetResourceVersion(latest.GetResourceVersion())
 		return nil
 	})
 	if err != nil {
-		// NotFound: mid-delete; in-memory stamp still guides this pass.
+		// NotFound: mid-delete; nothing to persist.
 		if client.IgnoreNotFound(err) == nil {
 			return nil
 		}
-		return fmt.Errorf("stamping history scoring mode annotation: %w", err)
+		return fmt.Errorf("persisting history scoring mode annotation: %w", err)
 	}
 	return nil
 }
@@ -247,9 +250,7 @@ func (r *ClusterBaselineReconciler) recordHistory(
 			if historyModeMatches(cb) {
 				cb.Status.History = syncHistorySnapshot(cb.Status.History, last, s)
 				syncProfileHistory(cb, last, weights)
-				if err := r.stampHistoryScoringMode(ctx, cb); err != nil {
-					return err
-				}
+				r.stampHistoryScoringMode(cb)
 			}
 			// Keep the baseline for the next scan current when CheckResults arrive
 			// after endTimestamp, and correct this scan's diff against its retained
@@ -324,9 +325,11 @@ func (r *ClusterBaselineReconciler) recordHistory(
 		"fixed", len(cb.Status.Fixed),
 		"firstScan", !hadPreviousScan,
 	)
-	// Stamp the mode that produced these snapshots so a later mode flip cannot
-	// rewrite them via the equal-LastScanTime late-refresh path.
-	return r.stampHistoryScoringMode(ctx, cb)
+	// Stamp (in memory) the mode that produced these snapshots so a later mode
+	// flip cannot rewrite them via the equal-LastScanTime late-refresh path. The
+	// durable write happens after Status().Update persists these rings.
+	r.stampHistoryScoringMode(cb)
+	return nil
 }
 
 // historyStallLogInterval is how often default-level Info may repeat for a

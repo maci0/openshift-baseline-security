@@ -193,6 +193,11 @@ func (r *ClusterBaselineReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return ctrl.Result{}, nil // update requeues
 	}
 
+	// Snapshot the persisted history scoring-mode stamp: recordHistory advances it
+	// only in memory, and it must be written durably only after Status().Update
+	// persists the rings it guards (see persistHistoryScoringMode).
+	preReconcileMode := cb.Annotations[historyScoringModeAnn]
+
 	if err := r.reconcileOwned(ctx, cb); err != nil {
 		// Persist a Degraded condition (best-effort) so a persistently failing
 		// reconcile is visible on the CR instead of leaving stale healthy status.
@@ -223,6 +228,16 @@ func (r *ClusterBaselineReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return ctrl.Result{}, err
 	}
 	publishMetrics(cb)
+	// Persist the history scoring-mode stamp only now that the rings it guards are
+	// durable. Only when recordHistory advanced it this reconcile, so the no-scan
+	// window between a mode flip and the next scan keeps the stamp (and the
+	// historyScoringModeMismatch signal) behind, not prematurely ahead.
+	if cb.Annotations[historyScoringModeAnn] != preReconcileMode {
+		if err := r.persistHistoryScoringMode(ctx, cb); err != nil {
+			logger.Error(err, "persist history scoring-mode stamp failed", "name", cb.Name)
+			return ctrl.Result{}, err
+		}
+	}
 	// Posture fields for incident reconstruction without scraping metrics/CR.
 	// Degraded at Info (default level): rollup failures (ScanStorage, InstallStalled,
 	// InvalidSchedule, plugin) succeed reconcile and would otherwise be silent until

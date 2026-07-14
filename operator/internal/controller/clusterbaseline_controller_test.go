@@ -1049,6 +1049,72 @@ func TestRemediationBatchPartialReopenKeepsPreCrashPool(t *testing.T) {
 	}
 }
 
+// TestHistoryScoringModeStampDeferredToPersist: the in-memory stamp must not
+// write the annotation to the API (it would then lead the history rings, which
+// are only persisted by the trailing Status().Update). persistHistoryScoringMode
+// is the durable write, called only after that update succeeds.
+func TestHistoryScoringModeStampDeferredToPersist(t *testing.T) {
+	scheme := testScheme(t)
+	cb := newBatchCB()
+	cb.Spec.Scoring.Mode = baselinev1alpha1.ScoringSeverityWeighted
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(cb).Build(),
+		Scheme: scheme,
+	}
+	ctx := context.Background()
+	weighted := string(baselinev1alpha1.ScoringSeverityWeighted)
+
+	r.stampHistoryScoringMode(cb)
+	if cb.Annotations[historyScoringModeAnn] != weighted {
+		t.Fatalf("in-memory stamp not applied: %v", cb.Annotations)
+	}
+	server := &baselinev1alpha1.ClusterBaseline{}
+	if err := r.Get(ctx, types.NamespacedName{Name: "cluster"}, server); err != nil {
+		t.Fatal(err)
+	}
+	if server.Annotations[historyScoringModeAnn] != "" {
+		t.Fatalf("in-memory stamp must not persist to the API, got %q", server.Annotations[historyScoringModeAnn])
+	}
+
+	if err := r.persistHistoryScoringMode(ctx, cb); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Get(ctx, types.NamespacedName{Name: "cluster"}, server); err != nil {
+		t.Fatal(err)
+	}
+	if server.Annotations[historyScoringModeAnn] != weighted {
+		t.Fatalf("persist did not write the annotation: %v", server.Annotations)
+	}
+}
+
+// TestRemediationBatchEmptyKeepPreservesResubmit: when the batch's remediations
+// are all gone, clearing the one-shot request must not delete a fresh console
+// resubmit that landed after the reconcile read the annotation.
+func TestRemediationBatchEmptyKeepPreservesResubmit(t *testing.T) {
+	scheme := testScheme(t)
+	// The client already holds the resubmitted request "remB".
+	stored := newBatchCB()
+	stored.SetAnnotations(map[string]string{batchApplyAnnotation: "rem-b"})
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(stored).
+			WithStatusSubresource(&baselinev1alpha1.ClusterBaseline{}).Build(),
+		Scheme: scheme,
+	}
+	// The reconcile read the earlier request "remA" (its target is now NotFound).
+	stale := newBatchCB()
+	stale.SetAnnotations(map[string]string{batchApplyAnnotation: "rem-a"})
+	if err := r.applyRemediationBatch(context.Background(), stale); err != nil {
+		t.Fatal(err)
+	}
+	got := &baselinev1alpha1.ClusterBaseline{}
+	if err := r.Get(context.Background(), types.NamespacedName{Name: "cluster"}, got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Annotations[batchApplyAnnotation] != "rem-b" {
+		t.Fatalf("resubmit clobbered: batch-apply = %q, want rem-b", got.Annotations[batchApplyAnnotation])
+	}
+}
+
 func TestRemediationBatchStatusFailureCannotResetGrace(t *testing.T) {
 	scheme := testScheme(t)
 	rem := nodeRemediation("rem1", "worker")

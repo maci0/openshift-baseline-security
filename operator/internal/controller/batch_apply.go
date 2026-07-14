@@ -79,7 +79,9 @@ func (r *ClusterBaselineReconciler) applyRemediationBatch(ctx context.Context, c
 			log.FromContext(ctx).Info("remediation batch skipped: no remediations found",
 				"name", cb.Name, "requested", list)
 			// Drop the one-shot request only (recovery keys were never written).
-			if err := r.clearBatchAnnotations(ctx, cb, true, nil, false); err != nil {
+			// Match on the request we evaluated so a console resubmit that landed
+			// after we read the annotation is preserved, not silently deleted.
+			if err := r.clearBatchAnnotations(ctx, cb, true, batchRemediationNames(names), false); err != nil {
 				return fmt.Errorf("clearing empty batch-apply annotation: %w", err)
 			}
 			return nil
@@ -107,7 +109,9 @@ func (r *ClusterBaselineReconciler) applyRemediationBatch(ctx context.Context, c
 			// drop the one-shot request so this does not retry-freeze the reconcile.
 			log.FromContext(ctx).Info("remediation batch skipped: too many target MachineConfigPools",
 				"name", cb.Name, "pools", len(poolList), "max", batchMaxPools)
-			if err := r.clearBatchAnnotations(ctx, cb, true, nil, false); err != nil {
+			// Match on the evaluated request so a console resubmit that raced this
+			// reconcile is preserved rather than unconditionally deleted.
+			if err := r.clearBatchAnnotations(ctx, cb, true, requested, false); err != nil {
 				return fmt.Errorf("clearing oversized batch-apply annotation: %w", err)
 			}
 			return nil
