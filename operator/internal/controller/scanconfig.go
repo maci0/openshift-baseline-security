@@ -154,6 +154,15 @@ func (r *ClusterBaselineReconciler) ensureScanBinding(ctx context.Context, cb *b
 		return controllerutil.SetControllerReference(cb, binding, r.Scheme)
 	})
 	if err != nil {
+		// The scansettingbindings CRD can be absent while scansettings is present
+		// (CO install/uninstall registers them one at a time). Degrade gracefully
+		// to CRDsMissing like the ScanSetting create and the binding List do,
+		// instead of returning an error that spins controller-runtime backoff and
+		// short-circuits aggregation / CO-readiness for those cycles.
+		if meta.IsNoMatchError(err) {
+			setScanCRDsMissing(cb)
+			return nil
+		}
 		return fmt.Errorf("ensuring ScanSettingBinding %s/%s: %w", complianceNamespace, name, err)
 	}
 	return nil

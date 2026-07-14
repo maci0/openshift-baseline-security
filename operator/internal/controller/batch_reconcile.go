@@ -395,6 +395,10 @@ func (r *ClusterBaselineReconciler) getBatchRemediation(
 		if apierrors.IsNotFound(err) {
 			return nil, nil
 		}
+		// NoMatch (complianceremediations CRD absent) deliberately propagates so the
+		// one-shot batch request is retried and preserved rather than silently
+		// dropped, and the reconcile Degrades loudly while CO is gone. See
+		// TestRemediationBatchNoMatchPropagates.
 		return nil, fmt.Errorf("getting remediation %q: %w", name, err)
 	}
 	if !remediationOwnedByBaseline(suites, rem) {

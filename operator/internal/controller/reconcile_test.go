@@ -1370,6 +1370,65 @@ func TestReconcileWithoutComplianceCRDs(t *testing.T) {
 	}
 }
 
+// TestReconcileBindingCRDAbsentDegradesGracefully: the scansettingbindings CRD can
+// be absent while scansettings is present (CO registers/removes them one at a
+// time). ensureScanBinding must then degrade to ScanConfigured=CRDsMissing like
+// its siblings, not return an error that spins controller-runtime backoff.
+func TestReconcileBindingCRDAbsentDegradesGracefully(t *testing.T) {
+	scheme := testScheme(t)
+	cb := newCB("cis")
+	cb.Finalizers = []string{finalizerName}
+	// NoMatch only ScanSettingBinding; ScanSetting (and everything else) resolves.
+	bindingNoMatch := func(gvk schema.GroupVersionKind) error {
+		if gvk == bindingGVK {
+			return &meta.NoKindMatchError{GroupKind: gvk.GroupKind()}
+		}
+		return nil
+	}
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).
+			WithObjects(cb, consoleCluster()).
+			WithStatusSubresource(&baselinev1alpha1.ClusterBaseline{}).
+			WithInterceptorFuncs(interceptor.Funcs{
+				Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+					if err := bindingNoMatch(obj.GetObjectKind().GroupVersionKind()); err != nil {
+						return err
+					}
+					return c.Get(ctx, key, obj, opts...)
+				},
+				List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+					gvk := list.GetObjectKind().GroupVersionKind()
+					gvk.Kind = strings.TrimSuffix(gvk.Kind, "List")
+					if err := bindingNoMatch(gvk); err != nil {
+						return err
+					}
+					return c.List(ctx, list, opts...)
+				},
+				Create: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
+					if err := bindingNoMatch(obj.GetObjectKind().GroupVersionKind()); err != nil {
+						return err
+					}
+					return c.Create(ctx, obj, opts...)
+				},
+			}).Build(),
+		Scheme: scheme,
+	}
+	t.Setenv("RELATED_IMAGE_CONSOLE_PLUGIN", "example.test/plugin:1")
+	if _, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: "cluster"},
+	}); err != nil {
+		t.Fatalf("reconcile must not error when only the binding CRD is missing: %v", err)
+	}
+	got := &baselinev1alpha1.ClusterBaseline{}
+	if err := r.Get(context.Background(), types.NamespacedName{Name: "cluster"}, got); err != nil {
+		t.Fatal(err)
+	}
+	c := meta.FindStatusCondition(got.Status.Conditions, "ScanConfigured")
+	if c == nil || c.Status != metav1.ConditionFalse || c.Reason != "CRDsMissing" {
+		t.Fatalf("ScanConfigured = %+v, want False/CRDsMissing", c)
+	}
+}
+
 // TestReconcileManualNoComplianceCRDs is the genuine steady state a Console- and
 // CO-less cluster settles into with InstallComplianceOperator=Manual: nothing is
 // installing, so Progressing must be False (no 15s poll storm), Available False,
