@@ -643,6 +643,61 @@ func TestRemediationBatchSkipsPermanentRejectsKeepsValid(t *testing.T) {
 	}
 }
 
+// TestRemediationBatchSkipsCorruptApplicationState: wrong-type applicationState
+// is a permanent corrupt status. Must not sticky-Degrade; clear when alone.
+func TestRemediationBatchSkipsCorruptApplicationState(t *testing.T) {
+	scheme := testScheme(t)
+	rem := nodeRemediation("rem1", "worker")
+	// NestedString fails on non-string status.applicationState.
+	_ = unstructured.SetNestedField(rem.Object, int64(1), "status", "applicationState")
+	pool := machineConfigPool("worker")
+	cb := newBatchCB()
+	cb.SetAnnotations(map[string]string{batchApplyAnnotation: "rem1"})
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(cb, rem, pool).
+			WithStatusSubresource(&baselinev1alpha1.ClusterBaseline{}).Build(),
+		Scheme: scheme,
+	}
+	if err := r.applyRemediationBatch(context.Background(), cb); err != nil {
+		t.Fatalf("corrupt status must not sticky-error: %v", err)
+	}
+	if cb.Status.RemediationBatch != nil {
+		t.Fatal("batch must not open for corrupt-only request")
+	}
+	gotCB := &baselinev1alpha1.ClusterBaseline{}
+	if err := r.Get(context.Background(), types.NamespacedName{Name: "cluster"}, gotCB); err != nil {
+		t.Fatal(err)
+	}
+	if gotCB.Annotations[batchApplyAnnotation] != "" {
+		t.Fatal("annotation not cleared for all-corrupt permanent reject")
+	}
+}
+
+// TestApplyOwnedRemediationSkipsPermanentReject: post-pause apply path must not
+// sticky-error when a target races to foreign/MissingDeps/corrupt after validation.
+func TestApplyOwnedRemediationSkipsPermanentReject(t *testing.T) {
+	scheme := testScheme(t)
+	rem := nodeRemediation("rem1", "worker")
+	rem.SetLabels(map[string]string{suiteLabel: "someone-elses-suite"})
+	cb := newBatchCB()
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(cb, rem).
+			WithStatusSubresource(&baselinev1alpha1.ClusterBaseline{}).Build(),
+		Scheme: scheme,
+	}
+	suites := ownedSuites(cb)
+	if err := r.applyOwnedRemediation(context.Background(), cb, "rem1", suites); err != nil {
+		t.Fatalf("permanent reject at apply must skip, not error: %v", err)
+	}
+	got := u(remediationGVK)
+	if err := r.Get(context.Background(), types.NamespacedName{Namespace: complianceNamespace, Name: "rem1"}, got); err != nil {
+		t.Fatal(err)
+	}
+	if apply, _, _ := unstructured.NestedBool(got.Object, "spec", "apply"); apply {
+		t.Fatal("foreign remediation must not be applied")
+	}
+}
+
 func TestRemediationBatchDeduplicatesNamesAndPreservesQueuedRequest(t *testing.T) {
 	scheme := testScheme(t)
 	rem := nodeRemediation("rem1", "worker")

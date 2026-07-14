@@ -349,18 +349,21 @@ func remediationOwnedByBaseline(suites map[string]bool, rem *unstructured.Unstru
 	return suites[unstructuredLabel(rem.Object, suiteLabel)]
 }
 
-// Permanent batch-start rejects: the request cannot succeed without an external
-// change (profiles/deps). Callers clear the one-shot annotation instead of
-// sticky-Degrading every reconcile. Transient API errors stay plain errors.
+// Permanent batch target rejects: cannot succeed without an external change
+// (profiles/deps/corrupt status). Callers skip the name (validation) or skip
+// apply (post-pause) instead of sticky-Degrading. Transient API errors stay plain.
 var (
-	errBatchForeignSuite = fmt.Errorf("does not belong to a selected baseline suite")
-	errBatchMissingDeps  = fmt.Errorf("has missing dependencies")
+	errBatchForeignSuite  = fmt.Errorf("does not belong to a selected baseline suite")
+	errBatchMissingDeps   = fmt.Errorf("has missing dependencies")
+	errBatchCorruptStatus = fmt.Errorf("has unreadable status fields")
 )
 
-// isPermanentBatchTargetReject is true for foreign-suite and MissingDependencies
-// validation failures from getBatchRemediation (not transient Get failures).
+// isPermanentBatchTargetReject is true for foreign-suite, MissingDependencies,
+// and corrupt applicationState/status shape (not transient Get failures).
 func isPermanentBatchTargetReject(err error) bool {
-	return err != nil && (errors.Is(err, errBatchForeignSuite) || errors.Is(err, errBatchMissingDeps))
+	return err != nil && (errors.Is(err, errBatchForeignSuite) ||
+		errors.Is(err, errBatchMissingDeps) ||
+		errors.Is(err, errBatchCorruptStatus))
 }
 
 // getBatchRemediation validates the confused-deputy boundary before the
@@ -384,7 +387,9 @@ func (r *ClusterBaselineReconciler) getBatchRemediation(
 	}
 	state, _, err := unstructured.NestedString(rem.Object, "status", "applicationState")
 	if err != nil {
-		return nil, fmt.Errorf("reading applicationState for remediation %q: %w", name, err)
+		// Wrong-type status will not heal without an external rewrite; treat as
+		// permanent so a hand-edited rem cannot sticky-Degrade every reconcile.
+		return nil, fmt.Errorf("remediation %q: %w: %v", name, errBatchCorruptStatus, err)
 	}
 	if state == "MissingDependencies" {
 		return nil, fmt.Errorf("remediation %q: %w", name, errBatchMissingDeps)
@@ -400,6 +405,15 @@ func (r *ClusterBaselineReconciler) applyOwnedRemediation(
 	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		rem, err := r.getBatchRemediation(ctx, name, suites)
 		if err != nil {
+			// Race after validation (suite flipped, deps, corrupt status): skip
+			// this name so post-pause permanent rejects do not sticky-Degrade or
+			// abort apply of remaining remediations. Wait path + grace still
+			// resume pools for names that never reached Applied.
+			if isPermanentBatchTargetReject(err) {
+				log.FromContext(ctx).Info("batch apply skipped: permanent target reject",
+					"remediation", name, "baseline", cb.Name, "error", err.Error())
+				return nil
+			}
 			return err
 		}
 		// Race-deleted after batch validation: skip apply (wait path treats
@@ -411,7 +425,11 @@ func (r *ClusterBaselineReconciler) applyOwnedRemediation(
 		}
 		apply, _, err := unstructured.NestedBool(rem.Object, "spec", "apply")
 		if err != nil {
-			return fmt.Errorf("reading spec.apply for remediation %q: %w", name, err)
+			// Wrong-type spec.apply is permanent corruption; skip like other
+			// permanent rejects so the rest of the batch can proceed.
+			log.FromContext(ctx).Info("batch apply skipped: unreadable spec.apply",
+				"remediation", name, "baseline", cb.Name, "error", err.Error())
+			return nil
 		}
 		if apply {
 			return nil
