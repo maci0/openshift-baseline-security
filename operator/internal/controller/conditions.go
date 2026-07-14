@@ -273,6 +273,13 @@ func sanitizeRemediationBatch(cb *baselinev1alpha1.ClusterBaseline) {
 	if b.Phase != baselinev1alpha1.RemediationBatchPhaseApplying {
 		b.Phase = baselinev1alpha1.RemediationBatchPhaseApplying
 	}
+	// startedAt is required (date-time). A zero value JSON-marshals as null and
+	// fails admission. Do not use Now(): that would restart batchResumeGrace and
+	// leave MCPs paused longer after a hand-edit/corrupt zero. Epoch is non-zero
+	// for OpenAPI and past grace (batchPastGrace already treats IsZero as past).
+	if b.StartedAt.IsZero() {
+		b.StartedAt = metav1.NewTime(time.Unix(0, 0).UTC())
+	}
 	b.PauseOwner = clampString(b.PauseOwner, 253)
 	b.Pools = clampStringList(b.Pools, batchMaxPools, 253)
 	b.Remediations = clampStringList(b.Remediations, batchMaxRemediations, 253)

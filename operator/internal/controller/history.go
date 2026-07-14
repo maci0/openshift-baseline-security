@@ -2,6 +2,7 @@ package controller
 
 import (
 	"slices"
+	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -104,7 +105,9 @@ func syncProfileHistory(cb *baselinev1alpha1.ClusterBaseline, t metav1.Time, wei
 // clampHistory trims history to the CRD MaxItems bound and clamps each score
 // into [0,100]. Without this, a status already over the limit or with an
 // out-of-range score (hand-edit, old bug) makes every Status().Update fail
-// admission and freezes reconciliation feedback.
+// admission and freezes reconciliation feedback. Zero snapshot Time also fails
+// CRD required date-time (JSON null); fill with epoch so the point admits
+// without inventing a recent scan time that would skew charts/alerts.
 func clampHistory(hist []baselinev1alpha1.ScoreSnapshot, max int) []baselinev1alpha1.ScoreSnapshot {
 	if max > 0 && len(hist) > max {
 		hist = append([]baselinev1alpha1.ScoreSnapshot(nil), hist[len(hist)-max:]...)
@@ -114,6 +117,9 @@ func clampHistory(hist []baselinev1alpha1.ScoreSnapshot, max int) []baselinev1al
 			hist[i].Score = 0
 		} else if hist[i].Score > 100 {
 			hist[i].Score = 100
+		}
+		if hist[i].Time.IsZero() {
+			hist[i].Time = metav1.NewTime(time.Unix(0, 0).UTC())
 		}
 	}
 	return hist

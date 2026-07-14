@@ -312,6 +312,10 @@ func TestSanitizeStatusForUpdate(t *testing.T) {
 		if h.Score < 0 || h.Score > 100 {
 			t.Fatalf("history score out of range: %d", h.Score)
 		}
+		// Zero Time JSON-marshals as null and fails CRD required date-time.
+		if h.Time.IsZero() {
+			t.Fatal("history snapshot Time must be non-zero after sanitize")
+		}
 	}
 	if len(cb.Status.Profiles[0].History) != historyMax {
 		t.Fatalf("profile history len = %d, want %d", len(cb.Status.Profiles[0].History), historyMax)
@@ -320,9 +324,15 @@ func TestSanitizeStatusForUpdate(t *testing.T) {
 		if h.Score < 0 || h.Score > 100 {
 			t.Fatalf("profile history score out of range: %d", h.Score)
 		}
+		if h.Time.IsZero() {
+			t.Fatal("profile history Time must be non-zero after sanitize")
+		}
 	}
 	if h := cb.Status.TailoredProfiles[0].History; len(h) != 1 || h[0].Score != 100 {
 		t.Fatalf("tailored history = %+v, want score 100", h)
+	}
+	if cb.Status.TailoredProfiles[0].History[0].Time.IsZero() {
+		t.Fatal("tailored history Time must be non-zero after sanitize")
 	}
 	for _, list := range [][]string{
 		cb.Status.NewlyFailed, cb.Status.Fixed,
@@ -372,6 +382,14 @@ func TestSanitizeRemediationBatch(t *testing.T) {
 	}
 	if got := len([]rune(b.PauseOwner)); got != 253 {
 		t.Fatalf("pauseOwner runes = %d, want 253", got)
+	}
+	// Zero StartedAt (omitted above) must become non-zero: CRD requires
+	// date-time and JSON null fails admission; epoch keeps batchPastGrace true.
+	if b.StartedAt.IsZero() {
+		t.Fatal("zero StartedAt must be filled so status admits")
+	}
+	if !batchPastGrace(b.StartedAt, time.Now()) {
+		t.Fatal("filled StartedAt must be past grace so MCP resume is not delayed")
 	}
 	// Empty batch pointer stays nil.
 	cb2 := &baselinev1alpha1.ClusterBaseline{}
@@ -1614,6 +1632,9 @@ func FuzzSanitizeStatusForUpdate(f *testing.F) {
 			for _, snap := range h {
 				if snap.Score < 0 || snap.Score > 100 {
 					t.Fatalf("%s score %d out of [0,100]", label, snap.Score)
+				}
+				if snap.Time.IsZero() {
+					t.Fatalf("%s Time is zero (would fail CRD date-time)", label)
 				}
 			}
 		}
