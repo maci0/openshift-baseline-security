@@ -324,7 +324,7 @@ func (r *ClusterBaselineReconciler) ensureConsolePlugin(ctx context.Context, cb 
 	if dep.Status.ReadyReplicas < pluginReadyMin {
 		reason, msg := "WaitingForPods",
 			fmt.Sprintf("Deployment %s/%s has %d ready replicas (want >= %d of %d)",
-				pluginNS, pluginName, dep.Status.ReadyReplicas, pluginReadyMin, pluginReplicas)
+				pluginNS, pluginName, dep.Status.ReadyReplicas, pluginReadyMin, replicas)
 		if pluginDeploymentUnavailable(dep) {
 			reason = "Unavailable"
 			// Minutes from pluginUnavailableGrace so the message cannot drift.

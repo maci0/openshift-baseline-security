@@ -222,6 +222,14 @@ func (r *ClusterBaselineReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 			// Error, not V(1): without this log the CR can look healthy while
 			// every reconcile fails and the Degraded condition never sticks.
 			logger.Error(serr, "status update after reconcile error failed", "name", cb.Name)
+		} else if cb.Annotations[historyScoringModeAnn] != preReconcileMode {
+			// The best-effort write above persisted any ring point recordHistory
+			// advanced under a just-flipped mode; keep the durable stamp aligned so
+			// a transient post-history error (e.g. checkScanStorage) cannot leave the
+			// stamp lagging the rings and fire a spurious historyScoringModeMismatch.
+			if perr := r.persistHistoryScoringMode(ctx, cb); perr != nil {
+				logger.Error(perr, "persist history scoring-mode stamp after reconcile error failed", "name", cb.Name)
+			}
 		}
 		// Publish after Degraded is set so ClusterBaselineDegraded can fire even
 		// when aggregation never ran (API blip, batch apply failure, etc.).
