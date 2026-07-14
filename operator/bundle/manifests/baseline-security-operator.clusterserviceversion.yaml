@@ -23,6 +23,8 @@ metadata:
       {"apiVersion":"v1","kind":"Namespace","metadata":{"name":"openshift-baseline-security","labels":{"openshift.io/cluster-monitoring":"true"}}}
     containerImage: quay.io/openshift-baseline-security/baseline-security-operator:0.5.6
     repository: https://github.com/maci0/openshift-baseline-security
+    support: Community (best-effort via GitHub issues at https://github.com/maci0/openshift-baseline-security/issues)
+    createdAt: "2026-07-14T00:00:00Z"
     description: Baseline benchmark compliance scanning with a native console UI,
       built on the Red Hat Compliance Operator.
     features.operators.openshift.io/fips-compliant: "false"
@@ -61,6 +63,11 @@ spec:
       email: maci.stgn@gmail.com
   provider:
     name: openshift-baseline-security
+    url: https://github.com/maci0/openshift-baseline-security
+  # Neutral shield-check mark (SVG) so OperatorHub renders a real icon.
+  icon:
+    - base64data: PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHBhdGggZmlsbD0iIzAwNjZjYyIgZD0iTTEyIDEgMyA1djZjMCA1LjA1IDMuODQgOS43NCA5IDExIDUuMTYtMS4yNiA5LTUuOTUgOS0xMVY1eiIvPjxwYXRoIGZpbGw9IiNmZmYiIGQ9Im0xMC41NSAxNS42LTMuMi0zLjIgMS40LTEuNCAxLjggMS44IDQuMjUtNC4yNSAxLjQgMS40eiIvPjwvc3ZnPg==
+      mediatype: image/svg+xml
   links:
     - name: Source
       url: https://github.com/maci0/openshift-baseline-security
@@ -86,6 +93,83 @@ spec:
         version: v1alpha1
         displayName: Cluster Baseline
         description: Cluster-scoped singleton configuring baseline compliance scanning.
+        # Resources the operator creates/drives, so OperatorHub's Resources tab and
+        # scorecard olm-crds-have-resources are populated.
+        resources:
+          - kind: ScanSettingBinding
+            version: v1alpha1
+          - kind: ScanSetting
+            version: v1alpha1
+          - kind: Deployment
+            version: v1
+          - kind: Service
+            version: v1
+          - kind: ConsolePlugin
+            version: v1
+          - kind: ConfigMap
+            version: v1
+          - kind: PodDisruptionBudget
+            version: v1
+        specDescriptors:
+          - path: profiles
+            displayName: Benchmark profiles
+            description: Built-in benchmark profiles to scan against (e.g. cis, pci-dss). Empty disables scanning.
+          - path: tailoredProfiles
+            displayName: Tailored profiles
+            description: Names of Compliance Operator TailoredProfiles to include in the scan.
+          - path: schedule
+            displayName: Scan schedule
+            description: Five-field cron schedule for the compliance scan (UTC).
+            x-descriptors:
+              - urn:alm:descriptor:com.tectonic.ui:text
+          - path: scoring.mode
+            displayName: Scoring mode
+            description: Flat (equal weight) or SeverityWeighted compliance score.
+            x-descriptors:
+              - urn:alm:descriptor:com.tectonic.ui:select:Flat
+              - urn:alm:descriptor:com.tectonic.ui:select:SeverityWeighted
+          - path: remediation.apply
+            displayName: Remediation apply policy
+            description: Manual (default) or Automatic application of remediations.
+            x-descriptors:
+              - urn:alm:descriptor:com.tectonic.ui:select:Manual
+              - urn:alm:descriptor:com.tectonic.ui:select:Automatic
+          - path: installComplianceOperator
+            displayName: Install Compliance Operator
+            description: Automatic (default) installs the Compliance Operator if absent; Manual defers to the admin.
+            x-descriptors:
+              - urn:alm:descriptor:com.tectonic.ui:select:Automatic
+              - urn:alm:descriptor:com.tectonic.ui:select:Manual
+          - path: complianceCatalogSource
+            displayName: Compliance catalog source
+            description: Override the CatalogSource providing compliance-operator (OKD/disconnected). Auto-detected when unset.
+            x-descriptors:
+              - urn:alm:descriptor:com.tectonic.ui:text
+          - path: console.managementState
+            displayName: Console plugin state
+            description: Managed (default) deploys the console plugin; Removed tears it down.
+            x-descriptors:
+              - urn:alm:descriptor:com.tectonic.ui:select:Managed
+              - urn:alm:descriptor:com.tectonic.ui:select:Removed
+        statusDescriptors:
+          - path: score
+            displayName: Compliance score
+            description: Aggregate compliance score, 0-100.
+            x-descriptors:
+              - urn:alm:descriptor:com.tectonic.ui:text
+          - path: conditions
+            displayName: Conditions
+            description: OpenShift-style Available / Progressing / Degraded rollups.
+            x-descriptors:
+              - urn:alm:descriptor:io.kubernetes.conditions
+          - path: lastScanTime
+            displayName: Last scan time
+            x-descriptors:
+              - urn:alm:descriptor:com.tectonic.ui:text
+          - path: complianceOperatorVersion
+            displayName: Compliance Operator version
+            x-descriptors:
+              - urn:alm:descriptor:com.tectonic.ui:text
   install:
     strategy: deployment
     spec:
