@@ -50,6 +50,11 @@ oc get clusterbaseline cluster -o jsonpath='{range .status.conditions[*]}{.type}
 oc -n openshift-baseline-security get all,configmap,servicemonitor,prometheusrule,poddisruptionbudget -o yaml \
   > "$OUT/operator-namespace.yaml" 2>/dev/null \
   || warn_fail operator-namespace.yaml
+# The console dashboard ConfigMap lives in openshift-config-managed, outside the
+# operator namespace dumped above. Collect it so "dashboard missing from the
+# console" can be triaged (never created vs wrong labels vs user-deleted).
+oc -n openshift-config-managed get configmap baseline-security-compliance-dashboard -o yaml \
+  > "$OUT/dashboard-configmap.yaml" 2>/dev/null || true
 oc -n openshift-baseline-security get secrets \
   -o custom-columns=NAME:.metadata.name,TYPE:.type,AGE:.metadata.creationTimestamp \
   > "$OUT/operator-secrets.txt" 2>/dev/null \
