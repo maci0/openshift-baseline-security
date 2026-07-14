@@ -280,6 +280,13 @@ CATALOG_IMG ?= quay.io/openshift-baseline-security/baseline-security-operator-ca
 # consumer-facing entries; cut a new version first. When cutting: move
 # [Unreleased] into ## [VERSION], then run RELEASE_GATE=1 REQUIRE_GIT_TAGS=1
 # make verify-versions (fails if Unreleased still has bullets or the tag is missing).
+# AT PUBLISH: after pushing the operator and console-plugin images, resolve each
+# to its @sha256 digest and pin the CSV relatedImages, the embedded Deployment
+# container image, the RELATED_IMAGE_CONSOLE_PLUGIN env, and the containerImage
+# annotation to the digest form. relatedImages is what OLM mirrors for
+# disconnected installs; a mutable :VERSION tag there lets a registry-side swap
+# substitute a different image undetected. The :VERSION tags above are for the
+# pre-publish CSV only.
 .PHONY: verify-versions
 verify-versions:
 	@csv=bundle/manifests/baseline-security-operator.clusterserviceversion.yaml; \
