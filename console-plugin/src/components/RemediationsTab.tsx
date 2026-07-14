@@ -603,7 +603,7 @@ const RemediationsTab: React.FC<{
           </Button>
         </ModalFooter>
       </Modal>
-      {!baselineLoaded || !loaded ? (
+      {!baselineLoaded || (!loaded && !watchError) ? (
         <Bullseye style={{ padding: 'var(--pf-t--global--spacer--xl)' }}>
           <Spinner
             aria-label={
@@ -613,6 +613,11 @@ const RemediationsTab: React.FC<{
         </Bullseye>
       ) : !baseline ? (
         <BaselineNotConfigured style={{ marginTop: 'var(--pf-t--global--spacer--md)' }} />
+      ) : watchError && owned.length === 0 ? (
+        // The watch failed and we have no (stale) rows: the danger alert above
+        // already explains it; a "No remediations, rescan" empty state here would
+        // contradict it (mirrors ResultsTab gating its empty states on !error).
+        null
       ) : owned.length === 0 ? (
         (() => {
           // Same dead-end as Results: "rescan after failures" is wrong when no

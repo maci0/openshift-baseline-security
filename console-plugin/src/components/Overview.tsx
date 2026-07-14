@@ -385,7 +385,10 @@ const CompositionDonut = React.memo<{
         animate={false}
         data={[{ x: t('No results'), y: 1 }]}
         colorScale={[DONUT_GREY]}
-        title={score != null ? formatCount(score, locale) : '—'}
+        // Always "—" here: with zero evaluated checks the score is 0/0 and
+        // meaningless, and the ariaDesc already says it is unavailable. A stale
+        // non-null status.score must not paint a number over a "No results" ring.
+        title="—"
         subTitle={t('of 100')}
         height={200}
         width={300}

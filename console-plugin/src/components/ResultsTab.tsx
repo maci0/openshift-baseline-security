@@ -345,6 +345,36 @@ const ResultsTab: React.FC<{
     );
   };
 
+  // Waivers whose check has no current result (its rule was removed or its
+  // profile unbound): they still exclude from scoring but have no table row, so
+  // there is otherwise no way to remove them but hand-editing the CR. Only when
+  // results are loaded and not errored, so a loading/failed list does not flag
+  // every waiver as orphaned.
+  const orphanWaivers = React.useMemo(() => {
+    if (!loaded || resultsError || !waivers?.length) {
+      return [] as { name: string; index: number }[];
+    }
+    const names = new Set((results ?? []).map((r) => r.metadata?.name).filter(Boolean));
+    return waivers.flatMap((w, index) =>
+      w.name && !names.has(w.name) ? [{ name: w.name, index }] : [],
+    );
+    // waivers read via waiversKey (content-stable); results identity is stable per page.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loaded, resultsError, waiversKey, results]);
+
+  const removeWaiverByIndex = (index: number, name: string) => {
+    const data = removeWaiverPatch(index, name);
+    if (!data.length) {
+      setWaiveError(t('Failed to remove waiver.'));
+      return;
+    }
+    void patchWaivers(
+      data,
+      t('Failed to remove waiver.'),
+      t('Waiver removed. The check counts toward the score again.'),
+    );
+  };
+
   const addSelectedWaiver = () => {
     if (!selectedLive) return;
     // MaxItems is a different failure mode from field validation; do not
@@ -697,6 +727,40 @@ const ResultsTab: React.FC<{
             />
           }
         />
+      )}
+      {canWaive && orphanWaivers.length > 0 && (
+        <Alert
+          variant="warning"
+          isInline
+          title={t('Waivers referencing a removed check ({{count}})', {
+            count: orphanWaivers.length,
+            formattedCount: formatCount(orphanWaivers.length, i18n.language),
+          })}
+          style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}
+        >
+          <p>
+            {t(
+              'The rule was removed or its profile unbound, so these waivers no longer match a result but still exclude it from scoring. Remove any that are no longer needed.',
+            )}
+          </p>
+          <Flex
+            gap={{ default: 'gapSm' }}
+            flexWrap={{ default: 'wrap' }}
+            style={{ marginTop: 'var(--pf-t--global--spacer--sm)' }}
+          >
+            {orphanWaivers.map(({ name, index }) => (
+              <FlexItem key={name}>
+                <Button
+                  variant="secondary"
+                  isDisabled={busy}
+                  onClick={() => removeWaiverByIndex(index, name)}
+                >
+                  {t('Remove waiver for {{name}}', { name })}
+                </Button>
+              </FlexItem>
+            ))}
+          </Flex>
+        </Alert>
       )}
       <Flex
         justifyContent={{ default: 'justifyContentSpaceBetween' }}

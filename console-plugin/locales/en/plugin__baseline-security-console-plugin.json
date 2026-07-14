@@ -273,5 +273,8 @@
   "No matching results": "No matching results",
   "No check results match the current filters. Clear or change filters to see more.": "No check results match the current filters. Clear or change filters to see more.",
   "Clear filters": "Clear filters",
-  "It renders into a MachineConfig; unapplying it reboots the affected nodes one by one.": "It renders into a MachineConfig; unapplying it reboots the affected nodes one by one."
+  "It renders into a MachineConfig; unapplying it reboots the affected nodes one by one.": "It renders into a MachineConfig; unapplying it reboots the affected nodes one by one.",
+  "Waivers referencing a removed check ({{count}})": "Waivers referencing a removed check ({{formattedCount}})",
+  "The rule was removed or its profile unbound, so these waivers no longer match a result but still exclude it from scoring. Remove any that are no longer needed.": "The rule was removed or its profile unbound, so these waivers no longer match a result but still exclude it from scoring. Remove any that are no longer needed.",
+  "Remove waiver for {{name}}": "Remove waiver for {{name}}"
 }
