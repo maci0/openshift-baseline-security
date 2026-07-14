@@ -51,11 +51,15 @@ func (r *ClusterBaselineReconciler) checkScanStorage(ctx context.Context, cb *ba
 	}
 	if len(pending) > 0 {
 		// Info once on transition (not every requeue): rolls up to Degraded;
-		// default logs must name the stuck PVCs so operators can fix StorageClass
+		// default logs must name the stuck PVCs so operators can diagnose them
 		// without only reading the CR condition. Steady-state spam is noise.
 		// Duration text from scanStoragePendingGrace so the message cannot drift
 		// from the grace constant (and TEST-PLAN "Pending >2m" row).
-		msg := fmt.Sprintf("PVC(s) %s in namespace %s Pending >%dm; need a default StorageClass",
+		// We only observe Phase==Pending, not the StorageClass, so the message must
+		// not assert "no default StorageClass": a WaitForFirstConsumer class with no
+		// schedulable consumer, slow CSI provisioning, or node capacity all present
+		// the same way. State the fact (Pending) and both likely causes.
+		msg := fmt.Sprintf("PVC(s) %s in namespace %s Pending >%dm; ensure a StorageClass can provision them (a default StorageClass, and for WaitForFirstConsumer a schedulable consumer)",
 			strings.Join(pending, ", "), complianceNamespace, int(scanStoragePendingGrace.Minutes()))
 		setCondFalseLogOnce(ctx, cb, "ScanStorageReady", "ScanStoragePending", msg,
 			"scan storage PVCs pending", "namespace", complianceNamespace, "pvcs", pending, "name", cb.Name)
