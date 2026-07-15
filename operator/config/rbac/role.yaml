@@ -26,7 +26,6 @@ rules:
   resources:
   - persistentvolumeclaims
   verbs:
-  - get
   - list
   - watch
 - apiGroups:
@@ -135,7 +134,6 @@ rules:
   resources:
   - scansettings
   verbs:
-  - delete
   - get
   - patch
   - update
@@ -153,8 +151,6 @@ rules:
   - consoleplugins
   verbs:
   - create
-  - list
-  - watch
 - apiGroups:
   - console.openshift.io
   resourceNames:

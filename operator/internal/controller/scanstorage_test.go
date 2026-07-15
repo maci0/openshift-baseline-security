@@ -80,6 +80,41 @@ func TestCheckScanStorageDegradedOnPendingPVC(t *testing.T) {
 	}
 }
 
+// TestCheckScanStoragePendingMessageSorted pins that a multi-PVC Pending message
+// is emitted in sorted order: cache List order is map-randomized, and an
+// unsorted message would rewrite the condition every reconcile, spinning a
+// status-write/requeue loop.
+func TestCheckScanStoragePendingMessageSorted(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := clientgoscheme.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	old := metav1.Time{Time: time.Now().Add(-5 * time.Minute)}
+	// Two owned Pending PVCs; added in reverse of sorted order.
+	node := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{Name: "ocp4-cis-node-master", Namespace: complianceNamespace, CreationTimestamp: old},
+		Status:     corev1.PersistentVolumeClaimStatus{Phase: corev1.ClaimPending},
+	}
+	plat := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{Name: "ocp4-cis", Namespace: complianceNamespace, CreationTimestamp: old},
+		Status:     corev1.PersistentVolumeClaimStatus{Phase: corev1.ClaimPending},
+	}
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(node, plat).Build(),
+		Scheme: scheme,
+	}
+	cb := &baselinev1alpha1.ClusterBaseline{
+		Spec: baselinev1alpha1.ClusterBaselineSpec{Profiles: []baselinev1alpha1.ProfileKey{"cis"}},
+	}
+	if err := r.checkScanStorage(context.Background(), cb); err != nil {
+		t.Fatal(err)
+	}
+	c := meta.FindStatusCondition(cb.Status.Conditions, "ScanStorageReady")
+	if c == nil || !strings.Contains(c.Message, "ocp4-cis, ocp4-cis-node-master") {
+		t.Fatalf("message not sorted: %q", c.Message)
+	}
+}
+
 func TestCheckScanStorageEmptyNamespace(t *testing.T) {
 	scheme := runtime.NewScheme()
 	if err := clientgoscheme.AddToScheme(scheme); err != nil {

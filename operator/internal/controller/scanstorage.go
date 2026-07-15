@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -49,6 +50,10 @@ func (r *ClusterBaselineReconciler) checkScanStorage(ctx context.Context, cb *ba
 			pending = append(pending, pvc.Name)
 		}
 	}
+	// Deterministic order so the message (and thus the status) does not flap:
+	// cache List order is map-randomized, and a reordered message rewrites the
+	// condition every reconcile, spinning a status-write/requeue loop.
+	slices.Sort(pending)
 	if len(pending) > 0 {
 		// Info once on transition (not every requeue): rolls up to Degraded;
 		// default logs must name the stuck PVCs so operators can diagnose them

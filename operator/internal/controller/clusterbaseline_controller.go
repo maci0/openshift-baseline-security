@@ -101,7 +101,7 @@ type ClusterBaselineReconciler struct {
 // Neither is watched (only suites/scans/remediations/checkresults are), so no
 // list/watch: the named get/update rule and the List of bindings cover all use.
 // +kubebuilder:rbac:groups=compliance.openshift.io,resources=scansettings,verbs=create
-// +kubebuilder:rbac:groups=compliance.openshift.io,resources=scansettings,resourceNames=baseline,verbs=get;update;patch;delete
+// +kubebuilder:rbac:groups=compliance.openshift.io,resources=scansettings,resourceNames=baseline,verbs=get;update;patch
 // +kubebuilder:rbac:groups=compliance.openshift.io,resources=scansettingbindings,verbs=get;list;create;update;patch;delete
 // +kubebuilder:rbac:groups=compliance.openshift.io,resources=compliancecheckresults;compliancescans;compliancesuites,verbs=get;list;watch
 // +kubebuilder:rbac:groups=compliance.openshift.io,resources=complianceremediations,verbs=get;list;watch;patch
@@ -134,7 +134,7 @@ type ClusterBaselineReconciler struct {
 // Get/CreateOrUpdate only (no informer watch); list/watch not required.
 // +kubebuilder:rbac:groups="",resources=configmaps,verbs=create
 // +kubebuilder:rbac:groups="",resources=configmaps,resourceNames=baseline-security-compliance-dashboard,verbs=get;update;patch
-// +kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;watch
+// +kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=list;watch
 // Plugin Deployment (fixed name). list/watch for Owns(); mutate name-scoped.
 // +kubebuilder:rbac:groups=apps,resources=deployments,verbs=create;list;watch
 // +kubebuilder:rbac:groups=apps,resources=deployments,resourceNames=baseline-security-console-plugin,verbs=get;update;patch;delete
@@ -142,7 +142,7 @@ type ClusterBaselineReconciler struct {
 // +kubebuilder:rbac:groups=policy,resources=poddisruptionbudgets,verbs=create;list;watch
 // +kubebuilder:rbac:groups=policy,resources=poddisruptionbudgets,resourceNames=baseline-security-console-plugin,verbs=get;update;patch;delete
 // ConsolePlugin CR (fixed name).
-// +kubebuilder:rbac:groups=console.openshift.io,resources=consoleplugins,verbs=create;list;watch
+// +kubebuilder:rbac:groups=console.openshift.io,resources=consoleplugins,verbs=create
 // +kubebuilder:rbac:groups=console.openshift.io,resources=consoleplugins,resourceNames=baseline-security-console-plugin,verbs=get;update;patch;delete
 // Console operator config is a singleton (name=cluster). Get/Update only; no
 // list/watch. Name-scope so a compromised SA cannot mutate other Console CRs.
