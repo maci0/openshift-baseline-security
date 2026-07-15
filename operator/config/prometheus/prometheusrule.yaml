@@ -1,5 +1,6 @@
 # Alerting on compliance posture, driven by the operator's custom metrics.
-# Install alongside the ServiceMonitor when user-workload monitoring is enabled.
+# Ships alongside the ServiceMonitor; both are scraped by cluster (platform)
+# monitoring via the openshift.io/cluster-monitoring namespace label.
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
@@ -109,8 +110,8 @@ spec:
             description: >-
               ClusterBaseline metrics have not been published recently (or never).
               Check the baseline-security-operator Deployment and pod logs in
-              openshift-baseline-security, leader election, and that user-workload
-              monitoring scrapes the metrics ServiceMonitor.
+              openshift-baseline-security, leader election, and that cluster
+              (platform) monitoring scrapes the metrics ServiceMonitor.
               CLI: oc -n openshift-baseline-security get pods,servicemonitor;
               oc -n openshift-baseline-security logs deploy/baseline-security-operator --tail=200
         - alert: RemediationBatchStuck

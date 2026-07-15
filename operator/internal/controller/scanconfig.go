@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -27,6 +28,14 @@ func (r *ClusterBaselineReconciler) ensureScanConfig(ctx context.Context, cb *ba
 	// schedule and all bindings so a bad cron does not freeze profile/tp or
 	// auto-apply changes. Invalid schedule is reported as Degraded at the end.
 	schedule, schedErr := normalizedSchedule(cb.Spec.Schedule)
+	// A syntactically-valid cron that never fires (an impossible calendar date
+	// like Feb 30 / April 31) parses cleanly but would silently never scan AND,
+	// because its scan interval is 0, suppress the ComplianceScanStale alert.
+	// Treat it as invalid so the last-good cron is kept and the CR Degrades (which
+	// ClusterBaselineDegraded covers), instead of failing silently.
+	if schedErr == nil && nextScanTime(cb.Spec.Schedule, time.Now()) == nil {
+		schedErr = errScheduleNeverFires
+	}
 
 	ss := u(scanSettingGVK)
 	ss.SetName(scanSettingName)

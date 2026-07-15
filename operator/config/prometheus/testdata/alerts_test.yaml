@@ -187,7 +187,7 @@ tests:
               severity: critical
             exp_annotations:
               summary: 'Baseline security status metrics are stale'
-              description: 'ClusterBaseline metrics have not been published recently (or never). Check the baseline-security-operator Deployment and pod logs in openshift-baseline-security, leader election, and that user-workload monitoring scrapes the metrics ServiceMonitor. CLI: oc -n openshift-baseline-security get pods,servicemonitor; oc -n openshift-baseline-security logs deploy/baseline-security-operator --tail=200'
+              description: 'ClusterBaseline metrics have not been published recently (or never). Check the baseline-security-operator Deployment and pod logs in openshift-baseline-security, leader election, and that cluster (platform) monitoring scrapes the metrics ServiceMonitor. CLI: oc -n openshift-baseline-security get pods,servicemonitor; oc -n openshift-baseline-security logs deploy/baseline-security-operator --tail=200'
 
   # Series entirely absent (all operator replicas gone / scaled to 0 / hard
   # crashloop): absent() fires ComplianceStatusStale. max() over an empty vector
@@ -204,7 +204,7 @@ tests:
               severity: critical
             exp_annotations:
               summary: 'Baseline security status metrics are stale'
-              description: 'ClusterBaseline metrics have not been published recently (or never). Check the baseline-security-operator Deployment and pod logs in openshift-baseline-security, leader election, and that user-workload monitoring scrapes the metrics ServiceMonitor. CLI: oc -n openshift-baseline-security get pods,servicemonitor; oc -n openshift-baseline-security logs deploy/baseline-security-operator --tail=200'
+              description: 'ClusterBaseline metrics have not been published recently (or never). Check the baseline-security-operator Deployment and pod logs in openshift-baseline-security, leader election, and that cluster (platform) monitoring scrapes the metrics ServiceMonitor. CLI: oc -n openshift-baseline-security get pods,servicemonitor; oc -n openshift-baseline-security logs deploy/baseline-security-operator --tail=200'
 
   # Fresh timestamp: ComplianceStatusStale must not fire.
   # eval_time 16m => unix ~960; timestamp 900 => age 60s < 900s threshold.

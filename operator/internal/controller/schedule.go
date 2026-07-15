@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -10,6 +11,12 @@ import (
 
 	baselinev1alpha1 "github.com/maci0/baseline-security-operator/api/v1alpha1"
 )
+
+// errScheduleNeverFires marks a syntactically-valid cron whose next fire never
+// resolves (an impossible calendar date, e.g. Feb 30 / April 31). ensureScanConfig
+// treats it like a parse error: keep the last-good cron and Degrade, so it does
+// not silently never scan while suppressing the stale-scan alert.
+var errScheduleNeverFires = errors.New("schedule never fires (impossible calendar date)")
 
 // defaultScanSchedule aliases the API constant so schedule normalize/ScanSetting
 // writes stay aligned with the CRD default and console DEFAULT_SCAN_SCHEDULE.

@@ -41,6 +41,28 @@ func consoleCluster(plugins ...string) *unstructured.Unstructured {
 	return console
 }
 
+// TestEnsureScanConfigNeverFiresSchedule pins the NB-R5 fix: a cron that parses
+// cleanly but can never fire (April 31) must Degrade with InvalidSchedule, not
+// silently configure a ScanSetting that never scans while its 0s interval
+// suppresses the ComplianceScanStale alert.
+func TestEnsureScanConfigNeverFiresSchedule(t *testing.T) {
+	scheme := testScheme(t)
+	cb := newCB("cis")
+	cb.Spec.Schedule = "0 0 31 4 *" // April 31: valid syntax, impossible date.
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(cb).
+			WithStatusSubresource(&baselinev1alpha1.ClusterBaseline{}).Build(),
+		Scheme: scheme,
+	}
+	if err := r.ensureScanConfig(context.Background(), cb); err != nil {
+		t.Fatalf("ensureScanConfig: %v", err)
+	}
+	c := meta.FindStatusCondition(cb.Status.Conditions, "ScanConfigured")
+	if c == nil || c.Status != metav1.ConditionFalse || c.Reason != "InvalidSchedule" {
+		t.Fatalf("ScanConfigured = %+v, want False/InvalidSchedule for a never-fires schedule", c)
+	}
+}
+
 func TestReconcileAddsFinalizerAndRequeues(t *testing.T) {
 	scheme := testScheme(t)
 	cb := newCB("cis")
