@@ -24,6 +24,10 @@ test.describe('Baseline Security screenshots', () => {
     });
     await expect(chipGroup.first()).toBeVisible();
     await expect(page.getByRole('button', { name: /Clear all filters/i })).toBeVisible();
+    // At least one row must survive the filter, else the chip renders over an
+    // empty table and the screenshot proves nothing filtered in (matches the
+    // row-existence guard on the sibling FAIL/INCONSISTENT filter tests).
+    await expect(page.getByRole('button', { name: /View details for/i }).first()).toBeVisible();
     await shot(page, 'results-severity-high');
   });
 
@@ -79,6 +83,9 @@ test.describe('Baseline Security screenshots', () => {
     });
     await expect(chipGroup.first()).toBeVisible();
     await expect(page.getByRole('button', { name: /Clear all filters/i })).toBeVisible();
+    // Guard against an empty filtered table: the tailored profile must contribute
+    // at least one visible row, or the screenshot documents nothing.
+    await expect(page.getByRole('button', { name: /View details for/i }).first()).toBeVisible();
     await shot(page, 'results-tailored');
   });
 
