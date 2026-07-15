@@ -20,6 +20,7 @@ import (
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	baselinev1alpha1 "github.com/maci0/baseline-security-operator/api/v1alpha1"
 )
@@ -83,7 +84,14 @@ func (r *ClusterBaselineReconciler) deregisterConsolePlugin(ctx context.Context)
 		}
 		plugins, _, err := unstructured.NestedStringSlice(console.Object, "spec", "plugins")
 		if err != nil {
-			return fmt.Errorf("reading console plugins: %w", err)
+			// A wrong-type spec.plugins (out-of-schema corrupt console CR) has
+			// nothing we can safely parse our entry out of. Skip rather than
+			// propagate, so it cannot wedge ClusterBaseline deletion forever
+			// (matches setMCPPaused's wrong-type tolerance). The Console CRD
+			// constrains plugins to []string, so this is unreachable via the API.
+			log.FromContext(ctx).Info("skipping console plugin deregistration; spec.plugins is not a string slice",
+				"error", err.Error())
+			return nil
 		}
 		kept := withoutPlugin(plugins, pluginName)
 		if len(kept) == len(plugins) {
