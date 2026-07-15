@@ -62,6 +62,7 @@ import {
   isNodeRemediation,
   missingDependencySummary,
   remediationObjectText,
+  REMEDIATION_OBJECT_UNSERIALIZABLE,
 } from '../remediation';
 import BaselineNotConfigured from './BaselineNotConfigured';
 import { regionFocusProps, withDisabledTip } from './DisabledTip';
@@ -998,7 +999,14 @@ const RemediationsTab: React.FC<{
             />
           )}
           {(() => {
-            const objectText = viewing ? remediationObjectText(viewing) : '';
+            const raw = viewing ? remediationObjectText(viewing) : '';
+            const unserializable = raw === REMEDIATION_OBJECT_UNSERIALIZABLE;
+            // Copyable only when it is the real rendered JSON, not absent or the
+            // unserializable sentinel.
+            const objectText = unserializable ? '' : raw;
+            const displayText = unserializable
+              ? t('The rendered object could not be displayed.')
+              : objectText || t('No rendered object.');
             return (
               <CodeBlock
                 actions={
@@ -1039,7 +1047,7 @@ const RemediationsTab: React.FC<{
                 }
               >
                 <CodeBlockCode id="remediation-object-code">
-                  {objectText || t('No rendered object.')}
+                  {displayText}
                 </CodeBlockCode>
               </CodeBlock>
             );

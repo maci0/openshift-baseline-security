@@ -175,6 +175,7 @@
   "Loading remediations": "Loading remediations",
   "No remediations": "No remediations",
   "The Compliance Operator generates remediations for failing checks that can be auto-fixed. None are available yet; rescan after new failures appear.": "The Compliance Operator generates remediations for failing checks that can be auto-fixed. None are available yet; rescan after new failures appear.",
+  "The rendered object could not be displayed.": "The rendered object could not be displayed.",
   "Review waived checks": "Review waived checks",
   "unknown error": "unknown error",
   "Tailored profile \"{{name}}\" was created but could not be bound: {{detail}}. Retry to bind it.": "Tailored profile \"{{name}}\" was created but could not be bound: {{detail}}. Retry to bind it.",

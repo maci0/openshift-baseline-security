@@ -92,6 +92,7 @@ export { checkResultHref, machineConfigPoolHref, resultsHref } from './links';
 export {
   isNodeRemediation,
   remediationObjectText,
+  REMEDIATION_OBJECT_UNSERIALIZABLE,
   missingDependencySummary,
   compareRemediationsForApplyOrder,
 } from './remediation';
