@@ -22,8 +22,10 @@ const dashboardJSONKey = "baseline-security-compliance.json"
 
 // ensureComplianceDashboard creates the score-trend dashboard as a ConfigMap in
 // openshift-config-managed labeled console.openshift.io/dashboard, so the console
-// renders it under Observe -> Dashboards (no Grafana). Data needs user-workload
-// monitoring + the metrics ServiceMonitor; the dashboard renders regardless.
+// renders it under Observe -> Dashboards (no Grafana). Data comes from platform
+// (cluster) Prometheus scraping the metrics ServiceMonitor: the operator installs
+// into an openshift-* namespace labeled openshift.io/cluster-monitoring, which
+// user-workload monitoring never scrapes. The dashboard renders regardless.
 // Best-effort: a write failure here is logged, not Degrading, since the dashboard
 // is cosmetic and must never block scanning or status.
 //
