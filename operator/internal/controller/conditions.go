@@ -470,7 +470,11 @@ func parseScanEndTimestamp(ts string, now time.Time) (time.Time, bool) {
 	if t.Before(time.Unix(0, 0)) {
 		return time.Time{}, false
 	}
-	return t, true
+	// Truncate to whole seconds: LastScanTime and history snapshots are metav1.Time,
+	// which marshals at RFC3339 (second) granularity. A sub-second endTimestamp would
+	// otherwise recompute larger than the persisted (truncated) value every reconcile,
+	// defeating equal-scan dedup and re-appending a duplicate history point each cycle.
+	return t.Truncate(time.Second), true
 }
 
 func setCond(cb *baselinev1alpha1.ClusterBaseline, typ string, status metav1.ConditionStatus, reason, msg string) {

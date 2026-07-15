@@ -17,6 +17,9 @@ metadata:
   labels:
     app: baseline-security-operator
 spec:
+  # Two replicas for fast failover; correctness is from leader election. No
+  # PodDisruptionBudget on purpose (ADR-028): a static PDB deadlocks a node
+  # drain on single-node OpenShift, and no fixed-replica PDB value avoids it.
   replicas: 2
   # Keep one ready replica during rollout (matches 2-replica HA + anti-affinity).
   strategy:
@@ -153,18 +156,3 @@ spec:
         - name: tmp
           emptyDir:
             sizeLimit: 64Mi
----
-# Keep one replica during voluntary disruptions (drain/upgrade). Preferred
-# anti-affinity alone does not block eviction of both pods.
-apiVersion: policy/v1
-kind: PodDisruptionBudget
-metadata:
-  name: baseline-security-operator
-  namespace: openshift-baseline-security
-  labels:
-    app: baseline-security-operator
-spec:
-  minAvailable: 1
-  selector:
-    matchLabels:
-      app: baseline-security-operator

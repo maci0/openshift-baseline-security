@@ -540,9 +540,13 @@ func TestParseScanEndTimestamp(t *testing.T) {
 	if !valid || !ok.Equal(time.Date(2026, 7, 9, 1, 0, 0, 0, time.UTC)) {
 		t.Fatalf("basic RFC3339: %v %v", ok, valid)
 	}
-	_, valid = parseScanEndTimestamp("2026-07-09T01:00:00.123456789Z", now)
-	if !valid {
-		t.Fatal("fractional seconds should parse")
+	// Fractional seconds parse but are truncated to whole seconds: LastScanTime
+	// and history snapshots persist as metav1.Time (RFC3339, second precision), so
+	// a sub-second value must not recompute larger than its stored form and defeat
+	// equal-scan dedup (duplicate history point every reconcile).
+	frac, valid := parseScanEndTimestamp("2026-07-09T01:00:00.123456789Z", now)
+	if !valid || !frac.Equal(time.Date(2026, 7, 9, 1, 0, 0, 0, time.UTC)) {
+		t.Fatalf("fractional seconds should parse and truncate to the second: %v %v", frac, valid)
 	}
 	if _, valid = parseScanEndTimestamp("", now); valid {
 		t.Fatal("empty should fail")

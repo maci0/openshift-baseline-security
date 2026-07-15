@@ -471,3 +471,49 @@ plus the history-scoring-mode annotation, not raw PromQL ranges across flips.
 
 **Status:** Keep. Add a mode label only if support volume shows mixed-mode
 Prom charts are a real operator pain.
+
+## ADR-028: No static PodDisruptionBudget for the operator
+
+**Decision:** The operator Deployment runs `replicas: 2` with no shipped
+PodDisruptionBudget. Correctness comes from leader election (a single active
+reconciler); the second replica is warm standby for fast failover only.
+
+**Alternatives:** Ship `minAvailable: 1` (or `maxUnavailable: 1`) as before;
+have the operator reconcile its own topology-aware PDB at runtime.
+
+**Tradeoff:** A static PDB deadlocks a voluntary node drain on single-node
+OpenShift: both replicas necessarily sit on the one node, so the first
+eviction succeeds, its replacement stays `Pending` (only node cordoned), and
+the PDB then denies the second eviction forever. No static PDB value avoids
+this with a fixed replica count (`maxUnavailable: 1` deadlocks identically once
+the replacement cannot schedule). A runtime-reconciled PDB would fight OLM
+ownership for marginal benefit. Since the operator is not in any data path, a
+brief both-pods-down window during a rare voluntary drain is acceptable, and
+leader election already guarantees no split-brain. The console-plugin PDB is
+unaffected: the operator reconciles it at runtime and already deletes it on
+SingleReplica (that is the plugin's serving path, where the same deadlock would
+drop the UI).
+
+**Status:** Keep. Revisit only if a customer needs guaranteed operator uptime
+across voluntary disruptions on a multi-node cluster.
+
+## ADR-029: An impossible-date schedule Degrades, it does not silently disable
+
+**Decision:** A `spec.schedule` cron that parses cleanly but can never fire (an
+impossible calendar date such as `0 0 31 4 *` / `0 0 30 2 *`) is treated as
+`ScanConfigured=False` / `InvalidSchedule` (Degraded), exactly like a
+syntactically-invalid cron. The last-good schedule is kept on the ScanSetting.
+
+**Alternatives:** Write the never-firing cron to the ScanSetting as-is (report
+Ready); reject it at admission with a CEL/pattern rule.
+
+**Tradeoff:** A parseable-but-never-fires cron would otherwise be written to the
+Compliance Operator, which then never scans, while the cadence-aware
+`ComplianceScanStale` alert (keyed on `scan_interval_seconds`, which is 0 for a
+never-firing schedule) stays permanently suppressed: a silent compliance gap.
+Rolling it up to Degraded surfaces it through `ClusterBaselineDegraded`. Full
+calendar validation in CEL is impractical, so detection lives in the
+reconciler via `nextScanTime(...) == nil` on the raw spec, consistent with the
+metric and next-fire computations.
+
+**Status:** Keep.

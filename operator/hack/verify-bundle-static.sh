@@ -30,7 +30,6 @@ baseline-security-metrics-scraper-token_v1_secret.yaml	config/prometheus/service
 baseline-security-metrics-scraper_rbac.authorization.k8s.io_v1_clusterrolebinding.yaml	config/prometheus/servicemonitor.yaml
 baseline-security-metrics-serving-ca_v1_configmap.yaml	config/prometheus/serving-ca-configmap.yaml
 baseline-security-operator-metrics_v1_service.yaml	config/manager/metrics_service.yaml
-baseline-security-operator_policy_v1_poddisruptionbudget.yaml	config/manager/manager.yaml
 EOF
 )
 
