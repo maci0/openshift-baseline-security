@@ -155,7 +155,13 @@ export const changedChecksMany = (
   nameLists: readonly (readonly string[] | undefined)[],
   results: ComplianceCheckResult[] | undefined,
 ): ChangedCheck[][] => {
-  const orderedLists = nameLists.map((names) => (names ?? []).filter(Boolean));
+  // status.newlyFailed / status.fixed are untrusted CR fields (not runtime
+  // type-checked). Keep only non-empty strings so a corrupt element (a number,
+  // object, etc.) cannot reach checkResultHref -> stripSurrogates -> .replace()
+  // and crash the Overview "Recent changes" render.
+  const orderedLists = nameLists.map((names) =>
+    (names ?? []).filter((n): n is string => typeof n === 'string' && n.length > 0),
+  );
   const want = new Set<string>();
   for (const list of orderedLists) {
     for (const name of list) {

@@ -18,6 +18,7 @@ import {
   compareRemediationsForApplyOrder,
   nodeScanPool,
   remediationObjectText,
+  REMEDIATION_OBJECT_UNSERIALIZABLE,
   resultsCsv,
   remediationApplyPatch,
   resourceVersionTest,
@@ -1385,6 +1386,17 @@ describe('changedChecks', () => {
     expect(changedChecks(undefined, undefined)).toEqual([]);
     expect(changedChecks(['', 'x'], [])).toHaveLength(1);
   });
+  it('drops non-string elements from untrusted status lists without throwing', () => {
+    // status.newlyFailed/fixed are not runtime type-checked; a corrupt element
+    // (number/object/bool/array) must be dropped, not reach checkResultHref and
+    // crash the Overview "Recent changes" render.
+    const hostile = [42, {}, true, ['x'], null, undefined, 'real'] as unknown as string[];
+    expect(() => changedChecks(hostile, [])).not.toThrow();
+    const items = changedChecks(hostile, []);
+    expect(items).toHaveLength(1);
+    expect(items[0].name).toBe('real');
+    expect(() => changedChecksMany([hostile, hostile], [])).not.toThrow();
+  });
   // Regression / newlyFailed names and CCR descriptions are untrusted cluster text.
   it('fuzz: never throws; drops empty names; every item has name/title/href', () => {
     for (let i = 0; i < 500; i++) {
@@ -1788,9 +1800,10 @@ describe('remediation helpers', () => {
   it('remediationObjectText does not throw on circular rendered objects', () => {
     const circular: Record<string, unknown> = { kind: 'MachineConfig' };
     circular.self = circular;
-    // Non-empty marker: UI must not show the same empty state as missing object.
+    // Distinct sentinel (not '' for absent): the component maps it to a
+    // translated message rather than showing raw untranslated text.
     expect(remediationObjectText(rem('MachineConfig', circular))).toBe(
-      '/* unserializable remediation object */',
+      REMEDIATION_OBJECT_UNSERIALIZABLE,
     );
   });
   // openspec guided-remediation: MissingDependencies must name the dependency.
