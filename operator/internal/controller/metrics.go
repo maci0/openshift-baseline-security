@@ -52,6 +52,14 @@ var (
 		Name: "baseline_security_newly_failed",
 		Help: "Number of checks that newly failed since the previous completed scan (len(status.newlyFailed)).",
 	})
+	// Approximate seconds between consecutive scans for the configured schedule.
+	// Lets ComplianceScanStale scale its staleness threshold with the cadence
+	// instead of assuming a daily scan (a weekly schedule is legitimately days
+	// old). 0 when scanning is disabled or the schedule is invalid.
+	scanIntervalSecondsGauge = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "baseline_security_scan_interval_seconds",
+		Help: "Approximate seconds between consecutive scans for the configured spec.schedule. 0 when scanning is disabled or the schedule is invalid.",
+	})
 	// Unix start of the active remediation batch (status.remediationBatch.startedAt).
 	// 0 when no batch. Complements remediationBatchActive (0/1) so dashboards and
 	// on-call can see how long MachineConfigPools have been paused without
@@ -77,6 +85,7 @@ func init() {
 		complianceScore, complianceChecks, statusObservedTimestamp,
 		remediationBatchActive, remediationBatchStartedTimestamp,
 		conditionStatus, lastScanTimestamp, newlyFailedCount,
+		scanIntervalSecondsGauge,
 	)
 	// Seed the "no score yet" sentinel so a never-reconciled or
 	// error-before-aggregation state reads as -1, not the gauge default of 0
@@ -88,6 +97,7 @@ func init() {
 	remediationBatchStartedTimestamp.Set(0)
 	lastScanTimestamp.Set(0)
 	newlyFailedCount.Set(0)
+	scanIntervalSecondsGauge.Set(0)
 	for _, typ := range publishedConditionTypes {
 		conditionStatus.WithLabelValues(typ).Set(0)
 	}
@@ -162,6 +172,14 @@ func publishMetrics(cb *baselinev1alpha1.ClusterBaseline) {
 		lastScanTimestamp.Set(float64(cb.Status.LastScanTime.Unix()))
 	} else {
 		lastScanTimestamp.Set(0)
+	}
+	// Cadence for ComplianceScanStale. 0 when scanning is off (or the schedule is
+	// invalid, which surfaces separately as InvalidSchedule/Degraded), so the
+	// alert's interval guard skips those cases.
+	if scanning {
+		scanIntervalSecondsGauge.Set(scanIntervalSeconds(cb.Spec.Schedule, time.Now()))
+	} else {
+		scanIntervalSecondsGauge.Set(0)
 	}
 	newlyFailedCount.Set(float64(len(cb.Status.NewlyFailed)))
 

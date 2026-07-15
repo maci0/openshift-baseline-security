@@ -47,6 +47,7 @@ Install from published OLM image/CSV tags for only the released surface.
   selection, `baseline_security_remediation_batch_active`,
   `baseline_security_remediation_batch_started_timestamp_seconds` for
   MCP-paused batch age, `baseline_security_last_scan_timestamp_seconds`,
+  `baseline_security_scan_interval_seconds` (cadence for the stale-scan alert),
   `baseline_security_newly_failed`,
   `baseline_security_condition` for Available/Progressing/Degraded) with
   PrometheusRule alerts (`ComplianceScoreLow`, `ComplianceChecksFailing`,

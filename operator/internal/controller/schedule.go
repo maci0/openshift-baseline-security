@@ -65,3 +65,25 @@ func nextScanTime(schedule string, now time.Time) *metav1.Time {
 	next := metav1.NewTime(nextTime)
 	return &next
 }
+
+// scanIntervalSeconds returns the approximate seconds between consecutive scans
+// for the schedule (the gap between the next two fires after now), or 0 for an
+// invalid/degenerate schedule. Exact for fixed cadences (daily/weekly/hourly);
+// for calendar-variable schedules (e.g. monthly) it is the current gap, which
+// the ComplianceScanStale alert's margin absorbs. Lets that alert scale its
+// staleness threshold with the cadence instead of assuming a daily scan.
+func scanIntervalSeconds(schedule string, now time.Time) float64 {
+	_, sched, err := normalizeAndParseSchedule(schedule)
+	if err != nil {
+		return 0
+	}
+	t1 := sched.Next(now.UTC())
+	if t1.IsZero() {
+		return 0
+	}
+	t2 := sched.Next(t1)
+	if t2.IsZero() {
+		return 0
+	}
+	return t2.Sub(t1).Seconds()
+}

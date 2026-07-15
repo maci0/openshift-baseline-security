@@ -296,7 +296,8 @@ tests:
               summary: 'ClusterBaseline is Degraded'
               description: 'The ClusterBaseline Degraded condition has been True for 15m. Check status.conditions on ClusterBaseline/cluster (reason and message), operator logs in openshift-baseline-security, and related detail conditions (ComplianceOperatorReady, ScanConfigured, ScanStorageReady, ConsolePluginReady). CLI: oc get clusterbaseline cluster -o jsonpath=''{range .status.conditions[*]}{.type}={.status} {.reason} {.message}{"\n"}{end}''; operator/hack/must-gather.sh'
 
-  # Last scan far older than 36h: ComplianceScanStale fires after for:1h.
+  # Daily cadence (interval 86400 -> threshold 1.5*86400 = 129600 = 36h): last scan
+  # far older than 36h fires ComplianceScanStale after for:1h.
   # Use 1m samples (matches evaluation_interval) so series stay non-stale while
   # for:1h accumulates. last_scan=100; condition true once time()>129700 (~36.03h).
   # _xN expands to N minutes of constant samples (promtool expand syntax).
@@ -304,6 +305,8 @@ tests:
     input_series:
       - series: 'baseline_security_last_scan_timestamp_seconds{instance="op-1"}'
         values: '100x2280'
+      - series: 'baseline_security_scan_interval_seconds{instance="op-1"}'
+        values: '86400x2280'
       - series: 'baseline_security_status_observed_timestamp_seconds{instance="op-1"}'
         values: '200x2280'
     alert_rule_test:
@@ -313,15 +316,18 @@ tests:
           - exp_labels:
               severity: warning
             exp_annotations:
-              summary: 'Last compliance scan is older than 36h'
-              description: 'status.lastScanTime is more than 36 hours old while metrics are still publishing. Check ComplianceSuites/Scans in openshift-compliance, ScanSetting schedule, and that profiles are selected. CLI: oc get clusterbaseline cluster -o jsonpath=''{.status.lastScanTime}{"\n"}{.spec.schedule}{"\n"}''; oc -n openshift-compliance get compliancesuites,compliancescans'
+              summary: 'Compliance scan is overdue for its schedule'
+              description: 'status.lastScanTime is more than 1.5x the configured scan interval old while metrics are still publishing. Check ComplianceSuites/Scans in openshift-compliance, ScanSetting schedule, and that profiles are selected. CLI: oc get clusterbaseline cluster -o jsonpath=''{.status.lastScanTime}{"\n"}{.spec.schedule}{"\n"}''; oc -n openshift-compliance get compliancesuites,compliancescans'
 
-  # Recent last scan: ComplianceScanStale silent.
-  # eval_time 38h => 136800; last_scan 130000 => age 6800s << 129600.
+  # Weekly cadence (interval 604800 -> threshold 907200s = 10.5d): a scan ~5 days
+  # old is NOT stale for a weekly schedule. The old hardcoded-36h alert would have
+  # false-fired here; the cadence-aware one stays silent.
   - interval: 1m
     input_series:
       - series: 'baseline_security_last_scan_timestamp_seconds{instance="op-1"}'
-        values: '130000x2280'
+        values: '100x2280'
+      - series: 'baseline_security_scan_interval_seconds{instance="op-1"}'
+        values: '604800x2280'
       - series: 'baseline_security_status_observed_timestamp_seconds{instance="op-1"}'
         values: '200x2280'
     alert_rule_test:
@@ -329,10 +335,28 @@ tests:
         alertname: ComplianceScanStale
         exp_alerts: []
 
-  # Never scanned (timestamp 0): ComplianceScanStale silent (install grace).
+  # Recent last scan: ComplianceScanStale silent.
+  # eval_time 38h => 136800; last_scan 130000 => age 6800s << 129600.
   - interval: 1m
     input_series:
       - series: 'baseline_security_last_scan_timestamp_seconds{instance="op-1"}'
+        values: '130000x2280'
+      - series: 'baseline_security_scan_interval_seconds{instance="op-1"}'
+        values: '86400x2280'
+      - series: 'baseline_security_status_observed_timestamp_seconds{instance="op-1"}'
+        values: '200x2280'
+    alert_rule_test:
+      - eval_time: 38h
+        alertname: ComplianceScanStale
+        exp_alerts: []
+
+  # Never scanned (timestamp 0) / scanning disabled (interval 0): silent
+  # (install grace / admin turned scanning off). Both guards skip the alert.
+  - interval: 1m
+    input_series:
+      - series: 'baseline_security_last_scan_timestamp_seconds{instance="op-1"}'
+        values: '0x2280'
+      - series: 'baseline_security_scan_interval_seconds{instance="op-1"}'
         values: '0x2280'
       - series: 'baseline_security_status_observed_timestamp_seconds{instance="op-1"}'
         values: '200x2280'

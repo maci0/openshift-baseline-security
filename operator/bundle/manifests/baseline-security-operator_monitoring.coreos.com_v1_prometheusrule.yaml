@@ -153,12 +153,16 @@ spec:
               CLI: oc get clusterbaseline cluster -o jsonpath='{range .status.conditions[*]}{.type}={.status} {.reason} {.message}{"\n"}{end}';
               operator/hack/must-gather.sh
         - alert: ComplianceScanStale
-          # Default schedule is daily (0 1 * * *). 36h allows one missed run plus
-          # slack for long scans. Gauge 0 means never scanned or scanning disabled
-          # (empty profiles/tailored); the > 0 guard skips those cases.
+          # Cadence-aware: fire when the last completed scan is older than 1.5x the
+          # configured scan interval (allows one missed run plus slack for long
+          # scans), instead of a hardcoded 36h that would false-page on any
+          # non-daily schedule (a weekly scan is legitimately days old). For the
+          # daily default (interval 86400s) this is 1.5*86400 = 129600s = 36h.
+          # Both gauges are 0 when never scanned or scanning is disabled
+          # (empty profiles/tailored); the > 0 guards skip those cases.
           # Operator publish freshness (ComplianceStatusStale) can stay green while
           # the Compliance Operator stops producing completed scans.
-          # Select the newest publisher's last_scan (same HA pattern as score/checks).
+          # Select the newest publisher's series (same HA pattern as score/checks).
           expr: >-
             (
               max(baseline_security_last_scan_timestamp_seconds
@@ -166,20 +170,26 @@ spec:
             )
             and
             (
+              max(baseline_security_scan_interval_seconds
+                and on(instance) topk(1, baseline_security_status_observed_timestamp_seconds)) > 0
+            )
+            and
+            (
               time()
               - max(baseline_security_last_scan_timestamp_seconds
                 and on(instance) topk(1, baseline_security_status_observed_timestamp_seconds))
-              > 129600
+              > 1.5 * max(baseline_security_scan_interval_seconds
+                and on(instance) topk(1, baseline_security_status_observed_timestamp_seconds))
             )
           for: 1h
           labels:
             severity: warning
           annotations:
-            summary: Last compliance scan is older than 36h
+            summary: Compliance scan is overdue for its schedule
             description: >-
-              status.lastScanTime is more than 36 hours old while metrics are still
-              publishing. Check ComplianceSuites/Scans in openshift-compliance,
-              ScanSetting schedule, and that profiles are selected.
+              status.lastScanTime is more than 1.5x the configured scan interval old
+              while metrics are still publishing. Check ComplianceSuites/Scans in
+              openshift-compliance, ScanSetting schedule, and that profiles are selected.
               CLI: oc get clusterbaseline cluster -o jsonpath='{.status.lastScanTime}{"\n"}{.spec.schedule}{"\n"}';
               oc -n openshift-compliance get compliancesuites,compliancescans
         - alert: ComplianceRegressions

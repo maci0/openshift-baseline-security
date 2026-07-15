@@ -116,3 +116,24 @@ func TestNextScanTime(t *testing.T) {
 		t.Fatalf("local-zone now next = %v, want UTC %v", got, want)
 	}
 }
+
+func TestScanIntervalSeconds(t *testing.T) {
+	now := time.Date(2026, 7, 10, 3, 0, 0, 0, time.UTC)
+	cases := []struct {
+		schedule string
+		want     float64
+	}{
+		{"0 1 * * *", 86400},  // daily
+		{"0 1 * * 0", 604800}, // weekly (Sunday)
+		{"0 * * * *", 3600},   // hourly
+		{"", 86400},           // empty -> default daily
+		{"not a cron", 0},     // invalid
+		{"@daily", 0},         // descriptor rejected (five-field only)
+		{"*/7 , 1 1 0", 0},    // parseable but never fires
+	}
+	for _, c := range cases {
+		if got := scanIntervalSeconds(c.schedule, now); got != c.want {
+			t.Fatalf("scanIntervalSeconds(%q) = %v, want %v", c.schedule, got, c.want)
+		}
+	}
+}

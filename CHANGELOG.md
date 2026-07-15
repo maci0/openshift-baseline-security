@@ -41,6 +41,13 @@ depend on those tags.
 
 ## [Unreleased]
 
+### Fixed
+
+- ComplianceScanStale alert is now cadence-aware: it fires when the last scan is
+  older than 1.5x the configured scan interval instead of a hardcoded 36h, which
+  false-paged continuously on any non-daily schedule (a weekly scan is
+  legitimately days old). Adds a `baseline_security_scan_interval_seconds` metric.
+
 ## [0.5.6] - 2026-07-14
 
 ### Changed
