@@ -41,12 +41,42 @@ depend on those tags.
 
 ## [Unreleased]
 
+## [0.5.7] - 2026-07-15
+
+### Changed
+
+- Removed the operator's static PodDisruptionBudget (ADR-028). On single-node
+  OpenShift both operator replicas sit on the one node, so a `minAvailable: 1`
+  PDB deadlocked a voluntary node drain (first eviction succeeds, its
+  replacement cannot schedule, the second is denied forever). Leader election
+  already guarantees a single active reconciler; two replicas are kept for fast
+  failover.
+
+### Removed
+
+- Trimmed three unused verbs from the operator ClusterRole (least privilege):
+  `persistentvolumeclaims` get, `scansettings` delete, and `consoleplugins`
+  list/watch. None were exercised on any code path.
+
 ### Fixed
 
 - ComplianceScanStale alert is now cadence-aware: it fires when the last scan is
   older than 1.5x the configured scan interval instead of a hardcoded 36h, which
   false-paged continuously on any non-daily schedule (a weekly scan is
   legitimately days old). Adds a `baseline_security_scan_interval_seconds` metric.
+- A syntactically valid but never-firing schedule (an impossible calendar date
+  such as April 31) now reports `InvalidSchedule`/Degraded and keeps the
+  last-good cron, instead of silently disabling scanning while suppressing the
+  stale-scan alert (ADR-029).
+- ScanStorageReady no longer flaps: the pending-PVC names in the condition
+  message are sorted, so an unchanged set of stuck PVCs stops rewriting the
+  status (and requeuing) every reconcile.
+- Score history no longer accumulates duplicate points when a scan's
+  `endTimestamp` carries sub-second precision; it is truncated to the whole
+  second that status persistence uses.
+- Console: a compliance result with a non-string check name no longer crashes
+  the Results tab, and an unserializable remediation object renders a localized
+  placeholder instead of a raw sentinel.
 
 ## [0.5.6] - 2026-07-14
 
@@ -368,7 +398,8 @@ Initial packaged release.
   Remediations, Profiles).
 - OLM bundle + file-based catalog; string-enum spec; OpenShift-style conditions.
 
-[Unreleased]: https://github.com/maci0/openshift-baseline-security/compare/v0.5.6...HEAD
+[Unreleased]: https://github.com/maci0/openshift-baseline-security/compare/v0.5.7...HEAD
+[0.5.7]: https://github.com/maci0/openshift-baseline-security/compare/v0.5.6...v0.5.7
 [0.5.6]: https://github.com/maci0/openshift-baseline-security/compare/v0.5.5...v0.5.6
 [0.5.5]: https://github.com/maci0/openshift-baseline-security/compare/v0.5.0...v0.5.5
 [0.5.0]: https://github.com/maci0/openshift-baseline-security/compare/v0.4.0...v0.5.0

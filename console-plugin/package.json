@@ -1,6 +1,6 @@
 {
   "name": "baseline-security-console-plugin",
-  "version": "0.5.6",
+  "version": "0.5.7",
   "private": true,
   "license": "Apache-2.0",
   "engines": {
@@ -50,7 +50,7 @@
   },
   "consolePlugin": {
     "name": "baseline-security-console-plugin",
-    "version": "0.5.6",
+    "version": "0.5.7",
     "displayName": "Baseline Security",
     "description": "Cluster compliance baseline dashboard driven by the Compliance Operator.",
     "exposedModules": {
