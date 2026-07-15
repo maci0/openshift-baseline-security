@@ -36,6 +36,8 @@ func TestPublishMetrics(t *testing.T) {
 	// Spec profiles selected so last-scan freshness is published (scanning on).
 	cb.Spec.Profiles = []baselinev1alpha1.ProfileKey{"cis"}
 	cb.Spec.TailoredProfiles = []string{"custom"}
+	cb.Spec.Schedule = "0 * * * *" // hourly -> 3600s scan interval
+
 	cb.Status.Score = ptr.To(int32(87))
 	cb.Status.Profiles = []baselinev1alpha1.ProfileStatus{
 		{
@@ -73,6 +75,10 @@ func TestPublishMetrics(t *testing.T) {
 	}
 	if got := testutil.ToFloat64(newlyFailedCount); got != 2 {
 		t.Fatalf("newly failed count = %v, want 2", got)
+	}
+	// Scan interval gauge tracks the (hourly) schedule while scanning is on.
+	if got := testutil.ToFloat64(scanIntervalSecondsGauge); got != 3600 {
+		t.Fatalf("scan interval gauge = %v, want 3600", got)
 	}
 	// Condition gauges: True -> 1, False/absent -> 0.
 	setCond(cb, "Available", metav1.ConditionTrue, "AsExpected", "")
@@ -127,6 +133,11 @@ func TestPublishMetrics(t *testing.T) {
 	publishMetrics(cb)
 	if got := testutil.ToFloat64(lastScanTimestamp); got != 0 {
 		t.Fatalf("last scan timestamp while scanning disabled = %v, want 0", got)
+	}
+	// Interval gauge also drops to 0 so ComplianceScanStale cannot fire on a
+	// leftover schedule once scanning is off.
+	if got := testutil.ToFloat64(scanIntervalSecondsGauge); got != 0 {
+		t.Fatalf("scan interval gauge while scanning disabled = %v, want 0", got)
 	}
 	if got := testutil.ToFloat64(newlyFailedCount); got != 0 {
 		t.Fatalf("newly failed after clear = %v, want 0", got)
