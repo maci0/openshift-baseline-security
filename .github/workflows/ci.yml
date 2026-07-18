@@ -148,7 +148,10 @@ jobs:
       - run: go test -race ./...
         env:
           GOFLAGS: -mod=readonly
-      - run: make fuzz
+      # Retry once: the Go fuzz coordinator can flake with "context deadline
+      # exceeded" at the fuzztime boundary on a loaded runner (no crasher file
+      # written). A real finding fails both attempts and leaves testdata/fuzz/.
+      - run: make fuzz || make fuzz
 
   # Live-cluster e2e, on demand only. Provide a base64-encoded kubeconfig for a
   # cluster with the operator already installed as the E2E_KUBECONFIG secret;
