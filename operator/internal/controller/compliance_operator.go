@@ -138,7 +138,14 @@ func (r *ClusterBaselineReconciler) ensureComplianceOperatorGroup(ctx context.Co
 // a working Subscription on a non-confident guess, or a transient error on the
 // redhat-operators check would flap an OKD Subscription off community-operators.
 func (r *ClusterBaselineReconciler) resolveCatalogSource(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline) (source string, confident bool) {
-	if s := strings.TrimSpace(cb.Spec.ComplianceCatalogSource); s != "" {
+	// The 0.5.6 CRD defaulted this field to redhat-operators, so every CR
+	// written under that schema has the default persisted in spec; trusting it
+	// as an explicit choice would pin OKD clusters to a nonexistent catalog
+	// forever after upgrade. Treat the default value as "not set" and let
+	// detection decide: when redhat-operators exists detection returns it
+	// anyway, and when it is definitely absent a Subscription pinned to it
+	// could never resolve, so falling through only ever heals.
+	if s := strings.TrimSpace(cb.Spec.ComplianceCatalogSource); s != "" && s != baselinev1alpha1.DefaultComplianceCatalogSource {
 		return s, true
 	}
 	if present, definite := r.catalogSourcePresent(ctx, baselinev1alpha1.DefaultComplianceCatalogSource); present {

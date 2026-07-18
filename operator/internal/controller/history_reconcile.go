@@ -174,9 +174,10 @@ func (r *ClusterBaselineReconciler) recordHistory(
 				// CRDs absent mid-history (partial CO uninstall). CCR list may
 				// still have succeeded. Log only when a prior scan exists so a
 				// frozen LastScanTime is explainable without requeue spam when
-				// CO was never installed.
+				// CO was never installed. Rate-limited like the NotFound sibling:
+				// this branch also re-fires every reconcile until the CRD returns.
 				if cb.Status.LastScanTime != nil {
-					log.FromContext(ctx).Info("compliance suite CRDs absent; history not advanced",
+					r.logHistoryStall(ctx, "compliance suite CRDs absent; history not advanced",
 						"suite", name, "name", cb.Name)
 				}
 				return nil

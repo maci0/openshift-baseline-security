@@ -4,6 +4,7 @@ import (
 	"context"
 	_ "embed"
 	"maps"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -39,8 +40,10 @@ func (r *ClusterBaselineReconciler) ensureComplianceDashboard(ctx context.Contex
 		return
 	}
 	if err != nil && !apierrors.IsNotFound(err) {
-		log.FromContext(ctx).Error(err, "compliance dashboard configmap get failed",
-			"namespace", dashboardNS, "name", dashboardName)
+		// V(1) only: CreateOrUpdate below hits the same failure and reports it
+		// (rate-limited); a second Error line per cycle is pure noise.
+		log.FromContext(ctx).V(1).Info("compliance dashboard configmap get failed",
+			"namespace", dashboardNS, "name", dashboardName, "error", err)
 		// Fall through to CreateOrUpdate: a transient Get error must not skip
 		// repair when the object is wrong or missing.
 	}
@@ -61,10 +64,18 @@ func (r *ClusterBaselineReconciler) ensureComplianceDashboard(ctx context.Contex
 		return controllerutil.SetControllerReference(cb, cm, r.Scheme)
 	})
 	if err != nil {
-		// Error (not Info): best-effort cosmetic resource, but operators need to
-		// see RBAC/namespace failures when the dashboard never appears.
-		log.FromContext(ctx).Error(err, "compliance dashboard configmap not reconciled",
-			"namespace", dashboardNS, "name", dashboardName)
+		// Error (not Info) so operators see RBAC/namespace failures when the
+		// dashboard never appears, but rate-limited: this best-effort path runs
+		// every reconcile (15s while Progressing), and a persistent denial would
+		// otherwise emit an unbounded Error stream. V(1) keeps the full cadence.
+		logger := log.FromContext(ctx)
+		logger.V(1).Info("compliance dashboard configmap not reconciled",
+			"namespace", dashboardNS, "name", dashboardName, "error", err)
+		if r.lastDashboardErrLog.IsZero() || time.Since(r.lastDashboardErrLog) >= historyStallLogInterval {
+			r.lastDashboardErrLog = time.Now()
+			logger.Error(err, "compliance dashboard configmap not reconciled",
+				"namespace", dashboardNS, "name", dashboardName)
+		}
 	}
 }
 

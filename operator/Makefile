@@ -258,6 +258,9 @@ deploy: manifests
 	    "$$tmp/config/manager/manager.yaml" > "$$tmp/config/manager/manager.yaml.new" && \
 	mv "$$tmp/config/manager/manager.yaml.new" "$$tmp/config/manager/manager.yaml" && \
 	oc apply -k "$$tmp/config/default"
+	# apply -k never prunes: drop the static operator PDB a pre-0.5.7 deploy
+	# left behind (removed in ADR-028; it deadlocks SNO node drains).
+	oc -n openshift-baseline-security delete pdb baseline-security-operator --ignore-not-found=true
 
 .PHONY: undeploy
 undeploy:

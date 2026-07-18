@@ -1,6 +1,9 @@
 package controller
 
 import (
+	"encoding/json"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -22,6 +25,73 @@ func TestSetCondEmptyReasonDefaults(t *testing.T) {
 	d := meta.FindStatusCondition(cb.Status.Conditions, "Degraded")
 	if d == nil || d.Status != metav1.ConditionTrue || d.Reason != "ScanStorageNotReady" {
 		t.Fatalf("Degraded must be ScanStorageNotReady, got %+v", d)
+	}
+}
+
+// TestSanitizeStatusConditionsSizeBudget: per-entry clamps leave the LIST
+// unbounded, so enough foreign pattern-valid types with max-size messages would
+// push the object past the apiserver/etcd cap and freeze every Status().Update.
+// The aggregate budget must drop foreign overflow while always keeping the
+// operator-owned types, regardless of their position in the list.
+func TestSanitizeStatusConditionsSizeBudget(t *testing.T) {
+	cb := &baselinev1alpha1.ClusterBaseline{}
+	// Worst-case adversarial content: 4-byte runes (rune clamp vs byte size)
+	// and control chars (JSON escaping inflates each byte up to 6x).
+	big := strings.Repeat("\U0001F600", conditionMessageMaxLen)
+	inflate := strings.Repeat("\x01", conditionMessageMaxLen)
+	now := metav1.Now()
+	// Foreign conditions first with both payload shapes; operator types
+	// appended LAST with hostile messages, so the reservation (not list order)
+	// must save them AND their re-clamp must keep the reservation small.
+	for i := 0; i < 25; i++ {
+		cb.Status.Conditions = append(cb.Status.Conditions,
+			metav1.Condition{
+				Type: fmt.Sprintf("Custom%d", i), Status: metav1.ConditionTrue,
+				Reason: "HandEdited", Message: big, LastTransitionTime: now,
+			},
+			metav1.Condition{
+				Type: fmt.Sprintf("Inflate%d", i), Status: metav1.ConditionTrue,
+				Reason: "HandEdited", Message: inflate, LastTransitionTime: now,
+			})
+	}
+	for typ := range operatorConditionTypes {
+		cb.Status.Conditions = append(cb.Status.Conditions, metav1.Condition{
+			Type: typ, Status: metav1.ConditionTrue, Reason: "HandEdited",
+			Message: big, LastTransitionTime: now,
+		})
+	}
+	sanitizeStatusConditions(cb)
+	total := 0
+	for i := range cb.Status.Conditions {
+		b, err := json.Marshal(&cb.Status.Conditions[i])
+		if err != nil {
+			t.Fatal(err)
+		}
+		total += len(b)
+	}
+	// Reserved operator types are re-clamped to the 1024-byte condMessage cap,
+	// so ~4 KiB serialized each is generous slack on top of the budget.
+	if total > conditionsSizeBudget+len(operatorConditionTypes)*4096 {
+		t.Fatalf("conditions aggregate marshaled size %d exceeds budget", total)
+	}
+	for typ := range operatorConditionTypes {
+		if meta.FindStatusCondition(cb.Status.Conditions, typ) == nil {
+			t.Fatalf("operator condition %s dropped by the size budget", typ)
+		}
+	}
+	if len(cb.Status.Conditions) >= 50+len(operatorConditionTypes) {
+		t.Fatal("no foreign condition was dropped; budget did not engage")
+	}
+	// A small foreign set must pass through untouched (no churn in normal use).
+	small := &baselinev1alpha1.ClusterBaseline{Status: baselinev1alpha1.ClusterBaselineStatus{
+		Conditions: []metav1.Condition{
+			{Type: "Custom", Status: metav1.ConditionTrue, Reason: "R", Message: "m", LastTransitionTime: now},
+			{Type: "Available", Status: metav1.ConditionTrue, Reason: "AsExpected", LastTransitionTime: now},
+		},
+	}}
+	sanitizeStatusConditions(small)
+	if len(small.Status.Conditions) != 2 || small.Status.Conditions[0].Type != "Custom" {
+		t.Fatalf("small list churned: %+v", small.Status.Conditions)
 	}
 }
 

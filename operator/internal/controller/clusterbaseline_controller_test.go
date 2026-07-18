@@ -20,6 +20,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/utils/ptr"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
@@ -211,6 +212,11 @@ func TestResolveCatalogSource(t *testing.T) {
 		{"whitespace-only spec auto-detects OKD", "   ", []string{"community-operators"}, "community-operators"},
 		{"whitespace-only spec, neither: default", "\t\n", nil, "redhat-operators"},
 		{"neither: default", "", nil, "redhat-operators"},
+		// The 0.5.6 CRD persisted its redhat-operators default into every spec;
+		// it must be treated as unset so an upgraded OKD cluster still detects
+		// community-operators instead of pinning a nonexistent catalog.
+		{"persisted 0.5.6 default on OKD auto-detects", "redhat-operators", []string{"community-operators"}, "community-operators"},
+		{"persisted 0.5.6 default on OCP keeps redhat-operators", "redhat-operators", []string{"redhat-operators", "community-operators"}, "redhat-operators"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -2692,6 +2698,61 @@ func TestRecordHistoryEqualScanRefreshesProfileTrends(t *testing.T) {
 
 // New scan after a Flat -> SeverityWeighted flip must drop prior ring points so
 // charts never mix formulas, then write a single fresh snapshot under the new mode.
+// TestReconcilePersistsScoringModeStampThroughStatusUpdate drives the stamp
+// through the FULL Reconcile + Status().Update round trip. The status-update
+// response resets in-memory annotations to their stored values (the real
+// apiserver ignores metadata on /status and the client decodes the response
+// back into cb), so the persist guard must compare a snapshot taken BEFORE the
+// update; reading cb.Annotations afterwards compares old==old, the durable
+// stamp never advances, and every later scan wipes the history rings again.
+func TestReconcilePersistsScoringModeStampThroughStatusUpdate(t *testing.T) {
+	scheme := testScheme(t)
+	previous := time.Date(2026, 7, 8, 1, 0, 0, 0, time.UTC)
+	end := time.Date(2026, 7, 9, 1, 0, 0, 0, time.UTC)
+	prev := metav1.NewTime(previous)
+	cb := newCB("cis")
+	cb.Finalizers = []string{finalizerName}
+	cb.Annotations = map[string]string{historyScoringModeAnn: string(baselinev1alpha1.ScoringFlat)}
+	cb.Spec.Scoring.Mode = baselinev1alpha1.ScoringSeverityWeighted
+	cb.Status = baselinev1alpha1.ClusterBaselineStatus{
+		LastScanTime: &prev,
+		History:      []baselinev1alpha1.ScoreSnapshot{{Time: prev, Score: 90}},
+	}
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).
+			WithObjects(cb, completedSuite("baseline-cis", end), checkResult("p1", "baseline-cis", "PASS")).
+			WithStatusSubresource(&baselinev1alpha1.ClusterBaseline{}).Build(),
+		Scheme: scheme,
+	}
+	if _, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: "cluster"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	server := &baselinev1alpha1.ClusterBaseline{}
+	if err := r.Get(context.Background(), types.NamespacedName{Name: "cluster"}, server); err != nil {
+		t.Fatal(err)
+	}
+	if got := server.Annotations[historyScoringModeAnn]; got != string(baselinev1alpha1.ScoringSeverityWeighted) {
+		t.Fatalf("durable stamp = %q, want SeverityWeighted (guard must snapshot before Status().Update)", got)
+	}
+	if got := server.Status.History; len(got) != 1 {
+		t.Fatalf("history after mode-flip scan = %+v, want single fresh point", got)
+	}
+	// Second reconcile: stamp persisted, so history must NOT be cleared again.
+	if _, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: "cluster"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Get(context.Background(), types.NamespacedName{Name: "cluster"}, server); err != nil {
+		t.Fatal(err)
+	}
+	if got := server.Status.History; len(got) != 1 {
+		t.Fatalf("history after second reconcile = %+v, want unchanged single point", got)
+	}
+}
+
 func TestRecordHistoryNewScanClearsHistoryWhenScoringModeFlips(t *testing.T) {
 	scheme := testScheme(t)
 	previous := time.Date(2026, 7, 8, 1, 0, 0, 0, time.UTC)

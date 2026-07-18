@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"time"
@@ -26,7 +27,27 @@ const (
 	conditionReasonMaxLen  = 1024
 	conditionMessageMaxLen = 32768
 	conditionTypeMaxLen    = 316
+	// conditionsSizeBudget bounds the aggregate serialized size of
+	// status.conditions. Per-entry clamps alone leave the LIST unbounded: enough
+	// hand-written pattern-valid types with 32 KiB messages push the object past
+	// the ~1.5 MiB apiserver/etcd cap and permanently freeze Status().Update
+	// (same failure mode failureListsSizeBudget prevents for the failure lists;
+	// 768 KiB there + 256 KiB here leaves ample headroom for the rest). Entries
+	// are accounted at their actual JSON-marshaled size, so multi-byte runes and
+	// escape inflation cannot slip past the budget. The operator's own 7 types
+	// always fit: their messages are re-clamped to the 1024-byte condMessage cap
+	// the operator itself writes under, ~3 KiB serialized each worst case.
+	conditionsSizeBudget = 256 * 1024
 )
+
+// operatorConditionTypes are the condition types this operator writes. They are
+// always kept under conditionsSizeBudget; only foreign (hand-edited / other
+// controller) types are dropped when the budget is exceeded.
+var operatorConditionTypes = map[string]struct{}{
+	"Available": {}, "Progressing": {}, "Degraded": {},
+	"ComplianceOperatorReady": {}, "ScanConfigured": {},
+	"ScanStorageReady": {}, "ConsolePluginReady": {},
+}
 
 // failureListMax aliases the API constant so clamps stay CRD-aligned (ADR-013).
 const failureListMax = baselinev1alpha1.FailureListMax
@@ -113,6 +134,14 @@ func sanitizeStatusConditions(cb *baselinev1alpha1.ClusterBaseline) {
 			c.Reason = "Unknown"
 		}
 		c.Message = clampString(c.Message, conditionMessageMaxLen)
+		// Operator-owned types never legitimately exceed the condMessage byte
+		// cap the operator itself writes under; re-clamping here keeps the
+		// budget's reservation for them small even if hand-edited. Reconcile
+		// overwrites these with real content anyway; only an early-error path
+		// could otherwise carry a hand-edited 32 KiB message into the write.
+		if _, own := operatorConditionTypes[c.Type]; own {
+			c.Message = condMessage(c.Message)
+		}
 		if c.LastTransitionTime.IsZero() {
 			// Required date-time; zero fails OpenAPI format validation.
 			c.LastTransitionTime = metav1.Now()
@@ -126,7 +155,37 @@ func sanitizeStatusConditions(cb *baselinev1alpha1.ClusterBaseline) {
 		cb.Status.Conditions = nil
 		return
 	}
-	cb.Status.Conditions = out
+	// Aggregate-size budget: operator-owned types are reserved first, then
+	// foreign types keep their original order while the budget allows. Under
+	// normal operation everything fits and the list is unchanged.
+	condSize := func(c *metav1.Condition) int {
+		// Actual marshaled size: an additive estimate undercounts multi-byte
+		// runes and JSON escaping (control chars inflate up to 6x).
+		if b, err := json.Marshal(c); err == nil {
+			return len(b)
+		}
+		return len(c.Type) + len(c.Reason) + len(c.Message) + 128
+	}
+	used := 0
+	for i := range out {
+		if _, own := operatorConditionTypes[out[i].Type]; own {
+			used += condSize(&out[i])
+		}
+	}
+	kept := out[:0]
+	for i := range out {
+		if _, own := operatorConditionTypes[out[i].Type]; own {
+			kept = append(kept, out[i])
+			continue
+		}
+		s := condSize(&out[i])
+		if used+s > conditionsSizeBudget {
+			continue
+		}
+		used += s
+		kept = append(kept, out[i])
+	}
+	cb.Status.Conditions = kept
 }
 
 // sanitizeStatusProfiles clamps status.profiles to CRD MaxItems=16, drops rows

@@ -91,6 +91,13 @@ type ClusterBaselineReconciler struct {
 	// so a steady state logs once on transition (not every 1m reconcile) while a
 	// new posture still surfaces at default level. Same single-threaded safety.
 	lastPostureLogSig string
+	// goneLogged gates the CR-gone Info to the transition: the goneHeartbeat
+	// requeue re-enters the NotFound branch every minute for as long as the
+	// singleton stays deleted, which would otherwise log ~1440 lines/day.
+	goneLogged bool
+	// lastDashboardErrLog rate-limits the best-effort dashboard reconcile Error
+	// (runs every cycle; a persistent RBAC denial must not stream Errors).
+	lastDashboardErrLog time.Time
 }
 
 // +kubebuilder:rbac:groups=baselinesecurity.openshift.io,resources=clusterbaselines,verbs=get;list;watch;create;update;patch
@@ -161,7 +168,11 @@ func (r *ClusterBaselineReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		// CR gone: clear gauges so score/fail/batch alerts cannot stick on a
 		// deleted posture until the process restarts.
 		if client.IgnoreNotFound(err) == nil {
-			logger.Info("ClusterBaseline gone; cleared published metrics", "name", req.Name)
+			// Log the transition only; the heartbeat re-enters here every minute.
+			if !r.goneLogged {
+				logger.Info("ClusterBaseline gone; cleared published metrics", "name", req.Name)
+				r.goneLogged = true
+			}
 			clearPublishedMetrics()
 			// Re-enqueue so the freshness heartbeat keeps ticking while the operator
 			// is healthy but the singleton is gone (no watch event will fire on an
@@ -173,6 +184,8 @@ func (r *ClusterBaselineReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		logger.Error(err, "get ClusterBaseline failed", "name", req.Name)
 		return ctrl.Result{}, err
 	}
+	// CR exists again: re-arm the gone-transition log for the next deletion.
+	r.goneLogged = false
 
 	if !cb.DeletionTimestamp.IsZero() {
 		// Unpause any MCPs a live batch held. Finalizer removal + GC must not
@@ -222,11 +235,16 @@ func (r *ClusterBaselineReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		// Structured Error before return: controller-runtime also logs the error,
 		// but without the CR name or that Degraded was attempted.
 		logger.Error(err, "reconcile failed", "name", cb.Name)
+		// Snapshot BEFORE the status write: a real apiserver's /status response
+		// carries the STORED metadata, and the client decodes it back into cb,
+		// resetting the in-memory stamp to the old persisted value. Reading the
+		// annotation after the update would compare old==old and never persist.
+		stamped := cb.Annotations[historyScoringModeAnn]
 		if serr := r.Status().Update(ctx, cb); serr != nil {
 			// Error, not V(1): without this log the CR can look healthy while
 			// every reconcile fails and the Degraded condition never sticks.
 			logger.Error(serr, "status update after reconcile error failed", "name", cb.Name)
-		} else if cb.Annotations[historyScoringModeAnn] != preReconcileMode {
+		} else if stamped != preReconcileMode {
 			// The best-effort write above persisted any ring point recordHistory
 			// advanced under a just-flipped mode; keep the durable stamp aligned so
 			// a transient post-history error (e.g. checkScanStorage) cannot leave the
@@ -246,6 +264,12 @@ func (r *ClusterBaselineReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	// leave gauges ahead of the CR for a full requeue interval.
 	sanitizeStatusForUpdate(cb)
 	setRollupConditions(cb)
+	// Snapshot BEFORE the status write: the real /status response resets the
+	// in-memory annotations to the stored values (metadata changes are ignored
+	// by the status subresource), so a post-update read would never differ from
+	// preReconcileMode and the durable stamp would silently stop advancing,
+	// wiping history rings again on every completed scan after a mode flip.
+	stamped := cb.Annotations[historyScoringModeAnn]
 	if err := r.Status().Update(ctx, cb); err != nil {
 		logger.Error(err, "status update failed", "name", cb.Name)
 		return ctrl.Result{}, err
@@ -255,7 +279,7 @@ func (r *ClusterBaselineReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	// durable. Only when recordHistory advanced it this reconcile, so the no-scan
 	// window between a mode flip and the next scan keeps the stamp (and the
 	// historyScoringModeMismatch signal) behind, not prematurely ahead.
-	if cb.Annotations[historyScoringModeAnn] != preReconcileMode {
+	if stamped != preReconcileMode {
 		if err := r.persistHistoryScoringMode(ctx, cb); err != nil {
 			logger.Error(err, "persist history scoring-mode stamp failed", "name", cb.Name)
 			return ctrl.Result{}, err

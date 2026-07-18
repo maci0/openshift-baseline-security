@@ -150,8 +150,17 @@ jobs:
           GOFLAGS: -mod=readonly
       # Retry once: the Go fuzz coordinator can flake with "context deadline
       # exceeded" at the fuzztime boundary on a loaded runner (no crasher file
-      # written). A real finding fails both attempts and leaves testdata/fuzz/.
-      - run: make fuzz || make fuzz
+      # written). A deterministic finding fails both attempts; a flaky
+      # (order/timing-dependent) crasher could pass the replay, so also fail
+      # if attempt 1 recorded any new corpus file under testdata/fuzz.
+      - run: |
+          make fuzz || make fuzz
+          crashers=$(git status --porcelain -- '*/testdata/fuzz/')
+          if [ -n "$crashers" ]; then
+            echo "fuzz retry passed but a crasher was recorded:"; echo "$crashers"
+            git diff -- '*/testdata/fuzz/'; git status --porcelain -- '*/testdata/fuzz/' | awk '{print $2}' | xargs -r cat
+            exit 1
+          fi
 
   # Live-cluster e2e, on demand only. Provide a base64-encoded kubeconfig for a
   # cluster with the operator already installed as the E2E_KUBECONFIG secret;
