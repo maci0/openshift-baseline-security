@@ -422,6 +422,16 @@ const ResultsTab: React.FC<{
             </FlexItem>
           ))}
         </Flex>
+        {/* This flow runs with no detail modal open, where waiveError's other
+            render site lives; without this a failed removal is silent. */}
+        {waiveError && !selected && (
+          <Alert
+            variant="danger"
+            isInline
+            title={waiveError}
+            style={{ marginTop: 'var(--pf-t--global--spacer--sm)' }}
+          />
+        )}
       </Alert>
     ) : null;
 
@@ -559,6 +569,9 @@ const ResultsTab: React.FC<{
               onClick={(e) => {
                 returnFocusRef.current = e.currentTarget;
                 setWaiveSuccess(null);
+                // A stale error from the orphan-removal flow must not appear
+                // inside an unrelated check's waive form.
+                setWaiveError(null);
                 setSelected(obj);
               }}
               // Fixed-height virtualized rows: ellipsis + title tooltip so long

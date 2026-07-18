@@ -219,6 +219,9 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
       setCreating(false);
       setTpName('');
       setTpDisable('');
+      // Match closeCreateModal: the next open must be a clean form, not
+      // pre-filled with the previous base profile.
+      setTpExtends('ocp4-cis');
       setSuccess(t('Tailored profile created and bound.'));
     } catch (e) {
       const detail = errorMessage(e);

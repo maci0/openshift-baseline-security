@@ -284,19 +284,26 @@ const RemediationsTab: React.FC<{
     });
   };
 
-  const setApply = (rem: ComplianceRemediation, apply: boolean) =>
-    run(
+  const setApply = (rem: ComplianceRemediation, apply: boolean) => {
+    // Re-resolve from the live watch: the modal snapshots the row at click
+    // time, so after any concurrent write (operator status update, another
+    // admin) the snapshot's resourceVersion is stale and an in-modal retry
+    // would fail the optimistic-lock test forever. Same pattern as
+    // ResultsTab's selectedLive.
+    const live = owned.find((o) => o.metadata?.name === rem.metadata?.name) ?? rem;
+    return run(
       () =>
         k8sPatch({
           model: ComplianceRemediationModel,
-          resource: rem,
+          resource: live,
           data: [
-            ...resourceVersionTest(rem.metadata.resourceVersion),
+            ...resourceVersionTest(live.metadata.resourceVersion),
             { op: 'add', path: '/spec/apply', value: apply },
           ],
         }),
       t('Failed to update remediation.'),
     );
+  };
 
   const toggleAutoApply = async (checked: boolean): Promise<boolean> => {
     if (!baseline) return false;

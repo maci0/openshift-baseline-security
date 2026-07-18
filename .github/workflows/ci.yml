@@ -155,10 +155,18 @@ jobs:
       # if attempt 1 recorded any new corpus file under testdata/fuzz.
       - run: |
           make fuzz || make fuzz
-          crashers=$(git status --porcelain -- '*/testdata/fuzz/')
+          # :(glob) with ** is required: a plain '*/testdata/fuzz/' wildcard
+          # pathspec must fnmatch the ENTIRE path and so matches nothing.
+          crashers=$(git status --porcelain -uall -- ':(glob)**/testdata/fuzz/**')
           if [ -n "$crashers" ]; then
-            echo "fuzz retry passed but a crasher was recorded:"; echo "$crashers"
-            git diff -- '*/testdata/fuzz/'; git status --porcelain -- '*/testdata/fuzz/' | awk '{print $2}' | xargs -r cat
+            echo "fuzz retry passed but a crasher was recorded:"
+            echo "$crashers"
+            # Dump crasher bytes from the -uall list above (porcelain paths are
+            # repo-root-relative); the runner is ephemeral, the log is all we keep.
+            top=$(git rev-parse --show-toplevel)
+            echo "$crashers" | awk '{print $2}' | while read -r f; do
+              echo "--- $f"; cat "$top/$f" 2>/dev/null || true
+            done
             exit 1
           fi
 
