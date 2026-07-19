@@ -164,8 +164,9 @@ for every publish.
   minor releases; read [CHANGELOG.md](CHANGELOG.md) **Changed** / **Removed**
   and **Migration notes** before upgrading.
 - **Consumer contract**: versioning covers the `ClusterBaseline` user-facing
-  API, shipped metrics/alerts, the OLM `alpha` channel `replaces` edge, and
-  the console plugin surface. Scan-diff bookkeeping fields
+  API, shipped metrics/alerts, the OLM package on the `alpha` channel (each
+  bundle a standalone channel head; no `replaces` upgrade graph pre-release),
+  and the console plugin surface. Scan-diff bookkeeping fields
   (`status.previousFailures`, `diffBaseFailures`, `diffBaseScanTime`) are
   internal and may change in 0.x; details in [CHANGELOG.md](CHANGELOG.md).
 - **Supported host**: OpenShift 4.22 only (`com.redhat.openshift.versions: =v4.22`;

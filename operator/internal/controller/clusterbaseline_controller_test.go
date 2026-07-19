@@ -1783,6 +1783,33 @@ func checkResult(name, suite, status string) *unstructured.Unstructured {
 	return u
 }
 
+// TestAggregateStatusRawWaivedFailsClosed: WAIVED is the operator's SYNTHETIC
+// status, assigned only to a FAIL with an active spec.waivers entry. A raw CCR
+// claiming status WAIVED (tampered or a future CO status) must count as Error,
+// not buy an accepted-risk slot; the console folds the same token to ERROR.
+func TestAggregateStatusRawWaivedFailsClosed(t *testing.T) {
+	scheme := testScheme(t)
+	end := time.Date(2026, 7, 9, 1, 0, 0, 0, time.UTC)
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(
+			completedSuite("baseline-cis", end),
+			checkResult("p1", "baseline-cis", "PASS"),
+			checkResult("forged", "baseline-cis", "WAIVED"),
+		).Build(),
+		Scheme: scheme,
+	}
+	cb := &baselinev1alpha1.ClusterBaseline{
+		Spec: baselinev1alpha1.ClusterBaselineSpec{Profiles: []baselinev1alpha1.ProfileKey{"cis"}},
+	}
+	if err := r.aggregateStatus(context.Background(), cb); err != nil {
+		t.Fatal(err)
+	}
+	p := cb.Status.Profiles[0]
+	if p.Waived != 0 || p.Error != 1 {
+		t.Fatalf("counts = %+v, want waived=0 error=1 (raw WAIVED must fail closed)", p)
+	}
+}
+
 func TestAggregateStatus(t *testing.T) {
 	scheme := testScheme(t)
 	r := &ClusterBaselineReconciler{

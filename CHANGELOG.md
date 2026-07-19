@@ -23,8 +23,9 @@ it does not advertise compatibility with untested console majors.
   (score, conditions, profiles, tailoredProfiles, history, newlyFailed, fixed,
   remediationBatch, relatedObjects, scan times, complianceOperatorVersion);
   Prometheus metric and alert names shipped in a given release; OLM package
-  `baseline-security-operator` channel `alpha` and the `replaces` upgrade
-  edge; console plugin routes and extensions under Administration → Compliance.
+  `baseline-security-operator` channel `alpha` (each bundle a standalone
+  channel head; no `replaces` upgrade graph is maintained pre-release);
+  console plugin routes and extensions under Administration → Compliance.
 - **Out of contract (may change in 0.x without a major bump)**:
   `status.previousFailures`, `status.diffBaseFailures`,
   `status.diffBaseScanTime` (scan-diff bookkeeping; use newlyFailed/fixed);
@@ -40,6 +41,36 @@ git tag `vX.Y.Z` (never force-moved); the compare links in the footer below
 depend on those tags.
 
 ## [Unreleased]
+
+### Fixed
+
+- Switching `spec.scoring.mode` no longer wipes the score history on every
+  subsequent scan: the durable history scoring-mode stamp was read back from
+  the status-update response (which resets in-memory metadata), so it never
+  advanced and each completed scan re-entered the mode-mismatch clear path,
+  permanently capping `status.history` at one point.
+- `ComplianceScanStale` no longer false-fires on irregular cron cadences: the
+  `baseline_security_scan_interval_seconds` gauge now reports the largest gap
+  between consecutive fires (a weekday-only schedule reports the 72h weekend
+  gap, not the 24h midweek one).
+- A ComplianceCheckResult carrying a raw `WAIVED` status (tampered or a future
+  Compliance Operator status) now counts as Error instead of silently entering
+  the Waived bucket without a `spec.waivers` entry, matching the console.
+- `status.conditions` is now bounded in aggregate size (256 KiB, measured at
+  serialized size); hand-written oversize condition lists can no longer push
+  the object past the apiserver limit and freeze status updates.
+- Upgraded clusters whose ClusterBaseline was written under the 0.5.6 CRD no
+  longer stay pinned to the `redhat-operators` catalog on OKD: a spec value
+  equal to the old schema default falls through to catalog auto-detection.
+- `make deploy` upgrades now remove the pre-0.5.7 static operator
+  PodDisruptionBudget that `oc apply` never prunes (SNO drain deadlock).
+- Console: remediation Apply/Unapply confirmations patch the live object, so
+  a retry after a concurrent update no longer fails indefinitely on a stale
+  resourceVersion; orphan-waiver removal failures now surface an error where
+  the action was taken; the tailored-profile form resets fully on success.
+- Console plugin assets now ship explicit Cache-Control headers (immutable
+  hashed chunks, no-cache manifest), fixing a stale-manifest failure after
+  operator upgrades that broke the plugin until a hard refresh.
 
 ## [0.5.7] - 2026-07-15
 

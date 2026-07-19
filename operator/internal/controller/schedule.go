@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/robfig/cron/v3"
@@ -73,24 +74,61 @@ func nextScanTime(schedule string, now time.Time) *metav1.Time {
 	return &next
 }
 
-// scanIntervalSeconds returns the approximate seconds between consecutive scans
-// for the schedule (the gap between the next two fires after now), or 0 for an
-// invalid/degenerate schedule. Exact for fixed cadences (daily/weekly/hourly);
-// for calendar-variable schedules (e.g. monthly) it is the current gap, which
-// the ComplianceScanStale alert's margin absorbs. Lets that alert scale its
-// staleness threshold with the cadence instead of assuming a daily scan.
+// scanIntervalCache memoizes scanIntervalSeconds per normalized schedule: the
+// full-horizon walk below costs ~0.3s for a per-minute cron, too much for every
+// metrics publish but fine once per distinct schedule per process lifetime.
+// Guarded by a mutex for -race safety in tests; reconcile itself is
+// single-threaded. Cleared wholesale if it ever grows past a sanity bound.
+var (
+	scanIntervalMu    sync.Mutex
+	scanIntervalCache = map[string]float64{}
+)
+
+// scanIntervalSeconds returns the LARGEST gap between consecutive fires over
+// the next ~14 months, or 0 for an invalid/degenerate schedule. The maximum
+// (not the next) gap is what the ComplianceScanStale alert must scale by: a
+// weekday-only cron's next-two-fires gap is 24h midweek, but the true
+// Friday-to-Monday gap is 72h, and reporting 24h would false-page every
+// weekend at the 1.5x threshold. The walk covers the WHOLE horizon (no fire
+// cap): a dense-plus-sparse mix like "*/5 * * * 1-5" fires ~85k times before
+// its first weekend gap, so any small cap would silently under-report and
+// resurrect the false pages. For fixed cadences the max gap equals the only
+// gap, so daily/weekly/hourly stay exact; the horizon covers monthly and
+// yearly schedules plus one Feb-29 cycle irregularity.
 func scanIntervalSeconds(schedule string, now time.Time) float64 {
-	_, sched, err := normalizeAndParseSchedule(schedule)
+	norm, sched, err := normalizeAndParseSchedule(schedule)
 	if err != nil {
 		return 0
 	}
-	t1 := sched.Next(now.UTC())
-	if t1.IsZero() {
+	scanIntervalMu.Lock()
+	defer scanIntervalMu.Unlock()
+	if v, ok := scanIntervalCache[norm]; ok {
+		return v
+	}
+	prev := sched.Next(now.UTC())
+	if prev.IsZero() {
 		return 0
 	}
-	t2 := sched.Next(t1)
-	if t2.IsZero() {
-		return 0
+	horizon := prev.AddDate(1, 2, 0)
+	// ~620k iterations for a per-minute cron over 14 months; the hard cap only
+	// backstops a pathological parser edge, far above any real schedule.
+	var maxGap float64
+	for i := 0; i < 1_000_000; i++ {
+		next := sched.Next(prev)
+		if next.IsZero() {
+			break
+		}
+		if gap := next.Sub(prev).Seconds(); gap > maxGap {
+			maxGap = gap
+		}
+		prev = next
+		if prev.After(horizon) {
+			break
+		}
 	}
-	return t2.Sub(t1).Seconds()
+	if len(scanIntervalCache) > 100 {
+		clear(scanIntervalCache)
+	}
+	scanIntervalCache[norm] = maxGap
+	return maxGap
 }

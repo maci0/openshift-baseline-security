@@ -40,14 +40,14 @@ func (r *ClusterBaselineReconciler) aggregateStatus(ctx context.Context, cb *bas
 			return fmt.Errorf("building check-result suite selector: %w", err)
 		}
 		sel := labels.NewSelector().Add(*req)
-		// UnsafeDisableDeepCopy: the loop below is strictly read-only (reads
-		// status/labels/name/severity, appends only string names, never mutates
-		// item.Object nor retains an *item pointer past the iteration), so the
-		// cache can hand back shared pointers instead of deep-copying thousands
-		// of large CCRs (description/instructions/rationale) on every reconcile.
+		// Live apiserver LIST, not a cache read: unstructured objects bypass the
+		// manager cache (cmd/main.go keeps the client default Unstructured=false),
+		// so the label selector filters server-side and every reconcile pays one
+		// fresh List. Do NOT flip the client to cached-unstructured to "fix"
+		// this: MCPs/Subscriptions/Consoles are read via the same client with
+		// get-only RBAC, and their informers could never start (no list/watch).
 		if err := r.List(ctx, list, client.InNamespace(complianceNamespace),
-			client.MatchingLabelsSelector{Selector: sel},
-			client.UnsafeDisableDeepCopy); err != nil {
+			client.MatchingLabelsSelector{Selector: sel}); err != nil {
 			if meta.IsNoMatchError(err) {
 				// CRDs gone: do not leave a stale score/profile rollup on the CR.
 				// Info once when we actually clear data (not every requeue while
@@ -203,6 +203,13 @@ func (r *ClusterBaselineReconciler) aggregateStatus(ctx context.Context, cb *bas
 		// each reconcile. Wrong-type or missing status must not vanish from
 		// counts (tally default maps empty/unknown to ERROR).
 		status, _ := item.Object["status"].(string)
+		// WAIVED is OUR synthetic status, assigned below for waived FAILs only.
+		// A raw CCR claiming it (tampered object or a future CO status) must not
+		// buy an accepted-risk slot with no spec.waivers entry: fail closed to
+		// ERROR, matching the console's effectiveStatus fold for unknown tokens.
+		if status == "WAIVED" {
+			status = "ERROR"
+		}
 		// A check the Compliance Operator marks INCONSISTENT only because it does
 		// not apply on some nodes (PASS where it applies, NOT-APPLICABLE elsewhere)
 		// is benign; collapse it so it does not read as "review each". A real

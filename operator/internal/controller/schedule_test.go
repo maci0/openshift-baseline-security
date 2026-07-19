@@ -126,10 +126,19 @@ func TestScanIntervalSeconds(t *testing.T) {
 		{"0 1 * * *", 86400},  // daily
 		{"0 1 * * 0", 604800}, // weekly (Sunday)
 		{"0 * * * *", 3600},   // hourly
-		{"", 86400},           // empty -> default daily
-		{"not a cron", 0},     // invalid
-		{"@daily", 0},         // descriptor rejected (five-field only)
-		{"*/7 , 1 1 0", 0},    // parseable but never fires
+		// Irregular cadence: the reported interval must be the LARGEST gap
+		// (Fri->Mon 72h), not the midweek 24h one, or ComplianceScanStale
+		// false-pages every weekend at the 1.5x threshold.
+		{"0 1 * * 1-5", 259200},  // weekdays -> weekend gap
+		{"0 1 1,2 * *", 2592000}, // 1st+2nd monthly -> largest 2nd->1st gap (30d)
+		// Dense-plus-sparse mix: ~85k five-minute fires precede the first
+		// weekend gap, so a fire-capped walk would under-report 300s and
+		// false-page. Max gap is Fri 23:55 -> Mon 00:00 = 2d + 5m.
+		{"*/5 * * * 1-5", 173100},
+		{"", 86400},        // empty -> default daily
+		{"not a cron", 0},  // invalid
+		{"@daily", 0},      // descriptor rejected (five-field only)
+		{"*/7 , 1 1 0", 0}, // parseable but never fires
 	}
 	for _, c := range cases {
 		if got := scanIntervalSeconds(c.schedule, now); got != c.want {

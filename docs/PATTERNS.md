@@ -20,25 +20,21 @@ half shaped exactly like its standalone counterpart so a later split is
 
 **Release contract (this repo)**: pre-1.0 SemVer on a single `alpha` OLM channel;
 API is `v1alpha1`. Consumer notes live in root `CHANGELOG.md` (Keep a Changelog).
-Version strings must match across `operator/Makefile` (`VERSION` /
-`PREV_VERSION` for the OLM `replaces` edge), the CSV
+No OLM `replaces` upgrade graph is maintained pre-release: every bundle is a
+standalone channel head, and there is no `PREV_VERSION` anywhere (see the
+`operator/Makefile` header). Version strings must match across
+`operator/Makefile` (`VERSION`), the CSV
 (`bundle/manifests/baseline-security-operator.clusterserviceversion.yaml`
-name/version/replaces/containerImage/image tags), `console-plugin/package.json`
+name/version/containerImage/image tags), `console-plugin/package.json`
 (`version` and `consolePlugin.version`), `CHANGELOG.md` (`## [VERSION]`,
-`## [PREV_VERSION]`, `## [Unreleased]`, and the `[VERSION]:` /
-`[Unreleased]: ...vVERSION...HEAD` compare footers), root `README.md`
-(**Current release** and the upgrade-path chain ending at `VERSION`), and
-`operator/catalog/package.yaml` channel entry (name + replaces) when that
-file is present after `make catalog-build`.
-`make verify-versions` (also run from `make bundle` and CI) enforces that,
-including a `### Migration notes` heading under `## [VERSION]`. After tags
-exist, `REQUIRE_GIT_TAGS=1 make verify-versions` also requires immutable
-`vVERSION` / `vPREV_VERSION` so changelog compare URLs cannot ship broken.
+`## [Unreleased]`, and the `[VERSION]:` / `[Unreleased]: ...vVERSION...HEAD`
+compare footers), root `README.md` (**Current release**), and
+`operator/catalog/package.yaml` channel entry when that file is present after
+`make catalog-build`. `make verify-versions` (also run from `make bundle` and
+CI) enforces that single-version consistency.
 Never reuse a published CSV/image tag; OLM unpack caches make same-tag
 republishes serve stale content. Breaking behavior in 0.x is allowed in
-minor bumps but must be called out under Changed/Removed in the changelog
-with a migration note (`make verify-versions` also requires Migration notes
-under **[Unreleased]** when that section has Changed/Removed bullets).
+minor bumps but must be called out under Changed/Removed in the changelog.
 Only the latest 0.x line is supported (no backports); see CHANGELOG support
 window and root `SECURITY.md`. Console host peer range is
 `@console/pluginAPI: >=4.22.0-0 <4.23.0-0` (matches `=v4.22`).
@@ -94,7 +90,10 @@ rollups plus detail `ComplianceOperatorReady`, `ScanConfigured`,
 (suite-scoped to `baseline-<profile>` bindings), history capped at 30
 (oldest first), printer columns Score / Last Scan. Manager and plugin
 Deployments use 2 replicas with preferred pod anti-affinity; manager uses
-leader election.
+leader election and ships no PDB (ADR-028). On SingleReplica-topology
+clusters (SNO) the plugin collapses to 1 replica and its PDB is removed so
+the single node can drain; the manager keeps 2 replicas (leader election
+provides correctness, the second is warm standby).
 
 ## 5. Console dynamic plugin
 

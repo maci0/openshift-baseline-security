@@ -164,7 +164,9 @@ Responsibilities:
    no `spec.tailoredProfiles` prunes all owned bindings and clears the score
    (scanning disabled; CR and history retained).
 3. **Console plugin deployment** (G3): nginx Deployment (2 replicas with
-   preferred pod anti-affinity; TLS on 9443, service-serving-cert mounted at
+   preferred pod anti-affinity on multi-node topologies; collapses to 1
+   replica with no PDB on SingleReplica clusters so the single node can
+   drain; TLS on 9443, service-serving-cert mounted at
    `/var/serving-cert`), Service, `ConsolePlugin` CR in namespace
    `openshift-baseline-security` (created if missing), and registration on
    `consoles.operator.openshift.io/cluster` `spec.plugins` (removed on CR
@@ -341,9 +343,11 @@ and Red Hat-updated.
 ## 6. Security and RBAC
 
 - Operator ClusterRole: get/list/watch Compliance Operator check results,
-  scans, and suites; create/update/delete ScanSetting and ScanSettingBindings;
-  patch ComplianceRemediations; get/list/patch/watch MachineConfigPools
-  (batch pause/resume); create Namespace/OperatorGroup/Subscription (scoped
+  scans, and suites; create/update ScanSetting (owner-ref GC'd, never
+  deleted) and create/update/delete ScanSettingBindings;
+  patch ComplianceRemediations; get/patch MachineConfigPools by name only
+  (batch pause/resume; never listed or watched); create
+  Namespace/OperatorGroup/Subscription (scoped
   by resourceNames where OLM allows); patch
   `consoles.operator.openshift.io/cluster`; full access to the owned CRD;
   Deployment/Service in its own namespace (console plugin); ConfigMaps for the

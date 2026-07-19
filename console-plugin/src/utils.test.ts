@@ -2165,6 +2165,9 @@ describe('waivers', () => {
       'NOT-APPLICABLE',
       'INCONSISTENT',
       '',
+      // Raw WAIVED from a CCR is a forged/unknown token (WAIVED is synthetic,
+      // assigned only for FAIL+active waiver): folds to ERROR on both sides.
+      'WAIVED',
     ];
     for (let i = 0; i < 1500; i++) {
       const status = statuses[i % statuses.length];
@@ -2194,8 +2197,9 @@ describe('waivers', () => {
       expect(typeof got!).toBe('string');
       if (status === 'SKIP') {
         expect(got!).toBe('NOT-APPLICABLE');
-      } else if (status === '') {
-        // Empty status maps to ERROR (operator tally parity).
+      } else if (status === '' || status === 'WAIVED') {
+        // Empty and raw-WAIVED statuses map to ERROR (operator tally parity:
+        // the operator fails a forged raw WAIVED closed the same way).
         expect(got!).toBe('ERROR');
       } else if (status !== 'INCONSISTENT' && status !== 'FAIL') {
         expect(got!).toBe(status);
