@@ -42,6 +42,8 @@ depend on those tags.
 
 ## [Unreleased]
 
+## [0.5.8] - 2026-07-20
+
 ### Fixed
 
 - Switching `spec.scoring.mode` no longer wipes the score history on every
@@ -429,7 +431,8 @@ Initial packaged release.
   Remediations, Profiles).
 - OLM bundle + file-based catalog; string-enum spec; OpenShift-style conditions.
 
-[Unreleased]: https://github.com/maci0/openshift-baseline-security/compare/v0.5.7...HEAD
+[Unreleased]: https://github.com/maci0/openshift-baseline-security/compare/v0.5.8...HEAD
+[0.5.8]: https://github.com/maci0/openshift-baseline-security/compare/v0.5.7...v0.5.8
 [0.5.7]: https://github.com/maci0/openshift-baseline-security/compare/v0.5.6...v0.5.7
 [0.5.6]: https://github.com/maci0/openshift-baseline-security/compare/v0.5.5...v0.5.6
 [0.5.5]: https://github.com/maci0/openshift-baseline-security/compare/v0.5.0...v0.5.5
