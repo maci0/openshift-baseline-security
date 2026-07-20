@@ -29,7 +29,7 @@ RUN --network=none yarn build
 # Image-equivalent layout (document root /opt/app-root/src) with TLS only on 9443.
 # nginx.conf is checked into the repo (no brittle sed against the base image).
 # ubi9/nginx-120
-FROM registry.access.redhat.com/ubi9/nginx-120@sha256:74a8728c8d4611de1090d09e9f8af79993ab6a2143eccd8fa14abaf7c7dc837d
+FROM registry.access.redhat.com/ubi9/nginx-120@sha256:2f3271f0fafbe12cc80843b94d2f1b36d75419f70f3f4ced69218765b106bde6
 ARG SOURCE_DATE_EPOCH=0
 # Runtime UID owns static assets and nginx.conf (read-only rootfs still applies
 # in the Deployment; ownership matches USER so the process can open its files).
