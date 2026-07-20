@@ -90,9 +90,10 @@ var (
 // weekday-only cron's next-two-fires gap is 24h midweek, but the true
 // Friday-to-Monday gap is 72h, and reporting 24h would false-page every
 // weekend at the 1.5x threshold. The walk covers the WHOLE horizon (no fire
-// cap): a dense-plus-sparse mix like "*/5 * * * 1-5" fires ~85k times before
-// its first weekend gap, so any small cap would silently under-report and
-// resurrect the false pages. For fixed cadences the max gap equals the only
+// cap): a dense-plus-sparse mix like "*/5 * * * 1-5" fires ~1.4k times before
+// its first weekend gap (~88k over the horizon), so any small cap would
+// silently under-report and resurrect the false pages. For fixed cadences
+// the max gap equals the only
 // gap, so daily/weekly/hourly stay exact; the horizon covers monthly and
 // yearly schedules plus one Feb-29 cycle irregularity.
 func scanIntervalSeconds(schedule string, now time.Time) float64 {
