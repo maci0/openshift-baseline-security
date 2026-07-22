@@ -96,9 +96,14 @@ jobs:
         run: |
           set -euo pipefail
           out=""
+          # --exclude immutable: the console dynamic-plugin-sdk pins immutable
+          # ^3.8.3 to match the console host's shared (module-federated) copy;
+          # the plugin does not bundle it, and forcing the 4.3.9 fix would break
+          # runtime compat with the 4.22 host. Not ours to bump; re-audit if the
+          # SDK moves off immutable 3.x.
           for attempt in 1 2 3; do
             set +e
-            out=$(yarn npm audit --all --recursive 2>&1)
+            out=$(yarn npm audit --all --recursive --exclude immutable 2>&1)
             rc=$?
             set -e
             printf '%s\n' "$out"
