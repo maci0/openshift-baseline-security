@@ -126,23 +126,12 @@ Then install "Baseline Security" from OperatorHub into the
 `ClusterBaseline/cluster` with the CIS profile and starts scanning; opt out
 with `BASELINE_SECURITY_SKIP_DEFAULT_CR=true` on the CSV deployment.
 
-Metrics: the OLM bundle ships ServiceMonitor, PrometheusRule, and a metrics
-scrape ServiceAccount bound to ClusterRole `baseline-security-metrics-reader`
-(`GET /metrics`). Non-OLM `make deploy` applies the same objects via
-`operator/config/default` (includes `config/prometheus/`). The install
-namespace is openshift-* (platform-reserved), so it carries the
-`openshift.io/cluster-monitoring: "true"` label and platform Prometheus scrapes
-it; user-workload monitoring never scrapes openshift-* namespaces. Monitoring
-CRDs are required on the cluster (present on OpenShift).
-
-Deleting the `ClusterBaseline` (or uninstalling this operator) does **not**
-remove the Compliance Operator Subscription; CO is treated as a shared
-cluster component. The console plugin and owned ScanSetting/bindings are
-cleaned up via owner references and the finalizer.
-
-Never reuse bundle/catalog image tags between pushes; OLM and kubelet caches
-will serve the stale content. Bump the version (CSV, images, catalog entry)
-for every publish.
+The bundle ships the metrics ServiceMonitor / PrometheusRule / dashboard
+(scraped by platform monitoring); see
+[docs/OBSERVABILITY.md](docs/OBSERVABILITY.md). Deleting the `ClusterBaseline`
+or uninstalling this operator does **not** remove the shared Compliance
+Operator; owned resources are cleaned up via owner references and the
+finalizer.
 
 ## Install (in-cluster build, no external registry)
 
