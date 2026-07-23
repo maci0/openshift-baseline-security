@@ -42,6 +42,26 @@ depend on those tags.
 
 ## [Unreleased]
 
+## [0.5.11] - 2026-07-23
+
+### Added
+
+- Console: the "New tailored profile" form now uses selections instead of
+  free text: a base-profile dropdown, a filterable disable-rules picker (from
+  the base profile's rules), and an enable-extra-rules picker over the full
+  Compliance Operator rule catalog.
+- Console: existing bound tailored profiles can be edited (base profile and
+  enable/disable rule sets) from an Edit action on each card.
+
+### Fixed
+
+- Console Overview: per-benchmark score cards bottom-align their trend charts,
+  the compliance-score donut is centered (no empty gap), and the score-trend
+  x-axis label no longer clips at the card edge.
+- Console: a create retry after a transient bind failure now correctly adopts
+  a tailored profile that has enable rules (the AlreadyExists match previously
+  ignored enableRules).
+
 ## [0.5.10] - 2026-07-23
 
 ### Fixed
@@ -462,7 +482,8 @@ Initial packaged release.
   Remediations, Profiles).
 - OLM bundle + file-based catalog; string-enum spec; OpenShift-style conditions.
 
-[Unreleased]: https://github.com/maci0/openshift-baseline-security/compare/v0.5.10...HEAD
+[Unreleased]: https://github.com/maci0/openshift-baseline-security/compare/v0.5.11...HEAD
+[0.5.11]: https://github.com/maci0/openshift-baseline-security/compare/v0.5.10...v0.5.11
 [0.5.10]: https://github.com/maci0/openshift-baseline-security/compare/v0.5.9...v0.5.10
 [0.5.9]: https://github.com/maci0/openshift-baseline-security/compare/v0.5.8...v0.5.9
 [0.5.8]: https://github.com/maci0/openshift-baseline-security/compare/v0.5.7...v0.5.8
