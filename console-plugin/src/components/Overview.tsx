@@ -490,7 +490,10 @@ const OverallTrendChart = React.memo<{
           animate={false}
           height={200}
           width={300}
-          padding={{ top: 10, bottom: 40, left: 40, right: 20 }}
+          // right: the last date tick is centered on the final point at the
+          // plot edge, so it needs half a label of room or it clips at the card
+          // edge (the SVG scales to the card width, magnifying the overflow).
+          padding={{ top: 10, bottom: 40, left: 40, right: 45 }}
           domain={{ y: [0, 100] }}
           // Time scale so ticks are spaced by date (a few, deduplicated),
           // not one categorical tick per snapshot with repeated labels.
@@ -959,7 +962,18 @@ const Overview: React.FC<{
       <Gallery hasGutter minWidths={{ default: '300px' }}>
         <Card>
           <CardTitle>{t('Compliance score')}</CardTitle>
-          <CardBody style={{ height: 260 }}>
+          {/* Center the donut: the card stretches to the taller Details card in
+              the row, so a top-anchored fixed-height donut leaves a big empty
+              gap below. minHeight keeps the donut readable; flex-center balances
+              any extra height. */}
+          <CardBody
+            style={{
+              minHeight: 260,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
             <CompositionDonut
               score={score}
               totalChecks={totalChecks}
