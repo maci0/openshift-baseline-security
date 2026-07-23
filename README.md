@@ -82,7 +82,7 @@ Playwright suite, `docs/screenshots/`).
 Overview with a built-in and a tailored profile: composition donut, score
 trend, next scan, per-profile score cards.
 
-![Compliance overview](docs/screenshots/overview-tailored.png)
+![Compliance overview](docs/screenshots/overview.png)
 
 Filterable check results with a detail modal that links to the raw resource:
 
