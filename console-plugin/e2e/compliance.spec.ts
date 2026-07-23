@@ -123,6 +123,12 @@ test.describe('Baseline Security console plugin', () => {
     // Base profile is a selection (combobox); the rules picker rendered.
     await expect(dialog.getByText('Base profile', { exact: true })).toBeVisible();
     await expect(dialog.getByRole('combobox')).toBeVisible();
+    // Enable-extra-rules picker: searching the catalog surfaces a candidate.
+    await expect(dialog.getByText('Enable extra rules', { exact: true })).toBeVisible();
+    await dialog.getByPlaceholder('Search the rule catalog to add rules').fill('ocp4-');
+    await expect(
+      dialog.getByRole('checkbox', { name: /^ocp4-/ }).first(),
+    ).toBeVisible();
     await expect(dialog.getByRole('button', { name: 'Save' })).toBeVisible();
     await shot(page, 'tailored-edit');
     // Cancel without saving (do not mutate the cluster).
