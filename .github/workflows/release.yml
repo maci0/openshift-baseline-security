@@ -1,0 +1,97 @@
+name: release
+
+# Publish the operator, console-plugin, OLM bundle, and catalog images to
+# quay.io on a version tag. The CSV/Makefile already reference
+# quay.io/openshift-baseline-security/*, so a tag push is all it takes to make
+# an OLM-installable release the community can pull. amd64 only for now
+# (OpenShift's primary arch); add QEMU + buildx platforms when arm64 is needed.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to build/push (e.g. 0.5.8), for manual re-publish'
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      REGISTRY: quay.io/openshift-baseline-security
+      # Classic docker driver (build then push, image lands in the local store).
+      # Drop the buildx-only --provenance/--sbom from the Makefile default; the
+      # release does not need reproducible-digest parity with the CI images job.
+      # ?= in the Makefile defers to this exported value.
+      DOCKER_BUILD_FLAGS: --pull --build-arg SOURCE_DATE_EPOCH=0
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      # Version from the tag (strip leading v) or the manual input; must match
+      # the Makefile VERSION so a release never ships images tagged differently
+      # from the CSV's own image references.
+      - name: resolve and verify version
+        run: |
+          set -euo pipefail
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            ver="${{ github.event.inputs.version }}"
+          else
+            ver="${GITHUB_REF_NAME#v}"
+          fi
+          mk=$(sed -n 's/^VERSION ?= //p' operator/Makefile | head -1)
+          if [ "$ver" != "$mk" ]; then
+            echo "tag/input version ($ver) != operator/Makefile VERSION ($mk)" >&2
+            exit 1
+          fi
+          echo "VERSION=$ver" >> "$GITHUB_ENV"
+
+      - uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.4.0
+        with:
+          registry: quay.io
+          username: ${{ secrets.QUAY_USERNAME }}
+          password: ${{ secrets.QUAY_TOKEN }}
+
+      # push_tags builds VERSION then retags + pushes :latest as a convenience
+      # pointer. :VERSION is the immutable one the CSV pins.
+      - name: operator image
+        run: |
+          set -euo pipefail
+          make -C operator docker-build docker-push IMG="$REGISTRY/baseline-security-operator:$VERSION"
+          docker tag "$REGISTRY/baseline-security-operator:$VERSION" "$REGISTRY/baseline-security-operator:latest"
+          docker push "$REGISTRY/baseline-security-operator:latest"
+
+      - name: console-plugin image
+        run: |
+          set -euo pipefail
+          img="$REGISTRY/baseline-security-console-plugin:$VERSION"
+          docker build $DOCKER_BUILD_FLAGS -f console-plugin/Dockerfile -t "$img" console-plugin
+          docker push "$img"
+          docker tag "$img" "$REGISTRY/baseline-security-console-plugin:latest"
+          docker push "$REGISTRY/baseline-security-console-plugin:latest"
+
+      - name: bundle image
+        run: |
+          set -euo pipefail
+          make -C operator bundle-build bundle-push BUNDLE_IMG="$REGISTRY/baseline-security-operator-bundle:$VERSION"
+          docker tag "$REGISTRY/baseline-security-operator-bundle:$VERSION" "$REGISTRY/baseline-security-operator-bundle:latest"
+          docker push "$REGISTRY/baseline-security-operator-bundle:latest"
+
+      # Catalog references the bundle pullspec, so build it after the bundle push.
+      - name: catalog image
+        run: |
+          set -euo pipefail
+          make -C operator catalog-build catalog-push \
+            BUNDLE_IMG="$REGISTRY/baseline-security-operator-bundle:$VERSION" \
+            CATALOG_IMG="$REGISTRY/baseline-security-operator-catalog:$VERSION"
+          docker tag "$REGISTRY/baseline-security-operator-catalog:$VERSION" "$REGISTRY/baseline-security-operator-catalog:latest"
+          docker push "$REGISTRY/baseline-security-operator-catalog:latest"
