@@ -526,7 +526,10 @@ const MiniTrend = React.memo<{ history?: ScoreSnapshot[] }>(({ history }) => {
   const first = chartData[0].y;
   const last = chartData[chartData.length - 1].y;
   return (
-    <div style={{ height: 40, marginTop: 'var(--pf-t--global--spacer--sm)' }}>
+    // marginTop:auto bottom-aligns the sparkline within a flex-column CardBody,
+    // so charts line up across cards whose stat-row counts differ (a card with
+    // an extra Inconsistent/Waived row would otherwise sit its chart lower).
+    <div style={{ height: 40, marginTop: 'auto', paddingTop: 'var(--pf-t--global--spacer--sm)' }}>
       <Chart
         ariaTitle={t('Score trend')}
         ariaDesc={t('Score moved from {{from}} to {{to}} over {{scans}} scans.', {
@@ -1121,7 +1124,7 @@ const Overview: React.FC<{
               >
                 <CardTitle>{t(profileTitle(p.key))}</CardTitle>
               </CardHeader>
-              <CardBody>
+              <CardBody style={{ display: 'flex', flexDirection: 'column' }}>
                 <ProfileCounts counts={p} filterKey={p.key} />
                 <MiniTrend history={p.history} />
               </CardBody>
@@ -1145,7 +1148,7 @@ const Overview: React.FC<{
                   {tp.name} <Label isCompact color="blue">{t('Tailored')}</Label>
                 </CardTitle>
               </CardHeader>
-              <CardBody>
+              <CardBody style={{ display: 'flex', flexDirection: 'column' }}>
                 <ProfileCounts counts={tp} filterKey={`tp-${tp.name}`} />
                 <MiniTrend history={tp.history} />
               </CardBody>

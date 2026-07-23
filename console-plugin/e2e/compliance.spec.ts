@@ -21,6 +21,11 @@ test.describe('Baseline Security console plugin', () => {
     await expect(
       page.getByText(/No changes since the last scan|No previous scan to compare yet|Newly failing/),
     ).toBeVisible();
+    // Tall viewport so the whole page (incl. the per-benchmark cards, which the
+    // console renders in an inner-scrolling area fullPage cannot reach) fits in
+    // one shot. Wait for a benchmark card's score chip so the cards have laid out.
+    await page.setViewportSize({ width: 1600, height: 1500 });
+    await expect(page.getByText('CIS', { exact: true }).first()).toBeVisible();
     await shot(page, 'overview');
   });
 
