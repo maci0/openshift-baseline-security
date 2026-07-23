@@ -4,6 +4,7 @@ import {
   k8sCreate,
   k8sGet,
   k8sPatch,
+  k8sUpdate,
   useAccessReview,
   useK8sWatchResource,
 } from '@openshift-console/dynamic-plugin-sdk';
@@ -52,6 +53,7 @@ import {
   profileTitle,
   TAILORED_PROFILE_MAX_ITEMS,
   TailoredProfileModel,
+  TailoredProfileResource,
 } from '../models';
 import { formatCount } from '../dates';
 import { errorMessage, isAlreadyExists } from '../errors';
@@ -91,6 +93,11 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
     namespace: COMPLIANCE_NAMESPACE,
   });
   const [creating, setCreating] = React.useState(false);
+  // The existing TailoredProfile being edited (fetched object, for the update),
+  // or null when the form is in create mode. Reuses the create modal.
+  const [editing, setEditing] = React.useState<{ name: string; obj: TailoredProfileResource } | null>(
+    null,
+  );
   // Name of the tailored profile pending unbind confirmation (null when closed).
   const [unbinding, setUnbinding] = React.useState<string | null>(null);
   // Built-in profile key pending "disable last / stop scanning" confirmation.
@@ -153,6 +160,34 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
     }
   }, [creating]);
 
+  // Open the shared modal in edit mode: fetch the TailoredProfile and pre-fill
+  // the base profile and disabled rules from its spec.
+  const openEdit = async (name: string, trigger: HTMLElement | null) => {
+    if (pendingRef.current) return;
+    setError(null);
+    setSuccess(null);
+    try {
+      const obj = (await k8sGet({
+        model: TailoredProfileModel,
+        name,
+        ns: COMPLIANCE_NAMESPACE,
+      })) as TailoredProfileResource;
+      setEditing({ name, obj });
+      setTpName(name);
+      setTpExtends(obj.spec?.extends || 'ocp4-cis');
+      setTpDisable(
+        (obj.spec?.disableRules ?? [])
+          .map((r) => r?.name)
+          .filter((n): n is string => typeof n === 'string' && n.length > 0),
+      );
+      setRuleFilter('');
+      returnFocusRef.current = trigger;
+      setCreating(true);
+    } catch (e) {
+      setError(errorMessage(e) ?? t('Failed to load tailored profile.'));
+    }
+  };
+
   // Restore focus to the control that opened unbind / disable-last confirms.
   React.useEffect(() => {
     if (anyConfirmModalOpen) {
@@ -199,13 +234,45 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
     pendingRef.current = true;
     setPending(true);
     setError(null);
+    // Selected rule names; keep only valid ones (manifest also filters).
+    const disable = tpDisable.filter((s) => isValidK8sName(s));
+
+    // Edit mode: the profile is already created and bound, so just update its
+    // spec (base + disabled rules) on the fetched object (preserves rv via
+    // k8sUpdate). No re-bind needed.
+    if (editing) {
+      try {
+        const rule = (n: string) => ({ name: n, rationale: 'set via console' });
+        const next: TailoredProfileResource = {
+          ...editing.obj,
+          spec: {
+            ...(editing.obj.spec ?? {}),
+            extends: extendsBase,
+            disableRules: disable.length ? disable.map(rule) : undefined,
+          },
+        };
+        await k8sUpdate({ model: TailoredProfileModel, data: next });
+        setCreating(false);
+        setEditing(null);
+        setTpName('');
+        setTpDisable([]);
+        setRuleFilter('');
+        setTpExtends('ocp4-cis');
+        setSuccess(t('Tailored profile updated.'));
+      } catch (e) {
+        setError(errorMessage(e) ?? t('Failed to update tailored profile.'));
+      } finally {
+        pendingRef.current = false;
+        setPending(false);
+      }
+      return;
+    }
+
     // Two steps: create the TailoredProfile, then bind it into spec. Track which
     // step we reached so a bind failure does not read as "nothing happened" and
     // an AlreadyExists on retry is treated as the create having succeeded.
     let created = false;
     try {
-      // Selected rule names; keep only valid ones (manifest also filters).
-      const disable = tpDisable.filter((s) => isValidK8sName(s));
       try {
         await k8sCreate({
           model: TailoredProfileModel,
@@ -288,6 +355,7 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
   const closeCreateModal = () => {
     if (pendingRef.current) return;
     setCreating(false);
+    setEditing(null);
     setTpName('');
     setTpDisable([]);
     setRuleFilter('');
@@ -493,7 +561,10 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
         onClose={closeCreateModal}
         aria-labelledby="new-tp-title"
       >
-        <ModalHeader title={t('New tailored profile')} labelId="new-tp-title" />
+        <ModalHeader
+          title={editing ? t('Edit tailored profile') : t('New tailored profile')}
+          labelId="new-tp-title"
+        />
         <ModalBody>
           {error && (
             <Alert
@@ -510,6 +581,8 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
               id="tp-name"
               value={tpName}
               onChange={(_e, v) => setTpName(v)}
+              // A TailoredProfile cannot be renamed; lock the name when editing.
+              readOnlyVariant={editing ? 'default' : undefined}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') {
                   e.preventDefault();
@@ -643,7 +716,7 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
             isLoading={pending}
             onClick={() => void createTailored()}
           >
-            {t('Create and bind')}
+            {editing ? t('Save') : t('Create and bind')}
           </Button>
           <Button variant="link" isDisabled={pending} onClick={closeCreateModal}>
             {t('Cancel')}
@@ -791,20 +864,35 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
                   actions={{
                     actions: withDisabledTip(
                       editDisabledReason,
-                      <Button
-                        variant="link"
-                        isInline
-                        isDisabled={editDisabled}
-                        aria-label={t('Unbind tailored profile {{name}}', { name })}
-                        onClick={(e) => {
-                          returnFocusRef.current = e.currentTarget;
-                          setError(null);
-                          setSuccess(null);
-                          setUnbinding(name);
-                        }}
-                      >
-                        {t('Unbind')}
-                      </Button>,
+                      <Split hasGutter>
+                        <SplitItem>
+                          <Button
+                            variant="link"
+                            isInline
+                            isDisabled={editDisabled}
+                            aria-label={t('Edit tailored profile {{name}}', { name })}
+                            onClick={(e) => void openEdit(name, e.currentTarget)}
+                          >
+                            {t('Edit')}
+                          </Button>
+                        </SplitItem>
+                        <SplitItem>
+                          <Button
+                            variant="link"
+                            isInline
+                            isDisabled={editDisabled}
+                            aria-label={t('Unbind tailored profile {{name}}', { name })}
+                            onClick={(e) => {
+                              returnFocusRef.current = e.currentTarget;
+                              setError(null);
+                              setSuccess(null);
+                              setUnbinding(name);
+                            }}
+                          >
+                            {t('Unbind')}
+                          </Button>
+                        </SplitItem>
+                      </Split>,
                     ),
                     hasNoOffset: true,
                   }}

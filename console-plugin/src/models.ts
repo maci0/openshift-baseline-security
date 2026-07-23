@@ -141,6 +141,19 @@ export type ComplianceProfile = {
   rules?: string[];
 };
 
+// Compliance Operator TailoredProfile (subset used for editing): the base it
+// extends and the disable/enable rule lists ({name, rationale}).
+export type TailoredProfileResource = {
+  apiVersion?: string;
+  kind?: string;
+  metadata?: { name?: string; namespace?: string; resourceVersion?: string };
+  spec?: {
+    extends?: string;
+    disableRules?: { name?: string; rationale?: string }[];
+    enableRules?: { name?: string; rationale?: string }[];
+  };
+};
+
 export type CheckStatus =
   | 'PASS'
   | 'FAIL'

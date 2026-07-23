@@ -282,5 +282,11 @@
   "Filter rules": "Filter rules",
   "No rules match the filter.": "No rules match the filter.",
   "Optional. {{count}} rule selected to disable in the base profile._one": "Optional. {{formattedCount}} rule selected to disable in the base profile.",
-  "Optional. {{count}} rule selected to disable in the base profile._other": "Optional. {{formattedCount}} rules selected to disable in the base profile."
+  "Optional. {{count}} rule selected to disable in the base profile._other": "Optional. {{formattedCount}} rules selected to disable in the base profile.",
+  "Save": "Save",
+  "Edit tailored profile": "Edit tailored profile",
+  "Edit tailored profile {{name}}": "Edit tailored profile {{name}}",
+  "Tailored profile updated.": "Tailored profile updated.",
+  "Failed to update tailored profile.": "Failed to update tailored profile.",
+  "Failed to load tailored profile.": "Failed to load tailored profile."
 }
