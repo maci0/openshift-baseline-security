@@ -15,9 +15,7 @@ not part of the published 0.5.9 CSV/image tags until the next version bump
 
 ## Features
 
-Feature list describes the tree on `main` (published **Current release** plus
-anything still under CHANGELOG **[Unreleased]** until the next version cut).
-Install from published OLM image/CSV tags for only the released surface.
+Describes `main`; install from published OLM tags for only the released surface.
 
 - **Zero-config baseline**: installing the operator scans the cluster against
   CIS on a daily schedule; no YAML required.
@@ -41,21 +39,9 @@ Install from published OLM image/CSV tags for only the released surface.
   object view, and an auto-apply switch.
 - **Status & conditions**: OpenShift-style Available / Progressing / Degraded
   rollups, per-profile counts, score history, `relatedObjects`.
-- **Observability**: Prometheus metrics
-  (`baseline_security_compliance_score`, `baseline_security_checks`,
-  `baseline_security_status_observed_timestamp_seconds` for HA scrape
-  selection, `baseline_security_remediation_batch_active`,
-  `baseline_security_remediation_batch_started_timestamp_seconds` for
-  MCP-paused batch age, `baseline_security_last_scan_timestamp_seconds`,
-  `baseline_security_scan_interval_seconds` (cadence for the stale-scan alert),
-  `baseline_security_newly_failed`,
-  `baseline_security_condition` for Available/Progressing/Degraded) with
-  PrometheusRule alerts (`ComplianceScoreLow`, `ComplianceChecksFailing`,
-  `ComplianceChecksInError`, `ComplianceChecksInconsistent`,
-  `ComplianceStatusStale`, `ComplianceScanStale`, `ComplianceRegressions`,
-  `RemediationBatchStuck`, `ClusterBaselineDegraded`);
-  native Observe →
-  Dashboards ConfigMap scraped by cluster (platform) monitoring.
+- **Observability**: Prometheus metrics, PrometheusRule alerts, and a native
+  Observe → Dashboards score trend, scraped by platform monitoring. Reference:
+  [docs/OBSERVABILITY.md](docs/OBSERVABILITY.md).
 - **Support**: `operator/hack/must-gather.sh` collects operator + compliance state.
 
 ## Layout
@@ -67,6 +53,7 @@ Install from published OLM image/CSV tags for only the released surface.
 - `docs/PATTERNS.md`: OpenShift addon patterns this repo follows
 - `docs/STANDARDS.md`: coding standards reference with authoritative links
 - `docs/TEST-PLAN.md`: unit/e2e coverage catalog, run ledger, and tiers
+- `docs/OBSERVABILITY.md`: Prometheus metrics and alert reference
 - `operator/`: Go operator (kubebuilder go/v4) reconciling the
   `ClusterBaseline` CRD: installs/adopts the Compliance Operator, owns
   ScanSetting/ScanSettingBinding defaults, deploys the console plugin,
