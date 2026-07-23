@@ -127,6 +127,9 @@ const RuleMultiSelect: React.FC<{
 
   return (
     <Select
+      isScrollable
+      maxMenuHeight="240px"
+      popperProps={{ enableFlip: true }}
       isOpen={isOpen}
       selected={selected}
       onSelect={(_e, value) => typeof value === 'string' && pick(value)}
