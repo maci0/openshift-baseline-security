@@ -42,6 +42,32 @@ depend on those tags.
 
 ## [Unreleased]
 
+## [0.5.13] - 2026-07-23
+
+### Changed
+
+- Console: the tailored-profile rule pickers are now typeahead multi-selects.
+  Type to filter the base profile's rules (disable) or search the full catalog
+  (enable extra rules); selections show as removable chips, and a live readout
+  reports the effective rule count (`Scans N of M base rules`) as you edit. The
+  dropdown scrolls for long result lists.
+
+### Fixed
+
+- Install: ship a `prometheus-k8s` Role/RoleBinding granting the platform
+  Prometheus service account read on services/endpoints/pods in the operator
+  namespace. The `openshift.io/cluster-monitoring` label adds the namespace to
+  Prometheus's selector, but cluster monitoring only auto-grants this
+  service-discovery RBAC to namespaces it manages; without it, target discovery
+  found zero endpoints and no metrics were scraped, firing `ComplianceStatusStale`
+  on an otherwise healthy operator.
+
+### Docs
+
+- README: document installing from the published Quay catalog
+  (`quay.io/openshift-baseline-security/baseline-security-operator-catalog`) as
+  the recommended path, alongside the existing build-from-source instructions.
+
 ## [0.5.12] - 2026-07-23
 
 ### Changed
@@ -492,7 +518,8 @@ Initial packaged release.
   Remediations, Profiles).
 - OLM bundle + file-based catalog; string-enum spec; OpenShift-style conditions.
 
-[Unreleased]: https://github.com/maci0/openshift-baseline-security/compare/v0.5.12...HEAD
+[Unreleased]: https://github.com/maci0/openshift-baseline-security/compare/v0.5.13...HEAD
+[0.5.13]: https://github.com/maci0/openshift-baseline-security/compare/v0.5.12...v0.5.13
 [0.5.12]: https://github.com/maci0/openshift-baseline-security/compare/v0.5.11...v0.5.12
 [0.5.11]: https://github.com/maci0/openshift-baseline-security/compare/v0.5.10...v0.5.11
 [0.5.10]: https://github.com/maci0/openshift-baseline-security/compare/v0.5.9...v0.5.10
