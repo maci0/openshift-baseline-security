@@ -17,7 +17,6 @@ import {
   CardBody,
   CardHeader,
   CardTitle,
-  Checkbox,
   Content,
   ExpandableSection,
   Flex,
@@ -31,20 +30,28 @@ import {
   HelperTextItem,
   Label,
   LabelGroup,
+  MenuToggle,
+  MenuToggleElement,
   Modal,
   ModalBody,
   ModalFooter,
   ModalHeader,
   PageSection,
-  SearchInput,
+  Select,
+  SelectList,
+  SelectOption,
   Skeleton,
   Spinner,
   Split,
   SplitItem,
   Switch,
   TextInput,
+  TextInputGroup,
+  TextInputGroupMain,
+  TextInputGroupUtilities,
   Title,
 } from '@patternfly/react-core';
+import { InfoCircleIcon, TimesIcon } from '@patternfly/react-icons';
 import {
   ClusterBaseline,
   ClusterBaselineModel,
@@ -74,89 +81,133 @@ import { withDisabledTip } from './DisabledTip';
 import { restoreFocus } from './focus';
 import { SUCCESS_DISMISS_MS } from './feedback';
 
-// One rule selector: a summary of current selections as removable chips (always
-// visible, scroll-independent), a filter, and a scrollable checkbox list of the
-// visible candidates. Shared by the disable and enable-extra pickers so the two
-// stay identical in behavior and a11y.
-const RulePicker: React.FC<{
-  idPrefix: string;
+// Typeahead multi-select over a (possibly large) rule catalog: type to filter,
+// pick from a checkbox dropdown, selections show as removable chips inline.
+// Compact and native, replacing a persistent scroll-box. searchOnly hides the
+// full list until the user types (for the ~1k-rule enable catalog).
+const RULE_OPTION_CAP = 200;
+const RuleMultiSelect: React.FC<{
+  options: string[];
   selected: string[];
   onChange: (next: string[]) => void;
-  visible: string[];
-  filter: string;
-  onFilter: (v: string) => void;
-  searchPlaceholder: string;
-  chipsLabel: string;
-  chipCloseLabel: (rule: string) => string;
-  emptyText: string;
+  placeholder: string;
+  ariaLabel: string;
+  clearLabel: string;
+  noResultsText: string;
+  promptText: string;
+  searchOnly?: boolean;
 }> = ({
-  idPrefix,
+  options,
   selected,
   onChange,
-  visible,
-  filter,
-  onFilter,
-  searchPlaceholder,
-  chipsLabel,
-  chipCloseLabel,
-  emptyText,
-}) => (
-  <>
-    {selected.length > 0 && (
-      <LabelGroup
-        categoryName={chipsLabel}
-        numLabels={6}
-        style={{ marginBottom: 'var(--pf-t--global--spacer--sm)' }}
-      >
-        {selected.map((rule) => (
-          <Label
-            key={rule}
-            variant="outline"
-            onClose={() => onChange(selected.filter((r) => r !== rule))}
-            closeBtnAriaLabel={chipCloseLabel(rule)}
-          >
-            {rule}
-          </Label>
-        ))}
-      </LabelGroup>
-    )}
-    <SearchInput
-      value={filter}
-      onChange={(_e, v) => onFilter(v)}
-      onClear={() => onFilter('')}
-      placeholder={searchPlaceholder}
-      aria-label={searchPlaceholder}
-    />
-    <div
-      style={{
-        maxHeight: 200,
-        overflow: 'auto',
-        marginTop: 'var(--pf-t--global--spacer--sm)',
-        border: '1px solid var(--pf-t--global--border--color--default)',
-        borderRadius: 'var(--pf-t--global--border--radius--small)',
-        padding: 'var(--pf-t--global--spacer--sm)',
-      }}
-    >
-      {visible.length === 0 ? (
-        <HelperText>
-          <HelperTextItem>{emptyText}</HelperTextItem>
-        </HelperText>
-      ) : (
-        visible.map((rule) => (
-          <Checkbox
-            key={rule}
-            id={`${idPrefix}-${rule}`}
-            label={rule}
-            isChecked={selected.includes(rule)}
-            onChange={(_e, checked) =>
-              onChange(checked ? [...selected, rule] : selected.filter((r) => r !== rule))
-            }
-          />
-        ))
+  placeholder,
+  ariaLabel,
+  clearLabel,
+  noResultsText,
+  promptText,
+  searchOnly,
+}) => {
+  const [isOpen, setIsOpen] = React.useState(false);
+  const [input, setInput] = React.useState('');
+  const inputRef = React.useRef<HTMLInputElement>(null);
+
+  const q = input.trim().toLowerCase();
+  const matches = React.useMemo(() => {
+    if (searchOnly && !q) return [];
+    return (q ? options.filter((o) => o.toLowerCase().includes(q)) : options).slice(
+      0,
+      RULE_OPTION_CAP,
+    );
+  }, [options, q, searchOnly]);
+
+  const pick = (value: string) => {
+    onChange(selected.includes(value) ? selected.filter((v) => v !== value) : [...selected, value]);
+    inputRef.current?.focus();
+  };
+
+  return (
+    <Select
+      isOpen={isOpen}
+      selected={selected}
+      onSelect={(_e, value) => typeof value === 'string' && pick(value)}
+      onOpenChange={(open) => setIsOpen(open)}
+      shouldFocusFirstItemOnOpen={false}
+      toggle={(toggleRef: React.Ref<MenuToggleElement>) => (
+        <MenuToggle
+          ref={toggleRef}
+          variant="typeahead"
+          aria-label={ariaLabel}
+          isExpanded={isOpen}
+          isFullWidth
+          onClick={() => setIsOpen((o) => !o)}
+        >
+          <TextInputGroup isPlain>
+            <TextInputGroupMain
+              value={input}
+              placeholder={placeholder}
+              aria-label={ariaLabel}
+              innerRef={inputRef}
+              onClick={() => setIsOpen(true)}
+              onChange={(_e, v) => {
+                setInput(v);
+                setIsOpen(true);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && matches[0]) {
+                  e.preventDefault();
+                  pick(matches[0]);
+                }
+              }}
+            >
+              {selected.length > 0 && (
+                <LabelGroup aria-label={ariaLabel} numLabels={6}>
+                  {selected.map((v) => (
+                    <Label
+                      key={v}
+                      variant="outline"
+                      onClose={(e) => {
+                        e.stopPropagation();
+                        onChange(selected.filter((x) => x !== v));
+                      }}
+                    >
+                      {v}
+                    </Label>
+                  ))}
+                </LabelGroup>
+              )}
+            </TextInputGroupMain>
+            {(selected.length > 0 || input !== '') && (
+              <TextInputGroupUtilities>
+                <Button
+                  variant="plain"
+                  aria-label={clearLabel}
+                  icon={<TimesIcon />}
+                  onClick={() => {
+                    onChange([]);
+                    setInput('');
+                    inputRef.current?.focus();
+                  }}
+                />
+              </TextInputGroupUtilities>
+            )}
+          </TextInputGroup>
+        </MenuToggle>
       )}
-    </div>
-  </>
-);
+    >
+      <SelectList>
+        {matches.length === 0 ? (
+          <SelectOption isDisabled>{q ? noResultsText : promptText}</SelectOption>
+        ) : (
+          matches.map((o) => (
+            <SelectOption key={o} value={o} hasCheckbox isSelected={selected.includes(o)}>
+              {o}
+            </SelectOption>
+          ))
+        )}
+      </SelectList>
+    </Select>
+  );
+};
 
 const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = ({
   baseline,
@@ -193,12 +244,10 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
   const [disablingLast, setDisablingLast] = React.useState<string | null>(null);
   const [tpName, setTpName] = React.useState('');
   const [tpExtends, setTpExtends] = React.useState('ocp4-cis');
-  // Selected rule names to disable (was a free-text list; now a selection).
+  // Selected rule names to disable (from the base profile's rules).
   const [tpDisable, setTpDisable] = React.useState<string[]>([]);
-  const [ruleFilter, setRuleFilter] = React.useState('');
   // Rules to enable on top of the base profile (from the full Rule catalog).
   const [tpEnable, setTpEnable] = React.useState<string[]>([]);
-  const [enableFilter, setEnableFilter] = React.useState('');
   // Enable-extra-rules is the advanced action: collapsed by default, opened
   // automatically when editing a profile that already has enable rules.
   const [enableExpanded, setEnableExpanded] = React.useState(false);
@@ -228,13 +277,9 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
     );
     return [...new Set(rules)].sort();
   }, [profiles, tpExtends]);
-  const filteredRules = React.useMemo(() => {
-    const q = ruleFilter.trim().toLowerCase();
-    return q ? baseRules.filter((r) => r.toLowerCase().includes(q)) : baseRules;
-  }, [baseRules, ruleFilter]);
 
   // Full Rule catalog: candidates for enableRules are the rules NOT already in
-  // the base profile (those are active anyway). Large list; filtered below.
+  // the base profile (those are active anyway). Large list; typeahead-filtered.
   const [allRules] = useK8sWatchResource<ComplianceRule[]>({
     groupVersionKind: RuleGVK,
     isList: true,
@@ -248,14 +293,9 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
       .filter((n): n is string => typeof n === 'string' && n.length > 0 && !inBase.has(n));
     return [...new Set(names)].sort();
   }, [allRules, baseRules]);
-  // Only render the (long) candidate list once the user filters, so the modal
-  // does not paint thousands of checkboxes. Current selections show as chips, so
-  // the empty (unfiltered) list just prompts to search.
-  const filteredEnable = React.useMemo(() => {
-    const q = enableFilter.trim().toLowerCase();
-    if (!q) return [];
-    return enableCandidates.filter((r) => r.toLowerCase().includes(q)).slice(0, 200);
-  }, [enableCandidates, enableFilter]);
+  // Effective rule set the tailored profile scans: base minus disabled plus
+  // enabled. tpDisable is always a subset of baseRules (reset on base change).
+  const effectiveCount = baseRules.length - tpDisable.length + tpEnable.length;
   const tpNameRef = React.useRef<HTMLInputElement>(null);
   const createButtonRef = React.useRef<HTMLButtonElement>(null);
   // Track create sessions so Cancel/close can restore focus to the trigger (WCAG 2.4.3).
@@ -302,8 +342,6 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
       const enableNames = ruleNames(obj.spec?.enableRules);
       setTpEnable(enableNames);
       setEnableExpanded(enableNames.length > 0);
-      setRuleFilter('');
-      setEnableFilter('');
       returnFocusRef.current = trigger;
       setCreating(true);
     } catch (e) {
@@ -385,8 +423,6 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
         setTpName('');
         setTpDisable([]);
         setTpEnable([]);
-        setRuleFilter('');
-        setEnableFilter('');
         setEnableExpanded(false);
         setTpExtends('ocp4-cis');
         setSuccess(t('Tailored profile updated.'));
@@ -458,8 +494,6 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
       setTpName('');
       setTpDisable([]);
       setTpEnable([]);
-      setRuleFilter('');
-      setEnableFilter('');
       setEnableExpanded(false);
       // Match closeCreateModal: the next open must be a clean form, not
       // pre-filled with the previous base profile.
@@ -493,8 +527,6 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
     setTpName('');
     setTpDisable([]);
     setTpEnable([]);
-    setRuleFilter('');
-    setEnableFilter('');
     setEnableExpanded(false);
     setTpExtends('ocp4-cis');
   };
@@ -764,14 +796,11 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
             <FormSelect
               id="tp-extends"
               value={tpExtends}
-              aria-describedby="tp-extends-help"
               // Rules differ per base profile; reset both rule selections.
               onChange={(_e, v) => {
                 setTpExtends(v);
                 setTpDisable([]);
                 setTpEnable([]);
-                setRuleFilter('');
-                setEnableFilter('');
               }}
             >
               {/* Keep the current value selectable even if the Profile watch has
@@ -783,13 +812,6 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
                 <FormSelectOption key={name} value={name} label={name} />
               ))}
             </FormSelect>
-            <FormHelperText>
-              <HelperText id="tp-extends-help">
-                <HelperTextItem>
-                  {t('The Compliance Operator profile this tailored profile extends.')}
-                </HelperTextItem>
-              </HelperText>
-            </FormHelperText>
           </FormGroup>
           <FormGroup
             label={
@@ -809,17 +831,15 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
                 </HelperTextItem>
               </HelperText>
             ) : (
-              <RulePicker
-                idPrefix="tp-rule"
+              <RuleMultiSelect
+                options={baseRules}
                 selected={tpDisable}
                 onChange={setTpDisable}
-                visible={filteredRules}
-                filter={ruleFilter}
-                onFilter={setRuleFilter}
-                searchPlaceholder={t('Filter the base profile rules')}
-                chipsLabel={t('Disabled')}
-                chipCloseLabel={(rule) => t('Re-enable {{rule}}', { rule })}
-                emptyText={t('No rules match the filter.')}
+                placeholder={t('Type to find a base rule to turn off')}
+                ariaLabel={t('Disable rules')}
+                clearLabel={t('Clear disabled rules')}
+                noResultsText={t('No matching rules')}
+                promptText={t('Type to filter the base profile rules')}
               />
             )}
           </FormGroup>
@@ -836,24 +856,40 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
             onToggle={(_e, expanded) => setEnableExpanded(expanded)}
           >
             <FormGroup fieldId="tp-enable" role="group" aria-label={t('Enable extra rules')}>
-              <RulePicker
-                idPrefix="tp-enable"
+              <RuleMultiSelect
+                options={enableCandidates}
                 selected={tpEnable}
                 onChange={setTpEnable}
-                visible={filteredEnable}
-                filter={enableFilter}
-                onFilter={setEnableFilter}
-                searchPlaceholder={t('Search the rule catalog to add rules')}
-                chipsLabel={t('Enabled')}
-                chipCloseLabel={(rule) => t('Remove {{rule}}', { rule })}
-                emptyText={
-                  enableFilter.trim()
-                    ? t('No rules match the filter.')
-                    : t('Search the catalog above to add rules not in the base profile.')
-                }
+                placeholder={t('Search the rule catalog to add rules')}
+                ariaLabel={t('Enable extra rules')}
+                clearLabel={t('Clear enabled rules')}
+                noResultsText={t('No matching rules')}
+                promptText={t('Type to search rules not in the base profile')}
+                searchOnly
               />
             </FormGroup>
           </ExpandableSection>
+          {baseRules.length > 0 && (
+            <HelperText style={{ marginTop: 'var(--pf-t--global--spacer--md)' }}>
+              <HelperTextItem icon={<InfoCircleIcon />}>
+                {tpEnable.length > 0
+                  ? t('Scans {{effective}} of {{base}} base rules, plus {{added}} added.', {
+                      effective: effectiveCount,
+                      base: baseRules.length,
+                      added: tpEnable.length,
+                      formattedEffective: formatCount(effectiveCount, i18n.language),
+                      formattedBase: formatCount(baseRules.length, i18n.language),
+                      formattedAdded: formatCount(tpEnable.length, i18n.language),
+                    })
+                  : t('Scans {{effective}} of {{base}} base rules.', {
+                      effective: effectiveCount,
+                      base: baseRules.length,
+                      formattedEffective: formatCount(effectiveCount, i18n.language),
+                      formattedBase: formatCount(baseRules.length, i18n.language),
+                    })}
+              </HelperTextItem>
+            </HelperText>
+          )}
         </ModalBody>
         <ModalFooter>
           <Button

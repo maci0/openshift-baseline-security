@@ -117,23 +117,25 @@ test.describe('Baseline Security console plugin', () => {
     await expect(dialog).toBeVisible();
     await expect(dialog.getByText('Edit tailored profile', { exact: true })).toBeVisible();
     // Name is pre-filled and read-only (a TailoredProfile cannot be renamed).
-    const nameField = dialog.getByRole('textbox').first();
+    const nameField = dialog.getByRole('textbox', { name: 'Name' });
     await expect(nameField).toHaveValue('cis-custom');
     await expect(nameField).toHaveAttribute('readonly', '');
-    // Base profile is a selection (combobox); the rules picker rendered.
+    // Base profile selection + the pre-filled disabled-rule chip.
     await expect(dialog.getByText('Base profile', { exact: true })).toBeVisible();
-    await expect(dialog.getByRole('combobox')).toBeVisible();
-    // Enable-extra-rules is an expandable (advanced) section; expand it, then
-    // searching the catalog surfaces a candidate rule.
-    await dialog.getByRole('button', { name: /Enable extra rules/ }).click();
-    await dialog.getByPlaceholder('Search the rule catalog to add rules').fill('ocp4-');
-    await expect(
-      dialog.getByRole('checkbox', { name: /^ocp4-/ }).first(),
-    ).toBeVisible();
+    await expect(dialog.getByText('ocp4-audit-profile-set')).toBeVisible();
+    // Effective-rule-count readout.
+    await expect(dialog.getByText(/Scans \d+ of \d+ base rules/)).toBeVisible();
     await expect(dialog.getByRole('button', { name: 'Save' })).toBeVisible();
+    // Enable-extra-rules is an expandable (advanced) section; expand it, then
+    // typing in the catalog typeahead accepts input (the menu opens over the
+    // footer, so shoot here and close via the header X, not the covered Cancel).
+    await dialog.getByRole('button', { name: /Enable extra rules/ }).click();
+    const enableInput = dialog.getByPlaceholder('Search the rule catalog to add rules');
+    await enableInput.fill('ocp4-');
+    await expect(enableInput).toHaveValue('ocp4-');
     await shot(page, 'tailored-edit');
-    // Cancel without saving (do not mutate the cluster).
-    await dialog.getByRole('button', { name: 'Cancel' }).click();
+    // Close without saving (do not mutate the cluster).
+    await dialog.getByRole('button', { name: 'Close', exact: true }).click();
   });
 
   test('Compliance is reachable under the Administration nav section', async ({ page }) => {
