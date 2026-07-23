@@ -15,11 +15,19 @@ not part of the published 0.5.13 CSV/image tags until the next version bump
 
 ## Quickstart
 
-One CatalogSource, then install from OperatorHub. Needs cluster-admin on
-OpenShift 4.22 with a default StorageClass.
+One `oc apply` installs everything (catalog, operator group, subscription).
+Needs cluster-admin on OpenShift 4.22 with a default StorageClass.
 
 ```sh
 oc apply -f - <<EOF
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: openshift-baseline-security
+  labels:
+    # Opt the namespace into platform monitoring so metrics/alerts are scraped.
+    openshift.io/cluster-monitoring: "true"
+---
 apiVersion: operators.coreos.com/v1alpha1
 kind: CatalogSource
 metadata:
@@ -29,14 +37,31 @@ spec:
   displayName: Baseline Security
   sourceType: grpc
   image: quay.io/openshift-baseline-security/baseline-security-operator-catalog:0.5.13
+---
+apiVersion: operators.coreos.com/v1
+kind: OperatorGroup
+metadata:
+  name: baseline-security
+  namespace: openshift-baseline-security
+spec: {}   # no targetNamespaces = AllNamespaces install mode
+---
+apiVersion: operators.coreos.com/v1alpha1
+kind: Subscription
+metadata:
+  name: baseline-security-operator
+  namespace: openshift-baseline-security
+spec:
+  channel: alpha
+  name: baseline-security-operator
+  source: baseline-security
+  sourceNamespace: openshift-marketplace
+  installPlanApproval: Automatic
 EOF
 ```
 
-Then **Operators → OperatorHub → Baseline Security → Install** into the
-`openshift-baseline-security` namespace (`AllNamespaces` mode). The operator
-creates a `ClusterBaseline/cluster`, scans against CIS, and renders results
-under **Administration → Compliance**. Full options in
-[Install (OLM)](#install-olm) below.
+The operator creates a `ClusterBaseline/cluster`, scans against CIS, and
+renders results under **Administration → Compliance**. Full options (pinning,
+build-from-source) in [Install (OLM)](#install-olm) below.
 
 ## Features
 
