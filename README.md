@@ -13,6 +13,31 @@ Work on `main` that is not yet cut lives under CHANGELOG **[Unreleased]** and is
 not part of the published 0.5.13 CSV/image tags until the next version bump
 (`make verify-versions` keeps those tags aligned with **Current release**).
 
+## Quickstart
+
+One CatalogSource, then install from OperatorHub. Needs cluster-admin on
+OpenShift 4.22 with a default StorageClass.
+
+```sh
+oc apply -f - <<EOF
+apiVersion: operators.coreos.com/v1alpha1
+kind: CatalogSource
+metadata:
+  name: baseline-security
+  namespace: openshift-marketplace
+spec:
+  displayName: Baseline Security
+  sourceType: grpc
+  image: quay.io/openshift-baseline-security/baseline-security-operator-catalog:0.5.13
+EOF
+```
+
+Then **Operators → OperatorHub → Baseline Security → Install** into the
+`openshift-baseline-security` namespace (`AllNamespaces` mode). The operator
+creates a `ClusterBaseline/cluster`, scans against CIS, and renders results
+under **Administration → Compliance**. Full options in
+[Install (OLM)](#install-olm) below.
+
 ## Features
 
 Describes `main`; install from published OLM tags for only the released surface.
