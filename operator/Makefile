@@ -1,7 +1,7 @@
 # Release version: keep in lockstep with the CSV and console-plugin package.json.
 # No OLM replaces graph is maintained (pre-release, no installed base): each
 # build is a standalone channel head, so there is no PREV_VERSION.
-VERSION ?= 0.5.9
+VERSION ?= 0.5.10
 IMG ?= quay.io/openshift-baseline-security/baseline-security-operator:latest
 # Plugin image the operator injects via RELATED_IMAGE_CONSOLE_PLUGIN on deploy.
 PLUGIN_IMG ?= quay.io/openshift-baseline-security/baseline-security-console-plugin:latest

@@ -7,10 +7,10 @@ Install it and the cluster benchmarks itself against the CIS OpenShift
 Benchmark out of the box, rendered natively in the console under
 **Administration → Compliance**.
 
-**Current release: 0.5.9** (OLM channel `alpha`, API `baselinesecurity.openshift.io/v1alpha1`).
+**Current release: 0.5.10** (OLM channel `alpha`, API `baselinesecurity.openshift.io/v1alpha1`).
 Consumer-facing release notes and upgrade notes: [CHANGELOG.md](CHANGELOG.md).
 Work on `main` that is not yet cut lives under CHANGELOG **[Unreleased]** and is
-not part of the published 0.5.9 CSV/image tags until the next version bump
+not part of the published 0.5.10 CSV/image tags until the next version bump
 (`make verify-versions` keeps those tags aligned with **Current release**).
 
 ## Features

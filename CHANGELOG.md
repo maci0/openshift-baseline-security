@@ -42,6 +42,19 @@ depend on those tags.
 
 ## [Unreleased]
 
+## [0.5.10] - 2026-07-23
+
+### Fixed
+
+- Console: the per-benchmark score cards now bottom-align their trend charts,
+  so the sparklines line up across cards even when a card has an extra status
+  row (e.g. PCI-DSS with Inconsistent).
+
+### Security
+
+- Base-image CVE patches (digest bumps to ubi9 `nodejs-22`, `nginx-120`, and
+  `go-toolset`; the language versions stay pinned by `.nvmrc` / `GOTOOLCHAIN`).
+
 ## [0.5.9] - 2026-07-23
 
 ### Added
@@ -449,7 +462,8 @@ Initial packaged release.
   Remediations, Profiles).
 - OLM bundle + file-based catalog; string-enum spec; OpenShift-style conditions.
 
-[Unreleased]: https://github.com/maci0/openshift-baseline-security/compare/v0.5.9...HEAD
+[Unreleased]: https://github.com/maci0/openshift-baseline-security/compare/v0.5.10...HEAD
+[0.5.10]: https://github.com/maci0/openshift-baseline-security/compare/v0.5.9...v0.5.10
 [0.5.9]: https://github.com/maci0/openshift-baseline-security/compare/v0.5.8...v0.5.9
 [0.5.8]: https://github.com/maci0/openshift-baseline-security/compare/v0.5.7...v0.5.8
 [0.5.7]: https://github.com/maci0/openshift-baseline-security/compare/v0.5.6...v0.5.7
