@@ -107,6 +107,28 @@ test.describe('Baseline Security console plugin', () => {
     await expect(create).toBeEnabled();
   });
 
+  test('Edit tailored profile opens pre-filled, name locked', async ({ page }) => {
+    await goto(page, '/profiles');
+    // The bound cis-custom tailored profile card exposes an Edit action.
+    const editBtn = page.getByRole('button', { name: /Edit tailored profile cis-custom/i });
+    await expect(editBtn).toBeVisible();
+    await editBtn.click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByText('Edit tailored profile', { exact: true })).toBeVisible();
+    // Name is pre-filled and read-only (a TailoredProfile cannot be renamed).
+    const nameField = dialog.getByRole('textbox').first();
+    await expect(nameField).toHaveValue('cis-custom');
+    await expect(nameField).toHaveAttribute('readonly', '');
+    // Base profile is a selection (combobox); the rules picker rendered.
+    await expect(dialog.getByText('Base profile', { exact: true })).toBeVisible();
+    await expect(dialog.getByRole('combobox')).toBeVisible();
+    await expect(dialog.getByRole('button', { name: 'Save' })).toBeVisible();
+    await shot(page, 'tailored-edit');
+    // Cancel without saving (do not mutate the cluster).
+    await dialog.getByRole('button', { name: 'Cancel' }).click();
+  });
+
   test('Compliance is reachable under the Administration nav section', async ({ page }) => {
     await page.goto('/dashboards', { waitUntil: 'domcontentloaded' });
     await page.getByRole('button', { name: 'Administration' }).click();
