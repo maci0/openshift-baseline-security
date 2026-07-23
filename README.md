@@ -95,18 +95,12 @@ Compliance score deep-linked on the cluster Overview Details card:
 
 ## Install (OLM)
 
-Build and push the operator image, console-plugin image, OLM bundle, and
-file-based catalog (four images; tag them with the release version, never
-reuse a published tag), then:
+### From the published catalog (recommended)
+
+Point a CatalogSource at the released file-based catalog on Quay; no local
+build needed. Pin the release tag (here `0.5.12`) or use `latest`:
 
 ```sh
-# Plugin image (must match CSV relatedImages / RELATED_IMAGE_CONSOLE_PLUGIN).
-# Makefile pins DOCKER_BUILD_FLAGS (reproducible digests; same as operator).
-make -C console-plugin docker-build docker-push IMG=<PLUGIN_IMG>
-cd operator
-make docker-build docker-push          # operator image (IMG=...)
-make bundle bundle-build bundle-push   # validated OLM bundle
-make catalog-build catalog-push        # file-based catalog
 oc apply -f - <<EOF
 apiVersion: operators.coreos.com/v1alpha1
 kind: CatalogSource
@@ -116,8 +110,28 @@ metadata:
 spec:
   displayName: Baseline Security
   sourceType: grpc
-  image: <CATALOG_IMG>
+  image: quay.io/openshift-baseline-security/baseline-security-operator-catalog:0.5.12
 EOF
+```
+
+The catalog references the operator and console-plugin images by digest, so
+OperatorHub pulls everything from `quay.io/openshift-baseline-security/*`.
+
+### From source
+
+Build and push the operator image, console-plugin image, OLM bundle, and
+file-based catalog (four images; tag them with the release version, never
+reuse a published tag), then apply the same CatalogSource with `image:` set to
+your `<CATALOG_IMG>`:
+
+```sh
+# Plugin image (must match CSV relatedImages / RELATED_IMAGE_CONSOLE_PLUGIN).
+# Makefile pins DOCKER_BUILD_FLAGS (reproducible digests; same as operator).
+make -C console-plugin docker-build docker-push IMG=<PLUGIN_IMG>
+cd operator
+make docker-build docker-push          # operator image (IMG=...)
+make bundle bundle-build bundle-push   # validated OLM bundle
+make catalog-build catalog-push        # file-based catalog
 ```
 
 Then install "Baseline Security" from OperatorHub into the
