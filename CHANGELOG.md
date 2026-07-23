@@ -42,6 +42,24 @@ depend on those tags.
 
 ## [Unreleased]
 
+## [0.5.9] - 2026-07-23
+
+### Added
+
+- Release workflow publishing the operator, console-plugin, OLM bundle, and
+  catalog images to `quay.io/openshift-baseline-security/*` (at `:VERSION` and
+  `:latest`) on a version tag, so a tag push yields an OLM-installable release.
+- README: in-cluster build + kustomize install path (binary `oc` BuildConfigs
+  to the internal registry, then `make deploy`) for dev/lab/disconnected
+  clusters with no external registry.
+
+### Security
+
+- Bump `golang.org/x/text` v0.37.0 -> v0.39.0 (GO-2026-5970: infinite loop on
+  invalid input, reachable via the status-update text-normalization path).
+- Pin `fast-uri` to `^3.1.4` (host confusion via a literal backslash authority
+  delimiter in ajv's transitive 3.1.3).
+
 ## [0.5.8] - 2026-07-20
 
 ### Fixed
@@ -431,7 +449,8 @@ Initial packaged release.
   Remediations, Profiles).
 - OLM bundle + file-based catalog; string-enum spec; OpenShift-style conditions.
 
-[Unreleased]: https://github.com/maci0/openshift-baseline-security/compare/v0.5.8...HEAD
+[Unreleased]: https://github.com/maci0/openshift-baseline-security/compare/v0.5.9...HEAD
+[0.5.9]: https://github.com/maci0/openshift-baseline-security/compare/v0.5.8...v0.5.9
 [0.5.8]: https://github.com/maci0/openshift-baseline-security/compare/v0.5.7...v0.5.8
 [0.5.7]: https://github.com/maci0/openshift-baseline-security/compare/v0.5.6...v0.5.7
 [0.5.6]: https://github.com/maci0/openshift-baseline-security/compare/v0.5.5...v0.5.6
