@@ -120,10 +120,26 @@ export const TailoredProfileGVK: K8sGroupVersionKind = {
   kind: 'TailoredProfile',
 };
 
+// Compliance Operator Profile: a built-in benchmark a TailoredProfile extends.
+// The object carries a top-level `rules: []string` (the rule names in the
+// profile), which populates the tailored-profile "disable rules" selection.
+export const ProfileGVK: K8sGroupVersionKind = {
+  group: 'compliance.openshift.io',
+  version: 'v1alpha1',
+  kind: 'Profile',
+};
+
 export const ClusterBaselineModel = model(ClusterBaselineGVK, 'clusterbaselines', false);
 export const ComplianceScanModel = model(ComplianceScanGVK, 'compliancescans', true);
 export const ComplianceRemediationModel = model(ComplianceRemediationGVK, 'complianceremediations', true);
 export const TailoredProfileModel = model(TailoredProfileGVK, 'tailoredprofiles', true);
+export const ProfileModel = model(ProfileGVK, 'profiles', true);
+
+// Compliance Operator Profile object (subset): name + the rule names it contains.
+export type ComplianceProfile = {
+  metadata?: { name?: string };
+  rules?: string[];
+};
 
 export type CheckStatus =
   | 'PASS'

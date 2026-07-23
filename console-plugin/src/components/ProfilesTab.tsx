@@ -1,6 +1,12 @@
 import * as React from 'react';
 import { useTranslation } from 'react-i18next';
-import { k8sCreate, k8sGet, k8sPatch, useAccessReview } from '@openshift-console/dynamic-plugin-sdk';
+import {
+  k8sCreate,
+  k8sGet,
+  k8sPatch,
+  useAccessReview,
+  useK8sWatchResource,
+} from '@openshift-console/dynamic-plugin-sdk';
 import {
   Alert,
   AlertActionCloseButton,
@@ -9,11 +15,14 @@ import {
   CardBody,
   CardHeader,
   CardTitle,
+  Checkbox,
   Content,
   Flex,
   FlexItem,
   FormGroup,
   FormHelperText,
+  FormSelect,
+  FormSelectOption,
   Gallery,
   HelperText,
   HelperTextItem,
@@ -23,12 +32,12 @@ import {
   ModalFooter,
   ModalHeader,
   PageSection,
+  SearchInput,
   Skeleton,
   Spinner,
   Split,
   SplitItem,
   Switch,
-  TextArea,
   TextInput,
   Title,
 } from '@patternfly/react-core';
@@ -36,8 +45,10 @@ import {
   ClusterBaseline,
   ClusterBaselineModel,
   COMPLIANCE_NAMESPACE,
+  ComplianceProfile,
   PROFILE_INFO,
   PROFILE_KEYS,
+  ProfileGVK,
   profileTitle,
   TAILORED_PROFILE_MAX_ITEMS,
   TailoredProfileModel,
@@ -86,7 +97,39 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
   const [disablingLast, setDisablingLast] = React.useState<string | null>(null);
   const [tpName, setTpName] = React.useState('');
   const [tpExtends, setTpExtends] = React.useState('ocp4-cis');
-  const [tpDisable, setTpDisable] = React.useState('');
+  // Selected rule names to disable (was a free-text list; now a selection).
+  const [tpDisable, setTpDisable] = React.useState<string[]>([]);
+  const [ruleFilter, setRuleFilter] = React.useState('');
+
+  // Compliance Operator Profiles: the base-profile options and their rule lists.
+  const [profiles] = useK8sWatchResource<ComplianceProfile[]>({
+    groupVersionKind: ProfileGVK,
+    isList: true,
+    namespaced: true,
+    namespace: COMPLIANCE_NAMESPACE,
+  });
+  // Base-profile names, sorted, deduped. Fallback to ocp4-cis so the form is
+  // usable before the watch resolves (or if Profiles are not readable).
+  const baseProfileNames = React.useMemo(() => {
+    const names = (Array.isArray(profiles) ? profiles : [])
+      .map((p) => p?.metadata?.name)
+      .filter((n): n is string => typeof n === 'string' && n.length > 0);
+    return names.length > 0 ? [...new Set(names)].sort() : ['ocp4-cis'];
+  }, [profiles]);
+  // Rule names in the selected base profile (for the disable selection).
+  const baseRules = React.useMemo(() => {
+    const p = (Array.isArray(profiles) ? profiles : []).find(
+      (x) => x?.metadata?.name === tpExtends,
+    );
+    const rules = (p?.rules ?? []).filter(
+      (r): r is string => typeof r === 'string' && r.length > 0,
+    );
+    return [...new Set(rules)].sort();
+  }, [profiles, tpExtends]);
+  const filteredRules = React.useMemo(() => {
+    const q = ruleFilter.trim().toLowerCase();
+    return q ? baseRules.filter((r) => r.toLowerCase().includes(q)) : baseRules;
+  }, [baseRules, ruleFilter]);
   const tpNameRef = React.useRef<HTMLInputElement>(null);
   const createButtonRef = React.useRef<HTMLButtonElement>(null);
   // Track create sessions so Cancel/close can restore focus to the trigger (WCAG 2.4.3).
@@ -161,11 +204,8 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
     // an AlreadyExists on retry is treated as the create having succeeded.
     let created = false;
     try {
-      // Drop non-DNS-1123 rule lines before create (manifest also filters).
-      const disable = tpDisable
-        .split('\n')
-        .map((s) => s.trim())
-        .filter((s) => isValidK8sName(s));
+      // Selected rule names; keep only valid ones (manifest also filters).
+      const disable = tpDisable.filter((s) => isValidK8sName(s));
       try {
         await k8sCreate({
           model: TailoredProfileModel,
@@ -218,7 +258,8 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
       }
       setCreating(false);
       setTpName('');
-      setTpDisable('');
+      setTpDisable([]);
+      setRuleFilter('');
       // Match closeCreateModal: the next open must be a clean form, not
       // pre-filled with the previous base profile.
       setTpExtends('ocp4-cis');
@@ -240,8 +281,6 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
   };
 
   const nameValid = tpName.trim() === '' || isValidTailoredProfileName(tpName.trim());
-  const extendsValid =
-    tpExtends.trim() === '' || isValidK8sName(tpExtends.trim());
 
   // Cancel / backdrop close: drop draft fields so the next open is a clean form.
   // Keep error: page-top alert can still show bind/create failures after close
@@ -250,7 +289,8 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
     if (pendingRef.current) return;
     setCreating(false);
     setTpName('');
-    setTpDisable('');
+    setTpDisable([]);
+    setRuleFilter('');
     setTpExtends('ocp4-cis');
   };
 
@@ -498,58 +538,98 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
               </FormHelperText>
             )}
           </FormGroup>
-          <FormGroup label={t('Extends (base profile)')} fieldId="tp-extends">
-            <TextInput
+          <FormGroup label={t('Base profile')} fieldId="tp-extends" isRequired>
+            <FormSelect
               id="tp-extends"
               value={tpExtends}
-              onChange={(_e, v) => setTpExtends(v)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault();
-                  void createTailored();
-                }
-              }}
-              validated={extendsValid ? 'default' : 'error'}
-              aria-invalid={!extendsValid}
               aria-describedby="tp-extends-help"
-              spellCheck={false}
-              autoComplete="off"
-              autoCorrect="off"
-              autoCapitalize="off"
-            />
+              // Rules differ per base profile; reset the disable selection.
+              onChange={(_e, v) => {
+                setTpExtends(v);
+                setTpDisable([]);
+                setRuleFilter('');
+              }}
+            >
+              {/* Keep the current value selectable even if the Profile watch has
+                  not resolved it (offline / not-yet-loaded). */}
+              {(baseProfileNames.includes(tpExtends)
+                ? baseProfileNames
+                : [tpExtends, ...baseProfileNames]
+              ).map((name) => (
+                <FormSelectOption key={name} value={name} label={name} />
+              ))}
+            </FormSelect>
             <FormHelperText>
               <HelperText id="tp-extends-help">
-                <HelperTextItem variant={extendsValid ? 'default' : 'error'}>
-                  {extendsValid
-                    ? t(
-                        'Compliance Operator profile name this tailored profile extends (for example ocp4-cis).',
-                      )
-                    : t(
-                        'Use lowercase letters, digits, - and .; must start and end with a letter or digit.',
-                      )}
+                <HelperTextItem>
+                  {t('The Compliance Operator profile this tailored profile extends.')}
                 </HelperTextItem>
               </HelperText>
             </FormHelperText>
           </FormGroup>
-          <FormGroup label={t('Disable rules (one per line)')} fieldId="tp-disable">
-            <TextArea
-              id="tp-disable"
-              value={tpDisable}
-              onChange={(_e, v) => setTpDisable(v)}
-              rows={4}
-              placeholder={t('ocp4-cis-...')}
-              aria-label={t('Disable rules (one per line)')}
-              aria-describedby="tp-disable-help"
-              spellCheck={false}
-              autoComplete="off"
-            />
-            <FormHelperText>
-              <HelperText id="tp-disable-help">
+          <FormGroup
+            label={t('Disable rules')}
+            fieldId="tp-disable"
+            role="group"
+            aria-label={t('Disable rules')}
+          >
+            {baseRules.length === 0 ? (
+              <HelperText>
                 <HelperTextItem>
-                  {t('Optional. One Compliance Operator rule name per line to disable in the base profile.')}
+                  {t('No rules found for this base profile (or Profiles are still loading).')}
                 </HelperTextItem>
               </HelperText>
-            </FormHelperText>
+            ) : (
+              <>
+                <SearchInput
+                  value={ruleFilter}
+                  onChange={(_e, v) => setRuleFilter(v)}
+                  onClear={() => setRuleFilter('')}
+                  placeholder={t('Filter rules')}
+                  aria-label={t('Filter rules')}
+                />
+                <div
+                  style={{
+                    maxHeight: 220,
+                    overflow: 'auto',
+                    marginTop: 'var(--pf-t--global--spacer--sm)',
+                    border: '1px solid var(--pf-t--global--border--color--default)',
+                    borderRadius: 'var(--pf-t--global--border--radius--small)',
+                    padding: 'var(--pf-t--global--spacer--sm)',
+                  }}
+                >
+                  {filteredRules.length === 0 ? (
+                    <HelperText>
+                      <HelperTextItem>{t('No rules match the filter.')}</HelperTextItem>
+                    </HelperText>
+                  ) : (
+                    filteredRules.map((rule) => (
+                      <Checkbox
+                        key={rule}
+                        id={`tp-rule-${rule}`}
+                        label={rule}
+                        isChecked={tpDisable.includes(rule)}
+                        onChange={(_e, checked) =>
+                          setTpDisable((prev) =>
+                            checked ? [...prev, rule] : prev.filter((r) => r !== rule),
+                          )
+                        }
+                      />
+                    ))
+                  )}
+                </div>
+                <FormHelperText>
+                  <HelperText id="tp-disable-help">
+                    <HelperTextItem>
+                      {t('Optional. {{count}} rule selected to disable in the base profile.', {
+                        count: tpDisable.length,
+                        formattedCount: formatCount(tpDisable.length, i18n.language),
+                      })}
+                    </HelperTextItem>
+                  </HelperText>
+                </FormHelperText>
+              </>
+            )}
           </FormGroup>
         </ModalBody>
         <ModalFooter>
