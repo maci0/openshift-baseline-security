@@ -157,6 +157,52 @@ Never reuse bundle/catalog image tags between pushes; OLM and kubelet caches
 will serve the stale content. Bump the version (CSV, images, catalog entry)
 for every publish.
 
+## Install (in-cluster build, no external registry)
+
+For a dev cluster or lab (including disconnected), build both images from the
+current source inside the cluster's own registry and install via kustomize (no
+OLM, no quay/ghcr push). Requires cluster-admin and the OpenShift internal
+image registry.
+
+```sh
+oc new-project openshift-baseline-security
+
+# One-time: binary Docker BuildConfigs + ImageStreams (Dockerfile at each
+# context root). Re-runnable builds thereafter are just `oc start-build`.
+oc new-build --binary --strategy=docker --name=baseline-security-operator \
+  -n openshift-baseline-security
+oc new-build --binary --strategy=docker --name=baseline-security-console-plugin \
+  -n openshift-baseline-security
+
+# Build the current tree in-cluster (uploads the dir as the build context).
+oc start-build baseline-security-operator --from-dir=operator --follow \
+  -n openshift-baseline-security
+oc start-build baseline-security-console-plugin --from-dir=console-plugin --follow \
+  -n openshift-baseline-security
+
+# Install via kustomize, pointing image refs at the internal registry.
+# make deploy applies config/default (CRD, RBAC, manager, prometheus) and
+# drops the pre-0.5.7 operator PDB if present.
+REG=image-registry.openshift-image-registry.svc:5000/openshift-baseline-security
+make -C operator deploy \
+  IMG="$REG/baseline-security-operator:latest" \
+  PLUGIN_IMG="$REG/baseline-security-console-plugin:latest"
+```
+
+Rebuild to pick up code changes with another `oc start-build ... --from-dir`,
+then roll the deployments (the `:latest` ref does not change, so pods do not
+restart on their own):
+
+```sh
+oc -n openshift-baseline-security rollout restart \
+  deploy/baseline-security-operator deploy/baseline-security-console-plugin
+```
+
+The operator default-creates `ClusterBaseline/cluster` and registers the
+console plugin on `consoles.operator.openshift.io/cluster`; the same
+monitoring objects as the OLM path ship via `config/prometheus/`. This path is
+for development and labs; use the OLM install above for production.
+
 ## Versioning and upgrades
 
 - **SemVer 0.x + alpha**: the product is pre-1.0. The CRD is `v1alpha1`, the
