@@ -42,6 +42,16 @@ depend on those tags.
 
 ## [Unreleased]
 
+## [0.5.12] - 2026-07-23
+
+### Changed
+
+- Console: streamlined the create/edit tailored-profile modal. Current rule
+  selections show as removable chips with a count badge; the advanced
+  enable-extra-rules picker is a collapsible section (auto-opens when editing a
+  profile that already has enable rules); a one-line intro explains the base +
+  disable + enable model; clearer search/chip copy.
+
 ## [0.5.11] - 2026-07-23
 
 ### Added
@@ -482,7 +492,8 @@ Initial packaged release.
   Remediations, Profiles).
 - OLM bundle + file-based catalog; string-enum spec; OpenShift-style conditions.
 
-[Unreleased]: https://github.com/maci0/openshift-baseline-security/compare/v0.5.11...HEAD
+[Unreleased]: https://github.com/maci0/openshift-baseline-security/compare/v0.5.12...HEAD
+[0.5.12]: https://github.com/maci0/openshift-baseline-security/compare/v0.5.11...v0.5.12
 [0.5.11]: https://github.com/maci0/openshift-baseline-security/compare/v0.5.10...v0.5.11
 [0.5.10]: https://github.com/maci0/openshift-baseline-security/compare/v0.5.9...v0.5.10
 [0.5.9]: https://github.com/maci0/openshift-baseline-security/compare/v0.5.8...v0.5.9
