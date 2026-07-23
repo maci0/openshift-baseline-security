@@ -141,6 +141,15 @@ export type ComplianceProfile = {
   rules?: string[];
 };
 
+// Compliance Operator Rule (subset): the object name is the rule identifier used
+// in TailoredProfile enable/disable lists. Populates the enable-rules picker.
+export const RuleGVK: K8sGroupVersionKind = {
+  group: 'compliance.openshift.io',
+  version: 'v1alpha1',
+  kind: 'Rule',
+};
+export type ComplianceRule = { metadata?: { name?: string } };
+
 // Compliance Operator TailoredProfile (subset used for editing): the base it
 // extends and the disable/enable rule lists ({name, rationale}).
 export type TailoredProfileResource = {

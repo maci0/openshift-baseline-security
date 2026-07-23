@@ -288,5 +288,10 @@
   "Edit tailored profile {{name}}": "Edit tailored profile {{name}}",
   "Tailored profile updated.": "Tailored profile updated.",
   "Failed to update tailored profile.": "Failed to update tailored profile.",
-  "Failed to load tailored profile.": "Failed to load tailored profile."
+  "Failed to load tailored profile.": "Failed to load tailored profile.",
+  "Enable extra rules": "Enable extra rules",
+  "Search the rule catalog to add rules": "Search the rule catalog to add rules",
+  "Type to search the rule catalog; selected rules stay listed here.": "Type to search the rule catalog; selected rules stay listed here.",
+  "Optional. {{count}} extra rule enabled on top of the base profile._one": "Optional. {{formattedCount}} extra rule enabled on top of the base profile.",
+  "Optional. {{count}} extra rule enabled on top of the base profile._other": "Optional. {{formattedCount}} extra rules enabled on top of the base profile."
 }

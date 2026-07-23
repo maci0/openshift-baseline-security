@@ -47,10 +47,12 @@ import {
   ClusterBaselineModel,
   COMPLIANCE_NAMESPACE,
   ComplianceProfile,
+  ComplianceRule,
   PROFILE_INFO,
   PROFILE_KEYS,
   ProfileGVK,
   profileTitle,
+  RuleGVK,
   TAILORED_PROFILE_MAX_ITEMS,
   TailoredProfileModel,
   TailoredProfileResource,
@@ -107,6 +109,9 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
   // Selected rule names to disable (was a free-text list; now a selection).
   const [tpDisable, setTpDisable] = React.useState<string[]>([]);
   const [ruleFilter, setRuleFilter] = React.useState('');
+  // Rules to enable on top of the base profile (from the full Rule catalog).
+  const [tpEnable, setTpEnable] = React.useState<string[]>([]);
+  const [enableFilter, setEnableFilter] = React.useState('');
 
   // Compliance Operator Profiles: the base-profile options and their rule lists.
   const [profiles] = useK8sWatchResource<ComplianceProfile[]>({
@@ -137,6 +142,29 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
     const q = ruleFilter.trim().toLowerCase();
     return q ? baseRules.filter((r) => r.toLowerCase().includes(q)) : baseRules;
   }, [baseRules, ruleFilter]);
+
+  // Full Rule catalog: candidates for enableRules are the rules NOT already in
+  // the base profile (those are active anyway). Large list; filtered below.
+  const [allRules] = useK8sWatchResource<ComplianceRule[]>({
+    groupVersionKind: RuleGVK,
+    isList: true,
+    namespaced: true,
+    namespace: COMPLIANCE_NAMESPACE,
+  });
+  const enableCandidates = React.useMemo(() => {
+    const inBase = new Set(baseRules);
+    const names = (Array.isArray(allRules) ? allRules : [])
+      .map((r) => r?.metadata?.name)
+      .filter((n): n is string => typeof n === 'string' && n.length > 0 && !inBase.has(n));
+    return [...new Set(names)].sort();
+  }, [allRules, baseRules]);
+  // Only render the (long) candidate list once the user filters, so the modal
+  // does not paint thousands of checkboxes; always show current selections.
+  const filteredEnable = React.useMemo(() => {
+    const q = enableFilter.trim().toLowerCase();
+    if (!q) return tpEnable;
+    return enableCandidates.filter((r) => r.toLowerCase().includes(q)).slice(0, 200);
+  }, [enableCandidates, enableFilter, tpEnable]);
   const tpNameRef = React.useRef<HTMLInputElement>(null);
   const createButtonRef = React.useRef<HTMLButtonElement>(null);
   // Track create sessions so Cancel/close can restore focus to the trigger (WCAG 2.4.3).
@@ -175,12 +203,14 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
       setEditing({ name, obj });
       setTpName(name);
       setTpExtends(obj.spec?.extends || 'ocp4-cis');
-      setTpDisable(
-        (obj.spec?.disableRules ?? [])
+      const ruleNames = (list: { name?: string }[] | undefined) =>
+        (list ?? [])
           .map((r) => r?.name)
-          .filter((n): n is string => typeof n === 'string' && n.length > 0),
-      );
+          .filter((n): n is string => typeof n === 'string' && n.length > 0);
+      setTpDisable(ruleNames(obj.spec?.disableRules));
+      setTpEnable(ruleNames(obj.spec?.enableRules));
       setRuleFilter('');
+      setEnableFilter('');
       returnFocusRef.current = trigger;
       setCreating(true);
     } catch (e) {
@@ -235,10 +265,14 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
     setPending(true);
     setError(null);
     // Selected rule names; keep only valid ones (manifest also filters).
+    // A rule in both lists is contradictory; disable wins (manifest also does
+    // this) so we never build a self-conflicting enable+disable set.
     const disable = tpDisable.filter((s) => isValidK8sName(s));
+    const disableSet = new Set(disable);
+    const enable = tpEnable.filter((s) => isValidK8sName(s) && !disableSet.has(s));
 
     // Edit mode: the profile is already created and bound, so just update its
-    // spec (base + disabled rules) on the fetched object (preserves rv via
+    // spec (base + rule lists) on the fetched object (preserves rv via
     // k8sUpdate). No re-bind needed.
     if (editing) {
       try {
@@ -249,6 +283,7 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
             ...(editing.obj.spec ?? {}),
             extends: extendsBase,
             disableRules: disable.length ? disable.map(rule) : undefined,
+            enableRules: enable.length ? enable.map(rule) : undefined,
           },
         };
         await k8sUpdate({ model: TailoredProfileModel, data: next });
@@ -256,7 +291,9 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
         setEditing(null);
         setTpName('');
         setTpDisable([]);
+        setTpEnable([]);
         setRuleFilter('');
+        setEnableFilter('');
         setTpExtends('ocp4-cis');
         setSuccess(t('Tailored profile updated.'));
       } catch (e) {
@@ -276,7 +313,7 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
       try {
         await k8sCreate({
           model: TailoredProfileModel,
-          data: tailoredProfileManifest(name, extendsBase, disable),
+          data: tailoredProfileManifest(name, extendsBase, disable, enable),
         });
       } catch (e) {
         if (!isAlreadyExists(e)) throw e;
@@ -326,7 +363,9 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
       setCreating(false);
       setTpName('');
       setTpDisable([]);
+      setTpEnable([]);
       setRuleFilter('');
+      setEnableFilter('');
       // Match closeCreateModal: the next open must be a clean form, not
       // pre-filled with the previous base profile.
       setTpExtends('ocp4-cis');
@@ -358,7 +397,9 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
     setEditing(null);
     setTpName('');
     setTpDisable([]);
+    setTpEnable([]);
     setRuleFilter('');
+    setEnableFilter('');
     setTpExtends('ocp4-cis');
   };
 
@@ -616,11 +657,13 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
               id="tp-extends"
               value={tpExtends}
               aria-describedby="tp-extends-help"
-              // Rules differ per base profile; reset the disable selection.
+              // Rules differ per base profile; reset both rule selections.
               onChange={(_e, v) => {
                 setTpExtends(v);
                 setTpDisable([]);
+                setTpEnable([]);
                 setRuleFilter('');
+                setEnableFilter('');
               }}
             >
               {/* Keep the current value selectable even if the Profile watch has
@@ -703,6 +746,64 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
                 </FormHelperText>
               </>
             )}
+          </FormGroup>
+          <FormGroup
+            label={t('Enable extra rules')}
+            fieldId="tp-enable"
+            role="group"
+            aria-label={t('Enable extra rules')}
+          >
+            <SearchInput
+              value={enableFilter}
+              onChange={(_e, v) => setEnableFilter(v)}
+              onClear={() => setEnableFilter('')}
+              placeholder={t('Search the rule catalog to add rules')}
+              aria-label={t('Search the rule catalog to add rules')}
+            />
+            <div
+              style={{
+                maxHeight: 220,
+                overflow: 'auto',
+                marginTop: 'var(--pf-t--global--spacer--sm)',
+                border: '1px solid var(--pf-t--global--border--color--default)',
+                borderRadius: 'var(--pf-t--global--border--radius--small)',
+                padding: 'var(--pf-t--global--spacer--sm)',
+              }}
+            >
+              {filteredEnable.length === 0 ? (
+                <HelperText>
+                  <HelperTextItem>
+                    {enableFilter.trim()
+                      ? t('No rules match the filter.')
+                      : t('Type to search the rule catalog; selected rules stay listed here.')}
+                  </HelperTextItem>
+                </HelperText>
+              ) : (
+                filteredEnable.map((rule) => (
+                  <Checkbox
+                    key={rule}
+                    id={`tp-enable-${rule}`}
+                    label={rule}
+                    isChecked={tpEnable.includes(rule)}
+                    onChange={(_e, checked) =>
+                      setTpEnable((prev) =>
+                        checked ? [...prev, rule] : prev.filter((r) => r !== rule),
+                      )
+                    }
+                  />
+                ))
+              )}
+            </div>
+            <FormHelperText>
+              <HelperText id="tp-enable-help">
+                <HelperTextItem>
+                  {t('Optional. {{count}} extra rule enabled on top of the base profile.', {
+                    count: tpEnable.length,
+                    formattedCount: formatCount(tpEnable.length, i18n.language),
+                  })}
+                </HelperTextItem>
+              </HelperText>
+            </FormHelperText>
           </FormGroup>
         </ModalBody>
         <ModalFooter>
