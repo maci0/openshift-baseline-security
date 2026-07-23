@@ -152,6 +152,9 @@ OLM, no quay/ghcr push). Requires cluster-admin and the OpenShift internal
 image registry.
 
 ```sh
+git clone https://github.com/maci0/openshift-baseline-security.git
+cd openshift-baseline-security
+
 oc new-project openshift-baseline-security
 
 # One-time: binary Docker BuildConfigs + ImageStreams (Dockerfile at each
@@ -192,73 +195,18 @@ for development and labs; use the OLM install above for production.
 
 ## Versioning and upgrades
 
-- **SemVer 0.x + alpha**: the product is pre-1.0. The CRD is `v1alpha1`, the
-  OLM channel and CSV `maturity` are `alpha`. Breaking behavior may appear in
-  minor releases; read [CHANGELOG.md](CHANGELOG.md) **Changed** / **Removed**
-  and **Migration notes** before upgrading.
-- **Consumer contract**: versioning covers the `ClusterBaseline` user-facing
-  API, shipped metrics/alerts, the OLM package on the `alpha` channel (each
-  bundle a standalone channel head; no `replaces` upgrade graph pre-release),
-  and the console plugin surface. Scan-diff bookkeeping fields
-  (`status.previousFailures`, `diffBaseFailures`, `diffBaseScanTime`) are
-  internal and may change in 0.x; details in [CHANGELOG.md](CHANGELOG.md).
-- **Supported host**: OpenShift 4.22 only (`com.redhat.openshift.versions: =v4.22`;
-  a bare `v4.22` would advertise 4.22 *and later*, which is untested). CSV
-  `minKubeVersion` is `1.35.0` (the kube API floor for that OCP line). The
-  console plugin pins `@console/pluginAPI` to `>=4.22.0-0 <4.23.0-0` for the
-  same reason.
-- **Support window**: only the latest published 0.x release is supported for
-  bugfixes and security updates. Older 0.x lines get no backports; upgrade to
-  the latest 0.x. Published CSV/image tags are immutable (never re-push the
-  same version string with different bits). Security reporting:
-  [SECURITY.md](SECURITY.md).
-- **Install path**: OLM bundle + file-based catalog is the only supported
-  install. Helm was removed in 0.4.0.
-- **Notable 0.4.0 behavior change**: benign Compliance Operator `INCONSISTENT`
-  results (PASS where applicable, NOT-APPLICABLE elsewhere) now count as PASS
-  in score, metrics, and UI. Scores can rise on upgrade without remediations.
-- **0.5.0 (breaking)**: API group renamed `baselinesecurity.io` →
-  `baselinesecurity.openshift.io` (existing `ClusterBaseline` CRs must be
-  recreated; see Migration notes). Also in 0.5.0: empty `spec.profiles: []`
-  disables scanning; `spec.complianceCatalogSource` is DNS-1123-validated; OKD
-  catalog auto-detection (`community-operators` when `redhat-operators` is
-  absent); a `registry.ci.openshift.org` build variant (`Dockerfile.ci` +
-  `.ci-operator.yaml`); scan-diff tracks raw FAIL (waivers no longer clear
-  `newlyFailed` / invent `fixed`); status list-types for
-  conditions/profiles/tailoredProfiles are map-merge; HA-safe score/fail alert
-  expressions; metrics
-  `baseline_security_status_observed_timestamp_seconds` /
-  `baseline_security_remediation_batch_active` /
-  `baseline_security_condition` /
-  `baseline_security_last_scan_timestamp_seconds` /
-  `baseline_security_newly_failed` /
-  `baseline_security_remediation_batch_started_timestamp_seconds`; alerts
-  `ComplianceChecksInError` / `ComplianceChecksInconsistent` /
-  `ComplianceStatusStale` / `RemediationBatchStuck` / `ClusterBaselineDegraded` /
-  `ComplianceScanStale` / `ComplianceRegressions`; dynamic informer watch on
-  Compliance CRs. Details and migration notes: [CHANGELOG.md](CHANGELOG.md)
-  **[0.5.0]**.
-- **Version sources** (must stay equal; `make verify-versions` checks them):
-  `operator/Makefile` (`VERSION`), the CSV in
-  `operator/bundle/manifests/baseline-security-operator.clusterserviceversion.yaml`
-  (name, version, containerImage, relatedImages),
-  `console-plugin/package.json` (`version` + `consolePlugin.version`),
-  `operator/catalog/package.yaml` channel entry (name) when present,
-  `CHANGELOG.md` (`## [VERSION]`, `## [Unreleased]`, and the `[VERSION]:` /
-  `[Unreleased]:` compare footers), this README's **Current release** line, and
-  the Go toolchain lockstep between `go.mod`, the release `Dockerfile`,
-  `Dockerfile.ci`, and `.ci-operator.yaml` (plus Node between `.nvmrc` and the
-  console Dockerfile). No OLM `replaces` upgrade graph is maintained: this is
-  pre-release with no installed base, so each build is a standalone channel head.
-- **Cutting a release**: bump `VERSION`, CSV name/version/images, console-plugin
-  versions, move CHANGELOG `[Unreleased]` into `## [VERSION]` with footer compare
-  links (`[VERSION]: ...compare/vPREV...vVERSION` and
-  `[Unreleased]: ...compare/vVERSION...HEAD`), update **Current release**, create
-  an immutable git tag `vVERSION` pointing at that commit (CHANGELOG compare URLs
-  require it; never force-move a published tag), then run
-  `make verify-versions`, then publish **new** image tags only (never overwrite
-  an existing version tag). Keep the CSV `links` Changelog entry pointed at
-  `CHANGELOG.md` so consumers can find release notes.
+Pre-1.0 SemVer on a single `alpha` OLM channel; the CRD is `v1alpha1`.
+Breaking behavior may land in minor releases, so read
+[CHANGELOG.md](CHANGELOG.md) (**Changed** / **Removed** / **Migration notes**)
+before upgrading. Only the latest published 0.x is supported; published
+image/CSV tags are immutable.
+
+- **Host**: OpenShift 4.22 only (`=v4.22`, `minKubeVersion 1.35.0`,
+  `@console/pluginAPI >=4.22.0-0 <4.23.0-0`).
+- **Install**: OLM bundle + file-based catalog (or the in-cluster build above).
+- **Release process and version-source lockstep**:
+  [docs/PATTERNS.md](docs/PATTERNS.md) §2 (`make verify-versions` enforces it).
+- **Security reporting**: [SECURITY.md](SECURITY.md).
 
 ## Development
 
