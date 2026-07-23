@@ -7,6 +7,13 @@ native Observe → Dashboards ConfigMap. The install namespace is `openshift-*`
 scrapes `openshift-*` namespaces. The OLM bundle and non-OLM `make deploy` ship
 the same ServiceMonitor / PrometheusRule / dashboard.
 
+The install also ships a `prometheus-k8s` Role/RoleBinding granting the
+platform Prometheus ServiceAccount (`openshift-monitoring/prometheus-k8s`)
+read on services/endpoints/pods in the namespace. The cluster-monitoring
+label adds the namespace to Prometheus's selector, but the monitoring operator
+only auto-grants this service-discovery RBAC to namespaces it manages; without
+it, discovery finds zero targets and nothing is scraped (`ComplianceStatusStale`).
+
 ## Metrics
 
 | Metric | Meaning |

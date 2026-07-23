@@ -28,6 +28,8 @@ baseline-security-metrics-reader_rbac.authorization.k8s.io_v1_clusterrole.yaml	c
 baseline-security-metrics-scraper_v1_serviceaccount.yaml	config/prometheus/servicemonitor.yaml
 baseline-security-metrics-scraper-token_v1_secret.yaml	config/prometheus/servicemonitor.yaml
 baseline-security-metrics-scraper_rbac.authorization.k8s.io_v1_clusterrolebinding.yaml	config/prometheus/servicemonitor.yaml
+prometheus-k8s_rbac.authorization.k8s.io_v1_role.yaml	config/prometheus/servicemonitor.yaml
+prometheus-k8s_rbac.authorization.k8s.io_v1_rolebinding.yaml	config/prometheus/servicemonitor.yaml
 baseline-security-metrics-serving-ca_v1_configmap.yaml	config/prometheus/serving-ca-configmap.yaml
 baseline-security-operator-metrics_v1_service.yaml	config/manager/metrics_service.yaml
 EOF

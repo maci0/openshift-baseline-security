@@ -33,6 +33,42 @@ subjects:
     name: baseline-security-metrics-scraper
     namespace: openshift-baseline-security
 ---
+# Platform Prometheus discovers scrape targets by listing Services/Endpoints/Pods
+# in this namespace. The openshift.io/cluster-monitoring label adds the namespace
+# to Prometheus's ServiceMonitor selector, but the cluster-monitoring operator
+# only auto-grants this service-discovery read access to namespaces it manages,
+# not arbitrary labeled ones. Without this Role/RoleBinding the prometheus-k8s
+# ServiceAccount gets 403 on endpoints, discovery finds zero targets, and no
+# metrics are ever scraped (ComplianceStatusStale fires). Mirrors the Role CMO
+# creates for platform namespaces (openshift-apiserver, etc.).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: prometheus-k8s
+  namespace: openshift-baseline-security
+  labels:
+    app: baseline-security-operator
+rules:
+  - apiGroups: [""]
+    resources: [services, endpoints, pods]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: prometheus-k8s
+  namespace: openshift-baseline-security
+  labels:
+    app: baseline-security-operator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: prometheus-k8s
+subjects:
+  - kind: ServiceAccount
+    name: prometheus-k8s
+    namespace: openshift-monitoring
+---
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
