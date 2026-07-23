@@ -327,7 +327,7 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
           name,
           ns: COMPLIANCE_NAMESPACE,
         })) as Record<string, unknown>;
-        if (!tailoredProfileSpecMatches(existing, extendsBase, disable)) {
+        if (!tailoredProfileSpecMatches(existing, extendsBase, disable, enable)) {
           setError(
             t(
               'A tailored profile named "{{name}}" already exists with different settings. Choose another name.',
