@@ -27,7 +27,7 @@ RUN --network=none CGO_ENABLED=0 go build -trimpath -buildvcs=false -mod=readonl
 	&& test -s /tmp/manager
 
 # ubi9/ubi-micro
-FROM registry.access.redhat.com/ubi9/ubi-micro@sha256:35de56a9413112f1474e392ebc35e0cf6f0fb484c8e8877bbae59b513694b41f
+FROM registry.access.redhat.com/ubi9/ubi-micro@sha256:7e7f79ab747bf2b452e3043dd89f388e92be4c7fdcc8b815b58adf6c99c39c95
 ARG SOURCE_DATE_EPOCH=0
 # Own the binary as the runtime UID (non-root cannot rewrite a root-owned path
 # under a read-only rootfs anyway; keeps ownership consistent with USER).
