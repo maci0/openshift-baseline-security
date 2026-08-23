@@ -27,175 +27,188 @@ import (
 // status.remediationBatch is persisted would leave pools paused forever if the
 // end-of-reconcile Status().Update fails (annotation gone, batch nil, no recovery).
 func (r *ClusterBaselineReconciler) applyRemediationBatch(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline) error {
-	batch := cb.Status.RemediationBatch
-	names := cb.Annotations[batchApplyAnnotation]
+	if cb.Status.RemediationBatch == nil {
+		return r.openRemediationBatch(ctx, cb, cb.Annotations[batchApplyAnnotation])
+	}
+	return r.finishRemediationBatch(ctx, cb)
+}
 
-	if batch == nil {
-		if strings.TrimSpace(names) == "" {
-			return r.resumeOrphanedBatch(ctx, cb)
+// openRemediationBatch is phase one: no status.remediationBatch yet. Validates
+// the request annotation, pauses pools, applies remediations, and records the
+// batch on status for finishRemediationBatch.
+func (r *ClusterBaselineReconciler) openRemediationBatch(
+	ctx context.Context, cb *baselinev1alpha1.ClusterBaseline, names string,
+) error {
+	if strings.TrimSpace(names) == "" {
+		return r.resumeOrphanedBatch(ctx, cb)
+	}
+	list := batchRemediationNames(names)
+	// Annotation of only commas/whitespace: do not open an empty batch.
+	if len(list) == 0 {
+		return r.resumeOrphanedBatch(ctx, cb)
+	}
+	// Match finish/skip clears on the evaluated request so a concurrent
+	// console resubmit (different CSV) is preserved, not silently deleted.
+	requested := batchRemediationNames(names)
+	// Untrusted annotation: refuse before any MCP pause / remediation apply.
+	// Clear the one-shot request (like too-many-pools) so a hostile or
+	// console-buggy value cannot sticky-Degrade every reconcile forever.
+	if len(list) > batchMaxRemediations {
+		log.FromContext(ctx).Info("remediation batch skipped: too many remediations",
+			"name", cb.Name, "count", len(list), "max", batchMaxRemediations)
+		if err := r.clearBatchAnnotations(ctx, cb, requested, false); err != nil {
+			return fmt.Errorf("clearing oversize batch-apply annotation: %w", err)
 		}
-		list := batchRemediationNames(names)
-		// Annotation of only commas/whitespace: do not open an empty batch.
-		if len(list) == 0 {
-			return r.resumeOrphanedBatch(ctx, cb)
-		}
-		// Match finish/skip clears on the evaluated request so a concurrent
-		// console resubmit (different CSV) is preserved, not silently deleted.
-		requested := batchRemediationNames(names)
-		// Untrusted annotation: refuse before any MCP pause / remediation apply.
-		// Clear the one-shot request (like too-many-pools) so a hostile or
-		// console-buggy value cannot sticky-Degrade every reconcile forever.
-		if len(list) > batchMaxRemediations {
-			log.FromContext(ctx).Info("remediation batch skipped: too many remediations",
-				"name", cb.Name, "count", len(list), "max", batchMaxRemediations)
-			if err := r.clearBatchAnnotations(ctx, cb, requested, false); err != nil {
-				return fmt.Errorf("clearing oversize batch-apply annotation: %w", err)
-			}
-			return nil
-		}
-		for _, name := range list {
-			if errs := utilvalidation.IsDNS1123Subdomain(name); len(errs) > 0 {
-				log.FromContext(ctx).Info("remediation batch skipped: invalid remediation name",
-					"name", cb.Name, "remediation", name)
-				if err := r.clearBatchAnnotations(ctx, cb, requested, false); err != nil {
-					return fmt.Errorf("clearing invalid batch-apply annotation: %w", err)
-				}
-				return nil
-			}
-		}
-
-		// Validate every existing target before any mutation. In particular, the
-		// suite check prevents ClusterBaseline patch permission from becoming a
-		// deputy that can apply arbitrary ComplianceRemediations.
-		// Drop race-deleted (NotFound) names so status only lists remediations we
-		// will actually apply. If none remain, clear the one-shot annotation
-		// instead of opening a fake batch that "succeeds" with no work.
-		// Permanent validation rejects (foreign suite, MissingDependencies) skip
-		// that name only: applying a mixed list must not drop valid remediations
-		// or sticky-Degrade forever. Same as NotFound race drops. If none remain
-		// eligible, clear the one-shot request (empty-keep path below).
-		// Transient Get/API errors still return so the request is retried.
-		// Build owned suites once for the whole list (up to batchMaxRemediations).
-		suites := ownedSuites(cb)
-		pools := map[string]bool{}
-		keep := make([]string, 0, len(list))
-		for _, name := range list {
-			rem, err := r.getBatchRemediation(ctx, name, suites)
-			if err != nil {
-				if isPermanentBatchTargetReject(err) {
-					log.FromContext(ctx).Info("remediation batch: permanent target reject, skipping",
-						"name", cb.Name, "remediation", name, "error", err.Error())
-					continue
-				}
-				return err
-			}
-			if rem == nil {
-				// Race-deleted between UI submit and start: log each drop so a
-				// partial batch (started with fewer remediations) is explainable.
-				log.FromContext(ctx).Info("remediation batch: target not found, skipping",
-					"remediation", name, "name", cb.Name)
-				continue
-			}
-			keep = append(keep, name)
-			if p := poolFromRemediation(rem); p != "" {
-				pools[p] = true
-			}
-		}
-		if len(keep) == 0 {
-			log.FromContext(ctx).Info("remediation batch skipped: no remediations found",
-				"name", cb.Name, "requested", list)
-			// Drop the one-shot request only (recovery keys were never written).
-			// Match on the request we evaluated so a console resubmit that landed
-			// after we read the annotation is preserved, not silently deleted.
-			// Covers all-NotFound and all-permanent-reject (foreign/MissingDeps).
-			if err := r.clearBatchAnnotations(ctx, cb, requested, false); err != nil {
-				return fmt.Errorf("clearing empty batch-apply annotation: %w", err)
-			}
-			return nil
-		}
-		list = keep
-		// Union with pools recorded on a prior (pre-crash) open. This runs when
-		// status.remediationBatch was lost (crash/leader handoff) and the batch is
-		// re-opened from the annotation; poolList is then rebuilt from only the
-		// surviving remediations. A pool paused before the crash whose remediation
-		// vanished in the restart window is no longer in poolList, so without this
-		// it drops out of the pause set, status.Pools, and every resume path and is
-		// left paused forever (nodes stuck). Re-pausing an already-paused pool is an
-		// idempotent no-op, and the union stays within batchMaxPools (it is a subset
-		// of the original open, which the guard already bounded).
-		for _, p := range batchRemediationNames(cb.Annotations[batchPoolsAnnotation]) {
-			if p != "" {
-				pools[p] = true
-			}
-		}
-		poolList := slices.Sorted(maps.Keys(pools))
-		if len(poolList) > batchMaxPools {
-			// More target pools than status.remediationBatch.pools can hold. Refuse
-			// before pausing anything (a paused-but-unrecorded pool would leak) and
-			// drop the one-shot request so this does not retry-freeze the reconcile.
-			log.FromContext(ctx).Info("remediation batch skipped: too many target MachineConfigPools",
-				"name", cb.Name, "pools", len(poolList), "max", batchMaxPools)
-			// Match on the evaluated request so a console resubmit that raced this
-			// reconcile is preserved rather than unconditionally deleted.
-			if err := r.clearBatchAnnotations(ctx, cb, requested, false); err != nil {
-				return fmt.Errorf("clearing oversized batch-apply annotation: %w", err)
-			}
-			return nil
-		}
-		startedAt, err := r.ensureBatchMetadata(ctx, cb, poolList, requested, list)
-		if err != nil {
-			return err
-		}
-		owner := batchPauseOwner(cb)
-		newBatch := func(pools []string) *baselinev1alpha1.RemediationBatchStatus {
-			return &baselinev1alpha1.RemediationBatchStatus{
-				Phase: baselinev1alpha1.RemediationBatchPhaseApplying, Pools: pools, Remediations: list, StartedAt: startedAt, PauseOwner: owner,
-			}
-		}
-		// Pause first so all apply-triggered MachineConfig renders coalesce.
-		// On a mid-list failure, unpause what we already paused this attempt so
-		// a permanent error cannot leave a subset of pools paused with no batch.
-		logger := log.FromContext(ctx)
-		var paused []string
-		for _, p := range poolList {
-			if err := r.setMCPPaused(ctx, p, true, owner); err != nil {
-				// If unpause itself failed, record the batch so batchResumeGrace
-				// can force resume instead of leaving pools paused forever while
-				// apply/pause keeps failing and status.remediationBatch stays nil.
-				if r.resumePoolsBestEffort(ctx, paused, owner, "failed to resume MachineConfigPool after pause failure") {
-					cb.Status.RemediationBatch = newBatch(slices.Clone(paused))
-				}
-				return fmt.Errorf("pausing MachineConfigPool %q for remediation batch: %w", p, err)
-			}
-			paused = append(paused, p)
-		}
-		for _, name := range list {
-			// Reuse suites from validation (same membership for the whole batch).
-			if err := r.applyOwnedRemediation(ctx, cb, name, suites); err != nil {
-				// Resume any paused pools so a failure never leaves them paused.
-				if r.resumePoolsBestEffort(ctx, poolList, owner, "failed to resume MachineConfigPool after batch apply error") {
-					cb.Status.RemediationBatch = newBatch(poolList)
-				}
-				return fmt.Errorf("applying remediation %q in batch: %w", name, err)
-			}
-		}
-		// Keep the annotation until resume. status.remediationBatch is written by
-		// the end-of-reconcile Status().Update; if that fails, the annotation still
-		// drives a restart rather than orphaning paused pools.
-		cb.Status.RemediationBatch = newBatch(poolList)
-		// Info: MCP pause is operationally sensitive; on-call needs a clear
-		// start marker in logs when investigating stuck paused pools.
-		logger.Info("remediation batch started",
-			"name", cb.Name, "remediations", len(list), "pools", poolList)
 		return nil
 	}
+	for _, name := range list {
+		if errs := utilvalidation.IsDNS1123Subdomain(name); len(errs) > 0 {
+			log.FromContext(ctx).Info("remediation batch skipped: invalid remediation name",
+				"name", cb.Name, "remediation", name)
+			if err := r.clearBatchAnnotations(ctx, cb, requested, false); err != nil {
+				return fmt.Errorf("clearing invalid batch-apply annotation: %w", err)
+			}
+			return nil
+		}
+	}
 
-	// Applying: resume when every listed remediation is Applied, or past grace.
-	// NotFound/NoMatch: remediation or CRDs gone; skip (do not block resume forever).
-	// Transient Get errors must not look like Applied (would unpause early), but
-	// must not bypass batchResumeGrace either (pools must never stay paused forever).
-	// Also track whether any remediation is still apply=true: if none are (the
-	// user reverted them all), the batch is cancelled and we resume at once.
+	// Validate every existing target before any mutation. In particular, the
+	// suite check prevents ClusterBaseline patch permission from becoming a
+	// deputy that can apply arbitrary ComplianceRemediations.
+	// Drop race-deleted (NotFound) names so status only lists remediations we
+	// will actually apply. If none remain, clear the one-shot annotation
+	// instead of opening a fake batch that "succeeds" with no work.
+	// Permanent validation rejects (foreign suite, MissingDependencies) skip
+	// that name only: applying a mixed list must not drop valid remediations
+	// or sticky-Degrade forever. Same as NotFound race drops. If none remain
+	// eligible, clear the one-shot request (empty-keep path below).
+	// Transient Get/API errors still return so the request is retried.
+	// Build owned suites once for the whole list (up to batchMaxRemediations).
+	suites := ownedSuites(cb)
+	pools := map[string]bool{}
+	keep := make([]string, 0, len(list))
+	for _, name := range list {
+		rem, err := r.getBatchRemediation(ctx, name, suites)
+		if err != nil {
+			if isPermanentBatchTargetReject(err) {
+				log.FromContext(ctx).Info("remediation batch: permanent target reject, skipping",
+					"name", cb.Name, "remediation", name, "error", err.Error())
+				continue
+			}
+			return err
+		}
+		if rem == nil {
+			// Race-deleted between UI submit and start: log each drop so a
+			// partial batch (started with fewer remediations) is explainable.
+			log.FromContext(ctx).Info("remediation batch: target not found, skipping",
+				"remediation", name, "name", cb.Name)
+			continue
+		}
+		keep = append(keep, name)
+		if p := poolFromRemediation(rem); p != "" {
+			pools[p] = true
+		}
+	}
+	if len(keep) == 0 {
+		log.FromContext(ctx).Info("remediation batch skipped: no remediations found",
+			"name", cb.Name, "requested", list)
+		// Drop the one-shot request only (recovery keys were never written).
+		// Match on the request we evaluated so a console resubmit that landed
+		// after we read the annotation is preserved, not silently deleted.
+		// Covers all-NotFound and all-permanent-reject (foreign/MissingDeps).
+		if err := r.clearBatchAnnotations(ctx, cb, requested, false); err != nil {
+			return fmt.Errorf("clearing empty batch-apply annotation: %w", err)
+		}
+		return nil
+	}
+	list = keep
+	// Union with pools recorded on a prior (pre-crash) open. This runs when
+	// status.remediationBatch was lost (crash/leader handoff) and the batch is
+	// re-opened from the annotation; poolList is then rebuilt from only the
+	// surviving remediations. A pool paused before the crash whose remediation
+	// vanished in the restart window is no longer in poolList, so without this
+	// it drops out of the pause set, status.Pools, and every resume path and is
+	// left paused forever (nodes stuck). Re-pausing an already-paused pool is an
+	// idempotent no-op, and the union stays within batchMaxPools (it is a subset
+	// of the original open, which the guard already bounded).
+	for _, p := range batchRemediationNames(cb.Annotations[batchPoolsAnnotation]) {
+		if p != "" {
+			pools[p] = true
+		}
+	}
+	poolList := slices.Sorted(maps.Keys(pools))
+	if len(poolList) > batchMaxPools {
+		// More target pools than status.remediationBatch.pools can hold. Refuse
+		// before pausing anything (a paused-but-unrecorded pool would leak) and
+		// drop the one-shot request so this does not retry-freeze the reconcile.
+		log.FromContext(ctx).Info("remediation batch skipped: too many target MachineConfigPools",
+			"name", cb.Name, "pools", len(poolList), "max", batchMaxPools)
+		// Match on the evaluated request so a console resubmit that raced this
+		// reconcile is preserved rather than unconditionally deleted.
+		if err := r.clearBatchAnnotations(ctx, cb, requested, false); err != nil {
+			return fmt.Errorf("clearing oversized batch-apply annotation: %w", err)
+		}
+		return nil
+	}
+	startedAt, err := r.ensureBatchMetadata(ctx, cb, poolList, requested, list)
+	if err != nil {
+		return err
+	}
+	owner := batchPauseOwner(cb)
+	newBatch := func(pools []string) *baselinev1alpha1.RemediationBatchStatus {
+		return &baselinev1alpha1.RemediationBatchStatus{
+			Phase: baselinev1alpha1.RemediationBatchPhaseApplying, Pools: pools, Remediations: list, StartedAt: startedAt, PauseOwner: owner,
+		}
+	}
+	// Pause first so all apply-triggered MachineConfig renders coalesce.
+	// On a mid-list failure, unpause what we already paused this attempt so
+	// a permanent error cannot leave a subset of pools paused with no batch.
+	logger := log.FromContext(ctx)
+	var paused []string
+	for _, p := range poolList {
+		if err := r.setMCPPaused(ctx, p, true, owner); err != nil {
+			// If unpause itself failed, record the batch so batchResumeGrace
+			// can force resume instead of leaving pools paused forever while
+			// apply/pause keeps failing and status.remediationBatch stays nil.
+			if r.resumePoolsBestEffort(ctx, paused, owner, "failed to resume MachineConfigPool after pause failure") {
+				cb.Status.RemediationBatch = newBatch(slices.Clone(paused))
+			}
+			return fmt.Errorf("pausing MachineConfigPool %q for remediation batch: %w", p, err)
+		}
+		paused = append(paused, p)
+	}
+	for _, name := range list {
+		// Reuse suites from validation (same membership for the whole batch).
+		if err := r.applyOwnedRemediation(ctx, cb, name, suites); err != nil {
+			// Resume any paused pools so a failure never leaves them paused.
+			if r.resumePoolsBestEffort(ctx, poolList, owner, "failed to resume MachineConfigPool after batch apply error") {
+				cb.Status.RemediationBatch = newBatch(poolList)
+			}
+			return fmt.Errorf("applying remediation %q in batch: %w", name, err)
+		}
+	}
+	// Keep the annotation until resume. status.remediationBatch is written by
+	// the end-of-reconcile Status().Update; if that fails, the annotation still
+	// drives a restart rather than orphaning paused pools.
+	cb.Status.RemediationBatch = newBatch(poolList)
+	// Info: MCP pause is operationally sensitive; on-call needs a clear
+	// start marker in logs when investigating stuck paused pools.
+	logger.Info("remediation batch started",
+		"name", cb.Name, "remediations", len(list), "pools", poolList)
+	return nil
+}
+
+// finishRemediationBatch is phase two: resume when every listed remediation is
+// Applied, or past grace. NotFound/NoMatch: remediation or CRDs gone; skip (do
+// not block resume forever). Transient Get errors must not look like Applied
+// (would unpause early), but must not bypass batchResumeGrace either (pools
+// must never stay paused forever). Also track whether any remediation is still
+// apply=true: if none are (the user reverted them all), the batch is cancelled
+// and we resume at once.
+func (r *ClusterBaselineReconciler) finishRemediationBatch(
+	ctx context.Context, cb *baselinev1alpha1.ClusterBaseline,
+) error {
+	batch := cb.Status.RemediationBatch
 	applied := true
 	anyApplying := false
 	var getErr error

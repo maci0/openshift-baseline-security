@@ -70,12 +70,11 @@ import {
 import {
   activeWaivedNames,
   expiringWaivers,
-  futureWaiverDeadlineMs,
-  soonestDeadlineDelayMs,
 } from '../waivers';
 import BaselineNotConfigured from './BaselineNotConfigured';
 import { regionFocusProps } from './DisabledTip';
 import { SUCCESS_DISMISS_MS } from './feedback';
+import { useWaiverExpiryClock } from './useWaiverExpiryClock';
 
 // Stable empty list so optional status arrays do not allocate each render.
 const EMPTY_NAMES: readonly string[] = [];
@@ -655,30 +654,14 @@ const Overview: React.FC<{
   // the same membership; identity deps would re-weigh multi-thousand CCRs every
   // reconcile even when score inputs did not change.
   const waivers = baseline?.spec.waivers;
-  const waiversKey = (waivers ?? [])
-    .map((w) => `${w.name ?? ''}\0${w.expiresAt ?? ''}`)
-    .join('\x01');
   // Active waivers are time-sensitive: membership alone is not enough. A waiver
   // can expire (or enter the expiring-soon window) with no CR edit. Without a
   // tick, SeverityWeighted profile badges and the expiring-soon alert stay
   // wrong until CCR identity or waiversKey change. ResultsTab clocks expiry
-  // only; Overview also clocks window entry for the 2-week alert.
-  const [waiverClock, setWaiverClock] = React.useState(0);
-  React.useEffect(() => {
-    const now = Date.now();
-    // Expiry drops score exclusions; -2w marks entry into the expiring-soon alert.
-    const delay = soonestDeadlineDelayMs(
-      now,
-      futureWaiverDeadlineMs(waivers, now, [-2 * WEEK_MS]),
-    );
-    if (delay === 0) {
-      return;
-    }
-    const id = window.setTimeout(() => setWaiverClock((c) => c + 1), delay);
-    return () => window.clearTimeout(id);
-    // waivers read when key or clock changes (content-stable + expiry).
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- content key
-  }, [waiversKey, waiverClock]);
+  // only; Overview also clocks window entry for the 2-week alert (-2w offset).
+  const { key: waiversKey, tick: waiverClock } = useWaiverExpiryClock(waivers, [
+    -2 * WEEK_MS,
+  ]);
   // Last history tip per bucket (empty-CCR fallback in profileScore only).
   const statusProfiles = baseline?.status?.profiles;
   const statusTailored = baseline?.status?.tailoredProfiles;
@@ -877,6 +860,37 @@ const Overview: React.FC<{
         {formatCount(pScore, locale)}
       </Label>
     ) : undefined;
+
+  // One card renderer for built-in and tailored profile rows so layout, score
+  // chip, count rows, and sparkline cannot drift between the two lists.
+  // Plain function (not a component element): no remount churn per render.
+  const scoreCard = (
+    filterKey: string,
+    title: React.ReactNode,
+    counts: ResultCounts,
+    history?: ScoreSnapshot[],
+  ) => {
+    // Flat: counts only. SeverityWeighted: memoized weightedScores map.
+    const pScore = weightedScores
+      ? (weightedScores.get(filterKey) ?? null)
+      : profileScore(counts);
+    return (
+      <Card key={filterKey}>
+        <CardHeader
+          actions={{
+            actions: scoreLabel(pScore),
+            hasNoOffset: true,
+          }}
+        >
+          <CardTitle>{title}</CardTitle>
+        </CardHeader>
+        <CardBody style={{ display: 'flex', flexDirection: 'column' }}>
+          <ProfileCounts counts={counts} filterKey={filterKey} />
+          <MiniTrend history={history} />
+        </CardBody>
+      </Card>
+    );
+  };
 
   return (
     <PageSection>
@@ -1123,52 +1137,19 @@ const Overview: React.FC<{
         minWidths={{ default: '260px' }}
         style={{ marginTop: 'var(--pf-t--global--spacer--md)' }}
       >
-        {(baseline.status?.profiles ?? []).map((p) => {
-          // Flat: counts only. SeverityWeighted: memoized weightedScores map.
-          const pScore = weightedScores
-            ? (weightedScores.get(p.key) ?? null)
-            : profileScore(p);
-          return (
-            <Card key={p.key}>
-              <CardHeader
-                actions={{
-                  actions: scoreLabel(pScore),
-                  hasNoOffset: true,
-                }}
-              >
-                <CardTitle>{t(profileTitle(p.key))}</CardTitle>
-              </CardHeader>
-              <CardBody style={{ display: 'flex', flexDirection: 'column' }}>
-                <ProfileCounts counts={p} filterKey={p.key} />
-                <MiniTrend history={p.history} />
-              </CardBody>
-            </Card>
-          );
-        })}
-        {(baseline.status?.tailoredProfiles ?? []).map((tp) => {
-          const tpKey = `tp-${tp.name}`;
-          const pScore = weightedScores
-            ? (weightedScores.get(tpKey) ?? null)
-            : profileScore(tp);
-          return (
-            <Card key={`tp-${tp.name}`}>
-              <CardHeader
-                actions={{
-                  actions: scoreLabel(pScore),
-                  hasNoOffset: true,
-                }}
-              >
-                <CardTitle>
-                  {tp.name} <Label isCompact color="blue">{t('Tailored')}</Label>
-                </CardTitle>
-              </CardHeader>
-              <CardBody style={{ display: 'flex', flexDirection: 'column' }}>
-                <ProfileCounts counts={tp} filterKey={`tp-${tp.name}`} />
-                <MiniTrend history={tp.history} />
-              </CardBody>
-            </Card>
-          );
-        })}
+        {(baseline.status?.profiles ?? []).map((p) =>
+          scoreCard(p.key, t(profileTitle(p.key)), p, p.history),
+        )}
+        {(baseline.status?.tailoredProfiles ?? []).map((tp) =>
+          scoreCard(
+            `tp-${tp.name}`,
+            <>
+              {tp.name} <Label isCompact color="blue">{t('Tailored')}</Label>
+            </>,
+            tp,
+            tp.history,
+          ),
+        )}
       </Gallery>
     </PageSection>
   );

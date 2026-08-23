@@ -77,14 +77,13 @@ import {
 import {
   activeWaivedNames,
   findWaiver,
-  futureWaiverDeadlineMs,
-  soonestDeadlineDelayMs,
   waiverExpired,
 } from '../waivers';
 import BaselineNotConfigured from './BaselineNotConfigured';
 import { withDisabledTip } from './DisabledTip';
 import { restoreFocus } from './focus';
 import { SUCCESS_DISMISS_MS } from './feedback';
+import { useWaiverExpiryClock } from './useWaiverExpiryClock';
 
 const statusLabel: Record<
   CheckStatus,
@@ -190,29 +189,12 @@ const ResultsTab: React.FC<{
     verb: 'patch',
   });
   const waivers = baseline?.spec.waivers;
-  // Content key: status-only CR updates reallocate the waivers array with the
-  // same membership; identity deps would rebuild the Set (and rowFilters) on
-  // every reconcile even when score exclusions did not change.
-  const waiversKey = (waivers ?? [])
-    .map((w) => `${w.name ?? ''}\0${w.expiresAt ?? ''}`)
-    .join('\x01');
   // Active waivers are time-sensitive: membership alone is not enough. A waiver
   // can expire with no CR edit, and operator status-only updates do not change
   // waiversKey. Without a clock tick at the soonest expiry, Results would keep
   // showing WAIVED (and hide the row from FAIL chips/deep-links) after the
   // operator has already returned the check to the Fail bucket.
-  const [waiverClock, setWaiverClock] = React.useState(0);
-  React.useEffect(() => {
-    const now = Date.now();
-    const delay = soonestDeadlineDelayMs(now, futureWaiverDeadlineMs(waivers, now));
-    if (delay === 0) {
-      return;
-    }
-    const id = window.setTimeout(() => setWaiverClock((c) => c + 1), delay);
-    return () => window.clearTimeout(id);
-    // waivers read when key or clock changes (content-stable + expiry).
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- content key
-  }, [waiversKey, waiverClock]);
+  const { key: waiversKey, tick: waiverClock } = useWaiverExpiryClock(waivers);
   // Active (non-expired) waiver names as a Set so row filters and cells are O(1)
   // per check instead of scanning the waiver list on every result.
   const activeWaived = React.useMemo(
@@ -343,18 +325,8 @@ const ResultsTab: React.FC<{
     if (!selectedLive) return;
     const idx = waivers?.findIndex((w) => w.name === selectedLive.metadata.name) ?? -1;
     if (idx < 0) return;
-    const data = removeWaiverPatch(idx, selectedLive.metadata.name);
-    // Empty patch (invalid index / empty name): surface failure instead of an
-    // RV-only patch that would report success without removing anything.
-    if (!data.length) {
-      setWaiveError(t('Failed to remove waiver.'));
-      return;
-    }
-    void patchWaivers(
-      data,
-      t('Failed to remove waiver.'),
-      t('Waiver removed. The check counts toward the score again.'),
-    );
+    // Same empty-patch guard / failure message as the orphan-removal path.
+    removeWaiverByIndex(idx, selectedLive.metadata.name);
   };
 
   // Waivers whose check has no current result (its rule was removed or its

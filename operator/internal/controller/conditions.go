@@ -381,17 +381,25 @@ func dedupeStable(in []string) []string {
 // clampStringList truncates each entry to objectRefFieldMaxLen (253) runes,
 // drops empties, dedupes, then keeps at most maxItems entries. Every status
 // set-list item it clamps (profile names, MCP pool names, remediation names) is
-// a DNS-1123 / object-ref name bounded at 253 in the CRD. The per-item clamp runs
-// BEFORE the dedupe so two over-length names sharing a 253-rune prefix (only
-// possible from corrupt/restored etcd) cannot collapse to the same string after
-// dedup and re-introduce a set-list duplicate that fails admission.
+// a DNS-1123 / object-ref name bounded at 253 in the CRD.
 func clampStringList(in []string, maxItems int) []string {
+	return clampSetList(in, objectRefFieldMaxLen, maxItems, true)
+}
+
+// clampSetList is the shared core of clampStringList and clampFailureList:
+// truncate each entry to nameMax runes, optionally drop empties, keep the first
+// occurrence of duplicates in original order, then trim to maxItems. The
+// per-item clamp runs BEFORE the dedupe so two over-length names sharing a
+// nameMax-rune prefix (only possible from corrupt/restored etcd, which bypasses
+// the CRD MaxLength) cannot collapse to the same string after truncation and
+// re-introduce a set-list duplicate that fails admission.
+func clampSetList(in []string, nameMax, maxItems int, dropEmpty bool) []string {
 	if len(in) == 0 {
 		return in
 	}
 	clamped := make([]string, 0, len(in))
 	for _, s := range in {
-		if s = clampString(s, objectRefFieldMaxLen); s != "" {
+		if s = clampString(s, nameMax); s != "" || !dropEmpty {
 			clamped = append(clamped, s)
 		}
 	}
@@ -399,7 +407,7 @@ func clampStringList(in []string, maxItems int) []string {
 	if maxItems > 0 && len(clamped) > maxItems {
 		clamped = clamped[:maxItems]
 	}
-	if len(clamped) == 0 {
+	if dropEmpty && len(clamped) == 0 {
 		return nil
 	}
 	return clamped
@@ -427,24 +435,12 @@ func clampString(s string, max int) string {
 }
 
 // clampFailureList clamps each name to CRD items:MaxLength=253, dedupes, then
-// trims to failureListMax (keeps the prefix). nil stays nil. The per-item clamp
-// runs BEFORE the dedupe so two over-length names sharing a 253-rune prefix (only
-// possible from corrupt/restored etcd, which bypasses the CRD MaxLength) cannot
-// truncate to the same string after dedup and re-introduce a set-list duplicate
-// that would fail Status().Update admission.
+// trims to failureListMax (keeps the prefix). nil stays nil. Unlike
+// clampStringList, empty entries are kept: failure list items have a CRD
+// MaxLength but no MinLength, so an empty name is admissible and dropping it
+// would silently rewrite (not just clamp) a hostile status.
 func clampFailureList(in []string) []string {
-	if len(in) == 0 {
-		return in
-	}
-	clamped := make([]string, len(in))
-	for i, s := range in {
-		clamped[i] = clampString(s, failureNameMaxLen)
-	}
-	clamped = dedupeStable(clamped)
-	if len(clamped) > failureListMax {
-		clamped = clamped[:failureListMax]
-	}
-	return clamped
+	return clampSetList(in, failureNameMaxLen, failureListMax, false)
 }
 
 // failureListsSizeBudget bounds the combined serialized size of the four status
