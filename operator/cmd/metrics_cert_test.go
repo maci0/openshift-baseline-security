@@ -197,7 +197,6 @@ func TestMetricsCertProviderConcurrentSelfSigned(t *testing.T) {
 	errs := make([]error, n)
 	wg.Add(n)
 	for i := 0; i < n; i++ {
-		i := i
 		go func() {
 			defer wg.Done()
 			certs[i], errs[i] = p.GetCertificate(nil)
@@ -228,7 +227,6 @@ func TestMetricsCertProviderConcurrentLoad(t *testing.T) {
 	errs := make([]error, n)
 	wg.Add(n)
 	for i := 0; i < n; i++ {
-		i := i
 		go func() {
 			defer wg.Done()
 			certs[i], errs[i] = p.GetCertificate(nil)
@@ -304,7 +302,6 @@ func TestMetricsCertProviderConcurrentReload(t *testing.T) {
 	errs := make([]error, n)
 	wg.Add(n)
 	for i := 0; i < n; i++ {
-		i := i
 		go func() {
 			defer wg.Done()
 			if i == n/2 {

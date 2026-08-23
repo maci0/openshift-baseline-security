@@ -5,6 +5,10 @@ linters:
     - unconvert
     - unparam
     - nilerr
+    - errorlint
+    - copyloopvar
+    - noctx
+    - bodyclose
   settings:
     staticcheck:
       checks: ["all", "-ST1000"]

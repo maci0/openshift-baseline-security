@@ -1031,7 +1031,7 @@ const RemediationsTab: React.FC<{
                         // rejects when the document lacks focus / permission. The
                         // object stays on-screen for manual selection either way.
                         const write = navigator.clipboard?.writeText(objectText);
-                        if (!write) {
+                        if (write === undefined) {
                           setCopied(false);
                           setError(t('Copy to clipboard is unavailable in this browser.'));
                           return;

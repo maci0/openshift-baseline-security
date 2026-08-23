@@ -408,7 +408,7 @@ func (r *ClusterBaselineReconciler) getBatchRemediation(
 	if err != nil {
 		// Wrong-type status will not heal without an external rewrite; treat as
 		// permanent so a hand-edited rem cannot sticky-Degrade every reconcile.
-		return nil, fmt.Errorf("remediation %q: %w: %v", name, errBatchCorruptStatus, err)
+		return nil, fmt.Errorf("remediation %q: %w: %w", name, errBatchCorruptStatus, err)
 	}
 	if state == "MissingDependencies" {
 		return nil, fmt.Errorf("remediation %q: %w", name, errBatchMissingDeps)
@@ -417,7 +417,7 @@ func (r *ClusterBaselineReconciler) getBatchRemediation(
 	// remediations never enter status.remediationBatch.Remediations and pin the
 	// wait path until grace.
 	if _, _, err := unstructured.NestedBool(rem.Object, "spec", "apply"); err != nil {
-		return nil, fmt.Errorf("remediation %q: %w: %v", name, errBatchCorruptStatus, err)
+		return nil, fmt.Errorf("remediation %q: %w: %w", name, errBatchCorruptStatus, err)
 	}
 	return rem, nil
 }

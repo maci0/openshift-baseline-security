@@ -13,7 +13,7 @@
     "build-dev": "yarn clean && yarn ts-node node_modules/.bin/webpack",
     "start": "yarn ts-node node_modules/.bin/webpack serve",
     "ts-node": "ts-node -O '{\"module\":\"commonjs\"}'",
-    "lint": "eslint ./src",
+    "lint": "eslint ./src ./e2e webpack.config.ts",
     "typecheck": "tsc --noEmit",
     "test": "jest",
     "test-e2e": "playwright test -c e2e/playwright.config.ts"

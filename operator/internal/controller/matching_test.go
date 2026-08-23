@@ -512,9 +512,9 @@ func TestSanitizeStatusProfilesTailoredRelated(t *testing.T) {
 			t.Fatalf("invalid tailored name survived: %q", tp.Name)
 		}
 		for _, neg := range []int32{
-			tp.ResultCounts.Pass, tp.ResultCounts.Fail, tp.ResultCounts.Manual,
-			tp.ResultCounts.Info, tp.ResultCounts.Error, tp.ResultCounts.Inconsistent,
-			tp.ResultCounts.Waived, tp.ResultCounts.NotApplicable,
+			tp.Pass, tp.Fail, tp.Manual,
+			tp.Info, tp.Error, tp.Inconsistent,
+			tp.Waived, tp.NotApplicable,
 		} {
 			if neg < 0 {
 				t.Fatalf("negative tailored ResultCounts field survived: %+v", tp.ResultCounts)
