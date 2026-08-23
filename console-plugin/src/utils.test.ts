@@ -1,63 +1,58 @@
 import {
-  checkResultHref,
   addWaiverPatch,
-  isWaived,
-  activeWaivedNames,
-  waiverExpired,
-  findWaiver,
-  expiringWaivers,
-  resultFilterStatus,
   removeWaiverPatch,
-  aggregateCounts,
-  clusterScore,
-  isNodeRemediation,
-  effectiveStatus,
-  inconsistentSources,
-  machineConfigPoolHref,
-  missingDependencySummary,
-  compareRemediationsForApplyOrder,
-  nodeScanPool,
-  remediationObjectText,
-  REMEDIATION_OBJECT_UNSERIALIZABLE,
-  resultsCsv,
   remediationApplyPatch,
   resourceVersionTest,
-  checkBody,
-  checkTitle,
-  errorMessage,
   rescanPatch,
-  resultsHref,
-  scoreColor,
-  scoreLabelColor,
-  severityWeight,
-  checkSeverity,
-  flatProfileScore,
-  profileScore,
-  effectiveScoringMode,
-  historyScoringModeMismatch,
-  HISTORY_SCORING_MODE_ANN,
-  toggledProfiles,
-  isValidCron,
   schedulePatch,
   batchApplyPatch,
   batchApplyRequested,
-  buildReportHtml,
-  tailoredProfileManifest,
-  tailoredProfileSpecMatches,
   tailoredProfileBindingPatch,
-  isAlreadyExists,
-  changedChecks,
-  changedChecksMany,
+} from './patches';
+import { isValidCron } from './cron';
+import {
+  waiverExpired,
+  findWaiver,
+  isWaived,
+  activeWaivedNames,
+  expiringWaivers,
+} from './waivers';
+import {
   dateInputEndOfDayIso,
   localDateInputValue,
   formatLocalDate,
   formatLocalDateTime,
   formatCount,
   formatChartDate,
-  profileTitle,
-  downloadBlob,
-} from './utils';
-import { ClusterBaseline, ComplianceCheckResult, ComplianceRemediation, ResultCounts } from './models';
+} from './dates';
+import {
+  HISTORY_SCORING_MODE_ANN,
+  effectiveScoringMode,
+  historyScoringModeMismatch,
+  clusterScore,
+  aggregateCounts,
+  scoreColor,
+  scoreLabelColor,
+  severityWeight,
+  checkSeverity,
+  flatProfileScore,
+  profileScore,
+} from './scoring';
+import { inconsistentSources, effectiveStatus, resultFilterStatus } from './status';
+import { checkTitle, checkBody, resultsCsv, changedChecksMany, nodeScanPool } from './results';
+import { checkResultHref, machineConfigPoolHref, resultsHref } from './links';
+import {
+  isNodeRemediation,
+  remediationObjectText,
+  REMEDIATION_OBJECT_UNSERIALIZABLE,
+  missingDependencySummary,
+  compareRemediationsForApplyOrder,
+} from './remediation';
+import { downloadBlob } from './download';
+import { buildReportHtml } from './report';
+import { errorMessage, isAlreadyExists } from './errors';
+import { toggledProfiles, tailoredProfileManifest, tailoredProfileSpecMatches } from './profiles';
+import { ClusterBaseline, ComplianceCheckResult, ComplianceRemediation, ResultCounts, profileTitle } from './models';
 import { isValidK8sName, isValidTailoredProfileName } from './names';
 
 const result = (name: string, description?: string): ComplianceCheckResult =>
@@ -1366,13 +1361,13 @@ describe('inconsistentSources', () => {
   });
 });
 
-describe('changedChecks', () => {
+describe('changedChecksMany', () => {
   const res = (name: string, description?: string) =>
     ({ metadata: { name, namespace: 'openshift-compliance' }, description }) as ComplianceCheckResult;
 
   it('resolves names to title + deep-link, name as title fallback', () => {
     const results = [res('ocp4-cis-a', 'Audit profile set\nrationale')];
-    const items = changedChecks(['ocp4-cis-a', 'ocp4-cis-missing'], results);
+    const [items] = changedChecksMany([['ocp4-cis-a', 'ocp4-cis-missing']], results);
     expect(items).toHaveLength(2);
     expect(items[0]).toEqual({
       name: 'ocp4-cis-a',
@@ -1383,16 +1378,17 @@ describe('changedChecks', () => {
     expect(items[1].title).toBe('ocp4-cis-missing');
   });
   it('filters empty names and tolerates undefined inputs', () => {
-    expect(changedChecks(undefined, undefined)).toEqual([]);
-    expect(changedChecks(['', 'x'], [])).toHaveLength(1);
+    expect(changedChecksMany([undefined], undefined)).toEqual([[]]);
+    const [items] = changedChecksMany([['', 'x']], []);
+    expect(items).toHaveLength(1);
   });
   it('drops non-string elements from untrusted status lists without throwing', () => {
     // status.newlyFailed/fixed are not runtime type-checked; a corrupt element
     // (number/object/bool/array) must be dropped, not reach checkResultHref and
     // crash the Overview "Recent changes" render.
     const hostile = [42, {}, true, ['x'], null, undefined, 'real'] as unknown as string[];
-    expect(() => changedChecks(hostile, [])).not.toThrow();
-    const items = changedChecks(hostile, []);
+    expect(() => changedChecksMany([hostile], [])).not.toThrow();
+    const [items] = changedChecksMany([hostile], []);
     expect(items).toHaveLength(1);
     expect(items[0].name).toBe('real');
     expect(() => changedChecksMany([hostile, hostile], [])).not.toThrow();
@@ -1407,7 +1403,7 @@ describe('changedChecks', () => {
         .filter(Boolean)
         .slice(0, 3)
         .map((name) => res(name, randomString(i % 40)));
-      const items = changedChecks(names, results);
+      const [items] = changedChecksMany([names], results);
       expect(items.length).toBe(names.filter(Boolean).length);
       for (const x of items) {
         expect(x.name.length).toBeGreaterThan(0);
@@ -2620,23 +2616,20 @@ describe('schedule editor helpers', () => {
   });
 
   it('schedulePatch always adds a valid cron (creates or replaces the leaf)', () => {
-    expect(schedulePatch(true, '0 2 * * *')).toEqual([
-      { op: 'add', path: '/spec/schedule', value: '0 2 * * *' },
-    ]);
-    expect(schedulePatch(false, '0 2 * * *')).toEqual([
+    expect(schedulePatch('0 2 * * *')).toEqual([
       { op: 'add', path: '/spec/schedule', value: '0 2 * * *' },
     ]);
     // Trims before validate/write so surrounding whitespace does not fail admission.
-    expect(schedulePatch(true, '  0 3 * * *  ')).toEqual([
+    expect(schedulePatch('  0 3 * * *  ')).toEqual([
       { op: 'add', path: '/spec/schedule', value: '0 3 * * *' },
     ]);
   });
 
   it('schedulePatch is a no-op for invalid cron (fail closed before admission)', () => {
-    expect(schedulePatch(true, '')).toEqual([]);
-    expect(schedulePatch(false, '@every 1s')).toEqual([]);
-    expect(schedulePatch(true, '0 1 * *')).toEqual([]);
-    expect(schedulePatch(true, '60 1 * * *')).toEqual([]);
+    expect(schedulePatch('')).toEqual([]);
+    expect(schedulePatch('@every 1s')).toEqual([]);
+    expect(schedulePatch('0 1 * *')).toEqual([]);
+    expect(schedulePatch('60 1 * * *')).toEqual([]);
   });
 });
 

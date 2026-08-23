@@ -179,7 +179,7 @@ const ScheduleEditor: React.FC<{ baseline: ClusterBaseline }> = ({ baseline }) =
     // Presence is != null (not !!): empty string is still a present field.
     // Empty schedule ops would leave only an RV test: a successful no-op that
     // looks like the schedule was updated when nothing changed.
-    const scheduleOps = schedulePatch(baseline.spec.schedule != null, value.trim());
+    const scheduleOps = schedulePatch(value.trim());
     if (!scheduleOps.length) {
       setErr(t('Invalid schedule. Use a five-field cron expression.'));
       return;

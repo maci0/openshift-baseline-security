@@ -17,7 +17,7 @@ import ResultsTab from './ResultsTab';
 import RemediationsTab from './RemediationsTab';
 import ProfilesTab from './ProfilesTab';
 
-export type BaselineContextValue = {
+type BaselineContextValue = {
   baseline?: ClusterBaseline;
   loaded: boolean;
   // Single shared watch of ComplianceCheckResults (CompliancePage owns it).

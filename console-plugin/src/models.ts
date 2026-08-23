@@ -133,7 +133,6 @@ export const ClusterBaselineModel = model(ClusterBaselineGVK, 'clusterbaselines'
 export const ComplianceScanModel = model(ComplianceScanGVK, 'compliancescans', true);
 export const ComplianceRemediationModel = model(ComplianceRemediationGVK, 'complianceremediations', true);
 export const TailoredProfileModel = model(TailoredProfileGVK, 'tailoredprofiles', true);
-export const ProfileModel = model(ProfileGVK, 'profiles', true);
 
 // Compliance Operator Profile object (subset): name + the rule names it contains.
 export type ComplianceProfile = {

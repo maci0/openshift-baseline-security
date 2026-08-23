@@ -60,8 +60,8 @@ export const tailoredProfileBindingPatch = (
 // already-set values all succeed (RFC 6902 add creates or replaces an object
 // member; matches remediationApplyPatch leaf handling for defaulted-absent
 // fields). Invalid cron yields no ops so CRD/controller rejection is not the
-// first failure mode. hasSchedule is retained for call-site compatibility.
-export const schedulePatch = (_hasSchedule: boolean, cron: string) => {
+// first failure mode.
+export const schedulePatch = (cron: string) => {
   const value = cron.trim();
   if (!isValidCron(value)) {
     return [] as { op: 'add'; path: string; value: unknown }[];

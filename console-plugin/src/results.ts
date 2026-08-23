@@ -137,18 +137,6 @@ export interface ChangedCheck {
   href: string;
 }
 
-// Resolve status.newlyFailed / status.fixed check names into display items for
-// the Overview "Recent changes" card: a human title (from the watched results,
-// falling back to the raw name) and a deep-link to the ComplianceCheckResult.
-//
-// Index only the requested names (often a handful of regressions) instead of
-// mapping every CCR. Early-exit when names is empty so Overview can call this
-// for both newlyFailed and fixed without a full-list scan when either is empty.
-export const changedChecks = (
-  names: readonly string[] | undefined,
-  results: ComplianceCheckResult[] | undefined,
-): ChangedCheck[] => changedChecksMany([names], results)[0];
-
 // Resolve several name lists with one CCR index pass (Overview newlyFailed +
 // fixed). Empty lists short-circuit; when every list is empty no results scan.
 export const changedChecksMany = (
