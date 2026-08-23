@@ -295,5 +295,6 @@
   "Scans {{effective}} of {{base}} base rules.": "Scans {{formattedEffective}} of {{formattedBase}} base rules.",
   "Type to filter the base profile rules": "Type to filter the base profile rules",
   "Type to find a base rule to turn off": "Type to find a base rule to turn off",
-  "Type to search rules not in the base profile": "Type to search rules not in the base profile"
+  "Type to search rules not in the base profile": "Type to search rules not in the base profile",
+  "Showing first {{shown}} of {{total}} matches. Refine your search to find more.": "Showing first {{formattedShown}} of {{formattedTotal}} matches. Refine your search to find more."
 }

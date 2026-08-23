@@ -107,18 +107,23 @@ const RuleMultiSelect: React.FC<{
   promptText,
   searchOnly,
 }) => {
+  const { t, i18n } = useTranslation('plugin__baseline-security-console-plugin');
   const [isOpen, setIsOpen] = React.useState(false);
   const [input, setInput] = React.useState('');
   const inputRef = React.useRef<HTMLInputElement>(null);
 
   const q = input.trim().toLowerCase();
+  // Cap rendered options for a ~1k-rule catalog; keep the pre-cap count so a
+  // truncated list says so instead of silently hiding rules past the cap.
+  const allMatches = React.useMemo(
+    () => (q ? options.filter((o) => o.toLowerCase().includes(q)) : options),
+    [options, q],
+  );
   const matches = React.useMemo(() => {
     if (searchOnly && !q) return [];
-    return (q ? options.filter((o) => o.toLowerCase().includes(q)) : options).slice(
-      0,
-      RULE_OPTION_CAP,
-    );
-  }, [options, q, searchOnly]);
+    return allMatches.slice(0, RULE_OPTION_CAP);
+  }, [allMatches, q, searchOnly]);
+  const truncated = !(searchOnly && !q) && allMatches.length > matches.length;
 
   const pick = (value: string) => {
     onChange(selected.includes(value) ? selected.filter((v) => v !== value) : [...selected, value]);
@@ -206,6 +211,16 @@ const RuleMultiSelect: React.FC<{
               {o}
             </SelectOption>
           ))
+        )}
+        {truncated && (
+          <SelectOption isDisabled key="__truncated">
+            {t('Showing first {{shown}} of {{total}} matches. Refine your search to find more.', {
+              shown: RULE_OPTION_CAP,
+              total: allMatches.length,
+              formattedShown: formatCount(RULE_OPTION_CAP, i18n.language),
+              formattedTotal: formatCount(allMatches.length, i18n.language),
+            })}
+          </SelectOption>
         )}
       </SelectList>
     </Select>

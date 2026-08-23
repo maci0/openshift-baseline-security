@@ -42,6 +42,20 @@ depend on those tags.
 
 ## [Unreleased]
 
+### Security
+
+- Go: bump indirect grpc 1.79.3 -> 1.82.1 (GO-2026-6061) and otel 1.40.0 ->
+  1.43.0 (GO-2026-5506; grpc 1.82.1 requires otel 1.43.0). govulncheck reports
+  no called vulnerabilities.
+- Console: pin resolutions brace-expansion ^5.0.8 (GHSA-mh99-v99m-4gvg, high)
+  and tar ^7.5.21 (GHSA-r292-9mhp-454m, via node-gyp). `yarn npm audit` is
+  clean.
+
+### Docs
+
+- README: add a Quickstart with a complete `oc apply` install sequence at the
+  top of the file.
+
 ## [0.5.13] - 2026-07-23
 
 ### Changed
