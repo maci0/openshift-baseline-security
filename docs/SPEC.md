@@ -428,7 +428,7 @@ openshift-baseline-security/
 │   ├── package.json
 │   ├── webpack.config.ts
 │   └── Dockerfile
-├── docs/{SPEC,DESIGN-DECISIONS,PATTERNS,STANDARDS,TEST-PLAN}.md
+├── docs/{SPEC,OBSERVABILITY,DESIGN-DECISIONS,PATTERNS,STANDARDS,TEST-PLAN}.md
 ├── CHANGELOG.md
 ├── SECURITY.md                     # support window + vulnerability reporting
 ├── TODO.md

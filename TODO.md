@@ -1,6 +1,6 @@
 # Roadmap
 
-Status of **openshift-baseline-security**. Current release **0.5.0**
+Status of **openshift-baseline-security**. Current release **0.5.13**
 (cluster-scoped `ClusterBaseline` API `v1alpha1`, string-enum spec, OLM
 channel `alpha`). See [CHANGELOG.md](CHANGELOG.md) for consumer-facing notes
 and upgrade impact. Verified end to end on a single-node OpenShift 4.22
@@ -59,9 +59,9 @@ Legend: `[x]` done · `[ ]` planned · **(H/M/L)** rough value.
 - [x] Console cluster Overview details item surfacing the compliance score.
 
 ### Packaging & quality
-- [x] OLM bundle + FBC catalog (`make bundle` validates); upgrade graph
-      0.2.0 → 0.2.1 → 0.3.0 → 0.3.1 → 0.4.0 → 0.5.0 (`replaces` chain); images/tools
-      digest-pinned where applicable.
+- [x] OLM bundle + FBC catalog (`make bundle` validates); no `replaces`
+      upgrade graph pre-release (each bundle is a standalone channel head);
+      images/tools digest-pinned where applicable.
 - [x] CI (unit, fuzz, lint, generated-file drift, image builds).
 - [x] E2E: operator Go (`make test-e2e`) + console Playwright
       (`yarn test-e2e`, also regenerates `docs/screenshots`).
@@ -85,7 +85,7 @@ Legend: `[x]` done · `[ ]` planned · **(H/M/L)** rough value.
       `ComplianceStatusStale`, `RemediationBatchStuck`, `ClusterBaselineDegraded`,
       `ComplianceScanStale`, `ComplianceRegressions`.
 
-## 0.4 additions (openspec: expand-compliance-features)
+### 0.4 additions (openspec: expand-compliance-features)
 - [x] Waiver governance: expiry, requester/approver attribution; expired waivers
       stop excluding; expiring-soon surfaced.
 - [x] Scan diff: `status.newlyFailed`/`fixed` (regressions since last scan) with
@@ -99,7 +99,9 @@ Legend: `[x]` done · `[ ]` planned · **(H/M/L)** rough value.
 - [x] Native console score-trend dashboard: the operator reconciles a
       `console.openshift.io/dashboard` ConfigMap in openshift-config-managed
       (embedded JSON) rendered under Observe -> Dashboards, no Grafana. Metrics
-      ServiceMonitor + PrometheusRule ship in the bundle; data needs UWM.
+      ServiceMonitor + PrometheusRule ship in the bundle; data comes from
+      platform (cluster) monitoring, which scrapes the `openshift-*` install
+      namespace via the cluster-monitoring label (UWM never scrapes it).
 - [x] Benign INCONSISTENT collapse: a check the Compliance Operator marks
       INCONSISTENT only because it applies on some nodes (PASS) and not others
       (NOT-APPLICABLE) now reads as PASS in the score, counts, metrics, and UI;
