@@ -3,6 +3,7 @@
 ADR-style record of product design choices for OpenShift Baseline Security.
 Folder layout and module boundaries are out of scope here; see
 [PATTERNS.md](PATTERNS.md) and [SPEC.md](SPEC.md) for architecture and API shape.
+Each record ends with its git creation date; new records must carry one.
 
 ## ADR-001: Orchestration wrapper, not a scanner
 
@@ -17,6 +18,8 @@ catalogs; dependent on CO CRDs, labels, and remediation semantics.
 
 **Status:** Keep. Revisit only if CO is unavailable on a target platform.
 
+*Recorded: 2026-07-12 (git history).*
+
 ## ADR-002: Single cluster-scoped CR (`ClusterBaseline/cluster`)
 
 **Decision:** One singleton CR for desired posture and observed score/history.
@@ -28,6 +31,8 @@ No per-profile CRDs and no separate Waiver CRD.
 stay bounded (history rings, failure-name caps) to protect etcd and admission.
 
 **Status:** Keep for single-cluster product scope (fleet is ACS/ACM territory).
+
+*Recorded: 2026-07-12 (git history).*
 
 ## ADR-003: Score and history live on the CR status
 
@@ -44,6 +49,8 @@ admission bounds limit how much detail we retain.
 `diffBaseFailures`), not a map of last-two statuses per check (cheaper, enough
 for regressions).
 
+*Recorded: 2026-07-12 (git history).*
+
 ## ADR-004: String enums for install/remediation/console/scoring
 
 **Decision:** Spec uses string enums (`Automatic`/`Manual`, `Managed`/`Removed`,
@@ -55,6 +62,8 @@ for regressions).
 more verbose YAML.
 
 **Status:** Keep.
+
+*Recorded: 2026-07-12 (git history).*
 
 ## ADR-005: Waivers as `spec.waivers` entries keyed by check name
 
@@ -72,6 +81,8 @@ waiting the full steady 1m interval. Scan-diff (`newlyFailed`/`fixed` /
 reported as Fixed and does not hide a regression.
 
 **Status:** Keep.
+
+*Recorded: 2026-07-12 (git history).*
 
 ## ADR-006: Batch remediation via annotation + MCP pause
 
@@ -97,6 +108,8 @@ permanently paused MCPs when status updates fail mid-batch.
 
 **Status:** Keep.
 
+*Recorded: 2026-07-12 (git history).*
+
 ## ADR-007: Console plugin has no backend
 
 **Decision:** All data and writes use the console k8s proxy and the user's
@@ -108,6 +121,8 @@ token (`useK8sWatchResource`, `useAccessReview`).
 cannot do privileged work the user cannot.
 
 **Status:** Keep.
+
+*Recorded: 2026-07-12 (git history).*
 
 ## ADR-008: Severity-weighted scoring is opt-in; history is mode-stamped
 
@@ -130,6 +145,8 @@ field; one ring of trend is lost across a mode flip.
 **Status:** Keep. Per-snapshot mode on `ScoreSnapshot` only if product needs
 continuous multi-mode charts without a break.
 
+*Recorded: 2026-07-12 (git history).*
+
 ## ADR-009: Benign INCONSISTENT collapse
 
 **Decision:** When the Compliance Operator marks a check `INCONSISTENT` only
@@ -149,6 +166,8 @@ to INCONSISTENT.
 
 **Status:** Keep.
 
+*Recorded: 2026-07-12 (git history).*
+
 ## ADR-010: Ownership via suite labels, not namespace-wide lists
 
 **Decision:** Built-in suites are `baseline-<profileKey>`; tailored suites are
@@ -165,6 +184,8 @@ misnamed suite is invisible to the baseline.
 
 **Status:** Keep.
 
+*Recorded: 2026-07-12 (git history).*
+
 ## ADR-011: Explicit CO Subscription, not OLM package dependency
 
 **Decision:** Install or adopt the Compliance Operator by reconciling Namespace,
@@ -180,6 +201,8 @@ More reconcile code and catalog-source overrides for disconnected/OKD. Revisit
 when OLM v1 dependency placement is reliable.
 
 **Status:** Keep until OLM v1 dependency placement is proven for CO.
+
+*Recorded: 2026-07-12 (git history).*
 
 ## ADR-012: Lazy dynamic informer with poll fallback
 
@@ -198,6 +221,8 @@ CRDs disappear. Dual paths mean a short lag is still possible when watches are
 down; MaxConcurrentReconciles stays 1 so status writes stay simple.
 
 **Status:** Keep.
+
+*Recorded: 2026-07-12 (git history).*
 
 ## ADR-013: Scan-diff bookkeeping fields are internal
 
@@ -222,6 +247,8 @@ external tools on the bookkeeping fields.
 **Status:** Keep; promote to a versioned subresource or annotation store only if
 CR size or API clarity becomes a problem.
 
+*Recorded: 2026-07-12 (git history).*
+
 ## ADR-014: Pooled score, not the mean of per-profile scores
 
 **Decision:** `status.score` is one pooled ratio over every owned check result
@@ -237,6 +264,8 @@ and `status.profiles[]` still expose each benchmark independently.
 
 **Status:** Keep. Revisit only if product wants "every selected benchmark must
 pass" as the headline (min-profile) rather than overall mass.
+
+*Recorded: 2026-07-13 (git history).*
 
 ## ADR-015: History advances only when every owned suite is complete
 
@@ -255,6 +284,8 @@ or is deselected (surface via Progressing/scan-stale signals).
 
 **Status:** Keep.
 
+*Recorded: 2026-07-13 (git history).*
+
 ## ADR-016: Unstructured clients for foreign CRs
 
 **Decision:** Touch Compliance Operator, OLM, console-operator, and MachineConfig
@@ -271,6 +302,8 @@ defensive NestedField reads).
 **Status:** Keep while foreign APIs are integration seams rather than owned
 surface.
 
+*Recorded: 2026-07-13 (git history).*
+
 ## ADR-017: UI score color bands vs ComplianceScoreLow threshold
 
 **Decision:** Console badges use danger below 60, warning mid-band, success at
@@ -283,6 +316,8 @@ for 30m (excluding the -1 "no score" sentinel; see ADR-018).
 noisy than badge color. The two scales can look inconsistent without this ADR.
 
 **Status:** Keep. Revisit if support volume shows 80 is too high or too low.
+
+*Recorded: 2026-07-13 (git history).*
 
 ## ADR-018: Score gauge uses -1 sentinel; HA picks newest publisher
 
@@ -304,6 +339,8 @@ must treat -1 as "absent", not as a numeric score.
 
 **Status:** Keep.
 
+*Recorded: 2026-07-13 (git history).*
+
 ## ADR-019: Default `ClusterBaseline/cluster` on operator start
 
 **Decision:** On manager start, create `ClusterBaseline/cluster` with defaults
@@ -322,6 +359,8 @@ config CRs (`cluster` name, cluster-scoped).
 
 **Status:** Keep.
 
+*Recorded: 2026-07-13 (git history).*
+
 ## ADR-020: Deleting the baseline does not uninstall the Compliance Operator
 
 **Decision:** Finalizer cleanup removes owned ScanSetting/bindings, console
@@ -338,6 +377,8 @@ uninstall it separately. Owned bindings are pruned so the baseline does not
 leave scan noise behind.
 
 **Status:** Keep.
+
+*Recorded: 2026-07-13 (git history).*
 
 ## ADR-021: Integer floor score in [0, 100], not a float
 
@@ -356,6 +397,8 @@ accepts that for stable integers.
 
 **Status:** Keep.
 
+*Recorded: 2026-07-13 (git history).*
+
 ## ADR-022: Fixed severity weight table (product contract)
 
 **Decision:** SeverityWeighted scoring uses a fixed, case-sensitive weight
@@ -371,6 +414,8 @@ Compliance Operator's lowercase severity field/label; unexpected casing falls
 through to weight 1 (fail closed, not silent half-weight).
 
 **Status:** Keep. Revisit only if product requires per-org weight policy.
+
+*Recorded: 2026-07-13 (git history).*
 
 ## ADR-023: ScanSetting storage and roles are fixed product defaults
 
@@ -389,6 +434,8 @@ via `ScanStorageReady` / Degraded. Admins who need different storage policy
 edit the ScanSetting carefully or own scanning outside this product.
 
 **Status:** Keep until a real customer needs CR-level storage/role policy.
+
+*Recorded: 2026-07-13 (git history).*
 
 ## ADR-024: Dual Go/TS product contracts, CI lockstep
 
@@ -412,6 +459,8 @@ lockstep covers the constant table.
 **Status:** Keep while monorepo holds both deliverables. Drop or replace with
 codegen if the console splits to its own repo without a shared contract.
 
+*Recorded: 2026-07-13 (git history).*
+
 ## ADR-025: Compliance report is client-side printable HTML
 
 **Decision:** The console builds a self-contained printable HTML report in
@@ -428,6 +477,8 @@ waiver reasons are HTML-escaped at build time.
 
 **Status:** Keep. Revisit only if product requires offline PDF packaging or
 bulk multi-cluster reports (out of single-cluster scope).
+
+*Recorded: 2026-07-13 (git history).*
 
 ## ADR-026: Score-trend dashboard is a native console ConfigMap
 
@@ -451,6 +502,8 @@ missing.
 
 **Status:** Keep.
 
+*Recorded: 2026-07-13 (git history).*
+
 ## ADR-027: Prometheus score gauge has no scoring-mode label
 
 **Decision:** `baseline_security_compliance_score` is a single gauge with no
@@ -471,6 +524,8 @@ plus the history-scoring-mode annotation, not raw PromQL ranges across flips.
 
 **Status:** Keep. Add a mode label only if support volume shows mixed-mode
 Prom charts are a real operator pain.
+
+*Recorded: 2026-07-13 (git history).*
 
 ## ADR-028: No static PodDisruptionBudget for the operator
 
@@ -497,6 +552,8 @@ drop the UI).
 **Status:** Keep. Revisit only if a customer needs guaranteed operator uptime
 across voluntary disruptions on a multi-node cluster.
 
+*Recorded: 2026-07-15 (git history).*
+
 ## ADR-029: An impossible-date schedule Degrades, it does not silently disable
 
 **Decision:** A `spec.schedule` cron that parses cleanly but can never fire (an
@@ -517,3 +574,5 @@ reconciler via `nextScanTime(...) == nil` on the raw spec, consistent with the
 metric and next-fire computations.
 
 **Status:** Keep.
+
+*Recorded: 2026-07-15 (git history).*

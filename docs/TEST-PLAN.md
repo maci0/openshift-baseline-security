@@ -455,12 +455,15 @@ an accepted risk neither inflates nor tanks the score.
       (`TestComplianceScoreSeededSentinel`, `TestPublishMetrics`).
 - [x] **Per-status series including info/inconsistent/waived** and tailored `tp:`
       prefix (`TestPublishMetrics`).
-- [x] **Alert expressions are HA-safe**: `max()` / `max by (profile,status)` in
-      `config/prometheus/prometheusrule.yaml`, pinned by promtool HA-dedup case.
+- [x] **Alert expressions are HA-safe**: every multi-replica expression selects
+      the newest publisher via
+      `and on(instance) topk(1, baseline_security_status_observed_timestamp_seconds)`
+      (ADR-018) in `config/prometheus/prometheusrule.yaml`, pinned by promtool
+      HA case.
 - [x] **PrometheusRule** `ComplianceScoreLow` / `ComplianceChecksFailing` fire
       against synthetic metric values (`make test-alerts`, promtool, no cluster):
-      score 79 fires, 80 does not, `-1` sentinel never fires, HA dup pods dedup
-      to value 5, fail=0 no alert (`config/prometheus/testdata/alerts_test.yaml`).
+      score 79 fires, 80 does not, `-1` sentinel never fires, stale HA dup pods
+      lose to the newest publisher (`alerts_test.yaml`).
 - [x] **Profile removed from spec**: old `{profile,status}` series are deleted
       via set-then-delete (not GaugeVec.Reset) so scrapers never see an empty
       gap (`TestPublishMetricsDropsRemovedProfile` CollectAndCount).
@@ -870,8 +873,9 @@ page.
 - [x] **Score exactly 80**: `ComplianceScoreLow` does not fire (`< 80`, not
       `<=`); promtool case (`alerts_test.yaml`).
 - [x] **Score sentinel -1**: never fires ComplianceScoreLow (promtool `-1` case).
-- [x] **HA duplicate pods**: two pods reporting fail=5 for one profile dedup via
-      `max by` to value 5, not 10 (promtool HA case).
+- [x] **Stale duplicate pod**: newest publisher wins over max and sum; op-1
+      fail=9 (observed 100), op-2 fail=5 (observed 200) alerts with value 5,
+      not 9 or 14 (promtool HA case; ADR-018).
 - [ ] **Flapping score 79↔81**: `for: 30m` prevents page storms; document how
       to validate with promtool `eval_time` steps.
 - [ ] **Fail count goes 5→0**: ComplianceChecksFailing clears after `for: 1h`
