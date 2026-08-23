@@ -388,8 +388,9 @@ ComplianceAsCode/compliance-operator master, and npm dist-tags).
 
 - **Images**: `quay.io/<org>/baseline-security-operator`,
   `quay.io/<org>/baseline-security-console-plugin`, both multi-stage UBI9
-  builds, Dockerfiles at each component root (a `Dockerfile.rhel` variant
-  using `registry.ci.openshift.org` builders is added at productization).
+  builds, Dockerfiles at each component root; the CI build variant
+  (`operator/Dockerfile.ci`, using `registry.ci.openshift.org` builders)
+  ships since 0.5.0.
 - **OLM**: one package `baseline-security-operator`; bundle carries the
   ClusterBaseline CRD, CSV (with `console.openshift.io` related-images for
   the plugin image via `RELATED_IMAGE_CONSOLE_PLUGIN` env, so disconnected
@@ -420,8 +421,8 @@ openshift-baseline-security/
 │   └── go.mod
 ├── console-plugin/                 # console-plugin-template shape
 │   ├── src/components/             # React tabs, BaselineContext, Overview item, UI feedback timing
-│   ├── src/{models,utils,scoring,status,names,cron,dates,waivers,patches,links,results,remediation,report,profiles,download,errors}.*
-│   │                               # domain modules; utils.ts is a re-export barrel for tests
+│   ├── src/{models,scoring,status,names,cron,dates,waivers,patches,links,results,remediation,report,profiles,download,errors}.*
+│   │                               # domain modules; tests live alongside as *.test.ts
 │   ├── locales/en/
 │   ├── e2e/                        # Playwright live-console suite
 │   ├── console-extensions.json
@@ -430,6 +431,7 @@ openshift-baseline-security/
 │   └── Dockerfile
 ├── docs/{SPEC,OBSERVABILITY,DESIGN-DECISIONS,PATTERNS,STANDARDS,TEST-PLAN}.md
 ├── CHANGELOG.md
+├── README.md
 ├── SECURITY.md                     # support window + vulnerability reporting
 ├── TODO.md
 ├── OWNERS
