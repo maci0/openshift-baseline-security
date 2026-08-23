@@ -322,6 +322,35 @@ func TestResumeBatchPoolsOnDeleteSkipsInvalidRemediationNames(t *testing.T) {
 	}
 }
 
+// TestResumeBatchPoolsOnDeleteSkipsForeignRemediation: a crafted foreign
+// remediation named in the batch-apply annotation must not make the delete-time
+// recovery path unpause (or otherwise touch) its MachineConfigPool through the
+// operator's service account. Only owned remediations resolve pools here.
+func TestResumeBatchPoolsOnDeleteSkipsForeignRemediation(t *testing.T) {
+	scheme := testScheme(t)
+	cb := newCB("cis")
+	cb.SetAnnotations(map[string]string{batchApplyAnnotation: "rem-foreign"})
+	foreign := nodeRemediation("rem-foreign", "worker")
+	foreign.SetLabels(map[string]string{suiteLabel: "someone-elses-suite"})
+	pool := machineConfigPool("worker")
+	_ = unstructured.SetNestedField(pool.Object, true, "spec", "paused")
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).
+			WithObjects(cb, foreign, pool).Build(),
+		Scheme: scheme,
+	}
+	if err := r.resumeBatchPoolsOnDelete(context.Background(), cb); err != nil {
+		t.Fatalf("foreign remediation must be skipped without error, got %v", err)
+	}
+	got := machineConfigPool("worker")
+	if err := r.Get(context.Background(), types.NamespacedName{Name: "worker"}, got); err != nil {
+		t.Fatal(err)
+	}
+	if paused, _, _ := unstructured.NestedBool(got.Object, "spec", "paused"); !paused {
+		t.Fatal("foreign remediation must not resume its pool during delete recovery")
+	}
+}
+
 func TestEnsureComplianceOperatorCreatesSubscription(t *testing.T) {
 	scheme := testScheme(t)
 	r := &ClusterBaselineReconciler{

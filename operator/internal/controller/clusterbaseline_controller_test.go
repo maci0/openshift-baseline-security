@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -1452,6 +1453,46 @@ func TestHistoryScoringModeStampDeferredToPersist(t *testing.T) {
 	}
 	if server.Annotations[historyScoringModeAnn] != weighted {
 		t.Fatalf("persist did not write the annotation: %v", server.Annotations)
+	}
+
+	// Re-persist under the already-stamped mode must be a no-op (no churn on
+	// every reconcile) and must not error.
+	if err := r.persistHistoryScoringMode(ctx, cb); err != nil {
+		t.Fatalf("idempotent re-persist errored: %v", err)
+	}
+	if err := r.Get(ctx, types.NamespacedName{Name: "cluster"}, server); err != nil {
+		t.Fatal(err)
+	}
+	if server.Annotations[historyScoringModeAnn] != weighted {
+		t.Fatalf("re-persist changed the annotation: %v", server.Annotations)
+	}
+
+	// Mid-delete NotFound (object gone between status update and persist) is
+	// success: there is nothing left to stamp.
+	gone := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).Build(),
+		Scheme: scheme,
+	}
+	cbGone := newBatchCB()
+	if err := gone.persistHistoryScoringMode(ctx, cbGone); err != nil {
+		t.Fatalf("mid-delete NotFound must be ignored, got %v", err)
+	}
+
+	// Any other Get failure surfaces wrapped so the mode lag stays visible.
+	denied := errors.New("injected get denial")
+	failing := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).
+			WithInterceptorFuncs(interceptor.Funcs{
+				Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+					return denied
+				},
+			}).Build(),
+		Scheme: scheme,
+	}
+	err := failing.persistHistoryScoringMode(ctx, cb)
+	if err == nil || !strings.Contains(err.Error(), "persisting history scoring mode annotation") ||
+		!strings.Contains(err.Error(), denied.Error()) {
+		t.Fatalf("persist failure must be wrapped for visibility, got %v", err)
 	}
 }
 

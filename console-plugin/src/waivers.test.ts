@@ -162,6 +162,9 @@ describe('waivers throw-safety and no-permanent-grant (fuzz sweep)', () => {
     expect(soonestDeadlineDelayMs(now, [now + 100])).toBe(125);
     // Floor at 25ms when the deadline is already in the past-relative gap.
     expect(soonestDeadlineDelayMs(now, [now + 1])).toBe(26);
+    // Among multiple future deadlines the soonest wins regardless of order.
+    expect(soonestDeadlineDelayMs(now, [now + 5000, now + 200])).toBe(225);
+    expect(soonestDeadlineDelayMs(now, [now + 200, now + 5000])).toBe(225);
     // Cap at signed-32-bit setTimeout max.
     expect(soonestDeadlineDelayMs(now, [now + 3_000_000_000])).toBe(2_147_483_647);
   });
@@ -181,6 +184,8 @@ describe('waivers throw-safety and no-permanent-grant (fuzz sweep)', () => {
     expect(plain).toHaveLength(2);
     expect(plain).toContain(new Date(far).getTime());
     expect(plain).toContain(new Date(near).getTime());
+    // Missing waiver list is not an error, just no deadlines.
+    expect(futureWaiverDeadlineMs(undefined, now)).toEqual([]);
     // -14d on far is still future; on near is past and dropped.
     const withOffset = futureWaiverDeadlineMs(waivers, now, [-2 * week]);
     expect(withOffset).toContain(new Date(far).getTime() - 2 * week);

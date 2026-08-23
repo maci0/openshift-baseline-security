@@ -1865,6 +1865,40 @@ describe('remediation helpers', () => {
         }),
       ),
     ).toBe('{not-json');
+    // Valid JSON that is not an array (hostile hand-edit): surface raw.
+    expect(
+      missingDependencySummary(
+        rem(undefined, undefined, {
+          metadata: {
+            name: 'r',
+            namespace: 'openshift-compliance',
+            annotations: {
+              'compliance.openshift.io/depends-on-obj': '{"kind":"ConfigMap"}',
+            },
+          },
+        }),
+      ),
+    ).toBe('{"kind":"ConfigMap"}');
+    // Junk entries inside a valid array are skipped; good entries still surface.
+    expect(
+      missingDependencySummary(
+        rem(undefined, undefined, {
+          metadata: {
+            name: 'r',
+            namespace: 'openshift-compliance',
+            annotations: {
+              'compliance.openshift.io/depends-on-obj': JSON.stringify([
+                null,
+                'not-an-object',
+                { namespace: 'ns-only' },
+                { kind: 'Config', name: '' },
+                { kind: 'Secret', name: 'tok' },
+              ]),
+            },
+          },
+        }),
+      ),
+    ).toBe('Config, Secret tok');
     // Fall back to status.errorMessage when annotations are empty.
     expect(
       missingDependencySummary(

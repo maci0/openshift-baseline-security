@@ -409,8 +409,11 @@ func TestSanitizeStatusProfilesTailoredRelated(t *testing.T) {
 		profiles = append(profiles, baselinev1alpha1.ProfileStatus{
 			Key:          baselinev1alpha1.ProfileCIS, // duplicates after first
 			ProfileNames: []string{strings.Repeat("p", 300), "ok-name"},
-			ResultCounts: baselinev1alpha1.ResultCounts{Pass: -3, Fail: -1, Manual: -2},
-			History:      []baselinev1alpha1.ScoreSnapshot{{Score: 200}},
+			ResultCounts: baselinev1alpha1.ResultCounts{
+				Pass: -3, Fail: -1, Manual: -2, Info: -1, Error: -4,
+				Inconsistent: -1, Waived: -2, NotApplicable: -3,
+			},
+			History: []baselinev1alpha1.ScoreSnapshot{{Score: 200}},
 		})
 	}
 	// First few with distinct known keys so MaxItems can fill with valid rows.
@@ -428,9 +431,14 @@ func TestSanitizeStatusProfilesTailoredRelated(t *testing.T) {
 	tps := make([]baselinev1alpha1.TailoredProfileStatus, 0, statusTailoredMax+3)
 	for i := 0; i < statusTailoredMax+3; i++ {
 		tps = append(tps, baselinev1alpha1.TailoredProfileStatus{
-			Name:         fmt.Sprintf("tp-%d", i),
-			ResultCounts: baselinev1alpha1.ResultCounts{Fail: -9},
-			History:      []baselinev1alpha1.ScoreSnapshot{{Score: -5}},
+			Name: fmt.Sprintf("tp-%d", i),
+			// Every ResultCounts field negative: clampResultCounts must zero each
+			// (CRD Minimum=0), so a hand-edited tally cannot fail status admission.
+			ResultCounts: baselinev1alpha1.ResultCounts{
+				Pass: -3, Fail: -9, Manual: -2, Info: -1, Error: -4,
+				Inconsistent: -1, Waived: -2, NotApplicable: -3,
+			},
+			History: []baselinev1alpha1.ScoreSnapshot{{Score: -5}},
 		})
 	}
 	// Invalid names must be dropped (empty, oversize, non-DNS1123).
@@ -476,8 +484,13 @@ func TestSanitizeStatusProfilesTailoredRelated(t *testing.T) {
 		if !p.Key.Known() {
 			t.Fatalf("unknown key survived: %q", p.Key)
 		}
-		if p.Pass < 0 || p.Fail < 0 || p.Manual < 0 {
-			t.Fatalf("negative ResultCounts survived: %+v", p.ResultCounts)
+		for _, neg := range []int32{
+			p.Pass, p.Fail, p.Manual, p.Info,
+			p.Error, p.Inconsistent, p.Waived, p.NotApplicable,
+		} {
+			if neg < 0 {
+				t.Fatalf("negative ResultCounts field survived: %+v", p.ResultCounts)
+			}
 		}
 		for _, n := range p.ProfileNames {
 			if len([]rune(n)) > objectRefFieldMaxLen {
@@ -498,8 +511,14 @@ func TestSanitizeStatusProfilesTailoredRelated(t *testing.T) {
 		if tp.Name == "" || len(tp.Name) > tailoredNameMaxLen {
 			t.Fatalf("invalid tailored name survived: %q", tp.Name)
 		}
-		if tp.Fail < 0 {
-			t.Fatalf("negative tailored Fail survived: %d", tp.Fail)
+		for _, neg := range []int32{
+			tp.ResultCounts.Pass, tp.ResultCounts.Fail, tp.ResultCounts.Manual,
+			tp.ResultCounts.Info, tp.ResultCounts.Error, tp.ResultCounts.Inconsistent,
+			tp.ResultCounts.Waived, tp.ResultCounts.NotApplicable,
+		} {
+			if neg < 0 {
+				t.Fatalf("negative tailored ResultCounts field survived: %+v", tp.ResultCounts)
+			}
 		}
 		for _, h := range tp.History {
 			if h.Score < 0 || h.Score > 100 {
@@ -1301,6 +1320,61 @@ func FuzzSyncFailureDiff(f *testing.F) {
 			}
 		}
 	})
+}
+
+// TestSyncFailureDiff pins both branches deterministically: the sorted
+// two-pointer fast path (production lists are sorted) and the map-based
+// fallback for unsorted or hand-edited input. Expected values mirror the
+// FuzzSyncFailureDiff properties: newlyFailed = current\base and
+// fixed = base\current, both sorted and unique.
+func TestSyncFailureDiff(t *testing.T) {
+	cases := []struct {
+		name          string
+		current, base []string
+		wantNew       []string
+		wantFixed     []string
+	}{
+		{
+			name:      "both empty",
+			current:   nil,
+			base:      nil,
+			wantNew:   nil,
+			wantFixed: nil,
+		},
+		{
+			name:      "sorted fast path",
+			current:   []string{"a", "b", "c"},
+			base:      []string{"b", "d"},
+			wantNew:   []string{"a", "c"},
+			wantFixed: []string{"d"},
+		},
+		{
+			name:      "unsorted fallback with duplicates on both sides",
+			current:   []string{"z", "a", "m", "a", "z"},
+			base:      []string{"m", "x", "x", "b"},
+			wantNew:   []string{"a", "z"},
+			wantFixed: []string{"b", "x"},
+		},
+		{
+			name:      "unsorted base only",
+			current:   []string{"q"},
+			base:      []string{"z", "q", "y"},
+			wantNew:   nil,
+			wantFixed: []string{"y", "z"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cb := &baselinev1alpha1.ClusterBaseline{}
+			syncFailureDiff(cb, tc.current, tc.base)
+			if !slices.Equal(cb.Status.NewlyFailed, tc.wantNew) {
+				t.Fatalf("newlyFailed = %v, want %v", cb.Status.NewlyFailed, tc.wantNew)
+			}
+			if !slices.Equal(cb.Status.Fixed, tc.wantFixed) {
+				t.Fatalf("fixed = %v, want %v", cb.Status.Fixed, tc.wantFixed)
+			}
+		})
+	}
 }
 
 // TestSyncHistorySnapshot pins late-CCR refresh and nil-score drop behavior
