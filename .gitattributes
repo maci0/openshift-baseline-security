@@ -1,0 +1,10 @@
+# Line-ending policy: pin every text file to LF on all platforms.
+#
+# The build breaks under a CRLF checkout (the Windows core.autocrlf default):
+# make recipes, the hack/*.sh shebangs, and Dockerfile RUN lines all fail on
+# stray CR bytes. The index stores LF only; these rules keep working trees LF
+# too, so clones behave identically on Linux, macOS, and Windows.
+* text=auto eol=lf
+
+# Binary assets: never normalize.
+*.png binary
