@@ -34,6 +34,11 @@ const (
 	finalizerName       = "baselinesecurity.openshift.io/cleanup"
 	pluginName          = "baseline-security-console-plugin"
 	pluginNS            = "openshift-baseline-security"
+	// Cluster-scoped singleton CR name every watch/filter must agree on.
+	clusterBaselineName = "cluster"
+	// OLM CSV names of the compliance-operator package carry this prefix; the
+	// version string is everything after it.
+	csvNamePrefix = "compliance-operator.v"
 	// The console renders dashboards from ConfigMaps in this namespace; ours is
 	// created here so it shows under Observe -> Dashboards without a Grafana.
 	dashboardNS        = "openshift-config-managed"
@@ -315,7 +320,7 @@ func (r *ClusterBaselineReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	available := condTrue(cb, "Available")
 	progressing := condTrue(cb, "Progressing")
 	degradedCond := meta.FindStatusCondition(cb.Status.Conditions, "Degraded")
-	degraded := degradedCond != nil && degradedCond.Status == metav1.ConditionTrue
+	degraded := condIsTrue(degradedCond)
 	keysAndValues := []any{
 		"name", cb.Name,
 		"generation", cb.Generation,
@@ -335,7 +340,7 @@ func (r *ClusterBaselineReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	// V(1) so it does not spam ~1440 lines/day, matching setCondFalseLogOnce and
 	// logHistoryStall. A genuine change (new Degraded reason, or recovery) logs.
 	switch {
-	case degradedCond != nil && degradedCond.Status == metav1.ConditionTrue:
+	case condIsTrue(degradedCond):
 		r.postureLog(logger, "degraded/"+degradedCond.Reason, "reconciled with Degraded condition",
 			append(keysAndValues, "reason", degradedCond.Reason, "message", degradedCond.Message))
 	case !available && !progressing:
@@ -368,10 +373,15 @@ func (r *ClusterBaselineReconciler) postureLog(logger logr.Logger, sig, msg stri
 	logger.Info(msg, keysAndValues...)
 }
 
+// condIsTrue is true when c is present (non-nil) and True. One definition of
+// "condition is True" so call sites cannot drift on the nil guard.
+func condIsTrue(c *metav1.Condition) bool {
+	return c != nil && c.Status == metav1.ConditionTrue
+}
+
 // condTrue is true when the named status condition is present and True.
 func condTrue(cb *baselinev1alpha1.ClusterBaseline, typ string) bool {
-	c := meta.FindStatusCondition(cb.Status.Conditions, typ)
-	return c != nil && c.Status == metav1.ConditionTrue
+	return condIsTrue(meta.FindStatusCondition(cb.Status.Conditions, typ))
 }
 
 // reconcileOwned drives every owned object and refreshes status fields.
@@ -451,7 +461,7 @@ func enqueueSingleton(_ context.Context, obj client.Object) []reconcile.Request 
 	if suite != "" && !strings.HasPrefix(suite, "baseline-") {
 		return nil
 	}
-	return []reconcile.Request{{NamespacedName: types.NamespacedName{Name: "cluster"}}}
+	return []reconcile.Request{{NamespacedName: types.NamespacedName{Name: clusterBaselineName}}}
 }
 
 // lazyComplianceWatch adds informers for the compliance CRs once their CRDs

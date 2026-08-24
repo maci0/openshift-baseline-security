@@ -118,7 +118,7 @@ func batchPauseOwner(cb *baselinev1alpha1.ClusterBaseline) string {
 	if cb.Name != "" {
 		return cb.Name
 	}
-	return "cluster"
+	return clusterBaselineName
 }
 
 func uniqueSortedStrings(values []string) []string {

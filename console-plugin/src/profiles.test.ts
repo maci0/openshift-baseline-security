@@ -1,5 +1,38 @@
 import { isValidK8sName, isValidTailoredProfileName } from './names';
-import { tailoredProfileManifest, tailoredProfileSpecMatches, toggledProfiles } from './profiles';
+import {
+  cleanRuleSelection,
+  consoleRule,
+  tailoredProfileManifest,
+  tailoredProfileSpecMatches,
+  toggledProfiles,
+} from './profiles';
+
+describe('cleanRuleSelection', () => {
+  it('trims, drops invalid names, dedupes, and lets disable win', () => {
+    const { disable, enable } = cleanRuleSelection(
+      [' r1 ', 'bad name', 'r2', 'r1'],
+      ['r3', 'r1', ' bad name ', 'r3'],
+    );
+    expect(disable).toEqual(['r1', 'r2']);
+    // Disable wins over enable (fail closed), duplicates dropped.
+    expect(enable).toEqual(['r3']);
+  });
+  it('returns the same sets the manifest ships, so update and create cannot drift', () => {
+    const selection = cleanRuleSelection(['dup', 'off-only'], ['dup', 'on-only']);
+    const spec = tailoredProfileManifest('x', 'ocp4-cis', ['dup', 'off-only'], [
+      'dup',
+      'on-only',
+    ]).spec as { enableRules?: { name: string }[]; disableRules?: { name: string }[] };
+    expect((spec.disableRules ?? []).map((r) => r.name)).toEqual(selection.disable);
+    expect((spec.enableRules ?? []).map((r) => r.name)).toEqual(selection.enable);
+  });
+});
+
+describe('consoleRule', () => {
+  it('writes the shared rationale so create and update payloads match', () => {
+    expect(consoleRule('r1')).toEqual({ name: 'r1', rationale: 'set via console' });
+  });
+});
 
 // Deterministic PRNG so fuzz loops are reproducible in CI (no Math.random).
 let fuzzSeed = 0x9e3779b9;

@@ -49,6 +49,8 @@ import {
   ClusterBaseline,
   ClusterBaselineModel,
   ComplianceCheckResult,
+  clusterBaselinePatchAccess,
+  scanningDisabled,
   suiteFilterKey,
   suiteFilterKeyTitle,
   WAIVER_MAX_ITEMS,
@@ -57,7 +59,13 @@ import { Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table';
 import { downloadBlob } from '../download';
 import { errorMessage } from '../errors';
 import { checkResultHref, machineConfigPoolHref } from '../links';
-import { addWaiverPatch, removeWaiverPatch, resourceVersionTest } from '../patches';
+import {
+  addWaiverPatch,
+  removeWaiverPatch,
+  resourceVersionTest,
+  WAIVER_ATTRIBUTION_MAX_LEN,
+  WAIVER_REASON_MAX_LEN,
+} from '../patches';
 import {
   checkBody,
   checkTitle,
@@ -179,11 +187,7 @@ const ResultsTab: React.FC<{
   const [waiveSuccess, setWaiveSuccess] = React.useState<string | null>(null);
   // Auto-dismiss success so the banner does not stick after the user moves on.
   useAutoDismiss(waiveSuccess, false, () => setWaiveSuccess(null));
-  const [canWaive, canWaiveLoading] = useAccessReview({
-    group: 'baselinesecurity.openshift.io',
-    resource: 'clusterbaselines',
-    verb: 'patch',
-  });
+  const [canWaive, canWaiveLoading] = useAccessReview(clusterBaselinePatchAccess);
   const waivers = baseline?.spec.waivers;
   // Active waivers are time-sensitive: membership alone is not enough. A waiver
   // can expire with no CR edit, and operator status-only updates do not change
@@ -444,8 +448,7 @@ const ResultsTab: React.FC<{
         ),
       );
       return;
-    }
-    void patchWaivers(
+    }    void patchWaivers(
       data,
       t('Failed to waive check.'),
       t('Check waived. It is excluded from the score.'),
@@ -701,20 +704,16 @@ const ResultsTab: React.FC<{
     );
   }
   if (loaded && !resultsError && ownedResults.length === 0) {
-    const scanningDisabled =
-      (baseline?.spec.profiles?.length ?? 0) === 0 &&
-      (baseline?.spec.tailoredProfiles?.length ?? 0) === 0;
+    const noScanning = scanningDisabled(baseline);
     return (
       <ListPageBody>
         {orphanWaiverAlert}
         <EmptyState
-          titleText={
-            scanningDisabled ? t('Scanning is disabled') : t('No check results yet')
-          }
+          titleText={noScanning ? t('Scanning is disabled') : t('No check results yet')}
           headingLevel="h2"
         >
           <EmptyStateBody>
-            {scanningDisabled ? (
+            {noScanning ? (
               <>
                 {t('No profiles are selected. Enable a profile to resume scanning.')}{' '}
                 <a href="/baseline-security/profiles">{t('Go to Profiles')}</a>
@@ -914,7 +913,9 @@ const ResultsTab: React.FC<{
                           {sources.map((s, i) => {
                             // Uppercase for label/title tables (CO is usually already
                             // uppercased; normalize so hostile/odd data still maps).
-                            const st = s.status.toUpperCase() as CheckStatus;
+                            // Plain string: both consumers fall back on unknown tokens,
+                            // so no cast that could launder hostile annotation data.
+                            const st = s.status.toUpperCase();
                             const style = statusStyle(st);
                             // Index in the key: hostile data could repeat a node name.
                             return (
@@ -1044,8 +1045,9 @@ const ResultsTab: React.FC<{
                                 // Stale submit errors must clear once the admin edits again.
                                 if (waiveError) setWaiveError(null);
                               }}
-                              // Match ClusterBaseline CRD waiver field MaxLength.
-                              maxLength={1024}
+                              // Match ClusterBaseline CRD waiver field MaxLength
+                              // (same constant the patch validator enforces).
+                              maxLength={WAIVER_REASON_MAX_LEN}
                               rows={2}
                             />
                           </FormGroup>
@@ -1064,7 +1066,7 @@ const ResultsTab: React.FC<{
                                     setWaiveRequestedBy(v);
                                     if (waiveError) setWaiveError(null);
                                   }}
-                                  maxLength={253}
+                                  maxLength={WAIVER_ATTRIBUTION_MAX_LEN}
                                   autoComplete="name"
                                 />
                               </FormGroup>
@@ -1078,7 +1080,7 @@ const ResultsTab: React.FC<{
                                     setWaiveApprovedBy(v);
                                     if (waiveError) setWaiveError(null);
                                   }}
-                                  maxLength={253}
+                                  maxLength={WAIVER_ATTRIBUTION_MAX_LEN}
                                   autoComplete="name"
                                 />
                               </FormGroup>

@@ -1,5 +1,5 @@
 // Profile toggle helpers and TailoredProfile create manifests.
-import { COMPLIANCE_NAMESPACE, isProfileKey, PROFILE_MAX_ITEMS } from './models';
+import { COMPLIANCE_NAMESPACE, DEFAULT_BASE_PROFILE, isProfileKey, PROFILE_MAX_ITEMS } from './models';
 import { isValidK8sName, isValidTailoredProfileName } from './names';
 
 // New profile list after toggling one key. An empty result is valid: clearing
@@ -37,6 +37,30 @@ const cleanRuleNames = (rules: string[]): string[] => {
   return out;
 };
 
+// Rule object written into TailoredProfile disableRules/enableRules. Shared by
+// tailoredProfileManifest and the ProfilesTab update path so both write the
+// identical shape.
+export const consoleRule = (n: string): { name: string; rationale: string } => ({
+  name: n,
+  rationale: 'set via console',
+});
+
+// Normalize a rule selection exactly as tailoredProfileManifest does so the
+// create payload and the update payload cannot drift: trim, drop invalid names,
+// dedupe, and let disable win over enable (a rule in both lists is
+// contradictory; fail closed).
+export const cleanRuleSelection = (
+  disableRules: string[],
+  enableRules: string[],
+): { disable: string[]; enable: string[] } => {
+  const disable = cleanRuleNames(disableRules);
+  const disableSet = new Set(disable);
+  return {
+    disable,
+    enable: cleanRuleNames(enableRules).filter((n) => !disableSet.has(n)),
+  };
+};
+
 // Build a TailoredProfile CR body from an editor: a base profile to extend and
 // optional rule names to enable/disable. Empty rule lists are omitted.
 // Empty/whitespace extends defaults to ocp4-cis (same as the Profiles form).
@@ -55,7 +79,7 @@ export const tailoredProfileManifest = (
     throw new Error('invalid TailoredProfile name');
   }
   // Empty means "use the form default"; non-empty junk must not silently become CIS.
-  const extendsName = extendsProfile.trim() || 'ocp4-cis';
+  const extendsName = extendsProfile.trim() || DEFAULT_BASE_PROFILE;
   if (!isValidK8sName(extendsName)) {
     throw new Error('invalid base profile name');
   }
@@ -63,12 +87,8 @@ export const tailoredProfileManifest = (
     title: profileName,
     extends: extendsName,
   };
-  const rule = (n: string) => ({ name: n, rationale: 'set via console' });
-  const disable = cleanRuleNames(disableRules);
-  // A rule in both lists is contradictory; disable wins (fail closed) so the
-  // console never ships a self-conflicting enable+disable manifest.
-  const disableSet = new Set(disable);
-  const enable = cleanRuleNames(enableRules).filter((n) => !disableSet.has(n));
+  const rule = consoleRule;
+  const { disable, enable } = cleanRuleSelection(disableRules, enableRules);
   if (enable.length) spec.enableRules = enable.map(rule);
   if (disable.length) spec.disableRules = disable.map(rule);
   return {
@@ -98,17 +118,16 @@ export const tailoredProfileSpecMatches = (
       .sort();
   const eq = (a: string[], b: string[]) =>
     a.length === b.length && a.every((x, i) => x === b[i]);
-  // Mirror the manifest's normalization: default extends, drop invalid rule
-  // names, and let disable win over enable so the comparison sees the same set.
-  const extendsName = extendsProfile.trim() || 'ocp4-cis';
-  const disable = cleanRuleNames(disableRules).sort();
-  const disableSet = new Set(disable);
-  const enable = cleanRuleNames(enableRules)
-    .filter((n) => !disableSet.has(n))
-    .sort();
+  // Mirror the manifest's normalization: default extends and the same
+  // cleanRuleSelection (drop invalid rule names, disable wins over enable) so
+  // the comparison sees the same set.
+  const extendsName = extendsProfile.trim() || DEFAULT_BASE_PROFILE;
+  const { disable, enable } = cleanRuleSelection(disableRules, enableRules);
+  const disableSorted = [...disable].sort();
+  const enableSorted = [...enable].sort();
   return (
     String(spec.extends ?? '') === extendsName &&
-    eq(names(spec.disableRules), disable) &&
-    eq(names(spec.enableRules), enable)
+    eq(names(spec.disableRules), disableSorted) &&
+    eq(names(spec.enableRules), enableSorted)
   );
 };

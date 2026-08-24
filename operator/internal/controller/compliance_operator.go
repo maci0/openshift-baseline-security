@@ -281,7 +281,7 @@ func pickComplianceOperatorCSV(items []unstructured.Unstructured, ns string, suc
 		if ns != "" && csv.GetNamespace() != ns {
 			continue
 		}
-		if !strings.HasPrefix(csv.GetName(), "compliance-operator.v") {
+		if !strings.HasPrefix(csv.GetName(), csvNamePrefix) {
 			continue
 		}
 		phase, _, _ := unstructured.NestedString(csv.Object, "status", "phase")
@@ -332,7 +332,7 @@ func setComplianceOperatorReadyFromCSV(cb *baselinev1alpha1.ClusterBaseline, csv
 		phase = "unknown"
 	}
 	if phase == "Succeeded" {
-		cb.Status.ComplianceOperatorVersion = strings.TrimPrefix(csv.GetName(), "compliance-operator.v")
+		cb.Status.ComplianceOperatorVersion = strings.TrimPrefix(csv.GetName(), csvNamePrefix)
 		setCond(cb, "ComplianceOperatorReady", metav1.ConditionTrue, "CSVSucceeded", "")
 		return
 	}

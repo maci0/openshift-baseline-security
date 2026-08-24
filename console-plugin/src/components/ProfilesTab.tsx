@@ -55,9 +55,11 @@ import { InfoCircleIcon, TimesIcon } from '@patternfly/react-icons';
 import {
   ClusterBaseline,
   ClusterBaselineModel,
+  clusterBaselinePatchAccess,
   COMPLIANCE_NAMESPACE,
   ComplianceProfile,
   ComplianceRule,
+  DEFAULT_BASE_PROFILE,
   PROFILE_INFO,
   PROFILE_KEYS,
   ProfileGVK,
@@ -72,6 +74,8 @@ import { errorMessage, isAlreadyExists } from '../errors';
 import { isValidK8sName, isValidTailoredProfileName } from '../names';
 import { resourceVersionTest, tailoredProfileBindingPatch } from '../patches';
 import {
+  cleanRuleSelection,
+  consoleRule,
   tailoredProfileManifest,
   tailoredProfileSpecMatches,
   toggledProfiles,
@@ -239,11 +243,7 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
   const pendingRef = React.useRef(false);
   const [error, setError] = React.useState<string | null>(null);
   const [success, setSuccess] = React.useState<string | null>(null);
-  const [canEdit, canEditLoading] = useAccessReview({
-    group: 'baselinesecurity.openshift.io',
-    resource: 'clusterbaselines',
-    verb: 'patch',
-  });
+  const [canEdit, canEditLoading] = useAccessReview(clusterBaselinePatchAccess);
   const [canAuthor, canAuthorLoading] = useAccessReview({
     group: 'compliance.openshift.io',
     resource: 'tailoredprofiles',
@@ -261,7 +261,7 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
   // Built-in profile key pending "disable last / stop scanning" confirmation.
   const [disablingLast, setDisablingLast] = React.useState<string | null>(null);
   const [tpName, setTpName] = React.useState('');
-  const [tpExtends, setTpExtends] = React.useState('ocp4-cis');
+  const [tpExtends, setTpExtends] = React.useState(DEFAULT_BASE_PROFILE);
   // Selected rule names to disable (from the base profile's rules).
   const [tpDisable, setTpDisable] = React.useState<string[]>([]);
   // Rules to enable on top of the base profile (from the full Rule catalog).
@@ -283,7 +283,7 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
     const names = (Array.isArray(profiles) ? profiles : [])
       .map((p) => p?.metadata?.name)
       .filter((n): n is string => typeof n === 'string' && n.length > 0);
-    return names.length > 0 ? [...new Set(names)].sort() : ['ocp4-cis'];
+    return names.length > 0 ? [...new Set(names)].sort() : [DEFAULT_BASE_PROFILE];
   }, [profiles]);
   // Rule names in the selected base profile (for the disable selection).
   const baseRules = React.useMemo(() => {
@@ -351,7 +351,7 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
       })) as TailoredProfileResource;
       setEditing({ name, obj });
       setTpName(name);
-      setTpExtends(obj.spec?.extends || 'ocp4-cis');
+      setTpExtends(obj.spec?.extends || DEFAULT_BASE_PROFILE);
       const ruleNames = (list: { name?: string }[] | undefined) =>
         (list ?? [])
           .map((r) => r?.name)
@@ -397,7 +397,7 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
       return;
     }
     // Base profile must be a DNS-1123 name (same shape as CO Profile metadata.name).
-    const extendsBase = tpExtends.trim() || 'ocp4-cis';
+    const extendsBase = tpExtends.trim() || DEFAULT_BASE_PROFILE;
     if (!isValidK8sName(extendsBase)) {
       setError(
         t(
@@ -409,26 +409,22 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
     pendingRef.current = true;
     setPending(true);
     setError(null);
-    // Selected rule names; keep only valid ones (manifest also filters).
-    // A rule in both lists is contradictory; disable wins (manifest also does
-    // this) so we never build a self-conflicting enable+disable set.
-    const disable = tpDisable.filter((s) => isValidK8sName(s));
-    const disableSet = new Set(disable);
-    const enable = tpEnable.filter((s) => isValidK8sName(s) && !disableSet.has(s));
+    // Same normalization as tailoredProfileManifest (trim, drop invalid names,
+    // dedupe, disable wins) so update and create payloads cannot drift.
+    const { disable, enable } = cleanRuleSelection(tpDisable, tpEnable);
 
     // Edit mode: the profile is already created and bound, so just update its
     // spec (base + rule lists) on the fetched object (preserves rv via
     // k8sUpdate). No re-bind needed.
     if (editing) {
       try {
-        const rule = (n: string) => ({ name: n, rationale: 'set via console' });
         const next: TailoredProfileResource = {
           ...editing.obj,
           spec: {
             ...(editing.obj.spec ?? {}),
             extends: extendsBase,
-            disableRules: disable.length ? disable.map(rule) : undefined,
-            enableRules: enable.length ? enable.map(rule) : undefined,
+            disableRules: disable.length ? disable.map(consoleRule) : undefined,
+            enableRules: enable.length ? enable.map(consoleRule) : undefined,
           },
         };
         await k8sUpdate({ model: TailoredProfileModel, data: next });
@@ -438,7 +434,7 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
         setTpDisable([]);
         setTpEnable([]);
         setEnableExpanded(false);
-        setTpExtends('ocp4-cis');
+        setTpExtends(DEFAULT_BASE_PROFILE);
         setSuccess(t('Tailored profile updated.'));
       } catch (e) {
         setError(errorMessage(e) ?? t('Failed to update tailored profile.'));
@@ -511,7 +507,7 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
       setEnableExpanded(false);
       // Match closeCreateModal: the next open must be a clean form, not
       // pre-filled with the previous base profile.
-      setTpExtends('ocp4-cis');
+      setTpExtends(DEFAULT_BASE_PROFILE);
       setSuccess(t('Tailored profile created and bound.'));
     } catch (e) {
       const detail = errorMessage(e);
@@ -542,7 +538,7 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
     setTpDisable([]);
     setTpEnable([]);
     setEnableExpanded(false);
-    setTpExtends('ocp4-cis');
+    setTpExtends(DEFAULT_BASE_PROFILE);
   };
 
   const editDisabled = !canEdit || canEditLoading || pending;
@@ -910,7 +906,7 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
             variant="primary"
             isDisabled={
               !isValidTailoredProfileName(tpName.trim()) ||
-              !isValidK8sName(tpExtends.trim() || 'ocp4-cis') ||
+              !isValidK8sName(tpExtends.trim() || DEFAULT_BASE_PROFILE) ||
               pending
             }
             isLoading={pending}

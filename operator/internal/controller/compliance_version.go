@@ -30,7 +30,7 @@ func compareComplianceCSVVersion(a, b string) int {
 }
 
 func complianceCSVVersion(name string) (complianceVersion, bool) {
-	v, ok := strings.CutPrefix(name, "compliance-operator.v")
+	v, ok := strings.CutPrefix(name, csvNamePrefix)
 	if !ok || v == "" {
 		return complianceVersion{}, false
 	}

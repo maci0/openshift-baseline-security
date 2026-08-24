@@ -46,11 +46,13 @@ import {
 } from '@patternfly/react-icons';
 import {
   ClusterBaseline,
+  clusterBaselinePatchAccess,
   ClusterBaselineModel,
   ComplianceCheckResult,
   DEFAULT_SCAN_SCHEDULE,
   profileTitle,
   ResultCounts,
+  scanningDisabled,
   ScoreSnapshot,
   suiteFilterKey,
 } from '../models';
@@ -109,11 +111,7 @@ const ScheduleEditor: React.FC<{ baseline: ClusterBaseline }> = ({ baseline }) =
   const wasEditing = React.useRef(false);
   // Auto-clear "Schedule updated" so success feedback matches other tabs.
   useAutoDismiss(saved, false, () => setSaved(false));
-  const [canEdit, canEditLoading] = useAccessReview({
-    group: 'baselinesecurity.openshift.io',
-    resource: 'clusterbaselines',
-    verb: 'patch',
-  });
+  const [canEdit, canEditLoading] = useAccessReview(clusterBaselinePatchAccess);
   const valid = isValidCron(value);
 
   // Move focus into the field when opening edit; return it to Edit when closing.
@@ -839,9 +837,6 @@ const Overview: React.FC<{
   // countable score (history stays short) but a second scan already compared.
   const hasPriorScan =
     !!baseline.status?.diffBaseScanTime || (baseline.status?.history?.length ?? 0) > 1;
-  const scanningDisabled =
-    (baseline.spec.profiles?.length ?? 0) === 0 &&
-    (baseline.spec.tailoredProfiles?.length ?? 0) === 0;
 
   // Compact score chip shown as a per-profile card action (built-in + tailored).
   const scoreLabel = (pScore: number | null) =>
@@ -890,7 +885,7 @@ const Overview: React.FC<{
 
   return (
     <PageSection>
-      {scanningDisabled && (
+      {scanningDisabled(baseline) && (
         <Alert
           variant="info"
           isInline

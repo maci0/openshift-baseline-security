@@ -142,6 +142,12 @@ const isParseableTime = (s: string): boolean => {
   return !Number.isNaN(Date.parse(trimmed));
 };
 
+// ClusterBaseline CRD bounds for waiver text fields. Shared by the patch
+// validator and the waive form's maxLength attributes so the widget can never
+// allow what the validator rejects (or vice versa).
+export const WAIVER_REASON_MAX_LEN = 1024;
+export const WAIVER_ATTRIBUTION_MAX_LEN = 253;
+
 // JSON patch adding a waiver for a check. When the array is absent, create it;
 // when it exists (including empty after the last remove), append with "/-".
 // If the name is already waived, replace that entry (updates reason, avoids
@@ -158,9 +164,9 @@ export const addWaiverPatch = (waivers: Waiver[] | undefined | null, entry: Waiv
   // here (empty ops) instead of only at apiserver admission.
   if (
     !isValidK8sName(name) ||
-    reason.length > 1024 ||
-    requestedBy.length > 253 ||
-    approvedBy.length > 253 ||
+    reason.length > WAIVER_REASON_MAX_LEN ||
+    requestedBy.length > WAIVER_ATTRIBUTION_MAX_LEN ||
+    approvedBy.length > WAIVER_ATTRIBUTION_MAX_LEN ||
     (entry.expiresAt != null && entry.expiresAt !== '' && !isParseableTime(entry.expiresAt)) ||
     (entry.reviewBy != null && entry.reviewBy !== '' && !isParseableTime(entry.reviewBy))
   ) {

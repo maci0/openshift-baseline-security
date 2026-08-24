@@ -217,7 +217,25 @@ func (r *ClusterBaselineReconciler) finishRemediationBatch(
 	// is not blocked forever; collect for the finish log so reason=applied is not
 	// misread as "every listed remediation reached Applied".
 	var missing []string
-	for _, name := range batch.Remediations {
+	// Status is hostile input here: this runs before sanitizeRemediationBatch, so
+	// a corrupt restored list would otherwise fire one Get per entry every
+	// reconcile until grace. Cap like resumeBatchPoolsOnDelete.
+	names := batch.Remediations
+	if len(names) > batchMaxRemediations {
+		log.FromContext(ctx).Info("status remediation batch exceeds max while waiting; capping",
+			"count", len(names), "max", batchMaxRemediations, "baseline", cb.Name)
+		names = names[:batchMaxRemediations]
+	}
+	for _, name := range names {
+		// A non-DNS1123 name can return 400 (not 404), which would fall through to
+		// getErr and block resume as "still waiting" until grace. Treat as terminal
+		// like NotFound; apply-path validation rejects these before they are stored.
+		if len(utilvalidation.IsDNS1123Subdomain(name)) > 0 {
+			log.FromContext(ctx).Info("skipping invalid remediation name while waiting for batch",
+				"remediation", name, "name", cb.Name)
+			missing = append(missing, name)
+			continue
+		}
 		rem := u(remediationGVK)
 		if err := r.Get(ctx, types.NamespacedName{Namespace: complianceNamespace, Name: name}, rem); err != nil {
 			if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) {

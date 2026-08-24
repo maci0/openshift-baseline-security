@@ -41,12 +41,14 @@ import {
 } from '@patternfly/react-icons';
 import {
   ClusterBaseline,
+  clusterBaselinePatchAccess,
   ClusterBaselineModel,
   COMPLIANCE_NAMESPACE,
   ComplianceRemediation,
   ComplianceRemediationGVK,
   ComplianceRemediationModel,
   ownedSuiteSelector,
+  scanningDisabled,
 } from '../models';
 import { formatCount } from '../dates';
 import { errorMessage } from '../errors';
@@ -168,11 +170,7 @@ const RemediationsTab: React.FC<{
     verb: 'patch',
     namespace: COMPLIANCE_NAMESPACE,
   });
-  const [canEditBaseline, canEditBaselineLoading] = useAccessReview({
-    group: 'baselinesecurity.openshift.io',
-    resource: 'clusterbaselines',
-    verb: 'patch',
-  });
+  const [canEditBaseline, canEditBaselineLoading] = useAccessReview(clusterBaselinePatchAccess);
   const watchError = errorMessage(loadError);
   // status.remediationBatch is the live batch; the annotation is the one-shot
   // request (may exist before status persists). Empty/comma-only values do not
@@ -647,19 +645,15 @@ const RemediationsTab: React.FC<{
         (() => {
           // Same dead-end as Results: "rescan after failures" is wrong when no
           // profile is selected and scans will never run.
-          const scanningDisabled =
-            (baseline.spec.profiles?.length ?? 0) === 0 &&
-            (baseline.spec.tailoredProfiles?.length ?? 0) === 0;
+          const noScanning = scanningDisabled(baseline);
           return (
             <EmptyState
-              titleText={
-                scanningDisabled ? t('Scanning is disabled') : t('No remediations')
-              }
+              titleText={noScanning ? t('Scanning is disabled') : t('No remediations')}
               headingLevel="h2"
               style={{ marginTop: 'var(--pf-t--global--spacer--md)' }}
             >
               <EmptyStateBody>
-                {scanningDisabled ? (
+                {noScanning ? (
                   <>
                     {t('No profiles are selected. Enable a profile to resume scanning.')}{' '}
                     <a href="/baseline-security/profiles">{t('Go to Profiles')}</a>

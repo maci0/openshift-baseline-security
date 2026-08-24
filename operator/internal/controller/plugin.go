@@ -74,7 +74,7 @@ func ValidRelatedImage(ref string) bool {
 func (r *ClusterBaselineReconciler) deregisterConsolePlugin(ctx context.Context) error {
 	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		console := u(consoleGVK)
-		if err := r.Get(ctx, types.NamespacedName{Name: "cluster"}, console); err != nil {
+		if err := r.Get(ctx, types.NamespacedName{Name: clusterBaselineName}, console); err != nil {
 			// Console capability disabled (CRD absent) or config gone: nothing to
 			// deregister. Must tolerate NoMatch so CR deletion is not wedged.
 			if meta.IsNoMatchError(err) {
@@ -136,7 +136,7 @@ func (r *ClusterBaselineReconciler) removeConsolePlugin(ctx context.Context, cb 
 // cluster and merely suboptimal (never deadlocking) if we ever misread an SNO.
 func (r *ClusterBaselineReconciler) infrastructureSingleReplica(ctx context.Context) bool {
 	infra := u(infrastructureGVK)
-	if err := r.Get(ctx, types.NamespacedName{Name: "cluster"}, infra); err != nil {
+	if err := r.Get(ctx, types.NamespacedName{Name: clusterBaselineName}, infra); err != nil {
 		return false
 	}
 	topology, _, err := unstructured.NestedString(infra.Object, "status", "infrastructureTopology")
@@ -299,7 +299,7 @@ func (r *ClusterBaselineReconciler) ensureConsolePlugin(ctx context.Context, cb 
 
 	if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		console := u(consoleGVK)
-		if err := r.Get(ctx, types.NamespacedName{Name: "cluster"}, console); err != nil {
+		if err := r.Get(ctx, types.NamespacedName{Name: clusterBaselineName}, console); err != nil {
 			return err
 		}
 		plugins, _, err := unstructured.NestedStringSlice(console.Object, "spec", "plugins")

@@ -74,6 +74,11 @@ export const WAIVER_MAX_ITEMS = 256;
 // Matches operator DefaultScanSchedule / CRD default for spec.schedule when empty.
 export const DEFAULT_SCAN_SCHEDULE = '0 1 * * *';
 
+// Base profile every tailored-profile form and manifest falls back to when no
+// extends is chosen (same default as the operator). Single source so create,
+// edit, reset, and validation cannot disagree on the shipped default.
+export const DEFAULT_BASE_PROFILE = 'ocp4-cis';
+
 // Compliance Operator install namespace (product default on OpenShift). Single
 // source for watches, access reviews, create payloads, and console deep-links.
 export const COMPLIANCE_NAMESPACE = 'openshift-compliance';
@@ -130,6 +135,15 @@ export const ProfileGVK: K8sGroupVersionKind = {
 };
 
 export const ClusterBaselineModel = model(ClusterBaselineGVK, 'clusterbaselines', false);
+
+// RBAC gate shared by every editing surface: all tabs patch the same singleton
+// ClusterBaseline. Derived from the GVK/model so a group or plural rename
+// cannot desynchronize one tab's permission check from the others.
+export const clusterBaselinePatchAccess = {
+  group: ClusterBaselineGVK.group,
+  resource: ClusterBaselineModel.plural,
+  verb: 'patch',
+} as const;
 export const ComplianceScanModel = model(ComplianceScanGVK, 'compliancescans', true);
 export const ComplianceRemediationModel = model(ComplianceRemediationGVK, 'complianceremediations', true);
 export const TailoredProfileModel = model(TailoredProfileGVK, 'tailoredprofiles', true);
@@ -306,6 +320,14 @@ export type ClusterBaseline = {
 };
 
 const SUITE_LABEL = 'compliance.openshift.io/suite';
+
+// True when no built-in and no tailored profile is selected: the operator prunes
+// all bindings and scans never run, so every tab shows the "Scanning is
+// disabled" dead-end. Single source so the three tabs cannot drift on the
+// definition; tolerates a partial CR (missing spec fields) at runtime.
+export const scanningDisabled = (baseline?: Pick<ClusterBaseline, 'spec'>): boolean =>
+  (baseline?.spec.profiles?.length ?? 0) === 0 &&
+  (baseline?.spec.tailoredProfiles?.length ?? 0) === 0;
 
 // CO label on scans / check results / remediations naming the scan that produced
 // the object. Shared by nodeScanPool and isNodeRemediation ("…-node-<pool>").

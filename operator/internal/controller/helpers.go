@@ -9,7 +9,6 @@ import (
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	baselinev1alpha1 "github.com/maci0/baseline-security-operator/api/v1alpha1"
@@ -31,7 +30,7 @@ func requeueAfterAt(cb *baselinev1alpha1.ClusterBaseline, now time.Time) time.Du
 	const slow = time.Minute
 	d := slow
 	progressing := meta.FindStatusCondition(cb.Status.Conditions, "Progressing")
-	if (progressing != nil && progressing.Status == metav1.ConditionTrue) || cb.Status.RemediationBatch != nil {
+	if condIsTrue(progressing) || cb.Status.RemediationBatch != nil {
 		d = fast
 	}
 	if until := nearestWaiverExpiry(cb, now); until > 0 && until < d {

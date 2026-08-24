@@ -339,7 +339,7 @@ func sanitizeRemediationBatch(cb *baselinev1alpha1.ClusterBaseline) {
 	if b.StartedAt.IsZero() {
 		b.StartedAt = metav1.NewTime(time.Unix(0, 0).UTC())
 	}
-	b.PauseOwner = clampString(b.PauseOwner, 253)
+	b.PauseOwner = clampString(b.PauseOwner, objectRefFieldMaxLen)
 	b.Pools = clampStringList(b.Pools, batchMaxPools)
 	b.Remediations = clampStringList(b.Remediations, batchMaxRemediations)
 }
@@ -591,8 +591,8 @@ func setRollupConditions(cb *baselinev1alpha1.ClusterBaseline) {
 	plugin := meta.FindStatusCondition(cb.Status.Conditions, "ConsolePluginReady")
 	storage := meta.FindStatusCondition(cb.Status.Conditions, "ScanStorageReady")
 
-	coReady := co != nil && co.Status == metav1.ConditionTrue
-	scanOK := scan != nil && scan.Status == metav1.ConditionTrue
+	coReady := condIsTrue(co)
+	scanOK := condIsTrue(scan)
 	// A Compliance Operator install that never becomes ready (bad catalog source,
 	// unresolvable Subscription) would otherwise Progress + fast-poll forever. Past
 	// a grace window, stop treating it as progress so it rolls up to Degraded and
