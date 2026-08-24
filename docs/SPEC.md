@@ -301,8 +301,6 @@ Behaviors that write to the cluster:
   exists (empty string alone is not enough).
 - **Profile toggle**: patch `ClusterBaseline.spec.profiles`.
 - **Schedule edit**: patch `ClusterBaseline.spec.schedule` (5-field cron).
-- **Scoring mode**: patch `ClusterBaseline.spec.scoring.mode`
-  (`Flat` | `SeverityWeighted`).
 - **Waivers**: add/remove entries on `ClusterBaseline.spec.waivers`.
 - **TailoredProfile authoring**: create/patch TailoredProfiles in
   `openshift-compliance`, then bind via `spec.tailoredProfiles`.
@@ -315,8 +313,10 @@ Behaviors that write to the cluster:
   remediation names); the operator pauses target MachineConfigPools, sets
   apply, then resumes.
 
-Client-only (no API write): CSV export of filtered results and printable
-HTML compliance report.
+Client-only (no API write): CSV export of filtered results, printable HTML
+compliance report, and the Overview scoring-mode readout (`Flat` |
+`SeverityWeighted`). The plugin never patches `spec.scoring.mode`: mode
+changes are an out-of-band CR edit.
 
 All writes go through the user's token; a read-only user gets disabled
 buttons (SDK `useAccessReview`), not errors.
