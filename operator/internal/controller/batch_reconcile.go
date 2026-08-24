@@ -253,43 +253,11 @@ func (r *ClusterBaselineReconciler) resumeOrphanedBatch(
 			return fmt.Errorf("resuming orphaned batch pool %q: %w", pool, err)
 		}
 	}
-	// RetryOnConflict: a concurrent console patch (waiver/schedule/rescan) must
-	// not leave recovery annotations stuck after pools are already unpaused.
-	// Clone + re-Get so we never mutate a shared annotation map in place.
-	if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		latest := &baselinev1alpha1.ClusterBaseline{}
-		if err := r.Get(ctx, types.NamespacedName{Name: cb.Name}, latest); err != nil {
-			return err
-		}
-		ann := maps.Clone(latest.GetAnnotations())
-		if ann == nil {
-			cb.SetAnnotations(nil)
-			cb.SetResourceVersion(latest.GetResourceVersion())
-			return nil
-		}
-		reqVal, hasReq := ann[batchApplyAnnotation]
-		emptyReq := hasReq && len(batchRemediationNames(reqVal)) == 0
-		if ann[batchStartedAtAnnotation] == "" && ann[batchPoolsAnnotation] == "" && !emptyReq {
-			cb.SetAnnotations(ann)
-			cb.SetResourceVersion(latest.GetResourceVersion())
-			return nil
-		}
-		delete(ann, batchStartedAtAnnotation)
-		delete(ann, batchPoolsAnnotation)
-		if emptyReq {
-			delete(ann, batchApplyAnnotation)
-		}
-		if len(ann) == 0 {
-			ann = nil
-		}
-		latest.SetAnnotations(ann)
-		if err := r.Update(ctx, latest); err != nil {
-			return err
-		}
-		cb.SetAnnotations(ann)
-		cb.SetResourceVersion(latest.GetResourceVersion())
-		return nil
-	}); err != nil {
+	// Clear via the shared helper (RetryOnConflict inside). Empty request match:
+	// batch-apply is dropped only when it holds no names (the orphan shape);
+	// a concurrent console resubmit with real names is preserved. Recovery keys
+	// always go. Keeps cb annotations + RV aligned.
+	if err := r.clearBatchAnnotations(ctx, cb, []string{}, true); err != nil {
 		return fmt.Errorf("clearing orphaned batch annotations for ClusterBaseline %q: %w", cb.Name, err)
 	}
 	return nil
@@ -298,8 +266,10 @@ func (r *ClusterBaselineReconciler) resumeOrphanedBatch(
 // clearBatchAnnotations drops the one-shot request and/or recovery annotations
 // with RetryOnConflict so a concurrent console patch cannot stick them after
 // pools are already safe. When requestMatch is non-nil, batch-apply is cleared
-// only if its CSV matches those remediation names (finish path). A nil match
-// clears any present request (skip-empty path). Keeps cb annotations + RV aligned.
+// only if its CSV matches those remediation names (finish path; the orphan path
+// passes the empty set so an empty-valued request key goes while a resubmit
+// with real names is preserved). A nil match clears any present request
+// (skip-empty path). Keeps cb annotations + RV aligned.
 func (r *ClusterBaselineReconciler) clearBatchAnnotations(
 	ctx context.Context, cb *baselinev1alpha1.ClusterBaseline,
 	requestMatch []string, clearRecovery bool,
