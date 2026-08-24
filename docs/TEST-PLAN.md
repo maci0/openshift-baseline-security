@@ -171,7 +171,7 @@ silently turn it into a mean of per-profile scores.
 - [x] **All-MANUAL scan**: `pass+fail==0` → `Status.Score==nil`, with
       per-profile counts preserved (`TestAggregateStatusAllManualNilScore`).
 - [x] **Zero owned results** (no matching suite labels) → score nil, no panic
-      (`TestRecordHistoryNoOwnedScans`, empty aggregate paths).
+      (`TestRecordHistoryNoOwnedSuites`, empty aggregate paths).
 - [x] Stale score cleared when CRDs vanish (`TestAggregateStatusClearsStaleScore`,
       `TestReconcileWithoutComplianceCRDs`).
 - [x] **int64 score math**: adversarial huge pass/fail counts do not overflow
