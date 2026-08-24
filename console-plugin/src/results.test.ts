@@ -2,18 +2,10 @@ import { resultsCsv, severityDisplayTitle, checkTitle, checkBody, changedChecksM
 import { machineConfigPoolHref } from './links';
 import { activeWaivedNames } from './waivers';
 import { ComplianceCheckResult } from './models';
+import { fuzzRand, mulberry32, randomString } from './testing/fuzz';
 
 const result = (name: string, description?: string): ComplianceCheckResult =>
   ({ metadata: { name, namespace: 'ns' }, description }) as ComplianceCheckResult;
-
-// Deterministic PRNG so fuzz loops are reproducible in CI (no Math.random).
-let fuzzSeed = 0x9e3779b9;
-const fuzzRand = (): number => {
-  fuzzSeed = (Math.imul(fuzzSeed, 1664525) + 1013904223) >>> 0;
-  return fuzzSeed / 0x100000000;
-};
-const randomString = (len: number): string =>
-  Array.from({ length: len }, () => String.fromCharCode(Math.floor(fuzzRand() * 0xffff))).join('');
 
 // severityDisplayTitle is shared by Results chips and the printable report so
 // filter labels cannot drift from export cells. Map known severities through t();
@@ -74,14 +66,6 @@ const HOSTILE = [
   'x'.repeat(2000),
 ];
 
-// Deterministic PRNG (mulberry32) so failures reproduce; no Math.random in CI.
-const rng = (seed: number) => () => {
-  seed |= 0;
-  seed = (seed + 0x6d2b79f5) | 0;
-  let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
-  t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-};
 const pick = (rand: () => number): string => HOSTILE[Math.floor(rand() * HOSTILE.length)];
 
 const hostileResults = (rand: () => number): ComplianceCheckResult[] =>
@@ -144,7 +128,7 @@ const formulaRe = /^\s*[=+\-@|\t\r\n＝＋－＠−]/;
 describe('resultsCsv fuzz sweep', () => {
   it('keeps CSV structure and neutralizes formulas under hostile input', () => {
     for (let seed = 0; seed < 400; seed++) {
-      const rand = rng(seed);
+      const rand = mulberry32(seed);
       const results = hostileResults(rand);
 
       let csv = '';

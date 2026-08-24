@@ -11,15 +11,7 @@ import { addWaiverPatch, removeWaiverPatch } from './patches';
 import { effectiveStatus, resultFilterStatus } from './status';
 import { resultsHref } from './links';
 import { Waiver } from './models';
-
-// Deterministic PRNG so fuzz loops are reproducible in CI (no Math.random).
-let fuzzSeed = 0x9e3779b9;
-const fuzzRand = (): number => {
-  fuzzSeed = (Math.imul(fuzzSeed, 1664525) + 1013904223) >>> 0;
-  return fuzzSeed / 0x100000000;
-};
-const randomString = (len: number): string =>
-  Array.from({ length: len }, () => String.fromCharCode(Math.floor(fuzzRand() * 0xffff))).join('');
+import { fuzzRand, randomString } from './testing/fuzz';
 
 // waivers.ts decides which checks are excluded from the compliance score based
 // on Waiver.expiresAt, a string carried in the CR that a user (or a hand-edit)

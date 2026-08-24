@@ -1,6 +1,7 @@
 // INCONSISTENT collapse, SKIP to N/A, and waived-FAIL filter status helpers.
 import { ComplianceCheckResult, Waiver } from './models';
 import { isWaived } from './waivers';
+import { isString } from './parse';
 
 export type NodeStatus = { node: string; status: string };
 
@@ -58,9 +59,14 @@ const upperStatusToken = (s: string): string => {
 // most-common-status. Untrusted cluster data: never throws on a malformed value.
 // Status tokens are normalized with upperStatusToken so the detail table matches
 // effectiveStatus / operator collapse (CO is usually uppercase already).
+export interface InconsistentSources {
+  sources: NodeStatus[];
+  mostCommon: string | null;
+}
+
 export const inconsistentSources = (
   result: ComplianceCheckResult,
-): { sources: NodeStatus[]; mostCommon: string | null } => {
+): InconsistentSources => {
   const ann = result.metadata?.annotations ?? {};
   const raw = ann[inconsistentSourceAnn] ?? '';
   const sources = raw
@@ -98,7 +104,7 @@ export const effectiveStatus = (
   // so a CCR is never silently dropped from ResultCounts). CRs are not runtime
   // type-checked; a missing field must not yield a blank filter chip or a
   // non-string that crashes CSV export.
-  if (typeof r.status !== 'string' || !r.status) {
+  if (!isString(r.status) || !r.status) {
     return 'ERROR';
   }
   if (r.status === 'SKIP') {

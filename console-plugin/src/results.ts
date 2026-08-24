@@ -4,6 +4,7 @@ import { checkSeverity } from './scoring';
 import { resultFilterStatus } from './status';
 import { activeWaivedNames } from './waivers';
 import { checkResultHref } from './links';
+import { isString } from './parse';
 
 // Localized severity label for Results UI and the printable report. Keep a single
 // switch so chip titles and report cells cannot drift. Unknown / empty use the
@@ -38,11 +39,11 @@ export const checkTitle = (r: ComplianceCheckResult): string => {
   // name is typed string but CRs are not runtime type-checked; always return a
   // non-empty string so Results rows / CSV cells never get undefined.
   const name =
-    typeof r.metadata?.name === 'string' && r.metadata.name ? r.metadata.name : 'unknown';
+    isString(r.metadata?.name) && r.metadata.name ? r.metadata.name : 'unknown';
   const d = r.description;
   // description is typed string but CRs are not runtime type-checked; a tampered
   // non-string value must fall back, not throw on .indexOf.
-  if (typeof d !== 'string' || !d) {
+  if (!isString(d) || !d) {
     return name;
   }
   const i = d.indexOf('\n');
@@ -52,7 +53,7 @@ export const checkTitle = (r: ComplianceCheckResult): string => {
 
 export const checkBody = (r: ComplianceCheckResult): string => {
   const d = r.description;
-  if (typeof d !== 'string' || !d) {
+  if (!isString(d) || !d) {
     return '';
   }
   const i = d.indexOf('\n');
@@ -95,7 +96,7 @@ export const resultsCsv = (
   // is already distinguishable without a separate column.
   // Pre-sized lines array: avoid map+join intermediates and push growth for
   // multi-thousand-row exports.
-  const lines: string[] = new Array(results.length + 1);
+  const lines: string[] = Array.from({ length: results.length + 1 });
   lines[0] = 'name,title,status,severity,waived';
   // Active waivers once: O(1) per row (multi-thousand CCRs; MaxItems=256 waivers).
   // Prebuilt Set (Results table) skips activeWaivedNames; Waiver[] builds once.
@@ -148,7 +149,7 @@ export const changedChecksMany = (
   // object, etc.) cannot reach checkResultHref -> stripSurrogates -> .replace()
   // and crash the Overview "Recent changes" render.
   const orderedLists = nameLists.map((names) =>
-    (names ?? []).filter((n): n is string => typeof n === 'string' && n.length > 0),
+    (names ?? []).filter((n): n is string => isString(n) && n.length > 0),
   );
   const want = new Set<string>();
   for (const list of orderedLists) {

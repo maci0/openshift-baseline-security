@@ -25,10 +25,10 @@ export const PROFILE_KEYS: readonly ProfileKey[] = [
   'bsi',
 ] as const;
 
-// Display metadata for every known ProfileKey. Record<ProfileKey, ...> fails
+// Display metadata for every known ProfileKey. The satisfies clause fails
 // typecheck if a CRD enum value is missing here (lockstep with PROFILE_KEYS).
 // title/description are i18n source keys (English); pass through t() at render.
-export const PROFILE_INFO: Record<ProfileKey, { title: string; description: string }> = {
+export const PROFILE_INFO = {
   cis: { title: 'CIS', description: 'CIS Red Hat OpenShift Container Platform Benchmark' },
   'pci-dss': { title: 'PCI-DSS', description: 'Payment Card Industry Data Security Standard' },
   'nist-moderate': { title: 'NIST 800-53 Moderate', description: 'FedRAMP Moderate impact baseline' },
@@ -46,7 +46,7 @@ export const PROFILE_INFO: Record<ProfileKey, { title: string; description: stri
     title: 'BSI',
     description: 'German Federal Office for Information Security IT-Grundschutz',
   },
-};
+} satisfies Record<ProfileKey, { title: string; description: string }>;
 
 // O(1) membership for ProfileKey enum (lockstep with PROFILE_KEYS / CRD).
 const PROFILE_KEY_SET: ReadonlySet<string> = new Set(PROFILE_KEYS);
@@ -196,7 +196,9 @@ export type ComplianceCheckResult = {
   status: CheckStatus;
   // Optional: CO usually sets .severity; when absent, use the
   // compliance.openshift.io/check-severity label (see checkSeverity).
-  severity?: 'unknown' | 'info' | 'low' | 'medium' | 'high' | string;
+  // CO emits one of the known tokens but CRs are unvalidated at runtime, so
+  // any string must survive checkSeverity/checkBody paths (lockstep weights).
+  severity?: string;
   description?: string;
   instructions?: string;
 };
@@ -207,7 +209,6 @@ export type RemediationObject = {
   apiVersion?: string;
   kind?: string;
   metadata?: { name?: string };
-  [k: string]: unknown;
 };
 
 export type ComplianceRemediation = {
@@ -411,7 +412,9 @@ export const ownedSuiteLabels = (
   tailoredProfiles: readonly string[] | undefined,
 ): string[] => {
   // Pre-size for typical multi-profile + tailored baselines (watch selector rebuild).
-  const out: string[] = new Array((profiles?.length ?? 0) + (tailoredProfiles?.length ?? 0));
+  const out: string[] = Array.from({
+    length: (profiles?.length ?? 0) + (tailoredProfiles?.length ?? 0),
+  });
   let n = 0;
   for (const p of profiles ?? []) {
     if (p) {
@@ -467,6 +470,8 @@ const nameIn = (list: NameSet | undefined, name: string): boolean => {
   if (list instanceof Set) {
     return list.has(name);
   }
+  // SAFETY: NameSet is readonly string[] | ReadonlySet<string>; the Set branch
+  // above exhausted the union, so list is the array side here.
   return (list as readonly string[]).includes(name);
 };
 

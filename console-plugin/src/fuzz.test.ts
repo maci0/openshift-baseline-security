@@ -30,14 +30,7 @@ import {
   formatLocalDateTime,
   safeLocale,
 } from './dates';
-
-// mulberry32: 32-bit seeded PRNG, enough spread for structural fuzzing.
-const rng = (seed: number) => (): number => {
-  seed = (seed + 0x6d2b79f5) | 0;
-  let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
-  t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-};
+import { mulberry32 } from './testing/fuzz';
 
 // Nasty scalar leaves: types the CR schema forbids but the API can still deliver,
 // plus strings that break CSV/annotation walking if a helper trusts them.
@@ -99,7 +92,7 @@ const ITER = 5000;
 describe('CR field fuzz (untrusted CR input never throws)', () => {
   it('effectiveStatus / checkSeverity / checkTitle / checkBody return safe strings', () => {
     for (let seed = 1; seed <= ITER; seed++) {
-      const next = rng(seed);
+      const next = mulberry32(seed);
       const cr = junkCR(next);
       try {
         const st = effectiveStatus(cr as unknown as { status: string });
@@ -116,7 +109,7 @@ describe('CR field fuzz (untrusted CR input never throws)', () => {
 
   it('resultsCsv survives junk rows: BOM prefix, NUL stripped, always a string', () => {
     for (let seed = 1; seed <= ITER; seed++) {
-      const next = rng(seed);
+      const next = mulberry32(seed);
       const rows = Array.from({ length: Math.floor(next() * 5) }, () => junkCR(next));
       let out: string;
       try {
@@ -136,7 +129,7 @@ describe('CR field fuzz (untrusted CR input never throws)', () => {
   // Filter / drill-down helpers also read untrusted annotations and labels.
   it('resultFilterStatus / inconsistentSources / suite parsers never throw', () => {
     for (let seed = 1; seed <= ITER; seed++) {
-      const next = rng(seed);
+      const next = mulberry32(seed);
       const cr = junkCR(next);
       // Mixed waiver shapes: array, Set, or absent (filter path branches).
       const waivers =
@@ -197,7 +190,7 @@ const junkString = (next: () => number): string => {
 describe('string-parser fuzz (untrusted schedule / date / locale never throws)', () => {
   it('isValidCron returns a boolean for any input', () => {
     for (let seed = 1; seed <= ITER; seed++) {
-      const next = rng(seed);
+      const next = mulberry32(seed);
       const s = junkString(next);
       try {
         expect(typeof isValidCron(s)).toBe('boolean');
@@ -209,7 +202,7 @@ describe('string-parser fuzz (untrusted schedule / date / locale never throws)',
 
   it('date/locale formatters never throw and keep their return contract', () => {
     for (let seed = 1; seed <= ITER; seed++) {
-      const next = rng(seed);
+      const next = mulberry32(seed);
       const iso = junkString(next);
       const locale = next() < 0.5 ? undefined : junkString(next);
       try {

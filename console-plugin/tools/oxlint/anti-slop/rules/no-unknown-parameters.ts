@@ -11,6 +11,17 @@ type ParameterOwner =
   | ESTree.TSFunctionType
   | ESTree.TSMethodSignature;
 
+function declaredPredicateReturn(owner: ParameterOwner): boolean {
+  if (
+    owner.type !== "ArrowFunctionExpression" &&
+    owner.type !== "FunctionDeclaration" &&
+    owner.type !== "FunctionExpression"
+  ) {
+    return false;
+  }
+  return owner.returnType?.typeAnnotation.type === "TSTypePredicate";
+}
+
 function parameterAnnotation(parameter: Parameter): ESTree.TSTypeAnnotation | null | undefined {
   if (parameter.type === "TSParameterProperty") {
     return parameterAnnotation(parameter.parameter);
@@ -51,9 +62,26 @@ export const noUnknownParametersRule = defineRule({
       unknownParameter:
         "Parameter `{{parameter}}` leaves input unparsed. Accept a named domain type; run the expected schema or parser at the I/O boundary before calling this function.",
     },
+    schema: [
+      {
+        type: "object",
+        properties: {
+          allowInTypeGuards: { type: "boolean" },
+        },
+        additionalProperties: false,
+      },
+    ],
+    defaultOptions: [{ allowInTypeGuards: false }],
   },
   createOnce(context) {
     const checkParameters = (node: ParameterOwner) => {
+      const option = context.options?.[0];
+      const allowInTypeGuards =
+        typeof option === "object" &&
+        option !== null &&
+        !Array.isArray(option) &&
+        option.allowInTypeGuards === true;
+      if (allowInTypeGuards && declaredPredicateReturn(node)) return;
       for (const parameter of node.params) {
         const annotation = parameterAnnotation(parameter);
         if (annotation?.typeAnnotation.type !== "TSUnknownKeyword") continue;

@@ -9,7 +9,7 @@ export const SUCCESS_DISMISS_MS = 8000;
 // stay (the timer is cleared when blocked flips true). Shared by every tab so
 // the effect and its cleanup cannot drift; `dismiss` is read through a ref so
 // callers can pass an inline setState closure without re-arming the timer.
-export const useAutoDismiss = (active: unknown, blocked: boolean, dismiss: () => void): void => {
+export const useAutoDismiss = <T>(active: T, blocked: boolean, dismiss: () => void): void => {
   const dismissRef = React.useRef(dismiss);
   React.useEffect(() => {
     dismissRef.current = dismiss;

@@ -83,10 +83,23 @@ const detailStyle: React.CSSProperties = {
 };
 
 // Color + icon so state is not color-only (matches Results status labels).
-const stateStyle: Record<
-  string,
-  { color: React.ComponentProps<typeof Label>['color']; icon: React.ReactElement }
-> = {
+// The index signature keeps unknown CO states readable at runtime while the
+// required keys fail typecheck if an applicationState member goes missing.
+interface StateVisual {
+  color: React.ComponentProps<typeof Label>['color'];
+  icon: React.ReactElement;
+}
+
+interface StateVisualMap {
+  [state: string]: StateVisual | undefined;
+  Applied: StateVisual;
+  NotApplied: StateVisual;
+  Error: StateVisual;
+  Outdated: StateVisual;
+  MissingDependencies: StateVisual;
+}
+
+const stateStyle: StateVisualMap = {
   Applied: { color: 'green', icon: <CheckCircleIcon /> },
   NotApplied: { color: 'grey', icon: <MinusCircleIcon /> },
   Error: { color: 'red', icon: <ExclamationCircleIcon /> },
@@ -182,7 +195,7 @@ const RemediationsTab: React.FC<{
   // Selector already scopes to owned suites.
   const owned = remediations ?? EMPTY_REMEDIATIONS;
 
-  const run = async (fn: () => Promise<unknown>, failMsg: string): Promise<boolean> => {
+  const run = async <T,>(fn: () => Promise<T>, failMsg: string): Promise<boolean> => {
     if (busyRef.current) return false;
     busyRef.current = true;
     setBusy(true);
@@ -317,7 +330,7 @@ const RemediationsTab: React.FC<{
 
   // Turning auto-apply on can reboot nodes after every scan; confirm first.
   // Turning it off is safe and applies immediately.
-  const onAutoApplyChange = (_e: unknown, checked: boolean) => {
+  const onAutoApplyChange = (_e: React.SyntheticEvent, checked: boolean) => {
     if (checked) {
       setError(null);
       setSuccess(null);

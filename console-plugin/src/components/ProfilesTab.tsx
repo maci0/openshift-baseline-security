@@ -76,6 +76,7 @@ import { resourceVersionTest, tailoredProfileBindingPatch } from '../patches';
 import {
   cleanRuleSelection,
   consoleRule,
+  ExistingTailoredProfile,
   tailoredProfileManifest,
   tailoredProfileSpecMatches,
   toggledProfiles,
@@ -84,6 +85,7 @@ import BaselineNotConfigured from './BaselineNotConfigured';
 import { withDisabledTip } from './DisabledTip';
 import { restoreFocus } from './focus';
 import { useAutoDismiss } from './feedback';
+import { isString } from '../parse';
 
 // Typeahead multi-select over a (possibly large) rule catalog: type to filter,
 // pick from a checkbox dropdown, selections show as removable chips inline.
@@ -141,7 +143,7 @@ const RuleMultiSelect: React.FC<{
       popperProps={{ enableFlip: true }}
       isOpen={isOpen}
       selected={selected}
-      onSelect={(_e, value) => typeof value === 'string' && pick(value)}
+      onSelect={(_e, value) => isString(value) && pick(value)}
       onOpenChange={(open) => setIsOpen(open)}
       shouldFocusFirstItemOnOpen={false}
       toggle={(toggleRef: React.Ref<MenuToggleElement>) => (
@@ -282,7 +284,7 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
   const baseProfileNames = React.useMemo(() => {
     const names = (Array.isArray(profiles) ? profiles : [])
       .map((p) => p?.metadata?.name)
-      .filter((n): n is string => typeof n === 'string' && n.length > 0);
+      .filter((n): n is string => isString(n) && n.length > 0);
     return names.length > 0 ? [...new Set(names)].sort() : [DEFAULT_BASE_PROFILE];
   }, [profiles]);
   // Rule names in the selected base profile (for the disable selection).
@@ -291,7 +293,7 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
       (x) => x?.metadata?.name === tpExtends,
     );
     const rules = (p?.rules ?? []).filter(
-      (r): r is string => typeof r === 'string' && r.length > 0,
+      (r): r is string => isString(r) && r.length > 0,
     );
     return [...new Set(rules)].sort();
   }, [profiles, tpExtends]);
@@ -308,7 +310,7 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
     const inBase = new Set(baseRules);
     const names = (Array.isArray(allRules) ? allRules : [])
       .map((r) => r?.metadata?.name)
-      .filter((n): n is string => typeof n === 'string' && n.length > 0 && !inBase.has(n));
+      .filter((n): n is string => isString(n) && n.length > 0 && !inBase.has(n));
     return [...new Set(names)].sort();
   }, [allRules, baseRules]);
   // Effective rule set the tailored profile scans: base minus disabled plus
@@ -344,6 +346,8 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
     setError(null);
     setSuccess(null);
     try {
+      // SAFETY: k8sGet resolves TailoredProfileModel; the edit form reads only
+      // spec.extends / spec.disableRules / spec.enableRules, each narrowed first.
       const obj = (await k8sGet({
         model: TailoredProfileModel,
         name,
@@ -355,7 +359,7 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
       const ruleNames = (list: { name?: string }[] | undefined) =>
         (list ?? [])
           .map((r) => r?.name)
-          .filter((n): n is string => typeof n === 'string' && n.length > 0);
+          .filter((n): n is string => isString(n) && n.length > 0);
       setTpDisable(ruleNames(obj.spec?.disableRules));
       const enableNames = ruleNames(obj.spec?.enableRules);
       setTpEnable(enableNames);
@@ -421,7 +425,7 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
         const next: TailoredProfileResource = {
           ...editing.obj,
           spec: {
-            ...(editing.obj.spec ?? {}),
+            ...editing.obj.spec,
             extends: extendsBase,
             disableRules: disable.length ? disable.map(consoleRule) : undefined,
             enableRules: enable.length ? enable.map(consoleRule) : undefined,
@@ -462,11 +466,13 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
         // collision with an unrelated profile must not be bound as if it were
         // ours, or the user's rule edits are silently discarded and a different
         // profile is scanned under a false "created and bound" success.
+        // SAFETY: k8sGet resolves the TailoredProfile model; only spec fields
+        // compared by tailoredProfileSpecMatches are read, each narrowed first.
         const existing = (await k8sGet({
           model: TailoredProfileModel,
           name,
           ns: COMPLIANCE_NAMESPACE,
-        })) as Record<string, unknown>;
+        })) as ExistingTailoredProfile;
         if (!tailoredProfileSpecMatches(existing, extendsBase, disable, enable)) {
           setError(
             t(

@@ -2,10 +2,12 @@ import { isValidK8sName, isValidTailoredProfileName } from './names';
 import {
   cleanRuleSelection,
   consoleRule,
+  TailoredProfileManifest,
   tailoredProfileManifest,
   tailoredProfileSpecMatches,
   toggledProfiles,
 } from './profiles';
+import { fuzzRand, randomString } from './testing/fuzz';
 
 describe('cleanRuleSelection', () => {
   it('trims, drops invalid names, dedupes, and lets disable win', () => {
@@ -33,15 +35,6 @@ describe('consoleRule', () => {
     expect(consoleRule('r1')).toEqual({ name: 'r1', rationale: 'set via console' });
   });
 });
-
-// Deterministic PRNG so fuzz loops are reproducible in CI (no Math.random).
-let fuzzSeed = 0x9e3779b9;
-const fuzzRand = (): number => {
-  fuzzSeed = (Math.imul(fuzzSeed, 1664525) + 1013904223) >>> 0;
-  return fuzzSeed / 0x100000000;
-};
-const randomString = (len: number): string =>
-  Array.from({ length: len }, () => String.fromCharCode(Math.floor(fuzzRand() * 0xffff))).join('');
 
 describe('toggledProfiles', () => {
   it('adds and removes keys', () => {
@@ -133,7 +126,7 @@ describe('tailoredProfileManifest', () => {
     expect(m.kind).toBe('TailoredProfile');
     expect((m.metadata as { name: string }).name).toBe('cis-custom');
     expect((m.spec as { extends: string }).extends).toBe('ocp4-cis');
-    expect((m.spec as Record<string, unknown>).disableRules).toBeUndefined();
+    expect(m.spec.disableRules).toBeUndefined();
   });
   it('includes enable/disable rules when provided', () => {
     const m = tailoredProfileManifest('x', 'ocp4-cis', ['r1', 'r2'], ['r3']);
@@ -203,7 +196,7 @@ describe('tailoredProfileManifest', () => {
         seeds[i % seeds.length],
       ];
       let threw = false;
-      let m: Record<string, unknown> | undefined;
+      let m: TailoredProfileManifest | undefined;
       try {
         m = tailoredProfileManifest(name, extendsBase, rules, rules);
       } catch (e) {
@@ -234,10 +227,12 @@ describe('tailoredProfileManifest', () => {
 // On an AlreadyExists create, the authoring form adopts the existing CR only if
 // its content matches what we would have created (a genuine retry). A collision
 // with an unrelated profile must NOT match, or the user's edits are silently
+// discarded and a different profile is scanned under a false "created and
+// bound" success.
 
 describe('tailoredProfileSpecMatches', () => {
   const specOf = (extendsBase: string, disable: string[], enable: string[] = []) =>
-    tailoredProfileManifest('x', extendsBase, disable, enable) as { spec: Record<string, unknown> };
+    tailoredProfileManifest('x', extendsBase, disable, enable);
   it('matches an identical spec regardless of rule order', () => {
     const existing = specOf('ocp4-cis', ['b-rule', 'a-rule']);
     expect(tailoredProfileSpecMatches(existing, 'ocp4-cis', ['a-rule', 'b-rule'])).toBeTruthy();
@@ -267,5 +262,3 @@ describe('tailoredProfileSpecMatches', () => {
     expect(tailoredProfileSpecMatches({}, 'ocp4-cis', ['a-rule'])).toBeFalsy();
   });
 });
-
-// downloadBlob is DOM-only; mock the minimal browser surface so we can assert

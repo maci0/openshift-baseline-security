@@ -14,13 +14,13 @@ import { formatCount, formatLocalDate, formatLocalDateTime, safeLocale } from '.
 import { waiverExpired } from './waivers';
 
 // HTML-escape untrusted text (waiver reasons, rule titles) for the report.
-const htmlEscapes: Record<string, string> = {
+const htmlEscapes = {
   '&': '&amp;',
   '<': '&lt;',
   '>': '&gt;',
   '"': '&quot;',
   "'": '&#39;',
-};
+} satisfies Record<string, string>;
 // Module-level regexes: multi-thousand FAIL-row exports must not recompile
 // patterns on every esc() / default translate call.
 const htmlEscapeRe = /[&<>"']/g;
@@ -28,11 +28,20 @@ const reportInterpRe = /\{\{(\w+)\}\}/g;
 // Coerce first: CR fields typed as string are not runtime type-checked, so a
 // tampered numeric/object/null value must not throw and abort report export.
 const esc = (s: string): string =>
-  String(s ?? '').replace(htmlEscapeRe, (c) => htmlEscapes[c]);
+  // SAFETY: htmlEscapeRe matches only the five characters keyed in htmlEscapes,
+  // so the lookup below cannot miss.
+  String(s ?? '').replace(htmlEscapeRe, (c) => htmlEscapes[c as keyof typeof htmlEscapes]);
+
+// Interpolation variables for report chrome. Keys are open-ended ({{count}},
+// {{formattedCount}}, {{name}}, ...) but values must render as text, so the
+// contract is string-or-number; anything else is a caller bug.
+export interface ReportVars {
+  [key: string]: string | number | undefined;
+}
 
 // Optional translator for report chrome. When omitted, English source keys are
 // used with simple {{var}} interpolation so unit tests need no i18n harness.
-export type ReportTranslate = (key: string, options?: Record<string, unknown>) => string;
+export type ReportTranslate = (key: string, options?: ReportVars) => string;
 
 const defaultReportTranslate: ReportTranslate = (key, options) => {
   if (!options) {
@@ -67,8 +76,9 @@ export const buildReportHtml = (
   // Inherit console locale/dir so the report matches the operator's language and
   // RTL layout when opened from a translated console session. Dates and counts
   // use the same BCP 47 tag so formatting is not tied to the browser OS alone.
-  const docEl =
-    typeof document !== 'undefined' ? document.documentElement : undefined;
+  // globalThis (not a typeof probe) so SSR-free console rendering still works
+  // when the plugin bundle is evaluated outside a document (early boot).
+  const docEl = globalThis.document?.documentElement;
   // safeLocale normalizes underscore form and rejects invalid tags (toLocale*
   // throws RangeError). Fall back to "en" for the html lang attribute only;
   // formatting still uses undefined (runtime default) when the tag is bad.

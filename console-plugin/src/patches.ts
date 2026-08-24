@@ -2,6 +2,15 @@
 import { isValidCron } from './cron';
 import { TAILORED_PROFILE_MAX_ITEMS, WAIVER_MAX_ITEMS, Waiver } from './models';
 import { isValidK8sName, isValidTailoredProfileName } from './names';
+import { isString } from './parse';
+
+// One RFC 6902 operation emitted by the patch builders in this module. value
+// is the JSON payload written at path; tests assert exact shapes.
+export interface PatchOp {
+  op: 'add' | 'replace' | 'test' | 'remove';
+  path: string;
+  value?: unknown;
+}
 
 // Matches operator batchApplyAnnotation / batchMaxRemediations so the console
 // and reconciler cannot drift on key or size.
@@ -16,7 +25,7 @@ export const batchApplyRequested = (
   annotations?: Record<string, string> | null,
 ): boolean => {
   const raw = annotations?.[BATCH_APPLY_ANNOTATION];
-  if (typeof raw !== 'string' || !raw) {
+  if (!isString(raw) || !raw) {
     return false;
   }
   for (const part of raw.split(',')) {
@@ -29,9 +38,9 @@ export const batchApplyRequested = (
 
 // Optimistic concurrency test op prepended to ClusterBaseline JSON patches.
 // Empty when resourceVersion is unknown (no guard rather than a false conflict).
-export const resourceVersionTest = (resourceVersion?: string) =>
+export const resourceVersionTest = (resourceVersion?: string): PatchOp[] =>
   resourceVersion
-    ? [{ op: 'test' as const, path: '/metadata/resourceVersion', value: resourceVersion }]
+    ? [{ op: 'test', path: '/metadata/resourceVersion', value: resourceVersion }]
     : [];
 
 // Idempotent, optimistic JSON patch for binding a newly-created TailoredProfile.
@@ -42,7 +51,7 @@ export const tailoredProfileBindingPatch = (
   current: string[] | undefined,
   name: string,
   resourceVersion?: string,
-) => {
+): PatchOp[] => {
   if (!isValidTailoredProfileName(name) || current?.includes(name)) return [];
   // CRD MaxItems=32: refuse growth past the bound (replace/duplicate already no-op above).
   if ((current?.length ?? 0) >= TAILORED_PROFILE_MAX_ITEMS) return [];
@@ -50,10 +59,10 @@ export const tailoredProfileBindingPatch = (
   return current != null
     ? [
         ...guard,
-        { op: 'test' as const, path: '/spec/tailoredProfiles', value: current },
-        { op: 'add' as const, path: '/spec/tailoredProfiles/-', value: name },
+        { op: 'test', path: '/spec/tailoredProfiles', value: current },
+        { op: 'add', path: '/spec/tailoredProfiles/-', value: name },
       ]
-    : [...guard, { op: 'add' as const, path: '/spec/tailoredProfiles', value: [name] }];
+    : [...guard, { op: 'add', path: '/spec/tailoredProfiles', value: [name] }];
 };
 
 // JSON patch for spec.schedule. Always uses `add` so missing, empty-string, and
@@ -61,12 +70,12 @@ export const tailoredProfileBindingPatch = (
 // member; matches remediationApplyPatch leaf handling for defaulted-absent
 // fields). Invalid cron yields no ops so CRD/controller rejection is not the
 // first failure mode.
-export const schedulePatch = (cron: string) => {
+export const schedulePatch = (cron: string): PatchOp[] => {
   const value = cron.trim();
   if (!isValidCron(value)) {
-    return [] as { op: 'add'; path: string; value: unknown }[];
+    return [];
   }
-  return [{ op: 'add' as const, path: '/spec/schedule', value }];
+  return [{ op: 'add', path: '/spec/schedule', value }];
 };
 
 // JSON patch setting the batch-apply annotation on the ClusterBaseline, which
@@ -74,7 +83,7 @@ export const schedulePatch = (cron: string) => {
 // remediations, and resume so nodes reboot once. Adds the annotations map when
 // absent (a nested add would 404). Empty / invalid names yield no ops (matches
 // operator skip of comma-only annotations). Cap matches batchMaxRemediations.
-export const batchApplyPatch = (hasAnnotations: boolean, names: string[]) => {
+export const batchApplyPatch = (hasAnnotations: boolean, names: string[]): PatchOp[] => {
   const seen = new Set<string>();
   const list: string[] = [];
   for (const raw of names) {
@@ -85,22 +94,18 @@ export const batchApplyPatch = (hasAnnotations: boolean, names: string[]) => {
     if (list.length >= batchApplyMaxNames) break;
   }
   if (list.length === 0) {
-    return [] as { op: 'add'; path: string; value: unknown }[];
+    return [];
   }
   const value = list.join(',');
   // JSON Pointer escapes "/" as "~1" in the nested annotation path.
   const annPath = `/metadata/annotations/${BATCH_APPLY_ANNOTATION.replace(/\//g, '~1')}`;
   return hasAnnotations
     ? [
-        {
-          op: 'add' as const,
-          path: annPath,
-          value,
-        },
+        { op: 'add', path: annPath, value },
       ]
     : [
         {
-          op: 'add' as const,
+          op: 'add',
           path: '/metadata/annotations',
           value: { [BATCH_APPLY_ANNOTATION]: value },
         },
@@ -108,11 +113,11 @@ export const batchApplyPatch = (hasAnnotations: boolean, names: string[]) => {
 };
 
 // JSON patch for spec.remediation.apply (Automatic|Manual).
-export const remediationApplyPatch = (hasRemediation: boolean, automatic: boolean) => {
+export const remediationApplyPatch = (hasRemediation: boolean, automatic: boolean): PatchOp[] => {
   const apply = automatic ? 'Automatic' : 'Manual';
   return hasRemediation
-    ? [{ op: 'add' as const, path: '/spec/remediation/apply', value: apply }]
-    : [{ op: 'add' as const, path: '/spec/remediation', value: { apply } }];
+    ? [{ op: 'add', path: '/spec/remediation/apply', value: apply }]
+    : [{ op: 'add', path: '/spec/remediation', value: { apply } }];
 };
 
 // metav1.Time JSON is RFC3339. Date.parse alone is too loose (e.g. "March 1,
@@ -153,7 +158,7 @@ export const WAIVER_ATTRIBUTION_MAX_LEN = 253;
 // If the name is already waived, replace that entry (updates reason, avoids
 // duplicate list-map keys from a double-click race). Empty or invalid names
 // (not DNS-1123) yield no ops so CRD admission is not the first failure mode.
-export const addWaiverPatch = (waivers: Waiver[] | undefined | null, entry: Waiver) => {
+export const addWaiverPatch = (waivers: Waiver[] | undefined | null, entry: Waiver): PatchOp[] => {
   const name = entry.name;
   // Trim optional text fields once: whitespace-only is empty; MaxLength is on
   // the stored value so padding cannot smuggle past the bound after a later trim.
@@ -170,7 +175,7 @@ export const addWaiverPatch = (waivers: Waiver[] | undefined | null, entry: Waiv
     (entry.expiresAt != null && entry.expiresAt !== '' && !isParseableTime(entry.expiresAt)) ||
     (entry.reviewBy != null && entry.reviewBy !== '' && !isParseableTime(entry.reviewBy))
   ) {
-    return [] as { op: 'add' | 'replace' | 'test'; path: string; value: unknown }[];
+    return [];
   }
   // Drop empty optional fields so the stored entry stays minimal.
   const clean: Waiver = { name };
@@ -183,29 +188,29 @@ export const addWaiverPatch = (waivers: Waiver[] | undefined | null, entry: Waiv
     const idx = waivers.findIndex((w) => w.name === name);
     if (idx >= 0) {
       return [
-        { op: 'test' as const, path: `/spec/waivers/${idx}/name`, value: name },
-        { op: 'replace' as const, path: `/spec/waivers/${idx}`, value: clean },
+        { op: 'test', path: `/spec/waivers/${idx}/name`, value: name },
+        { op: 'replace', path: `/spec/waivers/${idx}`, value: clean },
       ];
     }
     // CRD MaxItems=256: refuse a new entry past the bound (replace still allowed).
     if (waivers.length >= WAIVER_MAX_ITEMS) {
-      return [] as { op: 'add' | 'replace' | 'test'; path: string; value: unknown }[];
+      return [];
     }
-    return [{ op: 'add' as const, path: '/spec/waivers/-', value: clean }];
+    return [{ op: 'add', path: '/spec/waivers/-', value: clean }];
   }
-  return [{ op: 'add' as const, path: '/spec/waivers', value: [clean] }];
+  return [{ op: 'add', path: '/spec/waivers', value: [clean] }];
 };
 
 // JSON patch removing the waiver at index i (test-guards the name so a
 // concurrent reorder cannot delete the wrong entry). Invalid index / empty name
 // yield no ops so a bad call site cannot emit a patch that always 404s.
-export const removeWaiverPatch = (index: number, name: string) => {
+export const removeWaiverPatch = (index: number, name: string): PatchOp[] => {
   if (!Number.isInteger(index) || index < 0 || !name) {
-    return [] as { op: 'test' | 'remove'; path: string; value?: unknown }[];
+    return [];
   }
   return [
-    { op: 'test' as const, path: `/spec/waivers/${index}/name`, value: name },
-    { op: 'remove' as const, path: `/spec/waivers/${index}` },
+    { op: 'test', path: `/spec/waivers/${index}/name`, value: name },
+    { op: 'remove', path: `/spec/waivers/${index}` },
   ];
 };
 
@@ -216,12 +221,12 @@ export const rescanPatch = (
   hasAnnotations: boolean,
   value: string,
   resourceVersion?: string,
-) => {
+): PatchOp[] => {
   // Empty/whitespace tokens are not observed as a change by CO and would make a
   // successful patch look like a rescan when nothing useful was written.
-  const token = typeof value === 'string' ? value.trim() : '';
+  const token = isString(value) ? value.trim() : '';
   if (!token) {
-    return [] as { op: 'add' | 'test'; path: string; value: unknown }[];
+    return [];
   }
   // A nested add cannot erase siblings. Guard only whole-map creation, where a
   // concurrent writer could otherwise have its newly-created map replaced.
@@ -229,18 +234,10 @@ export const rescanPatch = (
   return hasAnnotations
     ? [
         ...guard,
-        {
-          op: 'add' as const,
-          path: '/metadata/annotations/compliance.openshift.io~1rescan',
-          value: token,
-        },
+        { op: 'add', path: '/metadata/annotations/compliance.openshift.io~1rescan', value: token },
       ]
     : [
         ...guard,
-        {
-          op: 'add' as const,
-          path: '/metadata/annotations',
-          value: { 'compliance.openshift.io/rescan': token },
-        },
+        { op: 'add', path: '/metadata/annotations', value: { 'compliance.openshift.io/rescan': token } },
       ];
 };

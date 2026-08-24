@@ -9,6 +9,7 @@ import {
 } from './models';
 import { effectiveStatus } from './status';
 import { activeWaivedNames } from './waivers';
+import { isFiniteNumber, isString } from './parse';
 
 // Operator annotation recording which scoring mode wrote the latest history
 // ring points (lockstep with operator historyScoringModeAnn). Used to detect
@@ -157,11 +158,11 @@ export const checkSeverity = (r: {
   metadata?: { labels?: Record<string, string> };
 }): string => {
   const field = r.severity;
-  if (typeof field === 'string' && field) {
+  if (isString(field) && field) {
     return field;
   }
   const label = r.metadata?.labels?.[checkSeverityLabel];
-  if (typeof label === 'string' && label) {
+  if (isString(label) && label) {
     return label;
   }
   return 'unknown';
@@ -234,7 +235,7 @@ export const profileScore = (
       const hist = opts.history;
       if (hist && hist.length > 0) {
         const last = hist[hist.length - 1]?.score;
-        if (typeof last === 'number' && Number.isFinite(last)) {
+        if (isFiniteNumber(last)) {
           return Math.min(100, Math.max(0, Math.floor(last)));
         }
       }

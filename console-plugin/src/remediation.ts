@@ -1,6 +1,18 @@
 // Remediation kind detection, object rendering, dependency summaries, apply order.
 import { ComplianceRemediation, nodePoolFromScanName, SCAN_NAME_LABEL } from './models';
 import { isValidK8sName } from './names';
+import { isString } from './parse';
+
+// Fields of a compliance-operator depends-on-obj JSON entry; values are
+// untrusted annotation text, so each field is narrowed before use.
+interface DependencyRef {
+  kind?: unknown;
+  name?: unknown;
+  namespace?: unknown;
+}
+
+const isDependencyRef = (v: unknown): v is DependencyRef =>
+  v !== null && typeof v === 'object';
 
 // CO annotations naming unmet remediation dependencies (see compliance-operator
 // RemediationDependencyAnnotation / RemediationObjectDependencyAnnotation).
@@ -74,16 +86,17 @@ export const missingDependencySummary = (rem: ComplianceRemediation): string | n
   const rawObj = (ann[dependsOnObjAnn] ?? '').trim();
   if (rawObj) {
     try {
-      const deps = JSON.parse(rawObj) as unknown;
+      // SAFETY: JSON.parse validated the array shape; each element is narrowed to
+      // DependencyRef by the guard below before any field is consumed.
+      const deps = JSON.parse(rawObj);
       if (Array.isArray(deps)) {
         for (const d of deps) {
-          if (!d || typeof d !== 'object') {
+          if (!isDependencyRef(d)) {
             continue;
           }
-          const o = d as { kind?: unknown; name?: unknown; namespace?: unknown };
-          const name = typeof o.name === 'string' ? o.name.trim() : '';
-          const kind = typeof o.kind === 'string' ? o.kind.trim() : '';
-          const ns = typeof o.namespace === 'string' ? o.namespace.trim() : '';
+          const name = isString(d.name) ? d.name.trim() : '';
+          const kind = isString(d.kind) ? d.kind.trim() : '';
+          const ns = isString(d.namespace) ? d.namespace.trim() : '';
           if (!name && !kind) {
             continue;
           }
@@ -128,7 +141,7 @@ export const compareRemediationsForApplyOrder = (
   if (d !== 0) {
     return d;
   }
-  const an = typeof a.metadata?.name === 'string' ? a.metadata.name : '';
-  const bn = typeof b.metadata?.name === 'string' ? b.metadata.name : '';
+  const an = isString(a.metadata?.name) ? a.metadata.name : '';
+  const bn = isString(b.metadata?.name) ? b.metadata.name : '';
   return an.localeCompare(bn);
 };

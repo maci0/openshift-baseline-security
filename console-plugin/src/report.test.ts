@@ -1,14 +1,6 @@
 import { buildReportHtml } from './report';
 import { ClusterBaseline, ComplianceCheckResult, Waiver } from './models';
-
-// Deterministic PRNG so fuzz loops are reproducible in CI (no Math.random).
-let fuzzSeed = 0x9e3779b9;
-const fuzzRand = (): number => {
-  fuzzSeed = (Math.imul(fuzzSeed, 1664525) + 1013904223) >>> 0;
-  return fuzzSeed / 0x100000000;
-};
-const randomString = (len: number): string =>
-  Array.from({ length: len }, () => String.fromCharCode(Math.floor(fuzzRand() * 0xffff))).join('');
+import { fuzzRand, mulberry32, randomString } from './testing/fuzz';
 
 // buildReportHtml renders a self-contained HTML report from ClusterBaseline
 // status and ComplianceCheckResult CRs. Every one of those fields is untrusted:
@@ -44,16 +36,6 @@ const XSS = [
 ];
 // Tag-open markers that must never appear literally in the output.
 const FORBIDDEN = ['<script', '<img', '<svg', '<iframe', '<object', '<marquee', '<b>'];
-
-// Deterministic PRNG (mulberry32) so failures reproduce without a fixed corpus
-// file and CI stays stable (no Math.random).
-const rng = (seed: number) => () => {
-  seed |= 0;
-  seed = (seed + 0x6d2b79f5) | 0;
-  let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
-  t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-};
 
 const pick = (rand: () => number): string => XSS[Math.floor(rand() * XSS.length)];
 
@@ -118,7 +100,7 @@ describe('buildReportHtml fuzz sweep', () => {
 
   it('never emits an unescaped injected tag and never throws', () => {
     for (let seed = 0; seed < 400; seed++) {
-      const rand = rng(seed);
+      const rand = mulberry32(seed);
       const baseline = hostileBaseline(rand);
       const results = hostileResults(rand);
 

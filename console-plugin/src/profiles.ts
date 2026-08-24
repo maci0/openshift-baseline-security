@@ -1,6 +1,47 @@
 // Profile toggle helpers and TailoredProfile create manifests.
 import { COMPLIANCE_NAMESPACE, DEFAULT_BASE_PROFILE, isProfileKey, PROFILE_MAX_ITEMS } from './models';
 import { isValidK8sName, isValidTailoredProfileName } from './names';
+import { isString } from './parse';
+
+// Rule object written into TailoredProfile disableRules/enableRules. Shared by
+// tailoredProfileManifest and the ProfilesTab update path so both write the
+// identical shape.
+export interface ConsoleRule {
+  name: string;
+  rationale: string;
+}
+
+// Trimmed, validated, deduped rule-name selection; disable wins over enable.
+export interface RuleSelection {
+  disable: string[];
+  enable: string[];
+}
+
+// TailoredProfile manifest written on create; mirrors apiVersion/kind of
+// compliance.openshift.io/v1alpha1 and the fields admission accepts.
+export interface TailoredProfileManifest {
+  apiVersion: 'compliance.openshift.io/v1alpha1';
+  kind: 'TailoredProfile';
+  metadata: { name: string; namespace: string };
+  spec: TailoredProfileSpec;
+}
+
+export interface TailoredProfileSpec {
+  title: string;
+  extends: string;
+  enableRules?: ConsoleRule[];
+  disableRules?: ConsoleRule[];
+}
+
+// Fields read back off a cluster TailoredProfile during retry adoption; values
+// are untrusted and narrowed through guards before comparison.
+export interface ExistingTailoredProfile {
+  spec?: {
+    extends?: unknown;
+    enableRules?: unknown;
+    disableRules?: unknown;
+  };
+}
 
 // New profile list after toggling one key. An empty result is valid: clearing
 // every profile disables scanning (the operator prunes the bindings).
@@ -40,7 +81,7 @@ const cleanRuleNames = (rules: string[]): string[] => {
 // Rule object written into TailoredProfile disableRules/enableRules. Shared by
 // tailoredProfileManifest and the ProfilesTab update path so both write the
 // identical shape.
-export const consoleRule = (n: string): { name: string; rationale: string } => ({
+export const consoleRule = (n: string): ConsoleRule => ({
   name: n,
   rationale: 'set via console',
 });
@@ -52,7 +93,7 @@ export const consoleRule = (n: string): { name: string; rationale: string } => (
 export const cleanRuleSelection = (
   disableRules: string[],
   enableRules: string[],
-): { disable: string[]; enable: string[] } => {
+): RuleSelection => {
   const disable = cleanRuleNames(disableRules);
   const disableSet = new Set(disable);
   return {
@@ -73,7 +114,7 @@ export const tailoredProfileManifest = (
   extendsProfile: string,
   disableRules: string[],
   enableRules: string[] = [],
-): Record<string, unknown> => {
+): TailoredProfileManifest => {
   const profileName = name.trim();
   if (!isValidTailoredProfileName(profileName)) {
     throw new Error('invalid TailoredProfile name');
@@ -83,7 +124,7 @@ export const tailoredProfileManifest = (
   if (!isValidK8sName(extendsName)) {
     throw new Error('invalid base profile name');
   }
-  const spec: Record<string, unknown> = {
+  const spec: TailoredProfileSpec = {
     title: profileName,
     extends: extendsName,
   };
@@ -105,15 +146,19 @@ export const tailoredProfileManifest = (
 // safe to adopt and bind) from a name collision with an unrelated profile
 // (different settings, which must not be silently bound as if it were ours).
 export const tailoredProfileSpecMatches = (
-  existing: Record<string, unknown> | undefined,
+  existing: ExistingTailoredProfile | undefined,
   extendsProfile: string,
   disableRules: string[],
   enableRules: string[] = [],
 ): boolean => {
-  const spec = (existing?.spec ?? {}) as Record<string, unknown>;
-  const names = (v: unknown): string[] =>
-    (Array.isArray(v) ? (v as Array<Record<string, unknown>>) : [])
-      .map((r) => String(r?.name ?? ''))
+  const spec = existing?.spec ?? {};
+  const isRuleRef = (v: unknown): v is { name?: unknown } =>
+    v !== null && typeof v === 'object';
+  const isRuleList = (v: unknown): v is readonly unknown[] => Array.isArray(v);
+  const names = (rules: readonly unknown[] | undefined): string[] =>
+    (rules ?? [])
+      .filter(isRuleRef)
+      .map((r) => (isString(r.name) ? r.name : ''))
       .filter(Boolean)
       .sort();
   const eq = (a: string[], b: string[]) =>
@@ -125,9 +170,10 @@ export const tailoredProfileSpecMatches = (
   const { disable, enable } = cleanRuleSelection(disableRules, enableRules);
   const disableSorted = [...disable].sort();
   const enableSorted = [...enable].sort();
+  const existingExtends = isString(spec.extends) ? spec.extends : '';
   return (
-    String(spec.extends ?? '') === extendsName &&
-    eq(names(spec.disableRules), disableSorted) &&
-    eq(names(spec.enableRules), enableSorted)
+    existingExtends === extendsName &&
+    eq(names(isRuleList(spec.disableRules) ? spec.disableRules : []), disableSorted) &&
+    eq(names(isRuleList(spec.enableRules) ? spec.enableRules : []), enableSorted)
   );
 };

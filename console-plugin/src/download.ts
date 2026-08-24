@@ -5,7 +5,7 @@
 // CR-derived name cannot create an oversized Content-Disposition path.
 const safeDownloadName = (filename: string): string => {
   const cleaned = filename
-    .replace(/[/\\:\0-\x1f\x7f]/g, '_')
+    .replace(/[/\\:\p{Cc}]/gu, '_')
     // BIDI / isolate controls (U+200E–U+200F, U+202A–U+202E, U+2066–U+2069)
     // and zero-width / BOM (U+200B–U+200D, U+FEFF) that can spoof extensions.
     .replace(/[\u200B-\u200D\u200E\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g, '_')

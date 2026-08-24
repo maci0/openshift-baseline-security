@@ -44,7 +44,6 @@ import {
   MinusCircleIcon,
 } from '@patternfly/react-icons';
 import {
-  CheckStatus,
   checkProfileLabel,
   ClusterBaseline,
   ClusterBaselineModel,
@@ -93,10 +92,27 @@ import { restoreFocus } from './focus';
 import { useAutoDismiss } from './feedback';
 import { useWaiverExpiryClock } from './useWaiverExpiryClock';
 
-const statusLabel: Record<
-  CheckStatus,
-  { color: React.ComponentProps<typeof Label>['color']; icon: React.ReactElement }
-> = {
+// Color + icon per status so state is not color-only. The index signature
+// keeps arbitrary runtime tokens readable while required keys fail typecheck
+// if a CheckStatus member is missing.
+interface StatusVisual {
+  color: React.ComponentProps<typeof Label>['color'];
+  icon: React.ReactElement;
+}
+
+interface StatusVisualMap {
+  [status: string]: StatusVisual | undefined;
+  PASS: StatusVisual;
+  FAIL: StatusVisual;
+  ERROR: StatusVisual;
+  MANUAL: StatusVisual;
+  INFO: StatusVisual;
+  INCONSISTENT: StatusVisual;
+  SKIP: StatusVisual;
+  'NOT-APPLICABLE': StatusVisual;
+}
+
+const statusLabel: StatusVisualMap = {
   PASS: { color: 'green', icon: <CheckCircleIcon /> },
   FAIL: { color: 'red', icon: <ExclamationCircleIcon /> },
   ERROR: { color: 'red', icon: <ExclamationCircleIcon /> },
@@ -111,10 +127,17 @@ const statusLabel: Record<
 // Style for a row-filter status. WAIVED (not a CheckStatus key) and any unknown
 // status fall through to the grey/minus default.
 const statusStyle = (status: string) =>
-  statusLabel[status as CheckStatus] ?? { color: 'grey' as const, icon: <MinusCircleIcon /> };
+  statusLabel[status] ?? { color: 'grey' as const, icon: <MinusCircleIcon /> };
 
 // Stable empty list for optional results prop (avoids new [] each render).
 const EMPTY_RESULTS: ComplianceCheckResult[] = [];
+
+// A waiver whose check vanished from the current result set; index is its
+// position in the CR spec.waivers list for targeted removal patches.
+interface OrphanedWaiver {
+  name: string;
+  index: number;
+}
 
 // A single-value chip filter: no chips -> show all; one chip -> === (lets
 // multi-thousand-row deep-links skip Array.includes); many -> includes. getValue
@@ -334,9 +357,9 @@ const ResultsTab: React.FC<{
   // there is otherwise no way to remove them but hand-editing the CR. Only when
   // results are loaded and not errored, so a loading/failed list does not flag
   // every waiver as orphaned.
-  const orphanWaivers = React.useMemo(() => {
+  const orphanWaivers = React.useMemo<OrphanedWaiver[]>(() => {
     if (!loaded || resultsError || !waivers?.length) {
-      return [] as { name: string; index: number }[];
+      return [];
     }
     const names = new Set((results ?? []).map((r) => r.metadata?.name).filter(Boolean));
     return waivers.flatMap((w, index) =>
@@ -480,19 +503,14 @@ const ResultsTab: React.FC<{
         // One collator, not a fresh one per localeCompare call: sorting thousands
         // of CCRs pays collator setup on every one of the O(n log n) comparisons.
         const collator = new Intl.Collator(locale);
-        const n = data.length;
-        const keys = new Array<string>(n);
-        const order = new Array<number>(n);
-        for (let i = 0; i < n; i++) {
-          keys[i] = keyOf(data[i]);
-          order[i] = i;
-        }
-        order.sort((a, b) => mul * collator.compare(keys[a], keys[b]));
-        const out = new Array<ComplianceCheckResult>(n);
-        for (let i = 0; i < n; i++) {
-          out[i] = data[order[i]];
-        }
-        return out;
+        return (
+          data
+            // Decorate once so each comparison reads a precomputed key and the
+            // final map restores the original rows without re-running keyOf.
+            .map((row, index) => ({ key: keyOf(row), index }))
+            .sort((a, b) => mul * collator.compare(a.key, b.key))
+            .map((d) => data[d.index])
+        );
       },
     [i18n.language],
   );

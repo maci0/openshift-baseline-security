@@ -76,6 +76,7 @@ import {
 import BaselineNotConfigured from './BaselineNotConfigured';
 import { regionFocusProps } from './DisabledTip';
 import { useAutoDismiss } from './feedback';
+import { isFiniteNumber } from '../parse';
 import { useWaiverExpiryClock } from './useWaiverExpiryClock';
 
 // Stable empty list so optional status arrays do not allocate each render.
@@ -327,10 +328,7 @@ const toTrendData = (history?: ScoreSnapshot[]) =>
   (history ?? [])
     .map((h) => ({ x: new Date(h.time), y: h.score }))
     .filter(
-      (p) =>
-        !Number.isNaN(p.x.getTime()) &&
-        typeof p.y === 'number' &&
-        Number.isFinite(p.y),
+      (p) => !Number.isNaN(p.x.getTime()) && isFiniteNumber(p.y),
     );
 
 // Content key for history rings: status-only CR updates reallocate the array

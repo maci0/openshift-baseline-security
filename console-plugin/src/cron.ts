@@ -1,11 +1,11 @@
 // Cron expression validation for ClusterBaseline.spec.schedule (5-field form).
-const cronMonths: Record<string, number> = {
+const cronMonths = {
   jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6,
   jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12,
-};
-const cronDays: Record<string, number> = {
+} as const;
+const cronDays = {
   sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6,
-};
+} as const;
 
 // The operator parses a cron step with robfig's strconv.Atoi (int64). An
 // all-digits step that overflows int64 makes it reject the whole schedule
@@ -17,18 +17,21 @@ const stepFitsInt64 = (digits: string): boolean => {
   return s.length < 19 || (s.length === 19 && s <= '9223372036854775807');
 };
 
-const cronNumber = (value: string, names?: Record<string, number>): number | null => {
+const cronNumber = <T extends Record<string, number>>(
+  value: string,
+  names?: T,
+): number | null => {
   const named = names?.[value.toLowerCase()];
   if (named != null) return named;
   if (!/^\d+$/.test(value)) return null;
   return Number(value);
 };
 
-const validCronField = (
+const validCronField = <T extends Record<string, number>>(
   field: string,
   min: number,
   max: number,
-  names?: Record<string, number>,
+  names?: T,
 ): boolean =>
   field.split(',').every((expression) => {
     if (!expression) return false;

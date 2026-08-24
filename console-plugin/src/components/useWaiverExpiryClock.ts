@@ -15,6 +15,13 @@ export const waiversContentKey = (waivers: Waiver[] | undefined): string =>
     .map((w) => `${w.name ?? ''}\0${w.expiresAt ?? ''}`)
     .join('\x01');
 
+// Content key (for memo deps) plus tick count (bumped once per fired deadline,
+// so effects/memos can react to time passing).
+export interface WaiverClock {
+  key: string;
+  tick: number;
+}
+
 // Schedule a tick at the soonest future waiver deadline plus any per-deadline
 // offsetsMs (e.g. -14d so a tab clocks when a waiver enters the expiring-soon
 // alert window). Returns the content key (for memo deps) and the tick count
@@ -22,7 +29,7 @@ export const waiversContentKey = (waivers: Waiver[] | undefined): string =>
 export const useWaiverExpiryClock = (
   waivers: Waiver[] | undefined,
   offsetsMs: readonly number[] = [],
-): { key: string; tick: number } => {
+): WaiverClock => {
   const key = waiversContentKey(waivers);
   const [tick, setTick] = React.useState(0);
   React.useEffect(() => {
