@@ -64,10 +64,16 @@ describe('inconsistentSources', () => {
   });
   it('fuzz: never throws for arbitrary annotation strings', () => {
     for (let i = 0; i < 1000; i++) {
-      const { sources } = inconsistentSources(
+      const { sources, mostCommon } = inconsistentSources(
         withAnn({ 'compliance.openshift.io/inconsistent-source': randomString(i % 40) }),
       );
-      expect(Array.isArray(sources)).toBe(true);
+      expect(Array.isArray(sources)).toBeTruthy();
+      // Whatever parses must keep the row shape the Results tooltip renders.
+      for (const s of sources) {
+        expect(typeof s.node).toBe('string');
+        expect(typeof s.status).toBe('string');
+      }
+      expect(mostCommon === null || typeof mostCommon === 'string').toBeTruthy();
     }
   });
 });

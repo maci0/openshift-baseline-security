@@ -81,7 +81,7 @@ describe('isValidCron accept/reject behavior', () => {
       // overflow guard must not over-reject what the operator's robfig accepts.
       '*/1000000 * * * *',
     ]) {
-      expect(isValidCron(s)).toBe(true);
+      expect(isValidCron(s)).toBeTruthy();
     }
   });
   it('rejects out-of-range, malformed, and oversized schedules', () => {
@@ -105,7 +105,7 @@ describe('isValidCron accept/reject behavior', () => {
       '0 0 * * 1#2',
       'H H * * *',
     ]) {
-      expect(isValidCron(s)).toBe(false);
+      expect(isValidCron(s)).toBeFalsy();
     }
   });
 });
@@ -125,7 +125,7 @@ describe('isValidCron throw-safety (fuzz sweep)', () => {
   it('never accepts a string longer than the CRD MaxLength=128', () => {
     for (const s of HOSTILE) {
       if (s.trim().length > 128) {
-        expect(isValidCron(s)).toBe(false);
+        expect(isValidCron(s)).toBeFalsy();
       }
     }
   });

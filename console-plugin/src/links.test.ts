@@ -28,7 +28,7 @@ describe('resultsHref', () => {
   it('fuzz: always under /baseline-security/results and never throws', () => {
     for (let i = 0; i < 1000; i++) {
       const href = resultsHref(randomString(i % 32), i % 3 === 0 ? 'cis' : undefined);
-      expect(href.startsWith('/baseline-security/results?')).toBe(true);
+      expect(href.startsWith('/baseline-security/results?')).toBeTruthy();
       expect(href).toContain('rowFilter-result-status=');
     }
   });
@@ -49,7 +49,7 @@ describe('checkResultHref', () => {
     for (let i = 0; i < 1000; i++) {
       const name = randomString(i % 40);
       const href = checkResultHref(name);
-      expect(href.startsWith(prefix)).toBe(true);
+      expect(href.startsWith(prefix)).toBeTruthy();
       // The name segment carries no unescaped path separator or whitespace.
       expect(href.slice(prefix.length)).not.toMatch(/[/\s#?]/);
     }

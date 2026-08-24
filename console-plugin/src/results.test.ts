@@ -1,5 +1,6 @@
 import { resultsCsv, severityDisplayTitle, checkTitle, checkBody, changedChecksMany, nodeScanPool } from './results';
 import { machineConfigPoolHref } from './links';
+import { activeWaivedNames } from './waivers';
 import { ComplianceCheckResult } from './models';
 
 const result = (name: string, description?: string): ComplianceCheckResult =>
@@ -163,7 +164,7 @@ describe('resultsCsv fuzz sweep', () => {
         expect(rows[r].length).toBe(5); // no stray comma desynced columns
         for (const cell of rows[r]) {
           // No cell may still look like a formula: hardening prepends "'".
-          expect(formulaRe.test(cell)).toBe(false);
+          expect(formulaRe.test(cell)).toBeFalsy();
           expect(cell).not.toContain('\0'); // NULs stripped
         }
       }
@@ -248,7 +249,7 @@ describe('resultsCsv', () => {
 
   it('emits a header and one row per result', () => {
     const csv = resultsCsv([r('a', 'PASS', 'low', 'Title A'), r('b', 'FAIL', 'high', 'Title B')]);
-    expect(csv.startsWith('\uFEFF')).toBe(true);
+    expect(csv.startsWith('\uFEFF')).toBeTruthy();
     const lines = csvLines(csv);
     expect(lines[0]).toBe('name,title,status,severity,waived');
     expect(lines[1]).toBe('a,Title A,PASS,low,false');
@@ -258,6 +259,21 @@ describe('resultsCsv', () => {
     // Status is WAIVED (same as Results filter/table), waived column true.
     const csv = resultsCsv([r('b', 'FAIL', 'high', 'Fail B')], [{ name: 'b', reason: 'risk' }]);
     expect(csvLines(csv)[1]).toBe('b,Fail B,WAIVED,high,true');
+  });
+  // Results table hot path passes a prebuilt activeWaivedNames Set; the export
+  // must treat it exactly like a Waiver[] (skip rebuild, same WAIVED marking).
+  it('accepts a prebuilt active-waiver Set identically to Waiver[]', () => {
+    const waivers = [
+      { name: 'w1', reason: 'risk' },
+      { name: 'stale', reason: 'old', expiresAt: '2000-01-01T00:00:00Z' },
+    ];
+    const results = [r('w1', 'FAIL', 'high', 'W'), r('stale', 'FAIL', 'high', 'S'), r('ok', 'PASS', 'low', 'O')];
+    const fromSet = resultsCsv(results, activeWaivedNames(waivers, new Date('2026-07-11T00:00:00Z')));
+    const fromList = resultsCsv(results, waivers);
+    expect(fromSet).toBe(fromList);
+    const lines = csvLines(fromSet);
+    expect(lines[1]).toBe('w1,W,WAIVED,high,true');
+    expect(lines[2]).toBe('stale,S,FAIL,high,false');
   });
   it('does not mark a waived PASS as score-excluded (self-healing)', () => {
     // Operator only excludes FAIL+waiver; a waived check that now PASSes
@@ -363,7 +379,7 @@ describe('resultsCsv', () => {
       const title = i % 3 === 0 ? formulaSeeds[i % formulaSeeds.length] : rand();
       const csv = resultsCsv([r(name, 'FAIL', 'high', title)]);
       expect(typeof csv).toBe('string');
-      expect(csv.startsWith('\uFEFF')).toBe(true);
+      expect(csv.startsWith('\uFEFF')).toBeTruthy();
       // Total double-quotes are even (all escapes balanced).
       expect((csv.match(/"/g) ?? []).length % 2).toBe(0);
       // Five columns: name,title,status,severity,waived (header + one data row).
@@ -417,10 +433,10 @@ describe('resultsCsv', () => {
       const nameClean = String(name ?? '').replace(/\0/g, '');
       const titleClean = String(renderedTitle ?? '').replace(/\0/g, '');
       if (formulaRe.test(nameClean) && nameClean.length > 0) {
-        expect(unquote(cols[0]).startsWith("'")).toBe(true);
+        expect(unquote(cols[0]).startsWith("'")).toBeTruthy();
       }
       if (formulaRe.test(titleClean) && titleClean.length > 0) {
-        expect(unquote(cols[1]).startsWith("'")).toBe(true);
+        expect(unquote(cols[1]).startsWith("'")).toBeTruthy();
       }
     }
   });
@@ -447,7 +463,7 @@ describe('nodeScanPool', () => {
   it('fuzz: never throws for arbitrary scan names', () => {
     for (let i = 0; i < 500; i++) {
       const out = nodeScanPool(withScan(randomString(i % 30)));
-      expect(out === null || typeof out === 'string').toBe(true);
+      expect(out === null || typeof out === 'string').toBeTruthy();
     }
   });
   it('machineConfigPoolHref builds an encoded MCP console path', () => {

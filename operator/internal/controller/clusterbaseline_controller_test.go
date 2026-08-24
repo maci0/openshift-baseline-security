@@ -316,13 +316,17 @@ func TestRemediationBatch(t *testing.T) {
 		t.Fatal("annotation must remain until pools are resumed")
 	}
 	gotPool := machineConfigPool("worker")
-	_ = r.Get(ctx, types.NamespacedName{Name: "worker"}, gotPool)
+	if err := r.Get(ctx, types.NamespacedName{Name: "worker"}, gotPool); err != nil {
+		t.Fatal(err)
+	}
 	if paused, _, _ := unstructured.NestedBool(gotPool.Object, "spec", "paused"); !paused {
 		t.Fatal("worker pool not paused")
 	}
 	gotRem := &unstructured.Unstructured{}
 	gotRem.SetGroupVersionKind(remediationGVK)
-	_ = r.Get(ctx, types.NamespacedName{Namespace: complianceNamespace, Name: "rem1"}, gotRem)
+	if err := r.Get(ctx, types.NamespacedName{Namespace: complianceNamespace, Name: "rem1"}, gotRem); err != nil {
+		t.Fatal(err)
+	}
 	if apply, _, _ := unstructured.NestedBool(gotRem.Object, "spec", "apply"); !apply {
 		t.Fatal("rem1 not set to apply")
 	}
@@ -339,8 +343,12 @@ func TestRemediationBatch(t *testing.T) {
 	}
 
 	// Mark Applied -> resume and clear annotation.
-	_ = unstructured.SetNestedField(gotRem.Object, "Applied", "status", "applicationState")
-	_ = r.Update(ctx, gotRem)
+	if err := unstructured.SetNestedField(gotRem.Object, "Applied", "status", "applicationState"); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Update(ctx, gotRem); err != nil {
+		t.Fatal(err)
+	}
 	if err := r.applyRemediationBatch(ctx, cb); err != nil {
 		t.Fatal(err)
 	}
@@ -403,7 +411,9 @@ func TestRemediationBatchTooManyPoolsRejected(t *testing.T) {
 	for i := 0; i <= batchMaxPools; i++ {
 		name := fmt.Sprintf("pool%d", i)
 		p := machineConfigPool(name)
-		_ = r.Get(ctx, types.NamespacedName{Name: name}, p)
+		if err := r.Get(ctx, types.NamespacedName{Name: name}, p); err != nil {
+			t.Fatalf("pool %s: %v", name, err)
+		}
 		if paused, _, _ := unstructured.NestedBool(p.Object, "spec", "paused"); paused {
 			t.Fatalf("%s paused despite rejected batch", name)
 		}
@@ -470,9 +480,15 @@ func TestRemediationBatchPartialMissingFinishClears(t *testing.T) {
 	// Mark Applied, then finish: pool resumes and annotation clears (no reopen).
 	gotRem := &unstructured.Unstructured{}
 	gotRem.SetGroupVersionKind(remediationGVK)
-	_ = r.Get(ctx, types.NamespacedName{Namespace: complianceNamespace, Name: "rem1"}, gotRem)
-	_ = unstructured.SetNestedField(gotRem.Object, "Applied", "status", "applicationState")
-	_ = r.Update(ctx, gotRem)
+	if err := r.Get(ctx, types.NamespacedName{Namespace: complianceNamespace, Name: "rem1"}, gotRem); err != nil {
+		t.Fatal(err)
+	}
+	if err := unstructured.SetNestedField(gotRem.Object, "Applied", "status", "applicationState"); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Update(ctx, gotRem); err != nil {
+		t.Fatal(err)
+	}
 	if err := r.applyRemediationBatch(ctx, cb); err != nil {
 		t.Fatal(err)
 	}
@@ -722,7 +738,9 @@ func TestRemediationBatchSkipsCorruptSpecApply(t *testing.T) {
 			t.Fatal("annotation not cleared for all-corrupt-apply reject")
 		}
 		gotPool := machineConfigPool("worker")
-		_ = r.Get(context.Background(), types.NamespacedName{Name: "worker"}, gotPool)
+		if err := r.Get(context.Background(), types.NamespacedName{Name: "worker"}, gotPool); err != nil {
+			t.Fatal(err)
+		}
 		if paused, _, _ := unstructured.NestedBool(gotPool.Object, "spec", "paused"); paused {
 			t.Fatal("pool must not pause for corrupt-apply-only batch")
 		}
@@ -825,6 +843,15 @@ func TestSetMCPPausedSkipsCorruptPausedField(t *testing.T) {
 	}
 	if err := r2.applyRemediationBatch(context.Background(), cb); err != nil {
 		t.Fatalf("batch start with corrupt MCP paused must not sticky-error: %v", err)
+	}
+	// No-error is not enough: the skip must still make progress, i.e. open the
+	// batch and keep the one-shot annotation (a silent no-op regression would
+	// otherwise pass while nothing is scheduled).
+	if cb.Status.RemediationBatch == nil || cb.Status.RemediationBatch.Phase != "Applying" {
+		t.Fatalf("batch must open despite corrupt MCP paused: %+v", cb.Status.RemediationBatch)
+	}
+	if cb.Annotations[batchApplyAnnotation] == "" {
+		t.Fatal("annotation must remain until pools are resumed")
 	}
 }
 
@@ -993,9 +1020,15 @@ func TestRemediationBatchDeduplicatesNamesAndPreservesQueuedRequest(t *testing.T
 	cb.SetAnnotations(ann)
 	cb.SetResourceVersion(latest.GetResourceVersion())
 	gotRem := u(remediationGVK)
-	_ = r.Get(ctx, types.NamespacedName{Namespace: complianceNamespace, Name: "rem1"}, gotRem)
-	_ = unstructured.SetNestedField(gotRem.Object, "Applied", "status", "applicationState")
-	_ = r.Update(ctx, gotRem)
+	if err := r.Get(ctx, types.NamespacedName{Namespace: complianceNamespace, Name: "rem1"}, gotRem); err != nil {
+		t.Fatal(err)
+	}
+	if err := unstructured.SetNestedField(gotRem.Object, "Applied", "status", "applicationState"); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Update(ctx, gotRem); err != nil {
+		t.Fatal(err)
+	}
 	if err := r.applyRemediationBatch(ctx, cb); err != nil {
 		t.Fatal(err)
 	}
@@ -1031,9 +1064,15 @@ func TestRemediationBatchCancelResumes(t *testing.T) {
 	// User reverts the remediation to apply=false (not Applied).
 	gotRem := &unstructured.Unstructured{}
 	gotRem.SetGroupVersionKind(remediationGVK)
-	_ = r.Get(ctx, types.NamespacedName{Namespace: complianceNamespace, Name: "rem1"}, gotRem)
-	_ = unstructured.SetNestedField(gotRem.Object, false, "spec", "apply")
-	_ = r.Update(ctx, gotRem)
+	if err := r.Get(ctx, types.NamespacedName{Namespace: complianceNamespace, Name: "rem1"}, gotRem); err != nil {
+		t.Fatal(err)
+	}
+	if err := unstructured.SetNestedField(gotRem.Object, false, "spec", "apply"); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Update(ctx, gotRem); err != nil {
+		t.Fatal(err)
+	}
 
 	// Next reconcile: cancelled -> resume without waiting out the grace.
 	if err := r.applyRemediationBatch(ctx, cb); err != nil {
@@ -1261,7 +1300,9 @@ func TestRemediationBatchApplyingGetErrorKeepsPaused(t *testing.T) {
 		t.Fatal("annotation must not clear on Get error before grace")
 	}
 	gotPool := machineConfigPool("worker")
-	_ = r.Get(context.Background(), types.NamespacedName{Name: "worker"}, gotPool)
+	if err := r.Get(context.Background(), types.NamespacedName{Name: "worker"}, gotPool); err != nil {
+		t.Fatal(err)
+	}
 	if paused, _, _ := unstructured.NestedBool(gotPool.Object, "spec", "paused"); !paused {
 		t.Fatal("pool must stay paused when Get fails before grace (not treat as Applied)")
 	}

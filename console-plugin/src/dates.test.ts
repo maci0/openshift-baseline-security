@@ -33,7 +33,7 @@ describe('expiresAtMs date-only branch', () => {
     expect(ms).toBeGreaterThan(Date.parse('2026-07-11T00:00:00Z'));
   });
   it('returns NaN for an unparseable date-only-shaped string', () => {
-    expect(Number.isNaN(expiresAtMs('2026-02-31'))).toBe(true);
+    expect(Number.isNaN(expiresAtMs('2026-02-31'))).toBeTruthy();
   });
 });
 
@@ -115,7 +115,7 @@ describe('dates throw-safety (fuzz sweep)', () => {
       // Only strict YYYY-MM-DD that round-trips to the same calendar day survives.
       expect(s).toMatch(/^\d{4}-\d{2}-\d{2}$/);
       const back = new Date(iso);
-      expect(Number.isNaN(back.getTime())).toBe(false);
+      expect(Number.isNaN(back.getTime())).toBeFalsy();
       expect(back.getHours()).toBe(23);
       expect(back.getMinutes()).toBe(59);
       expect(back.getSeconds()).toBe(59);
@@ -287,7 +287,7 @@ describe('dateInputEndOfDayIso', () => {
       if (got === undefined) continue;
       expect(typeof got).toBe('string');
       const d = new Date(got);
-      expect(Number.isNaN(d.getTime())).toBe(false);
+      expect(Number.isNaN(d.getTime())).toBeFalsy();
       expect(d.getHours()).toBe(23);
       expect(d.getMinutes()).toBe(59);
       expect(d.getSeconds()).toBe(59);

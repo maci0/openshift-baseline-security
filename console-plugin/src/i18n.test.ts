@@ -65,7 +65,9 @@ describe('i18n locale coverage', () => {
     const locale = JSON.parse(raw) as Record<string, unknown>;
     expect(Object.keys(locale).length).toBeGreaterThan(0);
     for (const [k, v] of Object.entries(locale)) {
-      expect(typeof k).toBe('string');
+      // Object.entries keys are always strings; assert the property that can
+      // actually regress: an empty key would silently break every lookup.
+      expect(k.length).toBeGreaterThan(0);
       expect(typeof v).toBe('string');
     }
   });

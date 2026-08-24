@@ -29,7 +29,7 @@ describe('scoreColor', () => {
       const s =
         i === 0 ? undefined : i === 1 ? Number.NaN : Math.floor(fuzzRand() * 200) - 50;
       const color = scoreColor(s);
-      expect(color.startsWith('var(--pf-t--')).toBe(true);
+      expect(color.startsWith('var(--pf-t--')).toBeTruthy();
       if (s === undefined || Number.isNaN(s) || (typeof s === 'number' && s < 60)) {
         expect(color).toContain('status--danger');
       }
@@ -89,22 +89,22 @@ describe('effectiveScoringMode / historyScoringModeMismatch', () => {
       const mismatch = historyScoringModeMismatch(baseline);
       expect(typeof mismatch).toBe('boolean');
       if (!stamp) {
-        expect(mismatch).toBe(false);
+        expect(mismatch).toBeFalsy();
       }
       // effectiveScoringMode collapses anything except SeverityWeighted to Flat.
       const effective = effectiveScoringMode(baseline);
-      expect(effective === 'Flat' || effective === 'SeverityWeighted').toBe(true);
+      expect(effective === 'Flat' || effective === 'SeverityWeighted').toBeTruthy();
     }
   });
 
   it('detects history points stamped under a different scoring mode', () => {
-    expect(historyScoringModeMismatch(undefined)).toBe(false);
+    expect(historyScoringModeMismatch(undefined)).toBeFalsy();
     expect(
       historyScoringModeMismatch({
         metadata: { name: 'cluster' },
         spec: { profiles: ['cis'] },
       }),
-    ).toBe(false);
+    ).toBeFalsy();
     expect(
       historyScoringModeMismatch({
         metadata: {
@@ -113,7 +113,7 @@ describe('effectiveScoringMode / historyScoringModeMismatch', () => {
         },
         spec: { profiles: ['cis'], scoring: { mode: 'Flat' } },
       }),
-    ).toBe(false);
+    ).toBeFalsy();
     expect(
       historyScoringModeMismatch({
         metadata: {
@@ -122,7 +122,7 @@ describe('effectiveScoringMode / historyScoringModeMismatch', () => {
         },
         spec: { profiles: ['cis'], scoring: { mode: 'SeverityWeighted' } },
       }),
-    ).toBe(true);
+    ).toBeTruthy();
     expect(
       historyScoringModeMismatch({
         metadata: {
@@ -131,7 +131,7 @@ describe('effectiveScoringMode / historyScoringModeMismatch', () => {
         },
         spec: { profiles: ['cis'] },
       }),
-    ).toBe(true);
+    ).toBeTruthy();
   });
 });
 
@@ -275,7 +275,7 @@ describe('severityWeight / profileScore', () => {
       if (got === null) {
         continue;
       }
-      expect(Number.isFinite(got)).toBe(true);
+      expect(Number.isFinite(got)).toBeTruthy();
       expect(got).toBeGreaterThanOrEqual(0);
       expect(got).toBeLessThanOrEqual(100);
       const p = pass ?? 0;
@@ -548,7 +548,7 @@ describe('aggregateCounts', () => {
     );
     expect(totals.pass).toBe(5); // NaN -> 0, '5' -> 5
     expect(totals.fail).toBe(3); // Infinity -> 0, 3 -> 3
-    expect(Number.isFinite(totals.pass + totals.fail)).toBe(true);
+    expect(Number.isFinite(totals.pass + totals.fail)).toBeTruthy();
   });
   it('keeps running totals finite when huge-but-finite counts overflow the accumulator', () => {
     // Per-value folding is not enough: two finite 9e307 counts sum to Infinity.
@@ -558,8 +558,8 @@ describe('aggregateCounts', () => {
       { pass: 9e307, fail: -9e307 } as ResultCounts,
       { pass: 9e307, fail: -9e307 } as ResultCounts,
     );
-    expect(Number.isFinite(totals.pass)).toBe(true);
-    expect(Number.isFinite(totals.fail)).toBe(true);
+    expect(Number.isFinite(totals.pass)).toBeTruthy();
+    expect(Number.isFinite(totals.fail)).toBeTruthy();
     // Saturation keeps the first contribution rather than inventing Infinity.
     expect(totals.pass).toBe(9e307);
     expect(totals.fail).toBe(-9e307);
@@ -581,7 +581,7 @@ describe('aggregateCounts', () => {
       const totals = aggregateCounts(g(), g(), g());
       for (const v of Object.values(totals)) {
         expect(typeof v).toBe('number');
-        expect(Number.isFinite(v)).toBe(true);
+        expect(Number.isFinite(v)).toBeTruthy();
       }
     }
   });
@@ -614,7 +614,7 @@ describe('clusterScore', () => {
         cb(j === 1 ? 'cluster' : randomString((j + 1) % 12), i % 3 === 0 ? undefined : (i + j) % 101),
       );
       const got = clusterScore(i % 7 === 0 ? undefined : list);
-      expect(got === null || typeof got === 'number').toBe(true);
+      expect(got === null || typeof got === 'number').toBeTruthy();
     }
   });
 });

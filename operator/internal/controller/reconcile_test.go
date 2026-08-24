@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -202,7 +203,9 @@ func TestReconcileOwnedBatchBeforeCOFailure(t *testing.T) {
 		t.Fatalf("batch must start before CO failure: %+v (err=%v)", cb.Status.RemediationBatch, err)
 	}
 	gotPool := machineConfigPool("worker")
-	_ = r.Get(context.Background(), types.NamespacedName{Name: "worker"}, gotPool)
+	if err := r.Get(context.Background(), types.NamespacedName{Name: "worker"}, gotPool); err != nil {
+		t.Fatal(err)
+	}
 	if paused, _, _ := unstructured.NestedBool(gotPool.Object, "spec", "paused"); !paused {
 		t.Fatal("worker pool must be paused even when CO ensure fails later")
 	}
@@ -970,7 +973,9 @@ func TestEnsureConsolePlugin(t *testing.T) {
 	if err := r.ensureConsolePlugin(context.Background(), cb); err != nil {
 		t.Fatal(err)
 	}
-	_ = r.Get(context.Background(), types.NamespacedName{Name: "cluster"}, console)
+	if err := r.Get(context.Background(), types.NamespacedName{Name: "cluster"}, console); err != nil {
+		t.Fatal(err)
+	}
 	plugins, _, _ = unstructured.NestedStringSlice(console.Object, "spec", "plugins")
 	if len(plugins) != 2 {
 		t.Fatalf("duplicate registration: %v", plugins)
@@ -1358,6 +1363,122 @@ func TestReconcileHappyPath(t *testing.T) {
 	}
 	if c := meta.FindStatusCondition(got.Status.Conditions, "Available"); c.Status != metav1.ConditionTrue {
 		t.Fatalf("Available = %+v", c)
+	}
+}
+
+// A non-NotFound Get failure on the watched object must propagate: swallowing it
+// would be indistinguishable from a healthy no-op reconcile and stall error
+// alerting while the CR (and its metrics) go stale.
+func TestReconcileGetErrorPropagates(t *testing.T) {
+	scheme := testScheme(t)
+	boom := apierrors.NewServiceUnavailable("apiserver blip")
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).
+			WithInterceptorFuncs(interceptor.Funcs{
+				Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+					if _, ok := obj.(*baselinev1alpha1.ClusterBaseline); ok {
+						return boom
+					}
+					return c.Get(ctx, key, obj, opts...)
+				},
+			}).Build(),
+		Scheme: scheme,
+	}
+	_, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: "cluster"},
+	})
+	if !errors.Is(err, boom) {
+		t.Fatalf("reconcile err = %v, want the Get failure", err)
+	}
+}
+
+// Adding the finalizer is the first mutation Reconcile makes; its Update failure
+// must propagate so the controller retries instead of reconciling an unowned CR
+// (GC would orphan every created resource).
+func TestReconcileAddFinalizerFailurePropagates(t *testing.T) {
+	scheme := testScheme(t)
+	cb := newCB("cis") // no finalizer yet
+	boom := apierrors.NewServiceUnavailable("finalizer write rejected")
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(cb).
+			WithStatusSubresource(&baselinev1alpha1.ClusterBaseline{}).
+			WithInterceptorFuncs(interceptor.Funcs{
+				Update: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.UpdateOption) error {
+					if _, ok := obj.(*baselinev1alpha1.ClusterBaseline); ok {
+						return boom
+					}
+					return c.Update(ctx, obj, opts...)
+				},
+			}).Build(),
+		Scheme: scheme,
+	}
+	_, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: "cluster"},
+	})
+	if !errors.Is(err, boom) {
+		t.Fatalf("reconcile err = %v, want the finalizer-update failure", err)
+	}
+	got := &baselinev1alpha1.ClusterBaseline{}
+	if err := r.Get(context.Background(), types.NamespacedName{Name: "cluster"}, got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Finalizers) != 0 {
+		t.Fatalf("finalizers = %v, want none persisted when the update fails", got.Finalizers)
+	}
+}
+
+// Status().Update failure after a successful reconcile must surface so the
+// controller retries, and gauges must stay unpublished: they are written only
+// after the status write succeeds so they can never run ahead of the CR.
+func TestReconcileStatusUpdateFailurePropagates(t *testing.T) {
+	scheme := testScheme(t)
+	resetMetrics(t)
+	scheme.AddKnownTypeWithName(scanSettingGVK, &unstructured.Unstructured{})
+	bindingList := uList(bindingGVK)
+	scheme.AddKnownTypeWithName(bindingGVK, &unstructured.Unstructured{})
+	scheme.AddKnownTypeWithName(bindingList.GroupVersionKind(), bindingList)
+
+	cb := newCB("cis")
+	cb.Finalizers = []string{finalizerName}
+
+	sub := u(subscriptionGVK)
+	sub.SetName("compliance-operator")
+	sub.SetNamespace(complianceNamespace)
+	_ = unstructured.SetNestedField(sub.Object, "compliance-operator.v1.9.1", "status", "installedCSV")
+	csv := u(csvGVK)
+	csv.SetName("compliance-operator.v1.9.1")
+	csv.SetNamespace(complianceNamespace)
+	_ = unstructured.SetNestedField(csv.Object, "Succeeded", "status", "phase")
+
+	boom := apierrors.NewServiceUnavailable("status write rejected")
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).
+			WithObjects(cb, sub, csv, consoleCluster("other"),
+				checkResult("a", "baseline-cis", "PASS"),
+				checkResult("b", "baseline-cis", "FAIL")).
+			WithStatusSubresource(&baselinev1alpha1.ClusterBaseline{}).
+			WithInterceptorFuncs(interceptor.Funcs{
+				SubResourceUpdate: func(ctx context.Context, c client.Client, subResourceName string, obj client.Object, opts ...client.SubResourceUpdateOption) error {
+					if subResourceName == "status" {
+						if _, ok := obj.(*baselinev1alpha1.ClusterBaseline); ok {
+							return boom
+						}
+					}
+					return c.SubResource(subResourceName).Update(ctx, obj, opts...)
+				},
+			}).Build(),
+		Scheme: scheme,
+	}
+	t.Setenv("RELATED_IMAGE_CONSOLE_PLUGIN", "example.test/plugin:1")
+
+	_, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: "cluster"},
+	})
+	if !errors.Is(err, boom) {
+		t.Fatalf("reconcile err = %v, want the status-write failure", err)
+	}
+	if got := testutil.ToFloat64(complianceScore); got != -1 {
+		t.Fatalf("score gauge = %v, want -1 (unpublished) while the status write fails", got)
 	}
 }
 

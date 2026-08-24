@@ -75,9 +75,9 @@ describe('waivers throw-safety and no-permanent-grant (fuzz sweep)', () => {
       // (A falsy expiresAt like '' means "no expiry set" = permanent, same as
       // undefined; that intentional branch is asserted separately below.)
       if (expiry && !parseable) {
-        expect(expired).toBe(true);
-        expect(isWaived('check-1', [w], NOW)).toBe(false);
-        expect(activeWaivedNames([w], NOW).has('check-1')).toBe(false);
+        expect(expired).toBeTruthy();
+        expect(isWaived('check-1', [w], NOW)).toBeFalsy();
+        expect(activeWaivedNames([w], NOW).has('check-1')).toBeFalsy();
         expect(expiringWaivers([w], 365 * 24 * 3600 * 1000, NOW)).toHaveLength(0);
       }
     });
@@ -93,7 +93,7 @@ describe('waivers throw-safety and no-permanent-grant (fuzz sweep)', () => {
         // strictly in the future. A truthy-unparseable date is never active.
         if (w.expiresAt) {
           const t = new Date(w.expiresAt).getTime();
-          expect(Number.isNaN(t)).toBe(false);
+          expect(Number.isNaN(t)).toBeFalsy();
           expect(t).toBeGreaterThan(NOW.getTime());
         }
       }
@@ -108,18 +108,18 @@ describe('waivers throw-safety and no-permanent-grant (fuzz sweep)', () => {
       { name: 'x', expiresAt: '2000-01-01T00:00:00Z' }, // expired, listed first
       { name: 'x', expiresAt: '3000-01-01T00:00:00Z' }, // active
     ];
-    expect(isWaived('x', expiredFirst, NOW)).toBe(true);
-    expect(activeWaivedNames(expiredFirst, NOW).has('x')).toBe(true);
+    expect(isWaived('x', expiredFirst, NOW)).toBeTruthy();
+    expect(activeWaivedNames(expiredFirst, NOW).has('x')).toBeTruthy();
     // Reverse order: same answer.
     const activeFirst = [...expiredFirst].reverse();
-    expect(isWaived('x', activeFirst, NOW)).toBe(true);
+    expect(isWaived('x', activeFirst, NOW)).toBeTruthy();
     // All duplicates expired -> not waived.
     const bothExpired: Waiver[] = [
       { name: 'y', expiresAt: '2000-01-01T00:00:00Z' },
       { name: 'y', expiresAt: '2001-01-01T00:00:00Z' },
     ];
-    expect(isWaived('y', bothExpired, NOW)).toBe(false);
-    expect(activeWaivedNames(bothExpired, NOW).has('y')).toBe(false);
+    expect(isWaived('y', bothExpired, NOW)).toBeFalsy();
+    expect(activeWaivedNames(bothExpired, NOW).has('y')).toBeFalsy();
   });
 
   it('expiringWaivers returns waivers in (now, now+window], excluding past/beyond/permanent', () => {
@@ -152,18 +152,18 @@ describe('waivers throw-safety and no-permanent-grant (fuzz sweep)', () => {
     // equality counts as expired on both sides. A waiver whose deadline is the
     // current instant no longer excludes its check.
     const w = asWaiver(NOW.toISOString());
-    expect(waiverExpired(w, NOW)).toBe(true);
-    expect(isWaived('check-1', [w], NOW)).toBe(false);
+    expect(waiverExpired(w, NOW)).toBeTruthy();
+    expect(isWaived('check-1', [w], NOW)).toBeFalsy();
     // One millisecond into the future is still active.
     const future = asWaiver(new Date(NOW.getTime() + 1).toISOString());
-    expect(waiverExpired(future, NOW)).toBe(false);
-    expect(isWaived('check-1', [future], NOW)).toBe(true);
+    expect(waiverExpired(future, NOW)).toBeFalsy();
+    expect(isWaived('check-1', [future], NOW)).toBeTruthy();
   });
 
   it('a missing (undefined) expiresAt is never expired but also never expiring', () => {
     const w = asWaiver(undefined);
-    expect(waiverExpired(w, NOW)).toBe(false);
-    expect(isWaived('check-1', [w], NOW)).toBe(true);
+    expect(waiverExpired(w, NOW)).toBeFalsy();
+    expect(isWaived('check-1', [w], NOW)).toBeTruthy();
     expect(expiringWaivers([w], 365 * 24 * 3600 * 1000, NOW)).toHaveLength(0);
   });
 
@@ -208,14 +208,14 @@ describe('waivers throw-safety and no-permanent-grant (fuzz sweep)', () => {
 describe('waivers', () => {
   it('isWaived matches by name', () => {
     const w = [{ name: 'a', reason: 'x' }, { name: 'b' }];
-    expect(isWaived('a', w)).toBe(true);
-    expect(isWaived('b', w)).toBe(true);
-    expect(isWaived('c', w)).toBe(false);
-    expect(isWaived('a', undefined)).toBe(false);
-    expect(isWaived('a', [])).toBe(false);
+    expect(isWaived('a', w)).toBeTruthy();
+    expect(isWaived('b', w)).toBeTruthy();
+    expect(isWaived('c', w)).toBeFalsy();
+    expect(isWaived('a', undefined)).toBeFalsy();
+    expect(isWaived('a', [])).toBeFalsy();
     // Empty names never match (corrupt waiver entry).
-    expect(isWaived('', [{ name: '' }])).toBe(false);
-    expect(isWaived('', w)).toBe(false);
+    expect(isWaived('', [{ name: '' }])).toBeFalsy();
+    expect(isWaived('', w)).toBeFalsy();
   });
   // Hot path for score math, CSV, and Results filters: one Set of active names.
   it('activeWaivedNames builds a Set of non-expired names only', () => {
@@ -234,10 +234,10 @@ describe('waivers', () => {
     );
     expect(set).toBeInstanceOf(Set);
     expect([...set].sort()).toEqual(['active', 'future']);
-    expect(set.has('expired')).toBe(false);
-    expect(set.has('exact')).toBe(false);
-    expect(set.has('bad')).toBe(false);
-    expect(set.has('')).toBe(false);
+    expect(set.has('expired')).toBeFalsy();
+    expect(set.has('exact')).toBeFalsy();
+    expect(set.has('bad')).toBeFalsy();
+    expect(set.has('')).toBeFalsy();
     expect(activeWaivedNames(undefined, now).size).toBe(0);
     expect(activeWaivedNames([], now).size).toBe(0);
   });
@@ -500,18 +500,18 @@ describe('waivers', () => {
     const bad = { name: 'd', expiresAt: 'not-a-date' };
     // Exact equality is expired (t <= now), lockstep with operator !After(now).
     const exact = { name: 'e', expiresAt: now.toISOString() };
-    expect(waiverExpired(past, now)).toBe(true);
-    expect(waiverExpired(future, now)).toBe(false);
-    expect(waiverExpired(none, now)).toBe(false);
+    expect(waiverExpired(past, now)).toBeTruthy();
+    expect(waiverExpired(future, now)).toBeFalsy();
+    expect(waiverExpired(none, now)).toBeFalsy();
     // Corrupt expiresAt must not grant a permanent waiver.
-    expect(waiverExpired(bad, now)).toBe(true);
-    expect(waiverExpired(exact, now)).toBe(true);
+    expect(waiverExpired(bad, now)).toBeTruthy();
+    expect(waiverExpired(exact, now)).toBeTruthy();
     // isWaived (excluded from score) is false for an expired waiver.
-    expect(isWaived('a', [past], now)).toBe(false);
-    expect(isWaived('b', [future], now)).toBe(true);
-    expect(isWaived('c', [none], now)).toBe(true);
-    expect(isWaived('d', [bad], now)).toBe(false);
-    expect(isWaived('e', [exact], now)).toBe(false);
+    expect(isWaived('a', [past], now)).toBeFalsy();
+    expect(isWaived('b', [future], now)).toBeTruthy();
+    expect(isWaived('c', [none], now)).toBeTruthy();
+    expect(isWaived('d', [bad], now)).toBeFalsy();
+    expect(isWaived('e', [exact], now)).toBeFalsy();
   });
 
   // expiresAt is CR/user text; corrupt values must never throw and must not
@@ -534,12 +534,12 @@ describe('waivers', () => {
       const expired = waiverExpired(w, now);
       expect(typeof expired).toBe('boolean');
       if (!expiresAt) {
-        expect(expired).toBe(false);
+        expect(expired).toBeFalsy();
         continue;
       }
       const t = new Date(expiresAt).getTime();
       if (Number.isNaN(t)) {
-        expect(expired).toBe(true);
+        expect(expired).toBeTruthy();
       } else {
         expect(expired).toBe(t <= now.getTime());
       }
@@ -550,7 +550,14 @@ describe('waivers', () => {
     const past = { name: 'a', expiresAt: '2026-07-10T00:00:00Z', reason: 'r' };
     expect(findWaiver('a', [past])).toEqual(past);
     expect(findWaiver('x', [past])).toBeUndefined();
-    expect(isWaived('a', [past], now)).toBe(false); // expired: not excluded
+    expect(isWaived('a', [past], now)).toBeFalsy(); // expired: not excluded
+  });
+  // Corrupt waiver entries may carry an empty name; the lookup must short-circuit
+  // instead of matching an empty-name entry (mirrors the isWaived('', …) pin).
+  it('findWaiver never matches on an empty check name', () => {
+    const corrupt = [{ name: '', reason: 'r' }];
+    expect(findWaiver('', corrupt)).toBeUndefined();
+    expect(findWaiver('', undefined)).toBeUndefined();
   });
   it('expiringWaivers lists active waivers within the window only', () => {
     const now = new Date('2026-07-11T00:00:00Z');
@@ -589,7 +596,7 @@ describe('waivers', () => {
         reason: randomString(i % 10),
       });
       expect(patch.length).toBeGreaterThan(0);
-      expect(patch[0].op === 'add' || patch[0].op === 'test').toBe(true);
+      expect(patch[0].op === 'add' || patch[0].op === 'test').toBeTruthy();
       const last = patch[patch.length - 1];
       const v = last.value as { name: string } | { name: string }[];
       const entry = Array.isArray(v) ? v[0] : v;

@@ -216,15 +216,15 @@ describe('tailoredProfileManifest', () => {
         expect(m!.kind).toBe('TailoredProfile');
         expect(m!.apiVersion).toBe('compliance.openshift.io/v1alpha1');
         const metaName = (m!.metadata as { name: string }).name;
-        expect(isValidTailoredProfileName(metaName)).toBe(true);
+        expect(isValidTailoredProfileName(metaName)).toBeTruthy();
         const spec = m!.spec as {
           extends: string;
           enableRules?: { name: string }[];
           disableRules?: { name: string }[];
         };
-        expect(isValidK8sName(spec.extends)).toBe(true);
+        expect(isValidK8sName(spec.extends)).toBeTruthy();
         for (const r of [...(spec.enableRules ?? []), ...(spec.disableRules ?? [])]) {
-          expect(isValidK8sName(r.name)).toBe(true);
+          expect(isValidK8sName(r.name)).toBeTruthy();
         }
       }
     }
@@ -240,31 +240,31 @@ describe('tailoredProfileSpecMatches', () => {
     tailoredProfileManifest('x', extendsBase, disable, enable) as { spec: Record<string, unknown> };
   it('matches an identical spec regardless of rule order', () => {
     const existing = specOf('ocp4-cis', ['b-rule', 'a-rule']);
-    expect(tailoredProfileSpecMatches(existing, 'ocp4-cis', ['a-rule', 'b-rule'])).toBe(true);
+    expect(tailoredProfileSpecMatches(existing, 'ocp4-cis', ['a-rule', 'b-rule'])).toBeTruthy();
   });
   it('matches when both sides default extends to ocp4-cis', () => {
     const existing = specOf('ocp4-cis', []);
-    expect(tailoredProfileSpecMatches(existing, '', [])).toBe(true);
+    expect(tailoredProfileSpecMatches(existing, '', [])).toBeTruthy();
   });
   it('does not match a different base profile', () => {
     const existing = specOf('ocp4-cis', ['a-rule']);
-    expect(tailoredProfileSpecMatches(existing, 'ocp4-pci-dss', ['a-rule'])).toBe(false);
+    expect(tailoredProfileSpecMatches(existing, 'ocp4-pci-dss', ['a-rule'])).toBeFalsy();
   });
   it('does not match a different disable-rule set (the collision case)', () => {
     const existing = specOf('ocp4-cis', ['rule-x']);
-    expect(tailoredProfileSpecMatches(existing, 'ocp4-cis', ['rule-y'])).toBe(false);
+    expect(tailoredProfileSpecMatches(existing, 'ocp4-cis', ['rule-y'])).toBeFalsy();
   });
   it('ignores invalid rule names the manifest would have dropped', () => {
     const existing = specOf('ocp4-cis', ['good-rule']);
-    expect(tailoredProfileSpecMatches(existing, 'ocp4-cis', ['good-rule', 'bad name'])).toBe(true);
+    expect(tailoredProfileSpecMatches(existing, 'ocp4-cis', ['good-rule', 'bad name'])).toBeTruthy();
   });
   it('treats a rule in both enable and disable as disabled (mirrors the manifest)', () => {
     const existing = specOf('ocp4-cis', ['dup'], ['dup', 'on-only']);
-    expect(tailoredProfileSpecMatches(existing, 'ocp4-cis', ['dup'], ['dup', 'on-only'])).toBe(true);
+    expect(tailoredProfileSpecMatches(existing, 'ocp4-cis', ['dup'], ['dup', 'on-only'])).toBeTruthy();
   });
   it('does not match undefined / empty existing against a real spec', () => {
-    expect(tailoredProfileSpecMatches(undefined, 'ocp4-cis', ['a-rule'])).toBe(false);
-    expect(tailoredProfileSpecMatches({}, 'ocp4-cis', ['a-rule'])).toBe(false);
+    expect(tailoredProfileSpecMatches(undefined, 'ocp4-cis', ['a-rule'])).toBeFalsy();
+    expect(tailoredProfileSpecMatches({}, 'ocp4-cis', ['a-rule'])).toBeFalsy();
   });
 });
 

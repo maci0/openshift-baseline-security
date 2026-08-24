@@ -126,10 +126,10 @@ describe('CR field fuzz (untrusted CR input never throws)', () => {
       }
       expect(typeof out).toBe('string');
       // UTF-8 BOM so spreadsheets detect encoding.
-      expect(out.startsWith('﻿')).toBe(true);
+      expect(out.startsWith('﻿')).toBeTruthy();
       // csvCell strips NUL (can truncate cells in some tools); a tampered CR
       // field carrying \0 must not survive into the export.
-      expect(out.includes('\0')).toBe(false);
+      expect(out.includes('\0')).toBeFalsy();
     }
   });
 
@@ -156,17 +156,17 @@ describe('CR field fuzz (untrusted CR input never throws)', () => {
         expect(typeof st).toBe('string');
         expect(st.length).toBeGreaterThan(0);
         const { sources, mostCommon } = inconsistentSources(cr);
-        expect(Array.isArray(sources)).toBe(true);
-        expect(mostCommon === null || typeof mostCommon === 'string').toBe(true);
+        expect(Array.isArray(sources)).toBeTruthy();
+        expect(mostCommon === null || typeof mostCommon === 'string').toBeTruthy();
         const pool = nodeScanPool(cr);
-        expect(pool === null || typeof pool === 'string').toBe(true);
+        expect(pool === null || typeof pool === 'string').toBeTruthy();
         const labels = cr.metadata?.labels as Record<string, string> | undefined;
         expect(() => suiteProfileKey(labels)).not.toThrow();
         expect(() => suiteTailoredName(labels)).not.toThrow();
         const scanLeaf = leaf(next);
         const scan = typeof scanLeaf === 'string' ? scanLeaf : String(scanLeaf ?? '');
         const fromScan = nodePoolFromScanName(scan);
-        expect(fromScan === null || typeof fromScan === 'string').toBe(true);
+        expect(fromScan === null || typeof fromScan === 'string').toBeTruthy();
       } catch (e) {
         throw new Error(`seed ${seed} threw: ${String(e)}`);
       }
@@ -219,7 +219,7 @@ describe('string-parser fuzz (untrusted schedule / date / locale never throws)',
         expect(typeof formatChartDate(iso as unknown as number, locale)).toBe('string');
         expect(typeof formatCount(next() * 1e12 - 5e11, locale)).toBe('string');
         const eod = dateInputEndOfDayIso(iso);
-        expect(eod === undefined || typeof eod === 'string').toBe(true);
+        expect(eod === undefined || typeof eod === 'string').toBeTruthy();
       } catch (e) {
         throw new Error(
           `seed ${seed} (iso=${JSON.stringify(iso)}, locale=${JSON.stringify(locale)}) threw: ${String(e)}`,

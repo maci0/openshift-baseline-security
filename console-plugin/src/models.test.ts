@@ -1,11 +1,13 @@
 import {
   checkProfileLabel,
+  ClusterBaseline,
   filterOwnedByBaseline,
   isOwnedByBaseline,
   isProfileKey,
   nodePoolFromScanName,
   ownedSuiteLabels,
   ownedSuiteSelector,
+  scanningDisabled,
   PROFILE_INFO,
   PROFILE_KEYS,
   PROFILE_MAX_ITEMS,
@@ -27,7 +29,7 @@ describe('profile key lockstep', () => {
   });
   it('every key is a known enum value with display metadata', () => {
     for (const key of PROFILE_KEYS) {
-      expect(isProfileKey(key)).toBe(true);
+      expect(isProfileKey(key)).toBeTruthy();
       const info = PROFILE_INFO[key];
       expect(info.title.length).toBeGreaterThan(0);
       expect(info.description.length).toBeGreaterThan(0);
@@ -39,31 +41,31 @@ describe('isOwnedByBaseline', () => {
   it('matches suite label to selected profiles', () => {
     expect(
       isOwnedByBaseline({ 'compliance.openshift.io/suite': 'baseline-cis' }, ['cis']),
-    ).toBe(true);
+    ).toBeTruthy();
     expect(
       isOwnedByBaseline({ 'compliance.openshift.io/suite': 'baseline-cis' }, ['stig']),
-    ).toBe(false);
-    expect(isOwnedByBaseline({ 'compliance.openshift.io/suite': 'other' }, ['cis'])).toBe(false);
-    expect(isOwnedByBaseline(undefined, ['cis'])).toBe(false);
-    expect(isOwnedByBaseline({ 'compliance.openshift.io/suite': 'baseline-cis' }, [])).toBe(false);
-    expect(isOwnedByBaseline({}, ['cis'])).toBe(false);
+    ).toBeFalsy();
+    expect(isOwnedByBaseline({ 'compliance.openshift.io/suite': 'other' }, ['cis'])).toBeFalsy();
+    expect(isOwnedByBaseline(undefined, ['cis'])).toBeFalsy();
+    expect(isOwnedByBaseline({ 'compliance.openshift.io/suite': 'baseline-cis' }, [])).toBeFalsy();
+    expect(isOwnedByBaseline({}, ['cis'])).toBeFalsy();
     expect(
       isOwnedByBaseline({ 'compliance.openshift.io/suite': 'baseline-pci-dss' }, [
         'cis',
         'pci-dss',
       ]),
-    ).toBe(true);
+    ).toBeTruthy();
   });
 
   // Results/Remediations hot path passes Sets so membership is O(1); Set.has
   // must match array includes for the same members.
   it('accepts Set membership for profiles and tailored (hot-path form)', () => {
     const labels = { 'compliance.openshift.io/suite': 'baseline-cis' };
-    expect(isOwnedByBaseline(labels, new Set(['cis', 'stig']))).toBe(true);
-    expect(isOwnedByBaseline(labels, new Set(['stig']))).toBe(false);
+    expect(isOwnedByBaseline(labels, new Set(['cis', 'stig']))).toBeTruthy();
+    expect(isOwnedByBaseline(labels, new Set(['stig']))).toBeFalsy();
     const tp = { 'compliance.openshift.io/suite': 'baseline-tp-custom' };
-    expect(isOwnedByBaseline(tp, new Set(['cis']), new Set(['custom']))).toBe(true);
-    expect(isOwnedByBaseline(tp, new Set(['cis']), new Set(['other']))).toBe(false);
+    expect(isOwnedByBaseline(tp, new Set(['cis']), new Set(['custom']))).toBeTruthy();
+    expect(isOwnedByBaseline(tp, new Set(['cis']), new Set(['other']))).toBeFalsy();
   });
 
   it('fuzz: only true when suite is baseline-<selected profile>', () => {
@@ -219,11 +221,11 @@ describe('tailored suite ownership', () => {
       }
       if (tailored !== undefined) {
         expect(filter).toBe(`tp-${tailored}`);
-        expect(suite?.startsWith('baseline-tp-')).toBe(true);
+        expect(suite?.startsWith('baseline-tp-')).toBeTruthy();
       } else if (key !== undefined) {
         expect(filter).toBe(key);
         expect(suite).toBe(`baseline-${key}`);
-        expect(suite?.startsWith('baseline-tp-')).toBe(false);
+        expect(suite?.startsWith('baseline-tp-')).toBeFalsy();
       } else {
         expect(filter).toBeUndefined();
       }
@@ -245,15 +247,15 @@ describe('tailored suite ownership', () => {
     );
   });
   it('isOwnedByBaseline recognizes bound tailored profiles', () => {
-    expect(isOwnedByBaseline(lbl('baseline-tp-custom'), ['cis'], ['custom'])).toBe(true);
-    expect(isOwnedByBaseline(lbl('baseline-tp-custom'), ['cis'], [])).toBe(false);
-    expect(isOwnedByBaseline(lbl('baseline-tp-custom'), ['cis'], undefined)).toBe(false);
+    expect(isOwnedByBaseline(lbl('baseline-tp-custom'), ['cis'], ['custom'])).toBeTruthy();
+    expect(isOwnedByBaseline(lbl('baseline-tp-custom'), ['cis'], [])).toBeFalsy();
+    expect(isOwnedByBaseline(lbl('baseline-tp-custom'), ['cis'], undefined)).toBeFalsy();
     // built-in still works, and a tailored suite is not matched as a profile
-    expect(isOwnedByBaseline(lbl('baseline-cis'), ['cis'], ['custom'])).toBe(true);
+    expect(isOwnedByBaseline(lbl('baseline-cis'), ['cis'], ['custom'])).toBeTruthy();
     // tailored suite must not match via profiles even if profiles contains "tp-custom"
-    expect(isOwnedByBaseline(lbl('baseline-tp-custom'), ['tp-custom'], undefined)).toBe(false);
+    expect(isOwnedByBaseline(lbl('baseline-tp-custom'), ['tp-custom'], undefined)).toBeFalsy();
     // empty tailored suite label is not owned
-    expect(isOwnedByBaseline(lbl('baseline-tp-'), ['cis'], [''])).toBe(false);
+    expect(isOwnedByBaseline(lbl('baseline-tp-'), ['cis'], [''])).toBeFalsy();
   });
 });
 describe('profileTitle', () => {
@@ -265,5 +267,30 @@ describe('profileTitle', () => {
 
   it('uppercases unknown keys', () => {
     expect(profileTitle('custom-suite')).toBe('CUSTOM-SUITE');
+  });
+  // CR status.profiles[].key is not runtime type-checked; the coercion exists so
+  // a tampered non-string key cannot throw on .toUpperCase.
+  it('coerces tampered non-string keys instead of throwing', () => {
+    expect(profileTitle(null as unknown as string)).toBe('');
+    expect(profileTitle(undefined as unknown as string)).toBe('');
+    expect(profileTitle(42 as unknown as string)).toBe('42');
+  });
+});
+
+// Single source for the "Scanning is disabled" dead-end shown by all three tabs;
+// a drift here would make one tab render controls while another claims disabled.
+describe('scanningDisabled', () => {
+  const cb = (spec: Partial<ClusterBaseline['spec']>): ClusterBaseline =>
+    ({ spec }) as ClusterBaseline;
+
+  it('is true when neither built-in nor tailored profiles are selected', () => {
+    expect(scanningDisabled(undefined)).toBeTruthy();
+    expect(scanningDisabled(cb({}))).toBeTruthy();
+    expect(scanningDisabled(cb({ profiles: [], tailoredProfiles: [] }))).toBeTruthy();
+  });
+  it('is false when any profile or tailored profile is selected', () => {
+    expect(scanningDisabled(cb({ profiles: ['cis'] }))).toBeFalsy();
+    expect(scanningDisabled(cb({ profiles: [], tailoredProfiles: ['tp-custom'] }))).toBeFalsy();
+    expect(scanningDisabled(cb({ profiles: ['cis'], tailoredProfiles: ['tp-custom'] }))).toBeFalsy();
   });
 });

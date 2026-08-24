@@ -342,17 +342,13 @@ describe('buildReportHtml', () => {
       }
       // Raw angle-bracket script from untrusted fields must not appear unescaped.
       if (hostile.includes('<') || hostile.includes('>') || hostile.includes('&')) {
-        // At least one escaped entity should appear when specials were present.
-        const hasEntity =
-          out!.includes('&lt;') ||
-          out!.includes('&gt;') ||
-          out!.includes('&amp;') ||
-          out!.includes('&quot;') ||
-          out!.includes('&#39;');
+        // esc() escapes every < > & " ' occurrence, so a payload containing any
+        // special must be transformed: the exact raw string may never survive
+        // anywhere in the document (entity presence elsewhere proves nothing).
         // Empty/whitespace-only hostile may not land in a cell; only assert when
         // the raw special would otherwise be injectable as element text.
         if (hostile.trim()) {
-          expect(hasEntity || !out!.includes(hostile)).toBe(true);
+          expect(out!.includes(hostile)).toBeFalsy();
         }
       }
     }

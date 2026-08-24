@@ -116,7 +116,7 @@ describe('downloadBlob', () => {
     try {
       downloadBlob(new Blob(['x']), `${'a'.repeat(300)}.csv`);
       expect(dom.anchor.download.length).toBe(200);
-      expect(dom.anchor.download.startsWith('aaa')).toBe(true);
+      expect(dom.anchor.download.startsWith('aaa')).toBeTruthy();
     } finally {
       dom.restore();
     }

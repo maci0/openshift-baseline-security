@@ -11,20 +11,23 @@ const randomString = (len: number): string =>
 
 describe('isValidK8sName', () => {
   it('accepts valid RFC1123 subdomain names', () => {
-    expect(isValidK8sName('cis-custom')).toBe(true);
-    expect(isValidK8sName('a')).toBe(true);
-    expect(isValidK8sName('ocp4.cis.1')).toBe(true);
+    expect(isValidK8sName('cis-custom')).toBeTruthy();
+    expect(isValidK8sName('a')).toBeTruthy();
+    expect(isValidK8sName('ocp4.cis.1')).toBeTruthy();
   });
   it('rejects invalid names', () => {
-    expect(isValidK8sName('')).toBe(false);
-    expect(isValidK8sName('My Profile')).toBe(false);
-    expect(isValidK8sName('UPPER')).toBe(false);
-    expect(isValidK8sName('-lead')).toBe(false);
-    expect(isValidK8sName('trail-')).toBe(false);
-    expect(isValidK8sName('a..b')).toBe(false);
-    expect(isValidK8sName('a.-b')).toBe(false);
-    expect(isValidK8sName('a-.b')).toBe(false);
-    expect(isValidK8sName('a'.repeat(254))).toBe(false);
+    expect(isValidK8sName('')).toBeFalsy();
+    expect(isValidK8sName('My Profile')).toBeFalsy();
+    expect(isValidK8sName('UPPER')).toBeFalsy();
+    expect(isValidK8sName('-lead')).toBeFalsy();
+    expect(isValidK8sName('trail-')).toBeFalsy();
+    expect(isValidK8sName('a..b')).toBeFalsy();
+    expect(isValidK8sName('a.-b')).toBeFalsy();
+    expect(isValidK8sName('a-.b')).toBeFalsy();
+    expect(isValidK8sName('a'.repeat(254))).toBeFalsy();
+  });
+  it('accepts the 253-char DNS-1123 length boundary', () => {
+    expect(isValidK8sName('a'.repeat(253))).toBeTruthy();
   });
   // Free-form TailoredProfile / resource names typed in the console; never throw,
   // and a true result must satisfy length + RFC1123 shape (no uppercase, no ends).
@@ -58,19 +61,19 @@ describe('isValidK8sName', () => {
 
 describe('isValidTailoredProfileName', () => {
   it('accepts names that fit baseline-tp-<name> label budget (51 chars)', () => {
-    expect(isValidTailoredProfileName('cis-custom')).toBe(true);
-    expect(isValidTailoredProfileName('a'.repeat(51))).toBe(true);
+    expect(isValidTailoredProfileName('cis-custom')).toBeTruthy();
+    expect(isValidTailoredProfileName('a'.repeat(51))).toBeTruthy();
   });
   it('rejects names longer than the ClusterBaseline tailoredProfiles MaxLength', () => {
     // isValidK8sName would accept 52 alphanumerics; suite label would exceed 63.
-    expect(isValidK8sName('a'.repeat(52))).toBe(true);
-    expect(isValidTailoredProfileName('a'.repeat(52))).toBe(false);
+    expect(isValidK8sName('a'.repeat(52))).toBeTruthy();
+    expect(isValidTailoredProfileName('a'.repeat(52))).toBeFalsy();
   });
   it('rejects the same shape invalids as isValidK8sName', () => {
-    expect(isValidTailoredProfileName('')).toBe(false);
-    expect(isValidTailoredProfileName('UPPER')).toBe(false);
-    expect(isValidTailoredProfileName('-x')).toBe(false);
-    expect(isValidTailoredProfileName('a..b')).toBe(false);
+    expect(isValidTailoredProfileName('')).toBeFalsy();
+    expect(isValidTailoredProfileName('UPPER')).toBeFalsy();
+    expect(isValidTailoredProfileName('-x')).toBeFalsy();
+    expect(isValidTailoredProfileName('a..b')).toBeFalsy();
   });
   // suite label is "baseline-tp-<name>" (63 char k8s label budget => name <= 51).
   it('fuzz: never throws; true implies k8s name and len <= 51', () => {
@@ -89,7 +92,7 @@ describe('isValidTailoredProfileName', () => {
       }).not.toThrow();
       if (ok!) {
         expect(name.length).toBeLessThanOrEqual(51);
-        expect(isValidK8sName(name)).toBe(true);
+        expect(isValidK8sName(name)).toBeTruthy();
       }
     }
   });

@@ -122,21 +122,21 @@ describe('rescanPatch', () => {
 
 describe('schedule editor helpers', () => {
   it('isValidCron accepts 5 fields, rejects otherwise', () => {
-    expect(isValidCron('0 1 * * *')).toBe(true);
-    expect(isValidCron('*/5 0-6 1,15 * 1-5')).toBe(true);
-    expect(isValidCron('0 1 * JAN MON-FRI')).toBe(true);
-    expect(isValidCron('0 1 ? * MON')).toBe(true);
-    expect(isValidCron('0 1 * *')).toBe(false); // 4 fields
-    expect(isValidCron('0 1 * * * *')).toBe(false); // 6 fields
-    expect(isValidCron('not a cron')).toBe(false);
-    expect(isValidCron('@every 1s')).toBe(false);
-    expect(isValidCron('60 1 * * *')).toBe(false);
-    expect(isValidCron('0 24 * * *')).toBe(false);
-    expect(isValidCron('0 1 * * 7')).toBe(false);
-    expect(isValidCron('*/0 1 * * *')).toBe(false);
-    expect(isValidCron('')).toBe(false);
+    expect(isValidCron('0 1 * * *')).toBeTruthy();
+    expect(isValidCron('*/5 0-6 1,15 * 1-5')).toBeTruthy();
+    expect(isValidCron('0 1 * JAN MON-FRI')).toBeTruthy();
+    expect(isValidCron('0 1 ? * MON')).toBeTruthy();
+    expect(isValidCron('0 1 * *')).toBeFalsy(); // 4 fields
+    expect(isValidCron('0 1 * * * *')).toBeFalsy(); // 6 fields
+    expect(isValidCron('not a cron')).toBeFalsy();
+    expect(isValidCron('@every 1s')).toBeFalsy();
+    expect(isValidCron('60 1 * * *')).toBeFalsy();
+    expect(isValidCron('0 24 * * *')).toBeFalsy();
+    expect(isValidCron('0 1 * * 7')).toBeFalsy();
+    expect(isValidCron('*/0 1 * * *')).toBeFalsy();
+    expect(isValidCron('')).toBeFalsy();
     // CRD MaxLength=128: a long-but-five-field string must not pass client-side.
-    expect(isValidCron(`0 1 * * ${'1'.repeat(200)}`)).toBe(false);
+    expect(isValidCron(`0 1 * * ${'1'.repeat(200)}`)).toBeFalsy();
   });
 
   // Schedule editor feeds free-form text into isValidCron before patching the
@@ -258,8 +258,8 @@ describe('batchApplyPatch', () => {
     expect(patch).toHaveLength(1);
     const value = (patch[0] as { value: string }).value;
     expect(value.split(',')).toHaveLength(256);
-    expect(value.startsWith('rem-0,')).toBe(true);
-    expect(value.endsWith(',rem-255')).toBe(true);
+    expect(value.startsWith('rem-0,')).toBeTruthy();
+    expect(value.endsWith(',rem-255')).toBeTruthy();
   });
   // Free-form remediation names from multi-select / deep-links before annotation write.
   it('fuzz: never throws; empty or single add; value names are DNS-1123 and <=256', () => {
@@ -274,7 +274,7 @@ describe('batchApplyPatch', () => {
               : '',
       );
       const patch = batchApplyPatch(i % 2 === 0, names);
-      expect(Array.isArray(patch)).toBe(true);
+      expect(Array.isArray(patch)).toBeTruthy();
       expect(patch.length).toBeLessThanOrEqual(1);
       if (patch.length === 0) continue;
       const value =
@@ -287,7 +287,7 @@ describe('batchApplyPatch', () => {
       expect(parts.length).toBeLessThanOrEqual(256);
       expect(new Set(parts).size).toBe(parts.length);
       for (const p of parts) {
-        expect(isValidK8sName(p)).toBe(true);
+        expect(isValidK8sName(p)).toBeTruthy();
       }
     }
   });
@@ -296,17 +296,17 @@ describe('batchApplyPatch', () => {
 describe('batchApplyRequested', () => {
   const key = 'baselinesecurity.openshift.io/batch-apply';
   it('is false when missing, empty, whitespace, or comma-only', () => {
-    expect(batchApplyRequested(undefined)).toBe(false);
-    expect(batchApplyRequested(null)).toBe(false);
-    expect(batchApplyRequested({})).toBe(false);
-    expect(batchApplyRequested({ [key]: '' })).toBe(false);
-    expect(batchApplyRequested({ [key]: '   ' })).toBe(false);
-    expect(batchApplyRequested({ [key]: ',, , ' })).toBe(false);
+    expect(batchApplyRequested(undefined)).toBeFalsy();
+    expect(batchApplyRequested(null)).toBeFalsy();
+    expect(batchApplyRequested({})).toBeFalsy();
+    expect(batchApplyRequested({ [key]: '' })).toBeFalsy();
+    expect(batchApplyRequested({ [key]: '   ' })).toBeFalsy();
+    expect(batchApplyRequested({ [key]: ',, , ' })).toBeFalsy();
   });
   it('is true when any non-empty remediation name token is present', () => {
-    expect(batchApplyRequested({ [key]: 'a' })).toBe(true);
-    expect(batchApplyRequested({ [key]: ' a , b ' })).toBe(true);
-    expect(batchApplyRequested({ [key]: ',,rem-1,' })).toBe(true);
+    expect(batchApplyRequested({ [key]: 'a' })).toBeTruthy();
+    expect(batchApplyRequested({ [key]: ' a , b ' })).toBeTruthy();
+    expect(batchApplyRequested({ [key]: ',,rem-1,' })).toBeTruthy();
   });
   // Annotation value is CR-editable; must never throw and true only when a
   // non-empty comma token exists after trim (operator batchRemediationNames).
@@ -330,12 +330,12 @@ describe('batchApplyRequested', () => {
       }).not.toThrow();
       expect(typeof got!).toBe('boolean');
       if (raw == null || typeof raw !== 'object') {
-        expect(got!).toBe(false);
+        expect(got!).toBeFalsy();
         continue;
       }
       const val = (raw as Record<string, unknown>)[key];
       if (typeof val !== 'string') {
-        expect(got!).toBe(false);
+        expect(got!).toBeFalsy();
         continue;
       }
       const hasToken = val.split(',').some((p) => p.trim());

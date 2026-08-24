@@ -28,9 +28,9 @@ describe('remediation helpers', () => {
     }) as ComplianceRemediation;
 
   it('isNodeRemediation detects MachineConfig', () => {
-    expect(isNodeRemediation(rem('MachineConfig'))).toBe(true);
-    expect(isNodeRemediation(rem('APIServer'))).toBe(false);
-    expect(isNodeRemediation(rem())).toBe(false);
+    expect(isNodeRemediation(rem('MachineConfig'))).toBeTruthy();
+    expect(isNodeRemediation(rem('APIServer'))).toBeFalsy();
+    expect(isNodeRemediation(rem())).toBeFalsy();
   });
   // Parity with operator poolFromRemediation: empty kind + node scan-name is a
   // node remediation (reboot warning / batch eligibility).
@@ -45,7 +45,7 @@ describe('remediation helpers', () => {
           },
         }),
       ),
-    ).toBe(true);
+    ).toBeTruthy();
     expect(
       isNodeRemediation(
         rem(undefined, undefined, {
@@ -56,7 +56,7 @@ describe('remediation helpers', () => {
           },
         }),
       ),
-    ).toBe(false);
+    ).toBeFalsy();
     // Operator validMCPPoolName: non-DNS-1123 pool suffix is not a batch target.
     expect(
       isNodeRemediation(
@@ -68,7 +68,7 @@ describe('remediation helpers', () => {
           },
         }),
       ),
-    ).toBe(false);
+    ).toBeFalsy();
     // A non-MachineConfig kind rendered by a node scan (e.g. a KubeletConfig, which
     // the MCO applies with a reboot) is STILL a node remediation: the "…-node-<pool>"
     // scan-name is authoritative, matching operator poolFromRemediation. The kind
@@ -84,7 +84,7 @@ describe('remediation helpers', () => {
           },
         }),
       ),
-    ).toBe(true);
+    ).toBeTruthy();
     // But a platform kind on a scan with no "-node-" is not a node remediation.
     expect(
       isNodeRemediation(
@@ -96,7 +96,7 @@ describe('remediation helpers', () => {
           },
         }),
       ),
-    ).toBe(false);
+    ).toBeFalsy();
   });
   it('remediationObjectText pretty-prints the object, empty when absent', () => {
     expect(remediationObjectText(rem('MachineConfig', { kind: 'MachineConfig', x: 1 }))).toContain(
@@ -260,7 +260,7 @@ describe('remediation helpers', () => {
           status: { errorMessage: randomString(i % 20) },
         }),
       );
-      expect(summary === null || typeof summary === 'string').toBe(true);
+      expect(summary === null || typeof summary === 'string').toBeTruthy();
     }
   });
   // Kind + scan-name are untrusted CO fields; reboot/batch eligibility must not
@@ -310,8 +310,8 @@ describe('remediation helpers', () => {
       });
       const ab = compareRemediationsForApplyOrder(a, b);
       const ba = compareRemediationsForApplyOrder(b, a);
-      expect(Number.isFinite(ab)).toBe(true);
-      expect(Number.isFinite(ba)).toBe(true);
+      expect(Number.isFinite(ab)).toBeTruthy();
+      expect(Number.isFinite(ba)).toBeTruthy();
       if (ab === 0) {
         expect(ba).toBe(0);
       } else {
@@ -329,6 +329,6 @@ describe('remediation helpers', () => {
       metadata: { name: 'b', namespace: 'ns' },
     });
     expect(() => compareRemediationsForApplyOrder(a, b)).not.toThrow();
-    expect(Number.isFinite(compareRemediationsForApplyOrder(a, b))).toBe(true);
+    expect(Number.isFinite(compareRemediationsForApplyOrder(a, b))).toBeTruthy();
   });
 });

@@ -19,6 +19,20 @@ describe('errorMessage', () => {
     expect(errorMessage('boom')).toBe('boom');
     expect(errorMessage(new Error('nope'))).toBe('nope');
   });
+  // An Error with an empty message (or only a generic HTTP phrase) and no .json
+  // body must still surface something: fall through to message || name.
+  it('falls back to the Error name when the message is empty', () => {
+    expect(errorMessage(new Error(''))).toBe('Error');
+    class HttpError extends Error {
+      constructor() {
+        super('');
+        this.name = 'HttpError';
+      }
+    }
+    expect(errorMessage(new HttpError())).toBe('HttpError');
+    // Generic status phrase without a Status body is still better than nothing.
+    expect(errorMessage(new Error('Conflict'))).toBe('Conflict');
+  });
   it('handles message-bearing objects (k8s / HttpError shapes)', () => {
     expect(errorMessage({ message: 'forbidden' })).toBe('forbidden');
   });
@@ -96,7 +110,7 @@ describe('errorMessage', () => {
     ];
     for (const h of hostile) {
       const out = errorMessage(h);
-      expect(out === null || typeof out === 'string').toBe(true);
+      expect(out === null || typeof out === 'string').toBeTruthy();
     }
   });
   it('fuzz: returns string|null and never throws for arbitrary input', () => {
@@ -112,24 +126,24 @@ describe('errorMessage', () => {
         i % 11 === 0 ? new Error(randomString(i % 16)) : null,
       ];
       const out = errorMessage(pool[i % pool.length]);
-      expect(out === null || typeof out === 'string').toBe(true);
+      expect(out === null || typeof out === 'string').toBeTruthy();
     }
   });
 });
 
 describe('isAlreadyExists', () => {
   it('detects an AlreadyExists apiserver rejection', () => {
-    expect(isAlreadyExists({ reason: 'AlreadyExists' })).toBe(true);
-    expect(isAlreadyExists({ code: 409, reason: 'AlreadyExists' })).toBe(true);
-    expect(isAlreadyExists({ message: 'tailoredprofiles "x" already exists' })).toBe(true);
+    expect(isAlreadyExists({ reason: 'AlreadyExists' })).toBeTruthy();
+    expect(isAlreadyExists({ code: 409, reason: 'AlreadyExists' })).toBeTruthy();
+    expect(isAlreadyExists({ message: 'tailoredprofiles "x" already exists' })).toBeTruthy();
     expect(isAlreadyExists({ code: 409, message: 'tailoredprofiles "x" already exists' })).toBe(
       true,
     );
-    expect(isAlreadyExists('tailoredprofiles "x" already exists')).toBe(true);
-    expect(isAlreadyExists(new Error('tailoredprofiles "x" already exists'))).toBe(true);
+    expect(isAlreadyExists('tailoredprofiles "x" already exists')).toBeTruthy();
+    expect(isAlreadyExists(new Error('tailoredprofiles "x" already exists'))).toBeTruthy();
     const named = new Error('conflict');
     named.name = 'AlreadyExists';
-    expect(isAlreadyExists(named)).toBe(true);
+    expect(isAlreadyExists(named)).toBeTruthy();
   });
   // Console SDK HttpError: name is "HttpError", reason lives on .json (Status body).
   // Message may be the generic "Conflict" status text while reason is AlreadyExists.
@@ -142,13 +156,13 @@ describe('isAlreadyExists', () => {
         message: 'tailoredprofiles.compliance.openshift.io "x" already exists',
       },
     });
-    expect(isAlreadyExists(httpAlready)).toBe(true);
+    expect(isAlreadyExists(httpAlready)).toBeTruthy();
     const httpConflict = Object.assign(new Error('Conflict'), {
       name: 'HttpError',
       code: 409,
       json: { reason: 'Conflict', message: 'the object has been modified' },
     });
-    expect(isAlreadyExists(httpConflict)).toBe(false);
+    expect(isAlreadyExists(httpConflict)).toBeFalsy();
     // Nested json on a plain object (serialized error shape).
     expect(
       isAlreadyExists({
@@ -156,17 +170,17 @@ describe('isAlreadyExists', () => {
         message: 'Conflict',
         json: { reason: 'AlreadyExists', message: 'foo already exists' },
       }),
-    ).toBe(true);
+    ).toBeTruthy();
   });
   it('is false for Conflict (also HTTP 409) and other errors', () => {
     // Bare 409 is ambiguous (AlreadyExists vs Conflict); do not guess.
-    expect(isAlreadyExists({ code: 409 })).toBe(false);
-    expect(isAlreadyExists({ code: 409, reason: 'Conflict' })).toBe(false);
-    expect(isAlreadyExists({ code: 409, message: 'the object has been modified' })).toBe(false);
-    expect(isAlreadyExists({ code: 403 })).toBe(false);
-    expect(isAlreadyExists(new Error('boom'))).toBe(false);
-    expect(isAlreadyExists('forbidden')).toBe(false);
-    expect(isAlreadyExists(null)).toBe(false);
+    expect(isAlreadyExists({ code: 409 })).toBeFalsy();
+    expect(isAlreadyExists({ code: 409, reason: 'Conflict' })).toBeFalsy();
+    expect(isAlreadyExists({ code: 409, message: 'the object has been modified' })).toBeFalsy();
+    expect(isAlreadyExists({ code: 403 })).toBeFalsy();
+    expect(isAlreadyExists(new Error('boom'))).toBeFalsy();
+    expect(isAlreadyExists('forbidden')).toBeFalsy();
+    expect(isAlreadyExists(null)).toBeFalsy();
   });
   // Untrusted watch/fetch error shapes (partial Status, throwing getters) must
   // never throw; create-retry classification cannot become a second failure mode.
