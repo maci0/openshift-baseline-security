@@ -18,25 +18,58 @@ import (
 // (not shutdown). Keeps Error() from receiving a nil error value.
 var errCacheNotSynced = errors.New("cache did not sync")
 
+// defaultCRRetryDelay is the pause between ensure attempts and between cache
+// sync attempts.
+const defaultCRRetryDelay = 10 * time.Second
+
 // defaultClusterBaseline creates ClusterBaseline/cluster once when none exist.
 // NeedLeaderElection keeps HA replicas from racing the create.
 type defaultClusterBaseline struct {
 	Client client.Client
 	Cache  cache.Cache
 	Log    logr.Logger
+
+	// waitForCacheSync overrides Cache.WaitForCacheSync (tests only) so the
+	// sync-retry loop can be driven without manager machinery. Production nil.
+	waitForCacheSync func(ctx context.Context) bool
+	// retryDelay is the pause between attempts; zero means defaultCRRetryDelay.
+	// Test knob: keeps retry-loop tests off the 10s wall clock.
+	retryDelay time.Duration
+}
+
+func (d *defaultClusterBaseline) delay() time.Duration {
+	if d.retryDelay > 0 {
+		return d.retryDelay
+	}
+	return defaultCRRetryDelay
 }
 
 func (d *defaultClusterBaseline) Start(ctx context.Context) error {
-	if !d.Cache.WaitForCacheSync(ctx) {
-		// Shutdown is normal (ctx cancelled). A live context with failed sync is
-		// unexpected and would leave the cluster without the zero-config CR.
+	// Retry cache sync while the context stays live: a false return without
+	// shutdown means informers were not ready yet (or failed transiently).
+	// Giving up here would leave the cluster without the zero-config CR until
+	// process restart even though reconciles resume once the cache recovers
+	// (readyz re-evaluates every probe). Rate-limit Error logs like the ensure
+	// loop below.
+	var syncAttempt int
+	for !d.waitForCacheSyncFn()(ctx) {
+		if ctx.Err() != nil {
+			// Shutdown is normal (ctx cancelled).
+			return nil
+		}
+		syncAttempt++
+		if syncAttempt == 1 || syncAttempt%6 == 0 {
+			d.Log.Error(errCacheNotSynced,
+				"cache did not sync; deferring default ClusterBaseline creation",
+				"syncAttempt", syncAttempt)
+		}
+		timer := time.NewTimer(d.delay())
 		select {
 		case <-ctx.Done():
+			timer.Stop()
 			return nil
-		default:
+		case <-timer.C:
 		}
-		d.Log.Error(errCacheNotSynced, "cache did not sync; skipping default ClusterBaseline creation")
-		return nil
 	}
 	// Retry on transient list/create failures so a brief API blip does not
 	// leave the cluster without the zero-config CR until restart. Permanent
@@ -59,7 +92,7 @@ func (d *defaultClusterBaseline) Start(ctx context.Context) error {
 			d.Log.Error(err, "default ClusterBaseline ensure failed; will retry",
 				"attempt", attempt)
 		}
-		timer := time.NewTimer(10 * time.Second)
+		timer := time.NewTimer(d.delay())
 		select {
 		case <-ctx.Done():
 			timer.Stop()
@@ -67,6 +100,15 @@ func (d *defaultClusterBaseline) Start(ctx context.Context) error {
 		case <-timer.C:
 		}
 	}
+}
+
+// waitForCacheSyncFn resolves the sync check: the test override when set, else
+// the real cache.
+func (d *defaultClusterBaseline) waitForCacheSyncFn() func(ctx context.Context) bool {
+	if d.waitForCacheSync != nil {
+		return d.waitForCacheSync
+	}
+	return d.Cache.WaitForCacheSync
 }
 
 // isPermanentDefaultCRError is true for auth/RBAC failures that will not clear

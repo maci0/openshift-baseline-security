@@ -103,6 +103,11 @@ type ClusterBaselineReconciler struct {
 	// lastDashboardErrLog rate-limits the best-effort dashboard reconcile Error
 	// (runs every cycle; a persistent RBAC denial must not stream Errors).
 	lastDashboardErrLog time.Time
+	// lastInfraErrLog rate-limits the Infrastructure topology read failure in
+	// infrastructureSingleReplica: on a persistent read error we silently assume
+	// HA (2 replicas + PDB), which is exactly what stalls an SNO drain, so the
+	// failure must surface (rate-limited) rather than vanish.
+	lastInfraErrLog time.Time
 }
 
 // +kubebuilder:rbac:groups=baselinesecurity.openshift.io,resources=clusterbaselines,verbs=get;list;watch;create;update;patch

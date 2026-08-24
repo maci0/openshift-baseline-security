@@ -175,6 +175,11 @@ const CompliancePage: React.FC = () => {
             : t('Failed to rescan {{formattedCount}} of {{formattedTotal}} scans. Check permissions and try again.', counts),
         );
       }
+    } catch (e) {
+      // allSettled covers per-scan rejections; this catches a synchronous throw
+      // while building the patch calls, which must not become an unhandled
+      // rejection with no banner (finally alone would only reset the spinner).
+      setRescanError(errorMessage(e) ?? t('Failed to start rescan.'));
     } finally {
       rescanningRef.current = false;
       setRescanning(false);

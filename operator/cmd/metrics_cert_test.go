@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/tls"
+	"errors"
 	"net"
 	"os"
 	"path/filepath"
@@ -97,6 +98,47 @@ func TestMetricsCertProviderKeepsLastGoodPairWhenFilesDisappear(t *testing.T) {
 	got, err := p.GetCertificate(nil)
 	if err != nil || got != loaded {
 		t.Fatalf("missing projected file replaced last good cert: got=%p want=%p err=%v", got, loaded, err)
+	}
+}
+
+// A set-but-unreadable cert dir must mark the missing-files episode (logged once)
+// and clear it again once a valid pair is installed, so a later outage re-logs.
+func TestMetricsCertProviderMissingFilesEpisodeLifecycle(t *testing.T) {
+	dir := t.TempDir()
+	p := &metricsCertProvider{certDir: dir}
+
+	if _, err := p.GetCertificate(nil); err != nil {
+		t.Fatalf("empty dir fallback: %v", err)
+	}
+	p.mu.Lock()
+	logged := p.loggedMissing
+	p.mu.Unlock()
+	if !logged {
+		t.Fatal("unreadable files must mark the missing episode as logged")
+	}
+
+	writeTestPair(t, dir)
+	if _, err := p.GetCertificate(nil); err != nil {
+		t.Fatalf("load after projection: %v", err)
+	}
+	p.mu.Lock()
+	logged = p.loggedMissing
+	p.mu.Unlock()
+	if logged {
+		t.Fatal("successful install must close the missing episode so a later outage re-logs")
+	}
+
+	if err := os.Remove(filepath.Join(dir, "tls.key")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.GetCertificate(nil); err != nil {
+		t.Fatalf("call with half-missing pair: %v", err)
+	}
+	p.mu.Lock()
+	logged = p.loggedMissing
+	p.mu.Unlock()
+	if !logged {
+		t.Fatal("re-appearing unreadable files must open a new missing episode")
 	}
 }
 
@@ -263,15 +305,15 @@ func TestMetricsCertProviderRereadFailureKeepsCachedCert(t *testing.T) {
 	// New on-disk pair so the outer read is a cache miss and parse runs.
 	writeTestPair(t, dir)
 	var reads atomic.Int32
-	p.readPair = func(certPath, keyPath string) ([]byte, []byte, [32]byte, bool) {
+	p.readPair = func(certPath, keyPath string) ([]byte, []byte, [32]byte, error) {
 		n := reads.Add(1)
-		certPEM, keyPEM, fp, ok := readCertPair(certPath, keyPath)
+		certPEM, keyPEM, fp, err := readCertPair(certPath, keyPath)
 		if n == 1 {
 			// Outer read succeeds (new content).
-			return certPEM, keyPEM, fp, ok
+			return certPEM, keyPEM, fp, err
 		}
 		// Under-lock re-read fails (transient projection blip).
-		return nil, nil, [32]byte{}, false
+		return nil, nil, [32]byte{}, errors.New("injected re-read failure")
 	}
 	got, err := p.GetCertificate(nil)
 	if err != nil || got != seeded {
@@ -322,9 +364,9 @@ func TestMetricsCertProviderConcurrentReload(t *testing.T) {
 	if err != nil || got == nil {
 		t.Fatalf("final load: cert=%v err=%v", got, err)
 	}
-	_, _, wantFP, ok := readCertPair(filepath.Join(dir, "tls.crt"), filepath.Join(dir, "tls.key"))
-	if !ok {
-		t.Fatal("final on-disk pair missing")
+	_, _, wantFP, readErr := readCertPair(filepath.Join(dir, "tls.crt"), filepath.Join(dir, "tls.key"))
+	if readErr != nil {
+		t.Fatalf("final on-disk pair unreadable: %v", readErr)
 	}
 	p.mu.Lock()
 	cachedFP := p.fingerprint

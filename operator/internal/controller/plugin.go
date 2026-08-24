@@ -6,6 +6,7 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -134,16 +135,36 @@ func (r *ClusterBaselineReconciler) removeConsolePlugin(ctx context.Context, cb 
 // It fails safe to false (assume HA) on any read or parse error: a false negative
 // only keeps the 2-replica+PDB HA layout, which is correct on a real multi-node
 // cluster and merely suboptimal (never deadlocking) if we ever misread an SNO.
+// The failure itself is rate-limited-logged: a persistent RBAC denial on SNO
+// silently ships the HA+PDB layout this function exists to avoid, and without a
+// breadcrumb a stuck node drain has nothing to correlate against.
 func (r *ClusterBaselineReconciler) infrastructureSingleReplica(ctx context.Context) bool {
 	infra := u(infrastructureGVK)
 	if err := r.Get(ctx, types.NamespacedName{Name: clusterBaselineName}, infra); err != nil {
+		r.logInfraReadErr(ctx, err)
 		return false
 	}
 	topology, _, err := unstructured.NestedString(infra.Object, "status", "infrastructureTopology")
 	if err != nil {
+		r.logInfraReadErr(ctx, err)
 		return false
 	}
 	return topology == "SingleReplica"
+}
+
+// logInfraReadErr emits the Infrastructure read failure at Error level at most
+// once per historyStallLogInterval: the reconcile re-reads topology every cycle,
+// and a persistent denial must surface without streaming an unbounded Error log.
+func (r *ClusterBaselineReconciler) logInfraReadErr(ctx context.Context, err error) {
+	logger := log.FromContext(ctx)
+	if r.lastInfraErrLog.IsZero() || time.Since(r.lastInfraErrLog) >= historyStallLogInterval {
+		r.lastInfraErrLog = time.Now()
+		logger.Error(err, "cannot read cluster Infrastructure topology; assuming multi-node plugin layout",
+			"name", clusterBaselineName)
+		return
+	}
+	logger.V(1).Info("cluster Infrastructure topology read failed; assuming multi-node plugin layout",
+		"name", clusterBaselineName, "error", err)
 }
 
 func (r *ClusterBaselineReconciler) ensureConsolePlugin(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline) error {

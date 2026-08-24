@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/sha256"
 	"crypto/tls"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -32,18 +33,22 @@ type metricsCertProvider struct {
 	badFingerprint [sha256.Size]byte
 	loggedBad      bool
 
+	// loggedMissing marks the unreadable-files episode already logged so a
+	// never-projected Secret does not spam every TLS handshake either.
+	loggedMissing bool
+
 	// readPair overrides on-disk reads (tests only). Production leaves nil.
-	readPair func(certPath, keyPath string) ([]byte, []byte, [sha256.Size]byte, bool)
+	readPair func(certPath, keyPath string) ([]byte, []byte, [sha256.Size]byte, error)
 }
 
-func readCertPair(certPath, keyPath string) ([]byte, []byte, [sha256.Size]byte, bool) {
+func readCertPair(certPath, keyPath string) ([]byte, []byte, [sha256.Size]byte, error) {
 	certPEM, err := os.ReadFile(certPath)
 	if err != nil {
-		return nil, nil, [sha256.Size]byte{}, false
+		return nil, nil, [sha256.Size]byte{}, fmt.Errorf("read %s: %w", certPath, err)
 	}
 	keyPEM, err := os.ReadFile(keyPath)
 	if err != nil {
-		return nil, nil, [sha256.Size]byte{}, false
+		return nil, nil, [sha256.Size]byte{}, fmt.Errorf("read %s: %w", keyPath, err)
 	}
 	h := sha256.New()
 	_, _ = h.Write(certPEM)
@@ -51,10 +56,10 @@ func readCertPair(certPath, keyPath string) ([]byte, []byte, [sha256.Size]byte, 
 	_, _ = h.Write(keyPEM)
 	var fingerprint [sha256.Size]byte
 	copy(fingerprint[:], h.Sum(nil))
-	return certPEM, keyPEM, fingerprint, true
+	return certPEM, keyPEM, fingerprint, nil
 }
 
-func (p *metricsCertProvider) loadCertPair(certPath, keyPath string) ([]byte, []byte, [sha256.Size]byte, bool) {
+func (p *metricsCertProvider) loadCertPair(certPath, keyPath string) ([]byte, []byte, [sha256.Size]byte, error) {
 	if p.readPair != nil {
 		return p.readPair(certPath, keyPath)
 	}
@@ -68,17 +73,23 @@ func (p *metricsCertProvider) GetCertificate(_ *tls.ClientHelloInfo) (*tls.Certi
 		var (
 			certPEM, keyPEM []byte
 			fingerprint     [sha256.Size]byte
-			haveFiles       bool
+			readErr         error
 		)
 		if p.certDir != "" {
 			certPath := filepath.Join(p.certDir, "tls.crt")
 			keyPath := filepath.Join(p.certDir, "tls.key")
-			certPEM, keyPEM, fingerprint, haveFiles = p.loadCertPair(certPath, keyPath)
+			certPEM, keyPEM, fingerprint, readErr = p.loadCertPair(certPath, keyPath)
+			if readErr != nil {
+				// A set-but-unreadable dir (wrong mount, Secret never projected)
+				// otherwise falls back to self-signed with no breadcrumb while
+				// service-ca scrapers fail TLS trust. Log once per episode.
+				p.logMissingOnce(readErr)
+			}
 		}
 
 		// Cache hit: same on-disk content as last successful load.
 		p.mu.Lock()
-		if haveFiles && p.cert != nil && fingerprint == p.fingerprint {
+		if readErr == nil && p.cert != nil && fingerprint == p.fingerprint {
 			c := p.cert
 			p.mu.Unlock()
 			return c, nil
@@ -86,7 +97,7 @@ func (p *metricsCertProvider) GetCertificate(_ *tls.ClientHelloInfo) (*tls.Certi
 		p.mu.Unlock()
 
 		// Parse outside the lock: rare (startup / cert rotation) but can be slow.
-		if haveFiles {
+		if readErr == nil {
 			pair, err := tls.X509KeyPair(certPEM, keyPEM)
 			if err == nil {
 				p.mu.Lock()
@@ -104,11 +115,11 @@ func (p *metricsCertProvider) GetCertificate(_ *tls.ClientHelloInfo) (*tls.Certi
 				// flight, and overwriting it would leave the cache on rotated-out
 				// material until the next successful load.
 				if p.certDir != "" {
-					_, _, currentFP, ok := p.loadCertPair(
+					_, _, currentFP, rerr := p.loadCertPair(
 						filepath.Join(p.certDir, "tls.crt"),
 						filepath.Join(p.certDir, "tls.key"),
 					)
-					if !ok || currentFP != fingerprint {
+					if rerr != nil || currentFP != fingerprint {
 						if p.cert != nil {
 							// Cache holds something else (often the concurrent winner),
 							// or disk is briefly unreadable: keep last known-good.
@@ -116,7 +127,7 @@ func (p *metricsCertProvider) GetCertificate(_ *tls.ClientHelloInfo) (*tls.Certi
 							p.mu.Unlock()
 							return c, nil
 						}
-						if ok {
+						if rerr == nil {
 							// Empty cache and disk moved: re-read/parse once.
 							p.mu.Unlock()
 							continue
@@ -127,8 +138,10 @@ func (p *metricsCertProvider) GetCertificate(_ *tls.ClientHelloInfo) (*tls.Certi
 				}
 				p.cert = &pair
 				p.fingerprint = fingerprint
-				// Clear sticky bad log so a later rotation of the same path re-logs.
+				// Clear sticky bad/missing logs so a later rotation of the same
+				// path re-logs.
 				p.loggedBad = false
+				p.loggedMissing = false
 				c := p.cert
 				p.mu.Unlock()
 				return c, nil
@@ -180,6 +193,22 @@ func (p *metricsCertProvider) GetCertificate(_ *tls.ClientHelloInfo) (*tls.Certi
 	}
 	p.selfSigned = &pair
 	return p.selfSigned, nil
+}
+
+// logMissingOnce logs unreadable cert files once per episode: until a pair is
+// successfully installed again, repeated handshakes stay quiet while the first
+// failure keeps its cause for whoever correlates scraper TLS errors.
+func (p *metricsCertProvider) logMissingOnce(readErr error) {
+	p.mu.Lock()
+	if p.loggedMissing {
+		p.mu.Unlock()
+		return
+	}
+	p.loggedMissing = true
+	p.mu.Unlock()
+	ctrl.Log.WithName("metrics-cert").Error(readErr,
+		"metrics TLS cert/key files unreadable; using previous or self-signed",
+		"certDir", p.certDir)
 }
 
 func metricsTLSOpts(certDir string) []func(*tls.Config) {

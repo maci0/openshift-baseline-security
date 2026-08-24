@@ -49,6 +49,8 @@
   "Review by (optional)": "Review by (optional)",
   "Failed to load compliance data.": "Failed to load compliance data.",
   "Failed to load remediations.": "Failed to load remediations.",
+  "Failed to load the profile catalog.": "Failed to load the profile catalog.",
+  "Failed to start rescan.": "Failed to start rescan.",
   "Baseline not configured": "Baseline not configured",
   "No ClusterBaseline resource found. Install the baseline-security operator from OperatorHub to start scanning.": "No ClusterBaseline resource found. Install the baseline-security operator from OperatorHub to start scanning.",
   "Status": "Status",

@@ -273,14 +273,16 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
   const [enableExpanded, setEnableExpanded] = React.useState(false);
 
   // Compliance Operator Profiles: the base-profile options and their rule lists.
-  const [profiles] = useK8sWatchResource<ComplianceProfile[]>({
+  const [profiles, , profilesError] = useK8sWatchResource<ComplianceProfile[]>({
     groupVersionKind: ProfileGVK,
     isList: true,
     namespaced: true,
     namespace: COMPLIANCE_NAMESPACE,
   });
   // Base-profile names, sorted, deduped. Fallback to ocp4-cis so the form is
-  // usable before the watch resolves (or if Profiles are not readable).
+  // usable before the watch resolves (or if Profiles are not readable); a read
+  // failure itself is surfaced via catalogWatchError instead of shrinking the
+  // catalog silently.
   const baseProfileNames = React.useMemo(() => {
     const names = (Array.isArray(profiles) ? profiles : [])
       .map((p) => p?.metadata?.name)
@@ -300,7 +302,7 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
 
   // Full Rule catalog: candidates for enableRules are the rules NOT already in
   // the base profile (those are active anyway). Large list; typeahead-filtered.
-  const [allRules] = useK8sWatchResource<ComplianceRule[]>({
+  const [allRules, , rulesError] = useK8sWatchResource<ComplianceRule[]>({
     groupVersionKind: RuleGVK,
     isList: true,
     namespaced: true,
@@ -313,6 +315,12 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
       .filter((n): n is string => isString(n) && n.length > 0 && !inBase.has(n));
     return [...new Set(names)].sort();
   }, [allRules, baseRules]);
+  // A failed catalog watch (RBAC denial, CRD absent) must not masquerade as an
+  // empty/one-profile catalog: surface it like every other tab's watch error,
+  // so an admin does not author a tailored profile against a silently shrunk
+  // option set.
+  const catalogWatchError =
+    errorMessage(profilesError) ?? errorMessage(rulesError);
   // Effective rule set the tailored profile scans: base minus disabled plus
   // enabled. tpDisable is always a subset of baseRules (reset on base change).
   const effectiveCount = baseRules.length - tpDisable.length + tpEnable.length;
@@ -691,6 +699,17 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
           ref on it is dropped. restoreFocus targets this sentinel when a modal
           trigger unmounts on success, recovering focus to the tab top. */}
       <div ref={regionRef} tabIndex={-1} />
+      {catalogWatchError && (
+        <Alert
+          variant="danger"
+          isInline
+          isLiveRegion
+          title={t('Failed to load the profile catalog.')}
+          style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}
+        >
+          {catalogWatchError}
+        </Alert>
+      )}
       {/* Hide page-top error while a modal owns the same message. */}
       {error && !unbinding && !disablingLast && !creating && (
         <Alert
