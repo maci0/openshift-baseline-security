@@ -1,6 +1,7 @@
 version: "2"
 linters:
   enable:
+    - nolintlint
     - misspell
     - unconvert
     - unparam
@@ -12,6 +13,10 @@ linters:
   settings:
     staticcheck:
       checks: ["all", "-ST1000"]
+    nolintlint:
+      # Every suppression must name its rule and say why; unused directives fail.
+      require-explanation: true
+      require-specific: true
 formatters:
   enable:
     - gofmt

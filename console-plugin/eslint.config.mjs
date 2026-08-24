@@ -2,6 +2,8 @@ import tseslint from 'typescript-eslint';
 import reactHooks from 'eslint-plugin-react-hooks';
 
 export default tseslint.config(
+  // A disable that silences nothing hides future regressions; fail on it.
+  { linterOptions: { reportUnusedDisableDirectives: 'error' } },
   { ignores: ['dist/', 'node_modules/', 'coverage/', '.yarn/', 'test-results/', 'playwright-report/'] },
   ...tseslint.configs.recommended,
   {
