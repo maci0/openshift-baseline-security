@@ -34,28 +34,33 @@ const parseLocalDateOnly = (value: string): Date | null => {
   return d;
 };
 
+// End of the local calendar day for a date-only value (the last instant that
+// day is still active), or null when unparseable/invalid. Shared by the ISO
+// writer (dateInputEndOfDayIso) and the ms reader (expiresAtMs) so a stored
+// expiry and its comparison can never disagree about the day boundary.
+const endOfLocalDay = (value: string): Date | null => {
+  const d = parseLocalDateOnly(value);
+  if (!d) return null;
+  d.setHours(23, 59, 59, 999);
+  return d;
+};
+
 // A date-only deadline remains active through the selected local calendar day.
 // Parsing YYYY-MM-DD directly as a Date means UTC midnight, which can expire it
 // before that day starts locally and display as the previous day in some zones.
-export const dateInputEndOfDayIso = (value: string): string | undefined => {
-  const d = parseLocalDateOnly(value);
-  if (!d) return undefined;
-  d.setHours(23, 59, 59, 999);
-  return d.toISOString();
-};
+export const dateInputEndOfDayIso = (value: string): string | undefined =>
+  endOfLocalDay(value)?.toISOString();
 
 // Epoch ms for a waiver expiresAt string. A date-only YYYY-MM-DD is treated as
-// end of that local calendar day (matching dateInputEndOfDayIso, the value the
-// picker writes), so a hand-edited date-only expiry agrees with how it displays
-// via formatLocalDate instead of expiring at UTC midnight (up to ~24h early for
-// UTC+ users). Returns NaN when unparseable, so callers' Number.isNaN guards hold.
+// end of that local calendar day (same instant dateInputEndOfDayIso writes), so
+// a hand-edited date-only expiry agrees with how it displays via formatLocalDate
+// instead of expiring at UTC midnight (up to ~24h early for UTC+ users).
+// Returns NaN when unparseable, so callers' Number.isNaN guards hold.
 export const expiresAtMs = (iso: string): number => {
-  if (localDateOnlyRe.test(iso)) {
-    const d = parseLocalDateOnly(iso);
-    if (!d) return NaN;
-    d.setHours(23, 59, 59, 999);
-    return d.getTime();
-  }
+  const d = endOfLocalDay(iso);
+  if (d) return d.getTime();
+  // Date-only shape but not a real calendar day (e.g. 2026-02-31): fail closed.
+  if (localDateOnlyRe.test(iso)) return NaN;
   return new Date(iso).getTime();
 };
 

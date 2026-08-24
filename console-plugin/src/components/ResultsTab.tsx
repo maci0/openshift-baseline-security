@@ -82,7 +82,7 @@ import {
 import BaselineNotConfigured from './BaselineNotConfigured';
 import { withDisabledTip } from './DisabledTip';
 import { restoreFocus } from './focus';
-import { SUCCESS_DISMISS_MS } from './feedback';
+import { useAutoDismiss } from './feedback';
 import { useWaiverExpiryClock } from './useWaiverExpiryClock';
 
 const statusLabel: Record<
@@ -178,11 +178,7 @@ const ResultsTab: React.FC<{
   // Success feedback after the detail modal closes so waive/unwaive is not a silent no-op.
   const [waiveSuccess, setWaiveSuccess] = React.useState<string | null>(null);
   // Auto-dismiss success so the banner does not stick after the user moves on.
-  React.useEffect(() => {
-    if (!waiveSuccess) return;
-    const id = window.setTimeout(() => setWaiveSuccess(null), SUCCESS_DISMISS_MS);
-    return () => window.clearTimeout(id);
-  }, [waiveSuccess]);
+  useAutoDismiss(waiveSuccess, false, () => setWaiveSuccess(null));
   const [canWaive, canWaiveLoading] = useAccessReview({
     group: 'baselinesecurity.openshift.io',
     resource: 'clusterbaselines',

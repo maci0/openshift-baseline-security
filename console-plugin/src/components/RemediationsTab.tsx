@@ -67,7 +67,7 @@ import {
 import BaselineNotConfigured from './BaselineNotConfigured';
 import { regionFocusProps, withDisabledTip } from './DisabledTip';
 import { restoreFocus } from './focus';
-import { SUCCESS_DISMISS_MS } from './feedback';
+import { useAutoDismiss } from './feedback';
 
 // Stable empty list when the suite-scoped watch is inactive.
 const EMPTY_REMEDIATIONS: ComplianceRemediation[] = [];
@@ -161,11 +161,7 @@ const RemediationsTab: React.FC<{
   // Success feedback after modal close so apply/unapply/batch is not a silent no-op.
   const [success, setSuccess] = React.useState<string | null>(null);
   // Auto-dismiss success so the banner does not stick after the user moves on.
-  React.useEffect(() => {
-    if (!success) return;
-    const id = window.setTimeout(() => setSuccess(null), SUCCESS_DISMISS_MS);
-    return () => window.clearTimeout(id);
-  }, [success]);
+  useAutoDismiss(success, false, () => setSuccess(null));
   const [canApply, canApplyLoading] = useAccessReview({
     group: 'compliance.openshift.io',
     resource: 'complianceremediations',

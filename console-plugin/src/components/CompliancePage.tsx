@@ -34,7 +34,7 @@ import { errorMessage } from '../errors';
 import { rescanPatch } from '../patches';
 import { buildReportHtml } from '../report';
 import { withDisabledTip } from './DisabledTip';
-import { SUCCESS_DISMISS_MS } from './feedback';
+import { useAutoDismiss } from './feedback';
 import {
   BaselineContext,
   OverviewRoute,
@@ -111,16 +111,8 @@ const CompliancePage: React.FC = () => {
     variant: 'info' | 'danger';
   } | null>(null);
   // Auto-dismiss non-error banners so rescan/export feedback does not stick.
-  React.useEffect(() => {
-    if (!rescanStarted || rescanError) return;
-    const id = window.setTimeout(() => setRescanStarted(false), SUCCESS_DISMISS_MS);
-    return () => window.clearTimeout(id);
-  }, [rescanStarted, rescanError]);
-  React.useEffect(() => {
-    if (!exportNotice || exportNotice.variant === 'danger') return;
-    const id = window.setTimeout(() => setExportNotice(null), SUCCESS_DISMISS_MS);
-    return () => window.clearTimeout(id);
-  }, [exportNotice]);
+  useAutoDismiss(rescanStarted, !!rescanError, () => setRescanStarted(false));
+  useAutoDismiss(exportNotice, exportNotice?.variant === 'danger', () => setExportNotice(null));
   const [canRescan, canRescanLoading] = useAccessReview({
     group: 'compliance.openshift.io',
     resource: 'compliancescans',

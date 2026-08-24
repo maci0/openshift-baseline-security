@@ -49,7 +49,8 @@ func (r *ClusterBaselineReconciler) openRemediationBatch(
 	}
 	// Match finish/skip clears on the evaluated request so a concurrent
 	// console resubmit (different CSV) is preserved, not silently deleted.
-	requested := batchRemediationNames(names)
+	// Alias before list is narrowed to the surviving set below.
+	requested := list
 	// Untrusted annotation: refuse before any MCP pause / remediation apply.
 	// Clear the one-shot request (like too-many-pools) so a hostile or
 	// console-buggy value cannot sticky-Degrade every reconcile forever.

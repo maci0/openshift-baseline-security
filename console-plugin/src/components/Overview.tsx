@@ -73,7 +73,7 @@ import {
 } from '../waivers';
 import BaselineNotConfigured from './BaselineNotConfigured';
 import { regionFocusProps } from './DisabledTip';
-import { SUCCESS_DISMISS_MS } from './feedback';
+import { useAutoDismiss } from './feedback';
 import { useWaiverExpiryClock } from './useWaiverExpiryClock';
 
 // Stable empty list so optional status arrays do not allocate each render.
@@ -108,11 +108,7 @@ const ScheduleEditor: React.FC<{ baseline: ClusterBaseline }> = ({ baseline }) =
   // Track edit sessions so Cancel/Save can restore focus to Edit (WCAG 2.4.3).
   const wasEditing = React.useRef(false);
   // Auto-clear "Schedule updated" so success feedback matches other tabs.
-  React.useEffect(() => {
-    if (!saved) return;
-    const id = window.setTimeout(() => setSaved(false), SUCCESS_DISMISS_MS);
-    return () => window.clearTimeout(id);
-  }, [saved]);
+  useAutoDismiss(saved, false, () => setSaved(false));
   const [canEdit, canEditLoading] = useAccessReview({
     group: 'baselinesecurity.openshift.io',
     resource: 'clusterbaselines',

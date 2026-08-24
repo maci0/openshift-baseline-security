@@ -79,7 +79,7 @@ import {
 import BaselineNotConfigured from './BaselineNotConfigured';
 import { withDisabledTip } from './DisabledTip';
 import { restoreFocus } from './focus';
-import { SUCCESS_DISMISS_MS } from './feedback';
+import { useAutoDismiss } from './feedback';
 
 // Typeahead multi-select over a (possibly large) rule catalog: type to filter,
 // pick from a checkbox dropdown, selections show as removable chips inline.
@@ -381,11 +381,7 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
   }, [anyConfirmModalOpen]);
 
   // Auto-dismiss success so enable/disable/create feedback does not stick forever.
-  React.useEffect(() => {
-    if (!success) return;
-    const id = window.setTimeout(() => setSuccess(null), SUCCESS_DISMISS_MS);
-    return () => window.clearTimeout(id);
-  }, [success]);
+  useAutoDismiss(success, false, () => setSuccess(null));
 
   const createTailored = async () => {
     const name = tpName.trim();
