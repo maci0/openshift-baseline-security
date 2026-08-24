@@ -1257,6 +1257,102 @@ func TestFindComplianceOperatorCSVRemoteSucceededBeatsLocalFailed(t *testing.T) 
 	}
 }
 
+// TestFindComplianceOperatorCSVListErrorPaths: CSV listing sits on the
+// install/adopt decision path, so a swallowed List error would silently make
+// detection report "no CO installed" and re-drive installation. Transient
+// errors must propagate wrapped; a NoMatch on the cluster-wide list (CSV CRD
+// gone mid-reconcile) must fall back to the non-Succeeded local candidates
+// already in hand rather than inventing an empty cluster.
+func TestFindComplianceOperatorCSVListErrorPaths(t *testing.T) {
+	inComplianceNS := func(opts []client.ListOption) bool {
+		for _, o := range opts {
+			if ns, ok := o.(client.InNamespace); ok && string(ns) == complianceNamespace {
+				return true
+			}
+		}
+		return false
+	}
+
+	t.Run("transient namespaced list error propagates", func(t *testing.T) {
+		scheme := testScheme(t)
+		r := &ClusterBaselineReconciler{
+			Client: fake.NewClientBuilder().WithScheme(scheme).
+				WithInterceptorFuncs(interceptor.Funcs{
+					List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+						if gvk := list.GetObjectKind().GroupVersionKind(); gvk.Kind == csvGVK.Kind+"List" && inComplianceNS(opts) {
+							return apierrors.NewServiceUnavailable("apiserver blip")
+						}
+						return c.List(ctx, list, opts...)
+					},
+				}).Build(),
+			Scheme: scheme,
+		}
+		_, err := r.findComplianceOperatorCSV(context.Background())
+		if err == nil {
+			t.Fatal("namespaced CSV list error must propagate")
+		}
+		if got := err.Error(); !strings.Contains(got, "listing CSVs in "+complianceNamespace) {
+			t.Fatalf("wrap = %q, want namespaced-list context", got)
+		}
+	})
+
+	t.Run("transient cluster-wide list error propagates", func(t *testing.T) {
+		scheme := testScheme(t)
+		r := &ClusterBaselineReconciler{
+			Client: fake.NewClientBuilder().WithScheme(scheme).
+				WithInterceptorFuncs(interceptor.Funcs{
+					List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+						if gvk := list.GetObjectKind().GroupVersionKind(); gvk.Kind == csvGVK.Kind+"List" && !inComplianceNS(opts) {
+							return apierrors.NewForbidden(
+								schema.GroupResource{Group: csvGVK.Group, Resource: "clusterserviceversions"},
+								"", nil)
+						}
+						return c.List(ctx, list, opts...)
+					},
+				}).Build(),
+			Scheme: scheme,
+		}
+		_, err := r.findComplianceOperatorCSV(context.Background())
+		if err == nil {
+			t.Fatal("cluster-wide CSV list error must propagate once no local Succeeded candidate exists")
+		}
+		if got := err.Error(); !strings.Contains(got, "listing CSVs cluster-wide") {
+			t.Fatalf("wrap = %q, want cluster-wide-list context", got)
+		}
+	})
+
+	t.Run("cluster-wide NoMatch falls back to local non-Succeeded", func(t *testing.T) {
+		scheme := testScheme(t)
+		localInstalling := u(csvGVK)
+		localInstalling.SetName("compliance-operator.v1.10.0")
+		localInstalling.SetNamespace(complianceNamespace)
+		_ = unstructured.SetNestedField(localInstalling.Object, "Installing", "status", "phase")
+		noMatch := &meta.NoKindMatchError{
+			GroupKind: schema.GroupKind{Group: csvGVK.Group, Kind: csvGVK.Kind},
+		}
+		r := &ClusterBaselineReconciler{
+			Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(localInstalling).
+				WithInterceptorFuncs(interceptor.Funcs{
+					List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+						if gvk := list.GetObjectKind().GroupVersionKind(); gvk.Kind == csvGVK.Kind+"List" && !inComplianceNS(opts) {
+							return noMatch
+						}
+						return c.List(ctx, list, opts...)
+					},
+				}).Build(),
+			Scheme: scheme,
+		}
+		got, err := r.findComplianceOperatorCSV(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got == nil || got.GetName() != "compliance-operator.v1.10.0" || got.GetNamespace() != complianceNamespace {
+			t.Fatalf("fallback CSV = %v/%v, want %s/compliance-operator.v1.10.0",
+				got.GetNamespace(), got.GetName(), complianceNamespace)
+		}
+	})
+}
+
 func TestCompareComplianceCSVVersion(t *testing.T) {
 	cases := []struct {
 		a    string
@@ -1282,6 +1378,108 @@ func TestCompareComplianceCSVVersion(t *testing.T) {
 			t.Fatalf("compareComplianceCSVVersion(%q, %q) = %d, want 0", tc.a, tc.b, got)
 		}
 	}
+}
+
+// TestSyncComplianceSubscriptionSourceNoopAndConflict: the sync path must not
+// touch an already-matched Subscription (an unconditional Update would bump
+// resourceVersion every reconcile and fight OLM), must survive a single OLM
+// conflict by retrying, and must surface a permanent Update failure so the
+// reconcile Degrades instead of silently leaving catalog drift (a Subscription
+// pinned to a nonexistent source can never install).
+func TestSyncComplianceSubscriptionSourceNoopAndConflict(t *testing.T) {
+	const (
+		desired = "community-operators"
+		current = "redhat-operators"
+	)
+	sub := func(source string) *unstructured.Unstructured {
+		s := u(subscriptionGVK)
+		s.SetName("compliance-operator")
+		s.SetNamespace(complianceNamespace)
+		s.Object["spec"] = map[string]any{"source": source}
+		return s
+	}
+	cb := newCB("cis")
+	cb.Spec.ComplianceCatalogSource = desired // explicit non-default: resolve is confident, no API calls
+
+	t.Run("already matched is a strict no-op", func(t *testing.T) {
+		scheme := testScheme(t)
+		updates := 0
+		r := &ClusterBaselineReconciler{
+			Client: fake.NewClientBuilder().WithScheme(scheme).
+				WithInterceptorFuncs(interceptor.Funcs{
+					Update: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.UpdateOption) error {
+						updates++
+						return c.Update(ctx, obj, opts...)
+					},
+				}).Build(),
+			Scheme: scheme,
+		}
+		if err := r.syncComplianceSubscriptionSource(context.Background(), cb, sub(desired)); err != nil {
+			t.Fatal(err)
+		}
+		if updates != 0 {
+			t.Fatalf("matched Subscription updated %d times, want 0", updates)
+		}
+	})
+
+	t.Run("single conflict retries and lands the desired source", func(t *testing.T) {
+		scheme := testScheme(t)
+		attempts := 0
+		r := &ClusterBaselineReconciler{
+			Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(sub(current)).
+				WithInterceptorFuncs(interceptor.Funcs{
+					Update: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.UpdateOption) error {
+						attempts++
+						if attempts == 1 {
+							return apierrors.NewConflict(
+								schema.GroupResource{Group: subscriptionGVK.Group, Resource: "subscriptions"},
+								"compliance-operator", errors.New("OLM raced the update"))
+						}
+						return c.Update(ctx, obj, opts...)
+					},
+				}).Build(),
+			Scheme: scheme,
+		}
+		if err := r.syncComplianceSubscriptionSource(context.Background(), cb, sub(current)); err != nil {
+			t.Fatal(err)
+		}
+		if attempts < 2 {
+			t.Fatalf("update attempts = %d, want >=2 (conflict must be retried)", attempts)
+		}
+		got := u(subscriptionGVK)
+		if err := r.Get(context.Background(), types.NamespacedName{
+			Namespace: complianceNamespace, Name: "compliance-operator",
+		}, got); err != nil {
+			t.Fatal(err)
+		}
+		if source, _, _ := unstructured.NestedString(got.Object, "spec", "source"); source != desired {
+			t.Fatalf("source after conflict retry = %q, want %q", source, desired)
+		}
+	})
+
+	t.Run("permanent update failure propagates", func(t *testing.T) {
+		scheme := testScheme(t)
+		deny := apierrors.NewForbidden(
+			schema.GroupResource{Group: subscriptionGVK.Group, Resource: "subscriptions"},
+			"compliance-operator", nil,
+		)
+		r := &ClusterBaselineReconciler{
+			Client: fake.NewClientBuilder().WithScheme(scheme).
+				WithInterceptorFuncs(interceptor.Funcs{
+					Update: func(context.Context, client.WithWatch, client.Object, ...client.UpdateOption) error {
+						return deny
+					},
+				}).Build(),
+			Scheme: scheme,
+		}
+		err := r.syncComplianceSubscriptionSource(context.Background(), cb, sub(current))
+		if err == nil {
+			t.Fatal("permanent Update failure must propagate, not leave silent catalog drift")
+		}
+		if got := err.Error(); !strings.Contains(got, "updating compliance-operator Subscription catalog source") {
+			t.Fatalf("wrap = %q, want catalog-source update context", got)
+		}
+	})
 }
 
 func TestFindComplianceOperatorCSVPrefersReleaseOverPrerelease(t *testing.T) {
