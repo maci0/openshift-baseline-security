@@ -1,5 +1,5 @@
 import { checkResultHref, resultsHref } from './links';
-import { fuzzRand, randomString } from './testing/fuzz';
+import { randomString } from './testing/fuzz';
 
 describe('resultsHref', () => {
   it('builds a filtered results path', () => {

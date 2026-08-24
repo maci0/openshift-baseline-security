@@ -1,5 +1,11 @@
 import { ClusterBaseline, ComplianceCheckResult, ResultCounts } from './models';
 import { HISTORY_SCORING_MODE_ANN, aggregateCounts, checkSeverity, clusterScore, effectiveScoringMode, flatProfileScore, historyScoringModeMismatch, profileScore, scoreColor, scoreLabelColor, severityWeight } from './scoring';
+import { isFiniteNumber } from './parse';
+
+// Runtime pins for fuzz sweeps: totals must be real numbers and mode checks
+// real booleans whatever garbage the persisted CR carries.
+const isNum = (v: unknown): v is number => typeof v === 'number';
+const isBool = (v: unknown): v is boolean => typeof v === 'boolean';
 import { fuzzRand, randomString } from './testing/fuzz';
 
 describe('scoreColor', () => {
@@ -14,7 +20,7 @@ describe('scoreColor', () => {
     // NaN must not fall through Math comparisons as a false success color.
     [Number.NaN, 'danger'],
   ])('score %p -> %s', (score, status) => {
-    expect(scoreColor(score as number | undefined)).toContain(`status--${status}`);
+    expect(scoreColor(score)).toContain(`status--${status}`);
   });
   it('fuzz: always a CSS var token', () => {
     for (let i = 0; i < 500; i++) {
@@ -22,7 +28,7 @@ describe('scoreColor', () => {
         i === 0 ? undefined : i === 1 ? Number.NaN : Math.floor(fuzzRand() * 200) - 50;
       const color = scoreColor(s);
       expect(color.startsWith('var(--pf-t--')).toBeTruthy();
-      if (s === undefined || Number.isNaN(s) || (typeof s === 'number' && s < 60)) {
+      if (s === undefined || Number.isNaN(s) || s < 60) {
         expect(color).toContain('status--danger');
       }
     }
@@ -79,7 +85,7 @@ describe('effectiveScoringMode / historyScoringModeMismatch', () => {
         },
       };
       const mismatch = historyScoringModeMismatch(baseline);
-      expect(typeof mismatch).toBe('boolean');
+      expect(isBool(mismatch)).toBeTruthy();
       if (!stamp) {
         expect(mismatch).toBeFalsy();
       }
@@ -131,18 +137,17 @@ describe('severityWeight / profileScore', () => {
   const check = (
     name: string,
     suite: string,
-    status: string,
+    status: ComplianceCheckResult['status'],
     severity: string,
-  ): ComplianceCheckResult =>
-    ({
-      metadata: {
-        name,
-        namespace: 'openshift-compliance',
-        labels: { 'compliance.openshift.io/suite': suite },
-      },
-      status,
-      severity,
-    }) as ComplianceCheckResult;
+  ): ComplianceCheckResult => ({
+    metadata: {
+      name,
+      namespace: 'openshift-compliance',
+      labels: { 'compliance.openshift.io/suite': suite },
+    },
+    status,
+    severity,
+  });
 
   it('matches the operator weight table', () => {
     expect(severityWeight('high')).toBe(10);
@@ -175,7 +180,7 @@ describe('severityWeight / profileScore', () => {
     expect(checkSeverity({ severity: '', metadata: { labels: {} } })).toBe('unknown');
   });
   it('profileScore SeverityWeighted uses label severity when field is absent', () => {
-    const results = [
+    const results: ComplianceCheckResult[] = [
       {
         metadata: {
           name: 'p1',
@@ -198,7 +203,7 @@ describe('severityWeight / profileScore', () => {
         },
         status: 'FAIL',
       },
-    ] as ComplianceCheckResult[];
+    ];
     // high PASS (10) + low FAIL (2) => 83; weight-1 defaults would yield 50.
     expect(
       profileScore(
@@ -272,9 +277,14 @@ describe('severityWeight / profileScore', () => {
       expect(got).toBeLessThanOrEqual(100);
       const p = pass ?? 0;
       const f = fail ?? 0;
-      if (Number.isFinite(p) && Number.isFinite(f) && p >= 0 && f >= 0 && p + f > 0) {
-        expect(got).toBe(Math.floor((p * 100) / (p + f)));
-      }
+      // Oracle matches operator score(): floor(pass*100/(pass+fail)) for
+      // non-negative finite mass; anything else stays unasserted beyond the
+      // null/range checks above.
+      const oracle =
+        Number.isFinite(p) && Number.isFinite(f) && p >= 0 && f >= 0 && p + f > 0
+          ? Math.floor((p * 100) / (p + f))
+          : got;
+      expect(got).toBe(oracle);
     }
   });
   it('profileScore uses flat counts by default', () => {

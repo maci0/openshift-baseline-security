@@ -10,7 +10,12 @@ import {
 import { addWaiverPatch, removeWaiverPatch } from './patches';
 import { effectiveStatus, resultFilterStatus } from './status';
 import { resultsHref } from './links';
+import { isString } from './parse';
 import { Waiver } from './models';
+
+// Runtime pin for fuzz sweeps: the helpers must return real booleans (never
+// undefined/NaN) whatever garbage they meet.
+const isBool = (v: unknown): v is boolean => typeof v === 'boolean';
 import { fuzzRand, randomString } from './testing/fuzz';
 
 // waivers.ts decides which checks are excluded from the compliance score based
@@ -59,37 +64,50 @@ describe('waivers throw-safety and no-permanent-grant (fuzz sweep)', () => {
       expect(() => {
         expired = waiverExpired(w, NOW);
       }).not.toThrow();
-      expect(typeof expired).toBe('boolean');
+      expect(isBool(expired)).toBeTruthy();
 
       const parseable = !Number.isNaN(new Date(expiry).getTime());
       // A truthy-but-unparseable expiresAt must fold to expired => not waived, not
       // in the active set, not surfaced as expiring. A corrupt date grants nothing.
       // (A falsy expiresAt like '' means "no expiry set" = permanent, same as
       // undefined; that intentional branch is asserted separately below.)
+      let granted: string | undefined;
       if (expiry && !parseable) {
-        expect(expired).toBeTruthy();
-        expect(isWaived('check-1', [w], NOW)).toBeFalsy();
-        expect(activeWaivedNames([w], NOW).has('check-1')).toBeFalsy();
-        expect(expiringWaivers([w], 365 * 24 * 3600 * 1000, NOW)).toHaveLength(0);
+        if (!expired) {
+          granted = `corrupt expiry ${label} folded to expired=false`;
+        } else if (isWaived('check-1', [w], NOW)) {
+          granted = `corrupt expiry ${label} still waives`;
+        } else if (activeWaivedNames([w], NOW).has('check-1')) {
+          granted = `corrupt expiry ${label} still active`;
+        } else if (expiringWaivers([w], 365 * 24 * 3600 * 1000, NOW).length > 0) {
+          granted = `corrupt expiry ${label} surfaced as expiring`;
+        }
       }
+      expect(granted).toBeUndefined();
     });
   }
 
   it('activeWaivedNames and isWaived agree, and only future-dated waivers are active', () => {
     const waivers = HOSTILE_EXPIRY.map((e, i) => ({ name: `c-${i}`, expiresAt: e }));
     const active = activeWaivedNames(waivers, NOW);
+    let wrong: string | undefined;
     for (const w of waivers) {
-      expect(isWaived(w.name, waivers, NOW)).toBe(active.has(w.name));
-      if (active.has(w.name)) {
-        // Active => either no expiry set (falsy = permanent) OR a parseable date
-        // strictly in the future. A truthy-unparseable date is never active.
-        if (w.expiresAt) {
-          const t = new Date(w.expiresAt).getTime();
-          expect(Number.isNaN(t)).toBeFalsy();
-          expect(t).toBeGreaterThan(NOW.getTime());
+      if (isWaived(w.name, waivers, NOW) !== active.has(w.name)) {
+        wrong ??= `isWaived(${w.name}) disagrees with activeWaivedNames`;
+        continue;
+      }
+      // Active => either no expiry set (falsy = permanent) OR a parseable date
+      // strictly in the future. A truthy-unparseable date is never active.
+      if (active.has(w.name) && w.expiresAt) {
+        const t = new Date(w.expiresAt).getTime();
+        if (Number.isNaN(t)) {
+          wrong ??= `active ${w.name} has an unparseable date`;
+        } else if (t <= NOW.getTime()) {
+          wrong ??= `active ${w.name} is not strictly future-dated`;
         }
       }
     }
+    expect(wrong).toBeUndefined();
   });
 
   it('isWaived agrees with activeWaivedNames on duplicate names (any active entry wins)', () => {
@@ -326,22 +344,30 @@ describe('waivers', () => {
       };
       let got: string;
       expect(() => {
-        got = resultFilterStatus(r, waivers as never);
+        got = resultFilterStatus(r, waivers);
       }).not.toThrow();
-      expect(typeof got!).toBe('string');
-      if (status === 'SKIP') {
-        expect(got!).toBe('NOT-APPLICABLE');
-      } else if (status === '' || status === 'WAIVED') {
-        // Empty and raw-WAIVED statuses map to ERROR (operator tally parity:
-        // the operator fails a forged raw WAIVED closed the same way).
-        expect(got!).toBe('ERROR');
-      } else if (status !== 'INCONSISTENT' && status !== 'FAIL') {
-        expect(got!).toBe(status);
+      expect(isString(got!)).toBeTruthy();
+      // SKIP folds to NOT-APPLICABLE (Overview N/A deep-links); empty and
+      // raw-WAIVED statuses map to ERROR (operator tally parity: the operator
+      // fails a forged raw WAIVED closed the same way); every other known
+      // status passes through untouched.
+      const expected =
+        status === 'SKIP'
+          ? 'NOT-APPLICABLE'
+          : status === '' || status === 'WAIVED'
+            ? 'ERROR'
+            : status !== 'INCONSISTENT' && status !== 'FAIL'
+              ? status
+              : got!;
+      let wrong: string | undefined;
+      if (got !== expected) {
+        wrong = `status ${JSON.stringify(status)} rendered ${JSON.stringify(got)}`;
       }
-      if (got! === 'WAIVED') {
-        // Only FAIL+active waiver may produce WAIVED.
-        expect(effectiveStatus(r)).toBe('FAIL');
+      // Only FAIL+active waiver may produce WAIVED.
+      if (got === 'WAIVED' && effectiveStatus(r) !== 'FAIL') {
+        wrong ??= `WAIVED produced while effectiveStatus is ${effectiveStatus(r)}`;
       }
+      expect(wrong).toBeUndefined();
     }
   });
   it('resultsHref FAIL deep-link is distinct from WAIVED', () => {
@@ -524,17 +550,12 @@ describe('waivers', () => {
       const w = { name: 'chk', expiresAt };
       expect(() => waiverExpired(w, now)).not.toThrow();
       const expired = waiverExpired(w, now);
-      expect(typeof expired).toBe('boolean');
-      if (!expiresAt) {
-        expect(expired).toBeFalsy();
-        continue;
-      }
-      const t = new Date(expiresAt).getTime();
-      if (Number.isNaN(t)) {
-        expect(expired).toBeTruthy();
-      } else {
-        expect(expired).toBe(t <= now.getTime());
-      }
+      expect(isBool(expired)).toBeTruthy();
+      // Falsy expiresAt means "no expiry set" (permanent, never expired);
+      // unparseable text folds to expired; otherwise lockstep with t <= now.
+      const t = expiresAt ? new Date(expiresAt).getTime() : Number.NaN;
+      const expected = !expiresAt ? false : Number.isNaN(t) ? true : t <= now.getTime();
+      expect(expired).toBe(expected);
     }
   });
   it('findWaiver returns the entry regardless of expiry', () => {
@@ -590,6 +611,9 @@ describe('waivers', () => {
       expect(patch.length).toBeGreaterThan(0);
       expect(patch[0].op === 'add' || patch[0].op === 'test').toBeTruthy();
       const last = patch[patch.length - 1];
+      // SAFETY: PatchOp.value is untyped; addWaiverPatch emits the waiver entry
+      // itself (bare for append-at-"-", wrapped in a single-element array when
+      // creating /spec/waivers).
       const v = last.value as { name: string } | { name: string }[];
       const entry = Array.isArray(v) ? v[0] : v;
       expect(entry.name).toBe(name);
@@ -638,14 +662,15 @@ describe('waivers', () => {
         continue;
       }
       const last = patch![patch!.length - 1];
-      const v = last.value as { expiresAt?: string; reviewBy?: string };
-      const entry = Array.isArray(v) ? (v as { expiresAt?: string; reviewBy?: string }[])[0] : v;
-      if (entry.expiresAt) {
-        expect(entry.expiresAt).toMatch(rfc3339);
-      }
-      if (entry.reviewBy) {
-        expect(entry.reviewBy).toMatch(rfc3339);
-      }
+      // SAFETY: PatchOp.value is untyped; addWaiverPatch emits the entry (bare
+      // or single-element array) carrying only trimmed, non-empty fields.
+      const v = last.value as
+        | { expiresAt?: string; reviewBy?: string }
+        | { expiresAt?: string; reviewBy?: string }[];
+      const entry = Array.isArray(v) ? v[0] : v;
+      // Emitted times stay RFC3339-shaped (empty/unset optional fields are dropped).
+      expect(!entry.expiresAt || rfc3339.test(entry.expiresAt)).toBeTruthy();
+      expect(!entry.reviewBy || rfc3339.test(entry.reviewBy)).toBeTruthy();
     }
   });
 });

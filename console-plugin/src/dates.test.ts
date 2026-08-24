@@ -8,7 +8,8 @@ import {
   formatChartDate,
   localDateInputValue,
 } from './dates';
-import { fuzzRand, randomString } from './testing/fuzz';
+import { randomString } from './testing/fuzz';
+import { isString } from './parse';
 
 describe('expiresAtMs date-only branch', () => {
   it('treats a bare YYYY-MM-DD expiry as end of the LOCAL calendar day', () => {
@@ -119,11 +120,9 @@ describe('dates throw-safety (fuzz sweep)', () => {
       for (const fmt of [formatLocalDate, formatLocalDateTime]) {
         const out = fmt(s, 'en-US');
         expect(out).not.toContain('Invalid Date');
-        // parseLocalDateOnly / new Date rejection path returns the input verbatim.
-        if (out !== s) {
-          // Non-fallback path must have produced a non-empty localized string.
-          expect(out.length).toBeGreaterThan(0);
-        }
+        // parseLocalDateOnly / new Date rejection path returns the input
+        // verbatim; otherwise the localized output must be a non-empty string.
+        expect(out !== s || out.length > 0).toBe(true);
       }
     }
   });
@@ -241,9 +240,9 @@ describe('localDateInputValue', () => {
     expect(localDateInputValue(d)).toBe('2026-07-12');
     // Contrasting wrong pattern: UTC slice can disagree with local day.
     const utcSlice = d.toISOString().slice(0, 10);
-    if (utcSlice !== '2026-07-12') {
-      expect(localDateInputValue(d)).not.toBe(utcSlice);
-    }
+    // When the UTC day differs, the local-day value must not equal it; when
+    // both are the 12th the equality above already pins the local behavior.
+    expect(utcSlice !== '2026-07-12' || localDateInputValue(d) !== utcSlice).toBe(true);
   });
 });
 
@@ -277,7 +276,7 @@ describe('dateInputEndOfDayIso', () => {
               : `2026-07-${String((i % 28) + 1).padStart(2, '0')}`;
       const got = dateInputEndOfDayIso(value);
       if (got === undefined) continue;
-      expect(typeof got).toBe('string');
+      expect(isString(got)).toBeTruthy();
       const d = new Date(got);
       expect(Number.isNaN(d.getTime())).toBeFalsy();
       expect(d.getHours()).toBe(23);

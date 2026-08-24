@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { PROFILE_INFO } from './models';
+import { isString } from './parse';
 
 // Every t('…') source key used by the plugin must exist in the English locale
 // file (OpenShift console i18n uses English as both key and default value).
@@ -13,6 +14,13 @@ const LOCALE_FILE = path.join(
   'en',
   'plugin__baseline-security-console-plugin.json',
 );
+
+// SAFETY: the English locale JSON is checked into this repo and produced by
+// the console i18n pipeline; its documented schema is a flat object mapping
+// message keys to translation strings. The first test re-verifies the value
+// types at runtime, so the unchecked parse cannot hide a schema break.
+const readLocale = (): Record<string, string> =>
+  JSON.parse(fs.readFileSync(LOCALE_FILE, 'utf8')) as Record<string, string>;
 
 const PLURAL_SUFFIXES = ['_zero', '_one', '_two', '_few', '_many', '_other'] as const;
 
@@ -61,19 +69,18 @@ const collectTKeys = (srcRoot: string): string[] => {
 
 describe('i18n locale coverage', () => {
   it('locale file is valid JSON with string values', () => {
-    const raw = fs.readFileSync(LOCALE_FILE, 'utf8');
-    const locale = JSON.parse(raw) as Record<string, unknown>;
+    const locale = readLocale();
     expect(Object.keys(locale).length).toBeGreaterThan(0);
     for (const [k, v] of Object.entries(locale)) {
       // Object.entries keys are always strings; assert the property that can
       // actually regress: an empty key would silently break every lookup.
       expect(k.length).toBeGreaterThan(0);
-      expect(typeof v).toBe('string');
+      expect(isString(v)).toBeTruthy();
     }
   });
 
   it('every t() key exists in the English locale (or as a plural base)', () => {
-    const locale = JSON.parse(fs.readFileSync(LOCALE_FILE, 'utf8')) as Record<string, string>;
+    const locale = readLocale();
     const bases = localeBases(locale);
     const used = collectTKeys(path.join(__dirname));
     expect(used.length).toBeGreaterThan(0);
@@ -88,7 +95,7 @@ describe('i18n locale coverage', () => {
   // entries, so guard them here or new profiles silently render English-only in
   // every translated locale.
   it('every PROFILE_INFO title and description exists in the English locale', () => {
-    const locale = JSON.parse(fs.readFileSync(LOCALE_FILE, 'utf8')) as Record<string, string>;
+    const locale = readLocale();
     const missing = Object.values(PROFILE_INFO)
       .flatMap(({ title, description }) => [title, description])
       .filter((k) => !(k in locale))
@@ -100,7 +107,7 @@ describe('i18n locale coverage', () => {
   // ships _one breaks Arabic/Polish/Russian plurals silently. Require the
   // English source set to include both _one and _other for every plural base.
   it('every plural base has both _one and _other forms', () => {
-    const locale = JSON.parse(fs.readFileSync(LOCALE_FILE, 'utf8')) as Record<string, string>;
+    const locale = readLocale();
     const forms = new Map<string, Set<string>>();
     for (const key of Object.keys(locale)) {
       for (const suffix of PLURAL_SUFFIXES) {
@@ -128,7 +135,7 @@ describe('i18n locale coverage', () => {
   // literals) so count them as used; every other locale entry must appear as a
   // t() key or plural base.
   it('every locale key is referenced by t() or PROFILE_INFO (no orphans)', () => {
-    const locale = JSON.parse(fs.readFileSync(LOCALE_FILE, 'utf8')) as Record<string, string>;
+    const locale = readLocale();
     const used = new Set(collectTKeys(path.join(__dirname)));
     for (const { title, description } of Object.values(PROFILE_INFO)) {
       used.add(title);

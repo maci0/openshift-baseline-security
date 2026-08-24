@@ -1,5 +1,9 @@
 import { isValidCron } from './cron';
 
+// Local predicate: the sweep pins that isValidCron returns a strict boolean,
+// and typeof checks live only inside type predicates.
+const isBoolean = (v: unknown): v is boolean => typeof v === 'boolean';
+
 // cron.ts validates ClusterBaseline.spec.schedule, a free-text field a user
 // types (or a hand-edited CR carries) before the console patches it onto the CR.
 // isValidCron is the client-side gate against a string that would fail apiserver
@@ -118,15 +122,17 @@ describe('isValidCron throw-safety (fuzz sweep)', () => {
       expect(() => {
         out = isValidCron(s);
       }).not.toThrow();
-      expect(typeof out).toBe('boolean');
+      expect(isBoolean(out)).toBeTruthy();
     });
   }
 
   it('never accepts a string longer than the CRD MaxLength=128', () => {
-    for (const s of HOSTILE) {
-      if (s.trim().length > 128) {
-        expect(isValidCron(s)).toBeFalsy();
-      }
+    // Precompute the violating subset so the assertion below is unconditional;
+    // the corpus must keep at least one oversized entry for this to stay honest.
+    const oversized = HOSTILE.filter((s) => s.trim().length > 128);
+    expect(oversized.length).toBeGreaterThan(0);
+    for (const s of oversized) {
+      expect(isValidCron(s)).toBeFalsy();
     }
   });
 

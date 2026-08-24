@@ -1,5 +1,6 @@
 import { downloadBlob } from './download';
-import { fuzzRand, randomString } from './testing/fuzz';
+import { randomString } from './testing/fuzz';
+import { isString } from './parse';
 
 describe('downloadBlob', () => {
   type AnchorStub = {
@@ -11,12 +12,19 @@ describe('downloadBlob', () => {
     remove: jest.Mock;
   };
 
-  const installDom = (): {
-    anchor: AnchorStub;
-    createObjectURL: jest.Mock;
-    revokeObjectURL: jest.Mock;
-    restore: () => void;
-  } => {
+  // The slice of the browser globals downloadBlob touches, swapped in for each
+  // test and restored afterwards. Blob is only preserved, never invoked.
+  type StubbedGlobals = {
+    URL: { createObjectURL: (blob: Blob) => string; revokeObjectURL: (url: string) => void };
+    document: {
+      createElement: (tagName: string) => AnchorStub;
+      body: { appendChild: (child: AnchorStub) => void };
+    };
+    window: { setTimeout: (fn: () => void) => number };
+    Blob?: unknown;
+  };
+
+  const installDom = () => {
     const anchor: AnchorStub = {
       href: '',
       download: '',
@@ -27,7 +35,18 @@ describe('downloadBlob', () => {
     };
     const createObjectURL = jest.fn(() => 'blob:mock-url');
     const revokeObjectURL = jest.fn();
-    const g = globalThis as Record<string, unknown>;
+    // SAFETY: jest runs this file under node, so these browser globals are
+    // absent from globalThis or carry incompatible native node shapes; the
+    // test installs stubs matching StubbedGlobals and restores the originals.
+    const host = globalThis as {
+      URL?: unknown;
+      document?: unknown;
+      window?: unknown;
+      Blob?: unknown;
+    };
+    // SAFETY: host above only proves which keys may exist; every read and
+    // write inside this helper follows the concrete StubbedGlobals shapes.
+    const g = host as StubbedGlobals;
     const prev = {
       URL: g.URL,
       document: g.document,
@@ -41,7 +60,7 @@ describe('downloadBlob', () => {
     };
     // Run revoke callbacks inline so the test can assert without waiting.
     g.window = { setTimeout: (fn: () => void) => { fn(); return 0; } };
-    if (typeof g.Blob === 'undefined') {
+    if (g.Blob === undefined) {
       g.Blob = class {
         // Minimal Blob stand-in for node; production uses the real DOM Blob.
         constructor(public parts: unknown[]) {}
@@ -69,8 +88,8 @@ describe('downloadBlob', () => {
       expect(dom.anchor.download).not.toContain('..');
       // Defense in depth when a browser ignores the download attribute.
       expect(dom.anchor.rel).toBe('noopener noreferrer');
-      expect(dom.createObjectURL).toHaveBeenCalledTimes(1);
-      expect(dom.anchor.click).toHaveBeenCalledTimes(1);
+      expect(dom.createObjectURL).toHaveBeenCalledOnce();
+      expect(dom.anchor.click).toHaveBeenCalledOnce();
       expect(dom.revokeObjectURL).toHaveBeenCalledWith('blob:mock-url');
     } finally {
       dom.restore();
@@ -151,13 +170,13 @@ describe('downloadBlob', () => {
       try {
         expect(() => downloadBlob(new Blob(['x']), name)).not.toThrow();
         const d = dom.anchor.download;
-        expect(typeof d).toBe('string');
+        expect(isString(d)).toBeTruthy();
         expect(d.length).toBeGreaterThan(0);
         expect(d.length).toBeLessThanOrEqual(200);
         expect(d).not.toContain('/');
         expect(d).not.toContain('\\');
         expect(d).not.toContain('..');
-        expect(d).not.toMatch(/[\0-\x1f\x7f]/);
+        expect(d).not.toMatch(/\p{Cc}/u);
         expect(d).not.toMatch(/[\u200B-\u200D\u200E\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/);
         expect(dom.anchor.rel).toBe('noopener noreferrer');
         expect(dom.revokeObjectURL).toHaveBeenCalledWith('blob:mock-url');
