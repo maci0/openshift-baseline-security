@@ -11,7 +11,9 @@ export const SUCCESS_DISMISS_MS = 8000;
 // callers can pass an inline setState closure without re-arming the timer.
 export const useAutoDismiss = (active: unknown, blocked: boolean, dismiss: () => void): void => {
   const dismissRef = React.useRef(dismiss);
-  dismissRef.current = dismiss;
+  React.useEffect(() => {
+    dismissRef.current = dismiss;
+  }, [dismiss]);
   React.useEffect(() => {
     if (!active || blocked) return;
     const id = window.setTimeout(() => dismissRef.current(), SUCCESS_DISMISS_MS);
