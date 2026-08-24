@@ -88,7 +88,7 @@ Prefer small deterministic fixtures over ad hoc live-cluster assertions.
 | Controller pure logic | Go unit test | table-driven helpers in `operator/internal/controller/*_test.go` |
 | Kubernetes CRUD / owner refs / NoKindMatch | controller-runtime fake client with interceptors | use unstructured builders (`u`, `uList`, `checkResult`) and inject NoKindMatch via interceptors |
 | CRD admission/defaulting/CEL | envtest or API server dry-run | install generated CRD from `operator/config/crd/bases` before applying samples |
-| Console helper logic | Jest | keep untrusted strings and missing-field cases in `utils.test.ts` / `models.test.ts` |
+| Console helper logic | Jest | keep untrusted strings and missing-field cases in colocated `<module>.test.ts` files (e.g. `results.test.ts`, `models.test.ts`) |
 | Console component branches | Jest + Testing Library/jsdom, or Playwright when SDK hooks are hard to mock | assert disabled states, alert text, modal focus, and download side effects |
 | Real OLM / Console / Compliance Operator behavior | OpenShift e2e | record cluster topology (SNO, compact, multi-worker), OCP version, CO CSV version, and profile content image |
 | Prometheus rules | promtool | synthetic series for score sentinel, low score, fail counts, and HA duplicate pods |

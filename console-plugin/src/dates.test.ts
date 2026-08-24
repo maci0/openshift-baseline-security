@@ -6,7 +6,17 @@ import {
   formatLocalDateTime,
   formatCount,
   formatChartDate,
+  localDateInputValue,
 } from './dates';
+
+// Deterministic PRNG so fuzz loops are reproducible in CI (no Math.random).
+let fuzzSeed = 0x9e3779b9;
+const fuzzRand = (): number => {
+  fuzzSeed = (Math.imul(fuzzSeed, 1664525) + 1013904223) >>> 0;
+  return fuzzSeed / 0x100000000;
+};
+const randomString = (len: number): string =>
+  Array.from({ length: len }, () => String.fromCharCode(Math.floor(fuzzRand() * 0xffff))).join('');
 
 describe('expiresAtMs date-only branch', () => {
   it('treats a bare YYYY-MM-DD expiry as end of the LOCAL calendar day', () => {
@@ -145,5 +155,143 @@ describe('dates throw-safety (fuzz sweep)', () => {
       expect(formatChartDate(new Date(NaN), loc)).toBe('');
     }
     expect(formatChartDate(new Date(2026, 6, 12), 'en-US')).toMatch(/2026/);
+  });
+});
+describe('formatLocalDate / formatLocalDateTime', () => {
+  it('formats parseable ISO timestamps', () => {
+    const iso = '2026-07-11T12:00:00.000Z';
+    expect(formatLocalDate(iso, 'en-US')).toMatch(/2026/);
+    expect(formatLocalDateTime(iso, 'en-US')).toMatch(/2026/);
+  });
+  it('accepts underscore locale tags (en_US) as BCP 47', () => {
+    const iso = '2026-07-11T12:00:00.000Z';
+    // Underscore form must not throw or yield Invalid Date; match hyphen form year.
+    expect(formatLocalDate(iso, 'en_US')).toMatch(/2026/);
+    expect(formatLocalDateTime(iso, 'de_DE')).toMatch(/2026/);
+  });
+  it('treats YYYY-MM-DD as a local calendar day (not UTC midnight)', () => {
+    // `new Date('2026-07-12')` is UTC midnight; in US zones toLocaleDateString
+    // would show July 11. Local-calendar parse must keep the selected day.
+    const out = formatLocalDate('2026-07-12', 'en-US');
+    expect(out).toMatch(/12/);
+    expect(out).toMatch(/2026/);
+    // Invalid calendar dates fall through to the raw string (not Invalid Date).
+    expect(formatLocalDate('2026-02-31', 'en-US')).toBe('2026-02-31');
+  });
+  it('returns the raw string for unparseable values (never "Invalid Date")', () => {
+    expect(formatLocalDate('not-a-date')).toBe('not-a-date');
+    expect(formatLocalDateTime('not-a-date')).toBe('not-a-date');
+    expect(formatLocalDate('not-a-date')).not.toBe('Invalid Date');
+  });
+  it('does not throw on structurally invalid locales (Intl throws RangeError)', () => {
+    // htmlLang/i18n.language flow in unvalidated; a bad tag must not crash render.
+    const iso = '2026-07-11T12:00:00.000Z';
+    for (const bad of ['en-', '123', '*', 'e', '!!', 'a-b-c-d']) {
+      expect(() => formatLocalDate(iso, bad)).not.toThrow();
+      expect(() => formatLocalDateTime(iso, bad)).not.toThrow();
+    }
+  });
+  // ISO comes from CR/user text and locale from the document/i18n; neither is
+  // validated upstream, so arbitrary pairs must never throw.
+  it('fuzz: never throws for arbitrary iso and locale inputs', () => {
+    for (let i = 0; i < 2000; i++) {
+      const iso = randomString(i % 40);
+      const locale = i % 3 === 0 ? undefined : randomString(i % 8);
+      expect(() => formatLocalDate(iso, locale)).not.toThrow();
+      expect(() => formatLocalDateTime(iso, locale)).not.toThrow();
+    }
+  });
+});
+
+describe('formatCount', () => {
+  it('formats with locale grouping', () => {
+    expect(formatCount(1234, 'en-US')).toBe('1,234');
+    expect(formatCount(1234, 'de-DE')).toBe('1.234');
+  });
+  it('accepts underscore locale tags and invalid tags without throwing', () => {
+    expect(formatCount(42, 'en_US')).toMatch(/42/);
+    expect(() => formatCount(42, '!!')).not.toThrow();
+  });
+  it('returns empty for non-finite values (no English NaN/Infinity)', () => {
+    expect(formatCount(NaN, 'en-US')).toBe('');
+    expect(formatCount(Infinity, 'en-US')).toBe('');
+    expect(formatCount(-Infinity, 'de-DE')).toBe('');
+  });
+});
+
+describe('formatChartDate', () => {
+  it('formats a valid Date with the given locale', () => {
+    const d = new Date(2026, 6, 12, 15, 30, 0);
+    expect(formatChartDate(d, 'en-US')).toMatch(/2026/);
+    expect(formatChartDate(d.getTime(), 'en_US')).toMatch(/2026/);
+  });
+  it('returns empty for invalid instants (no English Invalid Date)', () => {
+    expect(formatChartDate(new Date(NaN), 'en-US')).toBe('');
+    expect(formatChartDate(Number.NaN, 'en-US')).toBe('');
+  });
+  it('does not throw on invalid locale tags', () => {
+    expect(() => formatChartDate(new Date(0), '!!')).not.toThrow();
+  });
+});
+
+describe('localDateInputValue', () => {
+  it('formats the local calendar day as YYYY-MM-DD (not UTC)', () => {
+    // Midday UTC so local-date vs UTC-date is stable in any common offset.
+    const d = new Date(2026, 6, 12, 15, 30, 0);
+    expect(localDateInputValue(d)).toBe('2026-07-12');
+  });
+
+  it('does not use UTC when local day differs from UTC day', () => {
+    // 2026-07-12 01:00 local: toISOString may be the previous UTC day in
+    // western zones, or still the 12th in eastern zones. Either way the local
+    // calendar day must be 2026-07-12.
+    const d = new Date(2026, 6, 12, 1, 0, 0);
+    expect(localDateInputValue(d)).toBe('2026-07-12');
+    // Contrasting wrong pattern: UTC slice can disagree with local day.
+    const utcSlice = d.toISOString().slice(0, 10);
+    if (utcSlice !== '2026-07-12') {
+      expect(localDateInputValue(d)).not.toBe(utcSlice);
+    }
+  });
+});
+
+describe('dateInputEndOfDayIso', () => {
+  it('keeps a date-only deadline active through the selected local day', () => {
+    const parsed = new Date(dateInputEndOfDayIso('2026-07-12') ?? 'invalid');
+    expect(parsed.getFullYear()).toBe(2026);
+    expect(parsed.getMonth()).toBe(6);
+    expect(parsed.getDate()).toBe(12);
+    expect(parsed.getHours()).toBe(23);
+    expect(parsed.getMinutes()).toBe(59);
+    expect(parsed.getSeconds()).toBe(59);
+    expect(parsed.getMilliseconds()).toBe(999);
+  });
+
+  it.each(['', '2026-02-30', '2026-13-01', 'not-a-date'])('rejects invalid input %p', (value) => {
+    expect(dateInputEndOfDayIso(value)).toBeUndefined();
+  });
+
+  // User-typed date input for waiver expires/review; never throws, and a
+  // defined result must be a parseable ISO string for a real calendar day.
+  it('fuzz: never throws; undefined or valid ISO end-of-day', () => {
+    for (let i = 0; i < 2000; i++) {
+      const value =
+        i % 4 === 0
+          ? randomString(i % 20)
+          : i % 4 === 1
+            ? `${2000 + (i % 50)}-${String((i % 14) + 1).padStart(2, '0')}-${String((i % 32) + 1).padStart(2, '0')}`
+            : i % 4 === 2
+              ? ''
+              : `2026-07-${String((i % 28) + 1).padStart(2, '0')}`;
+      const got = dateInputEndOfDayIso(value);
+      if (got === undefined) continue;
+      expect(typeof got).toBe('string');
+      const d = new Date(got);
+      expect(Number.isNaN(d.getTime())).toBe(false);
+      expect(d.getHours()).toBe(23);
+      expect(d.getMinutes()).toBe(59);
+      expect(d.getSeconds()).toBe(59);
+      expect(d.getMilliseconds()).toBe(999);
+    }
   });
 });

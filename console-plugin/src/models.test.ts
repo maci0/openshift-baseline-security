@@ -9,6 +9,7 @@ import {
   suiteFilterKeyTitle,
   suiteProfileKey,
   suiteTailoredName,
+  profileTitle,
 } from './models';
 
 describe('isOwnedByBaseline', () => {
@@ -230,5 +231,16 @@ describe('tailored suite ownership', () => {
     expect(isOwnedByBaseline(lbl('baseline-tp-custom'), ['tp-custom'], undefined)).toBe(false);
     // empty tailored suite label is not owned
     expect(isOwnedByBaseline(lbl('baseline-tp-'), ['cis'], [''])).toBe(false);
+  });
+});
+describe('profileTitle', () => {
+  it('returns the display title for known profile keys', () => {
+    expect(profileTitle('cis')).toBe('CIS');
+    expect(profileTitle('nist-moderate')).toBe('NIST 800-53 Moderate');
+    expect(profileTitle('e8')).toBe('ACSC Essential Eight');
+  });
+
+  it('uppercases unknown keys', () => {
+    expect(profileTitle('custom-suite')).toBe('CUSTOM-SUITE');
   });
 });

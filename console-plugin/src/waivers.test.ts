@@ -1,12 +1,25 @@
 import {
   waiverExpired,
+  findWaiver,
   isWaived,
   activeWaivedNames,
   expiringWaivers,
   futureWaiverDeadlineMs,
   soonestDeadlineDelayMs,
 } from './waivers';
+import { addWaiverPatch, removeWaiverPatch } from './patches';
+import { effectiveStatus, resultFilterStatus } from './status';
+import { resultsHref } from './links';
 import { Waiver } from './models';
+
+// Deterministic PRNG so fuzz loops are reproducible in CI (no Math.random).
+let fuzzSeed = 0x9e3779b9;
+const fuzzRand = (): number => {
+  fuzzSeed = (Math.imul(fuzzSeed, 1664525) + 1013904223) >>> 0;
+  return fuzzSeed / 0x100000000;
+};
+const randomString = (len: number): string =>
+  Array.from({ length: len }, () => String.fromCharCode(Math.floor(fuzzRand() * 0xffff))).join('');
 
 // waivers.ts decides which checks are excluded from the compliance score based
 // on Waiver.expiresAt, a string carried in the CR that a user (or a hand-edit)
@@ -190,5 +203,450 @@ describe('waivers throw-safety and no-permanent-grant (fuzz sweep)', () => {
     const withOffset = futureWaiverDeadlineMs(waivers, now, [-2 * week]);
     expect(withOffset).toContain(new Date(far).getTime() - 2 * week);
     expect(withOffset).not.toContain(new Date(near).getTime() - 2 * week);
+  });
+});
+describe('waivers', () => {
+  it('isWaived matches by name', () => {
+    const w = [{ name: 'a', reason: 'x' }, { name: 'b' }];
+    expect(isWaived('a', w)).toBe(true);
+    expect(isWaived('b', w)).toBe(true);
+    expect(isWaived('c', w)).toBe(false);
+    expect(isWaived('a', undefined)).toBe(false);
+    expect(isWaived('a', [])).toBe(false);
+    // Empty names never match (corrupt waiver entry).
+    expect(isWaived('', [{ name: '' }])).toBe(false);
+    expect(isWaived('', w)).toBe(false);
+  });
+  // Hot path for score math, CSV, and Results filters: one Set of active names.
+  it('activeWaivedNames builds a Set of non-expired names only', () => {
+    const now = new Date('2026-07-11T00:00:00Z');
+    const set = activeWaivedNames(
+      [
+        { name: 'active', reason: 'r' },
+        { name: 'future', expiresAt: '2026-07-12T00:00:00Z' },
+        { name: 'expired', expiresAt: '2026-07-10T00:00:00Z' },
+        { name: 'exact', expiresAt: now.toISOString() }, // t <= now => expired
+        { name: 'bad', expiresAt: 'not-a-date' },
+        { name: '' },
+        { name: 'active' }, // dedupe
+      ],
+      now,
+    );
+    expect(set).toBeInstanceOf(Set);
+    expect([...set].sort()).toEqual(['active', 'future']);
+    expect(set.has('expired')).toBe(false);
+    expect(set.has('exact')).toBe(false);
+    expect(set.has('bad')).toBe(false);
+    expect(set.has('')).toBe(false);
+    expect(activeWaivedNames(undefined, now).size).toBe(0);
+    expect(activeWaivedNames([], now).size).toBe(0);
+  });
+  it('resultFilterStatus maps FAIL+waiver to WAIVED for Overview drill-down fidelity', () => {
+    const w = [{ name: 'f1' }];
+    expect(resultFilterStatus({ metadata: { name: 'f1' }, status: 'FAIL' }, w)).toBe('WAIVED');
+    expect(resultFilterStatus({ metadata: { name: 'f2' }, status: 'FAIL' }, w)).toBe('FAIL');
+    // Waived PASS still scores as PASS (self-healing); filter stays PASS.
+    expect(resultFilterStatus({ metadata: { name: 'f1' }, status: 'PASS' }, w)).toBe('PASS');
+    expect(resultFilterStatus({ metadata: { name: 'x' }, status: 'MANUAL' }, w)).toBe('MANUAL');
+    expect(resultFilterStatus({ metadata: { name: 'f1' }, status: 'FAIL' }, undefined)).toBe(
+      'FAIL',
+    );
+    // Expired waiver must not map to WAIVED (score re-includes the FAIL).
+    // resultFilterStatus does not take `now`; isWaived defaults to Date.now().
+    // Use a clearly-past year so wall-clock CI drift cannot flip the chip.
+    expect(
+      resultFilterStatus(
+        { metadata: { name: 'f1' }, status: 'FAIL' },
+        [{ name: 'f1', expiresAt: '2000-01-01T00:00:00Z' }],
+      ),
+    ).toBe('FAIL');
+    // Permanent waiver (no expiresAt) stays WAIVED without depending on clock.
+    expect(
+      resultFilterStatus(
+        { metadata: { name: 'f1' }, status: 'FAIL' },
+        [{ name: 'f1' }],
+      ),
+    ).toBe('WAIVED');
+    // Prebuilt Set path (Results/CSV hot path): same FAIL→WAIVED mapping.
+    const set = new Set(['f1']);
+    expect(resultFilterStatus({ metadata: { name: 'f1' }, status: 'FAIL' }, set)).toBe('WAIVED');
+    expect(resultFilterStatus({ metadata: { name: 'f2' }, status: 'FAIL' }, set)).toBe('FAIL');
+    expect(resultFilterStatus({ metadata: { name: 'f1' }, status: 'PASS' }, set)).toBe('PASS');
+  });
+  // Filter chips use effective status: a benign INCONSISTENT is not "INCONSISTENT".
+  it('resultFilterStatus collapses benign INCONSISTENT before filtering', () => {
+    expect(
+      resultFilterStatus({
+        metadata: {
+          name: 'inc',
+          annotations: {
+            'compliance.openshift.io/inconsistent-source': 'node0:PASS',
+            'compliance.openshift.io/most-common-status': 'NOT-APPLICABLE',
+          },
+        },
+        status: 'INCONSISTENT',
+      }),
+    ).toBe('PASS');
+  });
+  // Overview N/A deep-links must include SKIP rows (operator ResultCounts fold).
+  it('resultFilterStatus folds SKIP into NOT-APPLICABLE', () => {
+    expect(
+      resultFilterStatus({ metadata: { name: 's1' }, status: 'SKIP' }),
+    ).toBe('NOT-APPLICABLE');
+  });
+  // Untrusted CCR status/annotations + waiver names: filter chips must never throw;
+  // FAIL+active-waiver maps to WAIVED; SKIP folds to NOT-APPLICABLE.
+  it('fuzz: resultFilterStatus never throws; WAIVED only for FAIL with active waiver', () => {
+    const statuses = [
+      'PASS',
+      'FAIL',
+      'ERROR',
+      'MANUAL',
+      'INFO',
+      'SKIP',
+      'NOT-APPLICABLE',
+      'INCONSISTENT',
+      '',
+      // Raw WAIVED from a CCR is a forged/unknown token (WAIVED is synthetic,
+      // assigned only for FAIL+active waiver): folds to ERROR on both sides.
+      'WAIVED',
+    ];
+    for (let i = 0; i < 1500; i++) {
+      const status = statuses[i % statuses.length];
+      const name = i % 4 === 0 ? randomString(i % 24) : `chk-${i % 17}`;
+      const waivers =
+        i % 5 === 0
+          ? undefined
+          : i % 5 === 1
+            ? new Set<string>([name, `other-${i}`])
+            : [{ name }, { name: `other-${i}`, expiresAt: randomString(i % 12) }];
+      const r = {
+        status,
+        metadata: {
+          name,
+          annotations: {
+            'compliance.openshift.io/inconsistent-source':
+              i % 3 === 0 ? randomString(i % 36) : `n0:${statuses[i % statuses.length]}`,
+            'compliance.openshift.io/most-common-status':
+              i % 2 === 0 ? randomString(i % 10) : 'PASS',
+          },
+        },
+      };
+      let got: string;
+      expect(() => {
+        got = resultFilterStatus(r, waivers as never);
+      }).not.toThrow();
+      expect(typeof got!).toBe('string');
+      if (status === 'SKIP') {
+        expect(got!).toBe('NOT-APPLICABLE');
+      } else if (status === '' || status === 'WAIVED') {
+        // Empty and raw-WAIVED statuses map to ERROR (operator tally parity:
+        // the operator fails a forged raw WAIVED closed the same way).
+        expect(got!).toBe('ERROR');
+      } else if (status !== 'INCONSISTENT' && status !== 'FAIL') {
+        expect(got!).toBe(status);
+      }
+      if (got! === 'WAIVED') {
+        // Only FAIL+active waiver may produce WAIVED.
+        expect(effectiveStatus(r)).toBe('FAIL');
+      }
+    }
+  });
+  it('resultsHref FAIL deep-link is distinct from WAIVED', () => {
+    expect(resultsHref('FAIL')).toContain('rowFilter-result-status=FAIL');
+    expect(resultsHref('WAIVED')).toContain('rowFilter-result-status=WAIVED');
+    expect(resultsHref('FAIL')).not.toContain('WAIVED');
+  });
+  it('addWaiverPatch creates the array when absent, appends when present', () => {
+    expect(addWaiverPatch(undefined, { name: 'chk', reason: 'risk' })).toEqual([
+      { op: 'add', path: '/spec/waivers', value: [{ name: 'chk', reason: 'risk' }] },
+    ]);
+    expect(addWaiverPatch(null, { name: 'chk', reason: 'risk' })).toEqual([
+      { op: 'add', path: '/spec/waivers', value: [{ name: 'chk', reason: 'risk' }] },
+    ]);
+    // Empty array still exists after the last remove: must append with "/-".
+    expect(addWaiverPatch([], { name: 'chk' })).toEqual([
+      { op: 'add', path: '/spec/waivers/-', value: { name: 'chk' } },
+    ]);
+    expect(addWaiverPatch([{ name: 'other' }], { name: 'chk' })).toEqual([
+      { op: 'add', path: '/spec/waivers/-', value: { name: 'chk' } },
+    ]);
+  });
+  it('addWaiverPatch carries governance fields, dropping empty ones', () => {
+    expect(
+      addWaiverPatch(undefined, {
+        name: 'chk',
+        reason: 'risk',
+        requestedBy: 'alice',
+        approvedBy: '',
+        expiresAt: '2027-01-01T00:00:00Z',
+        reviewBy: '2026-12-01T00:00:00Z',
+      }),
+    ).toEqual([
+      {
+        op: 'add',
+        path: '/spec/waivers',
+        value: [
+          {
+            name: 'chk',
+            reason: 'risk',
+            requestedBy: 'alice',
+            expiresAt: '2027-01-01T00:00:00Z',
+            reviewBy: '2026-12-01T00:00:00Z',
+          },
+        ],
+      },
+    ]);
+    // Non-empty approvedBy is retained (not dropped with the empty-string path).
+    expect(
+      addWaiverPatch(undefined, {
+        name: 'chk2',
+        reason: 'risk',
+        approvedBy: 'bob',
+      }),
+    ).toEqual([
+      {
+        op: 'add',
+        path: '/spec/waivers',
+        value: [{ name: 'chk2', reason: 'risk', approvedBy: 'bob' }],
+      },
+    ]);
+    // Whitespace-only optional text is empty; surrounding whitespace is trimmed.
+    expect(
+      addWaiverPatch(undefined, {
+        name: 'chk3',
+        reason: '  padded  ',
+        requestedBy: '   ',
+        approvedBy: '\t',
+      }),
+    ).toEqual([
+      {
+        op: 'add',
+        path: '/spec/waivers',
+        value: [{ name: 'chk3', reason: 'padded' }],
+      },
+    ]);
+  });
+  it('addWaiverPatch replaces an existing entry instead of duplicating', () => {
+    expect(addWaiverPatch([{ name: 'chk', reason: 'old' }], { name: 'chk', reason: 'new' })).toEqual(
+      [
+        { op: 'test', path: '/spec/waivers/0/name', value: 'chk' },
+        { op: 'replace', path: '/spec/waivers/0', value: { name: 'chk', reason: 'new' } },
+      ],
+    );
+  });
+  it('addWaiverPatch is a no-op for empty or non-DNS-1123 names', () => {
+    expect(addWaiverPatch(undefined, { name: '', reason: 'x' })).toEqual([]);
+    expect(addWaiverPatch([], { name: '' })).toEqual([]);
+    // CRD Pattern on waiver name (DNS-1123 subdomain).
+    expect(addWaiverPatch(undefined, { name: 'Bad_Name' })).toEqual([]);
+    expect(addWaiverPatch(undefined, { name: 'UPPER' })).toEqual([]);
+  });
+  // CRD MaxLength bounds: reject over-long fields client-side so admission is not
+  // the first (and opaque) failure mode.
+  it('addWaiverPatch is a no-op when fields exceed CRD MaxLength', () => {
+    expect(addWaiverPatch(undefined, { name: 'a'.repeat(254) })).toEqual([]);
+    expect(addWaiverPatch(undefined, { name: 'chk', reason: 'r'.repeat(1025) })).toEqual([]);
+    expect(addWaiverPatch(undefined, { name: 'chk', requestedBy: 'u'.repeat(254) })).toEqual([]);
+    expect(addWaiverPatch(undefined, { name: 'chk', approvedBy: 'u'.repeat(254) })).toEqual([]);
+    // Boundary values still produce a patch.
+    expect(addWaiverPatch(undefined, { name: 'a'.repeat(253) })).toEqual([
+      { op: 'add', path: '/spec/waivers', value: [{ name: 'a'.repeat(253) }] },
+    ]);
+  });
+  // expiresAt/reviewBy must be RFC3339 (metav1.Time); free-form Date.parse
+  // successes and invalid calendar days fail closed before admission.
+  it('addWaiverPatch is a no-op for unparseable expiresAt or reviewBy', () => {
+    expect(addWaiverPatch(undefined, { name: 'chk', expiresAt: 'not-a-date' })).toEqual([]);
+    expect(addWaiverPatch(undefined, { name: 'chk', reviewBy: 'tomorrow' })).toEqual([]);
+    expect(addWaiverPatch(undefined, { name: 'chk', expiresAt: 'March 1, 2026' })).toEqual([]);
+    expect(addWaiverPatch(undefined, { name: 'chk', expiresAt: '01/02/2026' })).toEqual([]);
+    expect(addWaiverPatch(undefined, { name: 'chk', expiresAt: '2026-01-01' })).toEqual([]);
+    expect(addWaiverPatch(undefined, { name: 'chk', expiresAt: '2026-02-31T00:00:00Z' })).toEqual(
+      [],
+    );
+    expect(
+      addWaiverPatch(undefined, { name: 'chk', expiresAt: '2027-01-01T00:00:00Z' }),
+    ).toEqual([
+      {
+        op: 'add',
+        path: '/spec/waivers',
+        value: [{ name: 'chk', expiresAt: '2027-01-01T00:00:00Z' }],
+      },
+    ]);
+    expect(
+      addWaiverPatch(undefined, { name: 'chk', reviewBy: '2027-06-15T23:59:59.999Z' }),
+    ).toEqual([
+      {
+        op: 'add',
+        path: '/spec/waivers',
+        value: [{ name: 'chk', reviewBy: '2027-06-15T23:59:59.999Z' }],
+      },
+    ]);
+  });
+  it('addWaiverPatch refuses a new entry past CRD MaxItems=256 (replace still works)', () => {
+    const full = Array.from({ length: 256 }, (_, i) => ({ name: `w-${i}` }));
+    expect(addWaiverPatch(full, { name: 'w-new' })).toEqual([]);
+    expect(addWaiverPatch(full, { name: 'w-0', reason: 'updated' })).toEqual([
+      { op: 'test', path: '/spec/waivers/0/name', value: 'w-0' },
+      { op: 'replace', path: '/spec/waivers/0', value: { name: 'w-0', reason: 'updated' } },
+    ]);
+  });
+  it('waiverExpired / isWaived respect expiry', () => {
+    const now = new Date('2026-07-11T00:00:00Z');
+    const past = { name: 'a', expiresAt: '2026-07-10T00:00:00Z' };
+    const future = { name: 'b', expiresAt: '2026-07-12T00:00:00Z' };
+    const none = { name: 'c' };
+    const bad = { name: 'd', expiresAt: 'not-a-date' };
+    // Exact equality is expired (t <= now), lockstep with operator !After(now).
+    const exact = { name: 'e', expiresAt: now.toISOString() };
+    expect(waiverExpired(past, now)).toBe(true);
+    expect(waiverExpired(future, now)).toBe(false);
+    expect(waiverExpired(none, now)).toBe(false);
+    // Corrupt expiresAt must not grant a permanent waiver.
+    expect(waiverExpired(bad, now)).toBe(true);
+    expect(waiverExpired(exact, now)).toBe(true);
+    // isWaived (excluded from score) is false for an expired waiver.
+    expect(isWaived('a', [past], now)).toBe(false);
+    expect(isWaived('b', [future], now)).toBe(true);
+    expect(isWaived('c', [none], now)).toBe(true);
+    expect(isWaived('d', [bad], now)).toBe(false);
+    expect(isWaived('e', [exact], now)).toBe(false);
+  });
+
+  // expiresAt is CR/user text; corrupt values must never throw and must not
+  // count as permanently active (NaN → expired).
+  it('fuzz: waiverExpired never throws; unparseable expiresAt is expired', () => {
+    const now = new Date('2026-07-11T12:00:00Z');
+    for (let i = 0; i < 2000; i++) {
+      const expiresAt =
+        i % 5 === 0
+          ? undefined
+          : i % 5 === 1
+            ? randomString(i % 48)
+            : i % 5 === 2
+              ? 'not-a-date'
+              : i % 5 === 3
+                ? new Date(now.getTime() + (i - 1000) * 60_000).toISOString()
+                : '';
+      const w = { name: 'chk', expiresAt };
+      expect(() => waiverExpired(w, now)).not.toThrow();
+      const expired = waiverExpired(w, now);
+      expect(typeof expired).toBe('boolean');
+      if (!expiresAt) {
+        expect(expired).toBe(false);
+        continue;
+      }
+      const t = new Date(expiresAt).getTime();
+      if (Number.isNaN(t)) {
+        expect(expired).toBe(true);
+      } else {
+        expect(expired).toBe(t <= now.getTime());
+      }
+    }
+  });
+  it('findWaiver returns the entry regardless of expiry', () => {
+    const now = new Date('2026-07-11T00:00:00Z');
+    const past = { name: 'a', expiresAt: '2026-07-10T00:00:00Z', reason: 'r' };
+    expect(findWaiver('a', [past])).toEqual(past);
+    expect(findWaiver('x', [past])).toBeUndefined();
+    expect(isWaived('a', [past], now)).toBe(false); // expired: not excluded
+  });
+  it('expiringWaivers lists active waivers within the window only', () => {
+    const now = new Date('2026-07-11T00:00:00Z');
+    const day = 86400000;
+    const soon = { name: 'soon', expiresAt: '2026-07-13T00:00:00Z' }; // in 2 days
+    const later = { name: 'later', expiresAt: '2026-08-01T00:00:00Z' };
+    const gone = { name: 'gone', expiresAt: '2026-07-01T00:00:00Z' }; // expired
+    const perm = { name: 'perm' };
+    // Corrupt expiresAt is NaN and must not appear as "expiring soon".
+    const bad = { name: 'bad', expiresAt: 'not-a-date' };
+    // Window edge: exactly now+withinMs is included (t <= now+withinMs).
+    const edge = { name: 'edge', expiresAt: new Date(now.getTime() + 7 * day).toISOString() };
+    const out = expiringWaivers([soon, later, gone, perm, bad, edge], 7 * day, now);
+    expect(out.map((w) => w.name)).toEqual(['soon', 'edge']);
+  });
+  it('removeWaiverPatch test-guards the name before removing', () => {
+    expect(removeWaiverPatch(2, 'chk')).toEqual([
+      { op: 'test', path: '/spec/waivers/2/name', value: 'chk' },
+      { op: 'remove', path: '/spec/waivers/2' },
+    ]);
+  });
+  // Fail closed: a bad call site must not emit a patch that always 404s.
+  it('removeWaiverPatch is a no-op for invalid index or empty name', () => {
+    expect(removeWaiverPatch(-1, 'chk')).toEqual([]);
+    expect(removeWaiverPatch(1.5, 'chk')).toEqual([]);
+    expect(removeWaiverPatch(NaN, 'chk')).toEqual([]);
+    expect(removeWaiverPatch(0, '')).toEqual([]);
+  });
+  it('fuzz: addWaiverPatch carries the name when DNS-1123 valid', () => {
+    for (let i = 0; i < 500; i++) {
+      // Force a valid DNS-1123 subdomain so we exercise the happy path; invalid
+      // shapes are covered by the no-op cases above.
+      const name = `chk-${i}`;
+      const patch = addWaiverPatch(i % 2 === 0 ? [] : undefined, {
+        name,
+        reason: randomString(i % 10),
+      });
+      expect(patch.length).toBeGreaterThan(0);
+      expect(patch[0].op === 'add' || patch[0].op === 'test').toBe(true);
+      const last = patch[patch.length - 1];
+      const v = last.value as { name: string } | { name: string }[];
+      const entry = Array.isArray(v) ? v[0] : v;
+      expect(entry.name).toBe(name);
+    }
+    // Invalid shapes must stay no-ops.
+    for (const bad of ['', 'Bad_Name', 'A'.repeat(10), 'has space']) {
+      expect(addWaiverPatch(undefined, { name: bad })).toEqual([]);
+    }
+  });
+  // expiresAt/reviewBy free-text must fail closed: unparseable times never ship
+  // a patch that would 422 at admission; emitted times stay RFC3339-shaped.
+  it('fuzz: addWaiverPatch rejects unparseable expiresAt/reviewBy', () => {
+    const rfc3339 =
+      /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
+    for (let i = 0; i < 1000; i++) {
+      const name = `chk-${i}`;
+      const expiresAt =
+        i % 7 === 0
+          ? undefined
+          : i % 7 === 1
+            ? '2027-01-01T00:00:00Z'
+            : i % 7 === 2
+              ? '2026-02-31T00:00:00Z'
+              : i % 7 === 3
+                ? 'March 1, 2026'
+                : i % 7 === 4
+                  ? '2026-01-01'
+                  : i % 7 === 5
+                    ? ''
+                    : randomString(i % 48);
+      const reviewBy =
+        i % 5 === 0
+          ? undefined
+          : i % 5 === 1
+            ? '2027-06-15T23:59:59.999Z'
+            : i % 5 === 2
+              ? 'tomorrow'
+              : i % 5 === 3
+                ? '01/02/2026'
+                : randomString(i % 32);
+      let patch: ReturnType<typeof addWaiverPatch>;
+      expect(() => {
+        patch = addWaiverPatch(undefined, { name, expiresAt, reviewBy });
+      }).not.toThrow();
+      if (patch!.length === 0) {
+        continue;
+      }
+      const last = patch![patch!.length - 1];
+      const v = last.value as { expiresAt?: string; reviewBy?: string };
+      const entry = Array.isArray(v) ? (v as { expiresAt?: string; reviewBy?: string }[])[0] : v;
+      if (entry.expiresAt) {
+        expect(entry.expiresAt).toMatch(rfc3339);
+      }
+      if (entry.reviewBy) {
+        expect(entry.reviewBy).toMatch(rfc3339);
+      }
+    }
   });
 });

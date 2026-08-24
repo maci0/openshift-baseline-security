@@ -1,6 +1,15 @@
 import { buildReportHtml } from './report';
 import { ClusterBaseline, ComplianceCheckResult, Waiver } from './models';
 
+// Deterministic PRNG so fuzz loops are reproducible in CI (no Math.random).
+let fuzzSeed = 0x9e3779b9;
+const fuzzRand = (): number => {
+  fuzzSeed = (Math.imul(fuzzSeed, 1664525) + 1013904223) >>> 0;
+  return fuzzSeed / 0x100000000;
+};
+const randomString = (len: number): string =>
+  Array.from({ length: len }, () => String.fromCharCode(Math.floor(fuzzRand() * 0xffff))).join('');
+
 // buildReportHtml renders a self-contained HTML report from ClusterBaseline
 // status and ComplianceCheckResult CRs. Every one of those fields is untrusted:
 // a hand-edited CR (or a compromised in-cluster actor) controls waiver reasons,
@@ -195,5 +204,157 @@ describe('buildReportHtml data correctness', () => {
       NOW,
     );
     expect(html).toContain('88 / 100');
+  });
+});
+describe('buildReportHtml', () => {
+  const cb = {
+    metadata: { name: 'cluster' },
+    spec: {
+      profiles: ['cis'],
+      waivers: [
+        { name: 'chk', reason: '<script>x</script>', requestedBy: 'a', expiresAt: '2099-01-01T00:00:00Z' },
+        { name: 'old', reason: 'r', expiresAt: '2000-01-01T00:00:00Z' },
+      ],
+    },
+    status: {
+      score: 94,
+      lastScanTime: '2026-07-11T09:00:00Z',
+      profiles: [{ key: 'cis', profileNames: [], pass: 212, fail: 7, manual: 21, info: 0, error: 0, inconsistent: 37, waived: 0, notApplicable: 0 }],
+    },
+  } as unknown as ClusterBaseline;
+  const now = new Date('2026-07-11T00:00:00Z');
+  const reportResults = [
+    {
+      metadata: {
+        name: 'fail-check',
+        namespace: 'openshift-compliance',
+        labels: { 'compliance.openshift.io/suite': 'baseline-cis' },
+      },
+      status: 'FAIL',
+      severity: 'high',
+      description: 'Fail <script>title</script>',
+    },
+    {
+      metadata: {
+        name: 'foreign-fail',
+        namespace: 'openshift-compliance',
+        labels: { 'compliance.openshift.io/suite': 'foreign' },
+      },
+      status: 'FAIL',
+      severity: 'high',
+    },
+  ] as ComplianceCheckResult[];
+  const html = buildReportHtml(cb, reportResults, now);
+  it('includes score and per-profile counts', () => {
+    expect(html).toContain('94 / 100');
+    expect(html).toContain('CIS');
+    expect(html).toContain('212');
+  });
+  it('escapes untrusted waiver text (no raw script tag)', () => {
+    expect(html).toContain('&lt;script&gt;');
+    expect(html).not.toContain('<script>x</script>');
+  });
+  it('sets a no-script Content-Security-Policy on the report document', () => {
+    expect(html).toContain('Content-Security-Policy');
+    expect(html).toContain("default-src 'none'");
+    // Embedded chrome CSS needs style-src; scripts blocked via default-src only.
+    expect(html).toMatch(/style-src 'unsafe-inline'/);
+    expect(html).not.toMatch(/script-src/);
+  });
+  it('lists only active (non-expired) waivers', () => {
+    expect(html).toContain('chk');
+    expect(html).not.toContain('>old<');
+    expect(html).toContain('Active waivers (1)');
+  });
+  it('lists owned unwaived failures and escapes their titles', () => {
+    expect(html).toContain('fail-check');
+    expect(html).toContain('Fail &lt;script&gt;title&lt;/script&gt;');
+    expect(html).not.toContain('foreign-fail');
+  });
+  // Waiver reasons, check names/titles, and profile keys are untrusted CR text.
+  // The report must never throw and must never emit raw & < > " ' from those fields.
+  it('fuzz: never throws; escapes untrusted waiver/check text', () => {
+    for (let i = 0; i < 500; i++) {
+      const hostile = randomString(i % 48);
+      const baseline = {
+        metadata: { name: 'cluster' },
+        spec: {
+          profiles: ['cis'],
+          waivers: [
+            {
+              name: hostile || 'n',
+              reason: hostile,
+              requestedBy: hostile,
+              approvedBy: hostile,
+              expiresAt: '2099-01-01T00:00:00Z',
+            },
+          ],
+        },
+        status: {
+          score: i % 101,
+          profiles: [
+            {
+              key: hostile || 'cis',
+              profileNames: [],
+              pass: 1,
+              fail: 0,
+              manual: 0,
+              info: 0,
+              error: 0,
+              inconsistent: 0,
+              waived: 0,
+              notApplicable: 0,
+            },
+          ],
+        },
+      } as unknown as ClusterBaseline;
+      const results = [
+        {
+          metadata: {
+            name: hostile || 'chk',
+            namespace: 'openshift-compliance',
+            labels: { 'compliance.openshift.io/suite': 'baseline-cis' },
+          },
+          status: 'FAIL',
+          severity: 'high',
+          description: hostile,
+        },
+      ] as ComplianceCheckResult[];
+      let out: string;
+      expect(() => {
+        out = buildReportHtml(baseline, results, now);
+      }).not.toThrow();
+      expect(typeof out!).toBe('string');
+      // Non-string tampered CR fields must not throw through esc()/checkTitle.
+      if (i === 0) {
+        const tampered = {
+          metadata: { name: 42 },
+          spec: {
+            profiles: ['cis'],
+            waivers: [{ name: 7, reason: {}, requestedBy: null, approvedBy: [], expiresAt: '2099-01-01T00:00:00Z' }],
+          },
+          status: { score: 'x', profiles: [{ key: 3, pass: 'a', fail: null }] },
+        } as unknown as ClusterBaseline;
+        const tamperedResults = [
+          { metadata: { name: 9, labels: { 'compliance.openshift.io/suite': 'baseline-cis' } }, status: 'FAIL', severity: 5, description: 12 },
+        ] as unknown as ComplianceCheckResult[];
+        expect(() => buildReportHtml(tampered, tamperedResults, now)).not.toThrow();
+      }
+      // Raw angle-bracket script from untrusted fields must not appear unescaped.
+      if (hostile.includes('<') || hostile.includes('>') || hostile.includes('&')) {
+        // At least one escaped entity should appear when specials were present.
+        const hasEntity =
+          out!.includes('&lt;') ||
+          out!.includes('&gt;') ||
+          out!.includes('&amp;') ||
+          out!.includes('&quot;') ||
+          out!.includes('&#39;');
+        // Empty/whitespace-only hostile may not land in a cell; only assert when
+        // the raw special would otherwise be injectable as element text.
+        if (hostile.trim()) {
+          expect(hasEntity || !out!.includes(hostile)).toBe(true);
+        }
+      }
+    }
   });
 });
