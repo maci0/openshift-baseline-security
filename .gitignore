@@ -23,4 +23,6 @@ console-plugin/e2e/.auth/
 # Python bytecode from hack/ scripts (e.g. prometheusrule_to_rules.py).
 **/__pycache__/
 *.py[cod]
+# Session scratch space.
+.scratch/
 

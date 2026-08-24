@@ -41,10 +41,14 @@ jobs:
       # the Makefile VERSION so a release never ships images tagged differently
       # from the CSV's own image references.
       - name: resolve and verify version
+        # Input passed via env, never shell-interpolated: ${{ }} expansion into
+        # run: would let a crafted workflow_dispatch version execute commands.
+        env:
+          INPUT_VERSION: ${{ github.event.inputs.version }}
         run: |
           set -euo pipefail
-          if [ -n "${{ github.event.inputs.version }}" ]; then
-            ver="${{ github.event.inputs.version }}"
+          if [ -n "$INPUT_VERSION" ]; then
+            ver="$INPUT_VERSION"
           else
             ver="${GITHUB_REF_NAME#v}"
           fi
@@ -114,10 +118,13 @@ jobs:
           persist-credentials: false
 
       - name: resolve and verify version
+        # Same env indirection as the publish job: no raw input in shell source.
+        env:
+          INPUT_VERSION: ${{ github.event.inputs.version }}
         run: |
           set -euo pipefail
-          if [ -n "${{ github.event.inputs.version }}" ]; then
-            ver="${{ github.event.inputs.version }}"
+          if [ -n "$INPUT_VERSION" ]; then
+            ver="$INPUT_VERSION"
           else
             ver="${GITHUB_REF_NAME#v}"
           fi
