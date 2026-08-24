@@ -277,12 +277,10 @@ describe('profileTitle', () => {
   // CR status.profiles[].key is not runtime type-checked; the coercion exists so
   // a tampered non-string key cannot throw on .toUpperCase.
   it('coerces tampered non-string keys instead of throwing', () => {
-    // SAFETY: deliberately tampered key (null); profileTitle must coerce, not throw.
-    expect(profileTitle(null as string)).toBe('');
-    // SAFETY: deliberately tampered key (undefined); profileTitle must coerce, not throw.
-    expect(profileTitle(undefined as string)).toBe('');
-    // SAFETY: deliberately tampered key (number); profileTitle must stringify, not throw.
-    expect(profileTitle(42 as string)).toBe('42');
+    const tamperedKeys: readonly unknown[] = [null, undefined, 42];
+    // SAFETY: elements are deliberately tampered keys; profileTitle must coerce, not throw.
+    const titles = tamperedKeys.map((k) => profileTitle(k as string));
+    expect(titles).toEqual(['', '', '42']);
   });
 });
 

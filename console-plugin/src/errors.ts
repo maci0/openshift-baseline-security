@@ -61,7 +61,7 @@ export const errorMessage = (cause: unknown): string | null => {
     // Stringifying the residual (numbers, booleans, arrays, exotic objects) is
     // the point of a normalizer; useless forms are filtered below and throwing
     // toString/getters are caught by this try block.
-    // eslint-disable-next-line typescript/no-base-to-string -- deliberate unknown-value stringification
+    // oxlint-disable-next-line typescript/no-base-to-string -- deliberate unknown-value stringification
     const s = String(cause);
     // Default Object.prototype.toString is useless in Alerts; treat as absent so
     // UI copy stays translated. Arrays / numbers / booleans still stringify.
