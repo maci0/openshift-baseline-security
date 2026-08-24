@@ -2,15 +2,38 @@ import {
   checkProfileLabel,
   filterOwnedByBaseline,
   isOwnedByBaseline,
+  isProfileKey,
   nodePoolFromScanName,
   ownedSuiteLabels,
   ownedSuiteSelector,
+  PROFILE_INFO,
+  PROFILE_KEYS,
+  PROFILE_MAX_ITEMS,
   suiteFilterKey,
   suiteFilterKeyTitle,
   suiteProfileKey,
   suiteTailoredName,
   profileTitle,
 } from './models';
+
+// models.ts requires PROFILE_KEYS / ProfileKey / PROFILE_INFO / PROFILE_MAX_ITEMS
+// to stay in lockstep with the operator CRD enum and Profiles MaxItems=8. The
+// Record<> typing catches missing INFO entries, but not a key added to the union
+// while PROFILE_KEYS (or the CRD) lags; this pins the runtime contract.
+describe('profile key lockstep', () => {
+  it('PROFILE_KEYS has no duplicates and matches Profiles MaxItems', () => {
+    expect(PROFILE_KEYS.length).toBe(PROFILE_MAX_ITEMS);
+    expect(new Set(PROFILE_KEYS).size).toBe(PROFILE_KEYS.length);
+  });
+  it('every key is a known enum value with display metadata', () => {
+    for (const key of PROFILE_KEYS) {
+      expect(isProfileKey(key)).toBe(true);
+      const info = PROFILE_INFO[key];
+      expect(info.title.length).toBeGreaterThan(0);
+      expect(info.description.length).toBeGreaterThan(0);
+    }
+  });
+});
 
 describe('isOwnedByBaseline', () => {
   it('matches suite label to selected profiles', () => {
