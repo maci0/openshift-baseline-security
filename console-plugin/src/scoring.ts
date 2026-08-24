@@ -52,6 +52,16 @@ const count = (n: number | undefined): number => {
   return Number.isFinite(x) ? x : 0;
 };
 
+// Running totals must stay finite too: count() folds per-value non-finites, but
+// several huge-yet-finite counts (two profiles of 9e307) still overflow the
+// accumulator to ±Infinity and reach the donut / report as non-finite. Keep the
+// prior finite total when an add would overflow (saturate; the magnitude is far
+// past meaningful display either way).
+const addCount = (total: number, v: number): number => {
+  const s = total + v;
+  return Number.isFinite(s) ? s : total;
+};
+
 // Sum result counts across profiles (built-in + tailored) for the composition
 // donut, so its slices match the score, which includes all of them.
 // Mutates a single accumulator (no per-group intermediate objects).
@@ -67,14 +77,14 @@ export const aggregateCounts = (...groups: ResultCounts[]): ResultCounts => {
     notApplicable: 0,
   };
   for (const g of groups) {
-    a.pass += count(g.pass);
-    a.fail += count(g.fail);
-    a.manual += count(g.manual);
-    a.info += count(g.info);
-    a.error += count(g.error);
-    a.inconsistent += count(g.inconsistent);
-    a.waived += count(g.waived);
-    a.notApplicable += count(g.notApplicable);
+    a.pass = addCount(a.pass, count(g.pass));
+    a.fail = addCount(a.fail, count(g.fail));
+    a.manual = addCount(a.manual, count(g.manual));
+    a.info = addCount(a.info, count(g.info));
+    a.error = addCount(a.error, count(g.error));
+    a.inconsistent = addCount(a.inconsistent, count(g.inconsistent));
+    a.waived = addCount(a.waived, count(g.waived));
+    a.notApplicable = addCount(a.notApplicable, count(g.notApplicable));
   }
   return a;
 };
@@ -164,10 +174,27 @@ export const checkSeverity = (r: {
 export const flatProfileScore = (pass?: number, fail?: number): number | null => {
   const p = pass ?? 0;
   const f = fail ?? 0;
-  if (!Number.isFinite(p) || !Number.isFinite(f) || p < 0 || f < 0 || p + f === 0) {
+  // Finite operands can still overflow the arithmetic: p + f wraps past
+  // 1.8e308 to Infinity and p * 100 past ~1.8e306. The operator's int64/128-bit
+  // score() fails closed (nil) on exactly that mass, so mirror it here rather
+  // than leak NaN / Infinity into badges (Infinity/Infinity -> NaN painted
+  // green by threshold comparisons that are all false for NaN).
+  const total = p + f;
+  if (
+    !Number.isFinite(p) ||
+    !Number.isFinite(f) ||
+    p < 0 ||
+    f < 0 ||
+    !Number.isFinite(total) ||
+    total === 0
+  ) {
     return null;
   }
-  return Math.floor((p * 100) / (p + f));
+  const scaled = p * 100;
+  if (!Number.isFinite(scaled)) {
+    return null;
+  }
+  return Math.floor(scaled / total);
 };
 
 /**

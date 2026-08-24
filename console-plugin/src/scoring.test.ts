@@ -237,6 +237,13 @@ describe('severityWeight / profileScore', () => {
     expect(flatProfileScore(-1, -1)).toBeNull();
     expect(flatProfileScore(Number.NaN, 1)).toBeNull();
     expect(flatProfileScore(1, Number.POSITIVE_INFINITY)).toBeNull();
+    // Finite operands whose sum or p*100 product overflows must fail closed
+    // like the operator's int64 score() (nil), never NaN / Infinity: those
+    // leak past threshold comparisons as a false badge color.
+    expect(flatProfileScore(1e308, 1e308)).toBeNull();
+    expect(flatProfileScore(Number.MAX_VALUE, Number.MAX_VALUE)).toBeNull();
+    expect(flatProfileScore(1e307, 1)).toBeNull();
+    expect(flatProfileScore(-1e307, -1e307)).toBeNull();
   });
   // Untrusted / hand-edited ResultCounts: score is null or in [0,100], never NaN.
   // Oracle matches operator score(): floor(pass*100/(pass+fail)) for non-neg finite.
@@ -251,6 +258,9 @@ describe('severityWeight / profileScore', () => {
       [Number.NaN, 1],
       [1, Number.POSITIVE_INFINITY],
       [Number.MAX_SAFE_INTEGER, 1],
+      [Number.MAX_VALUE, Number.MAX_VALUE],
+      [1e307, 1],
+      [1e308, 1e308],
       [undefined, undefined],
     ];
     for (let i = 0; i < 2000; i++) {
@@ -539,6 +549,20 @@ describe('aggregateCounts', () => {
     expect(totals.pass).toBe(5); // NaN -> 0, '5' -> 5
     expect(totals.fail).toBe(3); // Infinity -> 0, 3 -> 3
     expect(Number.isFinite(totals.pass + totals.fail)).toBe(true);
+  });
+  it('keeps running totals finite when huge-but-finite counts overflow the accumulator', () => {
+    // Per-value folding is not enough: two finite 9e307 counts sum to Infinity.
+    // The accumulator must saturate (keep the prior finite total) so donut
+    // segments and the report total never receive a non-finite y value.
+    const totals = aggregateCounts(
+      { pass: 9e307, fail: -9e307 } as ResultCounts,
+      { pass: 9e307, fail: -9e307 } as ResultCounts,
+    );
+    expect(Number.isFinite(totals.pass)).toBe(true);
+    expect(Number.isFinite(totals.fail)).toBe(true);
+    // Saturation keeps the first contribution rather than inventing Infinity.
+    expect(totals.pass).toBe(9e307);
+    expect(totals.fail).toBe(-9e307);
   });
   // Status count fields may be missing, huge, or negative from stale CRs.
   it('fuzz: never throws; all fields are finite numbers', () => {
