@@ -31,8 +31,9 @@ Enforcement is mechanical, not prose:
   [cluster-network-operator](https://github.com/openshift/cluster-network-operator/blob/master/.golangci.yaml)
   (12). Some repos (oc, compliance-operator) rely on gofmt/govet only.
 
-**Here**: `operator/.golangci.yml` (staticcheck settings, misspell, unconvert,
-unparam, nilerr + gofmt/goimports), `make lint`, CI drift check for
+**Here**: `operator/.golangci.yml` (staticcheck settings plus nolintlint,
+misspell, unconvert, unparam, nilerr, errorlint, copyloopvar, noctx,
+bodyclose + gofmt/goimports), `make lint`, CI drift check for
 generated files.
 
 ## API design conventions
@@ -78,7 +79,7 @@ Status conditions include the OpenShift rollup set
 plus the detail conditions above. Manager and plugin Deployments run 2
 replicas with preferred pod anti-affinity and leader election on the
 manager. Resource **requests** are low (manager 10m/64Mi, plugin 10m/32Mi);
-**limits** are bounded (manager 500m/256Mi, plugin 200m/128Mi). Metrics over
+**limits** are bounded (manager 500m/512Mi, plugin 200m/128Mi). Metrics over
 HTTPS with authn/authz (`filters.WithAuthenticationAndAuthorization` on
 `:8443`), service-ca serving cert when present. Metrics scrape objects
 (ServiceMonitor, PrometheusRule, scraper SA/RBAC) live under

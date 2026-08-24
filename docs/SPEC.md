@@ -167,8 +167,8 @@ Responsibilities:
    preferred pod anti-affinity on multi-node topologies; collapses to 1
    replica with no PDB on SingleReplica clusters so the single node can
    drain; TLS on 9443, service-serving-cert mounted at
-   `/var/serving-cert`), Service, `ConsolePlugin` CR in namespace
-   `openshift-baseline-security` (created if missing), and registration on
+   `/var/serving-cert`), Service, cluster-scoped `ConsolePlugin` CR
+   (created if missing), and registration on
    `consoles.operator.openshift.io/cluster` `spec.plugins` (removed on CR
    deletion via finalizer, or when `spec.console.managementState` is Removed).
 4. **Status aggregation**: list `ComplianceCheckResult`s labeled with
@@ -421,7 +421,7 @@ openshift-baseline-security/
 │   └── go.mod
 ├── console-plugin/                 # console-plugin-template shape
 │   ├── src/components/             # React tabs, BaselineContext, Overview item, UI feedback timing
-│   ├── src/{models,scoring,status,names,cron,dates,waivers,patches,links,results,remediation,report,profiles,download,errors}.*
+│   ├── src/{models,scoring,status,names,cron,dates,waivers,patches,links,results,remediation,report,profiles,download,errors,parse}.*
 │   │                               # domain modules; tests live alongside as *.test.ts
 │   ├── locales/en/
 │   ├── e2e/                        # Playwright live-console suite
