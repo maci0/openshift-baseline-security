@@ -12,11 +12,11 @@ import { effectiveStatus, resultFilterStatus } from './status';
 import { resultsHref } from './links';
 import { isString } from './parse';
 import { Waiver } from './models';
+import { randomString } from './testing/fuzz';
 
 // Runtime pin for fuzz sweeps: the helpers must return real booleans (never
 // undefined/NaN) whatever garbage they meet.
 const isBool = (v: unknown): v is boolean => typeof v === 'boolean';
-import { fuzzRand, randomString } from './testing/fuzz';
 
 // waivers.ts decides which checks are excluded from the compliance score based
 // on Waiver.expiresAt, a string carried in the CR that a user (or a hand-edit)
@@ -360,11 +360,11 @@ describe('waivers', () => {
               ? status
               : got!;
       let wrong: string | undefined;
-      if (got !== expected) {
-        wrong = `status ${JSON.stringify(status)} rendered ${JSON.stringify(got)}`;
+      if (got! !== expected) {
+        wrong = `status ${JSON.stringify(status)} rendered ${JSON.stringify(got!)}`;
       }
       // Only FAIL+active waiver may produce WAIVED.
-      if (got === 'WAIVED' && effectiveStatus(r) !== 'FAIL') {
+      if (got! === 'WAIVED' && effectiveStatus(r) !== 'FAIL') {
         wrong ??= `WAIVED produced while effectiveStatus is ${effectiveStatus(r)}`;
       }
       expect(wrong).toBeUndefined();

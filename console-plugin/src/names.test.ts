@@ -1,5 +1,5 @@
 import { isValidK8sName, isValidTailoredProfileName } from './names';
-import { fuzzRand, randomString } from './testing/fuzz';
+import { randomString } from './testing/fuzz';
 
 describe('isValidK8sName', () => {
   it('accepts valid RFC1123 subdomain names', () => {
@@ -35,18 +35,23 @@ describe('isValidK8sName', () => {
               : i % 5 === 3
                 ? ''
                 : `name-${i}`;
-      let ok: boolean;
+      let ok: boolean | undefined;
       expect(() => {
         ok = isValidK8sName(name);
       }).not.toThrow();
-      expect(typeof ok!).toBe('boolean');
-      if (ok!) {
-        expect(name.length).toBeGreaterThan(0);
-        expect(name.length).toBeLessThanOrEqual(253);
-        expect(name).toMatch(/^[a-z0-9]/);
-        expect(name).toMatch(/[a-z0-9]$/);
-        expect(name).not.toMatch(/[A-Z_\s]/);
+      expect(ok).toBeDefined();
+      let bad: string | undefined;
+      if (
+        ok &&
+        (name.length === 0 ||
+          name.length > 253 ||
+          !/^[a-z0-9]/.test(name) ||
+          !/[a-z0-9]$/.test(name) ||
+          /[A-Z_\s]/.test(name))
+      ) {
+        bad = `isValidK8sName accepted ${JSON.stringify(name)} (len ${name.length})`;
       }
+      expect(bad).toBeUndefined();
     }
   });
 });
@@ -78,14 +83,16 @@ describe('isValidTailoredProfileName', () => {
             : i % 4 === 2
               ? `tp-${i}`
               : '';
-      let ok: boolean;
+      let ok: boolean | undefined;
       expect(() => {
         ok = isValidTailoredProfileName(name);
       }).not.toThrow();
-      if (ok!) {
-        expect(name.length).toBeLessThanOrEqual(51);
-        expect(isValidK8sName(name)).toBeTruthy();
+      expect(ok).toBeDefined();
+      let bad: string | undefined;
+      if (ok && (name.length > 51 || !isValidK8sName(name))) {
+        bad = `isValidTailoredProfileName accepted ${JSON.stringify(name)} (len ${name.length})`;
       }
+      expect(bad).toBeUndefined();
     }
   });
 });

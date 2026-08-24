@@ -1,20 +1,28 @@
-import { ComplianceRemediation } from './models';
+import { ComplianceRemediation, RemediationObject } from './models';
 import { isValidK8sName } from './names';
 import { REMEDIATION_OBJECT_UNSERIALIZABLE, compareRemediationsForApplyOrder, isNodeRemediation, missingDependencySummary, remediationObjectText } from './remediation';
-import { fuzzRand, randomString } from './testing/fuzz';
+import { randomString } from './testing/fuzz';
+import { isString } from './parse';
+
+// Primitive-contract checks live in type guards (the one allowed typeof home).
+const isBool = (v: unknown): v is boolean => typeof v === 'boolean';
+
+// Self-referencing rendered object stays fully typed (no dictionary escape).
+type CircularObject = RemediationObject & { self?: CircularObject };
 
 describe('remediation helpers', () => {
   const rem = (
     kind?: string,
-    obj?: Record<string, unknown>,
+    obj?: RemediationObject,
     extra?: Partial<ComplianceRemediation>,
   ): ComplianceRemediation =>
+    // SAFETY: fixture mirrors a CO ComplianceRemediation CR; partial/hostile fields deliberate.
     ({
-      metadata: { name: 'r', namespace: 'openshift-compliance', ...(extra?.metadata ?? {}) },
+      metadata: { name: 'r', namespace: 'openshift-compliance', ...extra?.metadata },
       spec: {
         apply: false,
         current: obj ? { object: obj } : kind ? { object: { kind } } : undefined,
-        ...(extra?.spec ?? {}),
+        ...extra?.spec,
       },
       status: extra?.status,
     }) as ComplianceRemediation;
@@ -91,13 +99,15 @@ describe('remediation helpers', () => {
     ).toBeFalsy();
   });
   it('remediationObjectText pretty-prints the object, empty when absent', () => {
-    expect(remediationObjectText(rem('MachineConfig', { kind: 'MachineConfig', x: 1 }))).toContain(
-      '"kind": "MachineConfig"',
-    );
+    expect(
+      remediationObjectText(
+        rem('MachineConfig', { kind: 'MachineConfig', metadata: { name: 'mc' } }),
+      ),
+    ).toContain('"kind": "MachineConfig"');
     expect(remediationObjectText(rem())).toBe('');
   });
   it('remediationObjectText does not throw on circular rendered objects', () => {
-    const circular: Record<string, unknown> = { kind: 'MachineConfig' };
+    const circular: CircularObject = { kind: 'MachineConfig' };
     circular.self = circular;
     // Distinct sentinel (not '' for absent): the component maps it to a
     // translated message rather than showing raw untranslated text.
@@ -225,14 +235,14 @@ describe('remediation helpers', () => {
   });
   it('fuzz: returns a string and never throws for arbitrary rendered objects', () => {
     for (let i = 0; i < 1000; i++) {
-      const obj: Record<string, unknown> = {
+      const obj = {
         kind: randomString(i % 12),
         [randomString((i % 6) + 1)]: i,
         nested: { a: [randomString(i % 5)], b: i % 2 === 0 },
         weird: i % 13 === 0 ? undefined : randomString(i % 10),
       };
       const out = remediationObjectText(rem('X', obj));
-      expect(typeof out).toBe('string');
+      expect(isString(out)).toBeTruthy();
       expect(missingDependencySummary(rem('X', obj))).toBeNull();
     }
   });
@@ -252,7 +262,7 @@ describe('remediation helpers', () => {
           status: { errorMessage: randomString(i % 20) },
         }),
       );
-      expect(summary === null || typeof summary === 'string').toBeTruthy();
+      expect(summary === null || isString(summary)).toBeTruthy();
     }
   });
   // Kind + scan-name are untrusted CO fields; reboot/batch eligibility must not
@@ -274,7 +284,7 @@ describe('remediation helpers', () => {
           },
         }),
       );
-      expect(typeof out).toBe('boolean');
+      expect(isBool(out)).toBeTruthy();
       // Exact invariant (lockstep with operator poolFromRemediation): a
       // MachineConfig is always a node remediation; any other kind is node iff its
       // scan name ends in a DNS-valid "-node-<pool>". Non-vacuous: asserts the
@@ -304,18 +314,22 @@ describe('remediation helpers', () => {
       const ba = compareRemediationsForApplyOrder(b, a);
       expect(Number.isFinite(ab)).toBeTruthy();
       expect(Number.isFinite(ba)).toBeTruthy();
-      if (ab === 0) {
-        expect(ba).toBe(0);
-      } else {
-        expect(Math.sign(ab)).toBe(-Math.sign(ba));
+      let antisymmetry: string | undefined;
+      if (ab === 0 && ba !== 0) {
+        antisymmetry = `compare(a, b) = 0 but compare(b, a) = ${ba}`;
+      } else if (ab !== 0 && Math.sign(ab) !== -Math.sign(ba)) {
+        antisymmetry = `sign(compare(a, b) = ${ab}) != -sign(compare(b, a) = ${ba})`;
       }
+      expect(antisymmetry).toBeUndefined();
       expect(compareRemediationsForApplyOrder(a, a)).toBe(0);
     }
   });
   // Partial list-watch items must not throw mid-sort.
   it('compareRemediationsForApplyOrder tolerates missing names', () => {
+    const missingName: unknown = undefined;
+    // SAFETY: partial list items can omit metadata.name at runtime; sort must not throw.
     const a = rem(undefined, undefined, {
-      metadata: { name: undefined as unknown as string, namespace: 'ns' },
+      metadata: { name: missingName as string, namespace: 'ns' },
     });
     const b = rem(undefined, undefined, {
       metadata: { name: 'b', namespace: 'ns' },

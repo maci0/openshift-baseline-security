@@ -1,10 +1,13 @@
 import { ComplianceCheckResult } from './models';
+import { isString } from './parse';
 import { effectiveStatus, inconsistentSources } from './status';
-import { fuzzRand, randomString } from './testing/fuzz';
+import { randomString } from './testing/fuzz';
 
 describe('inconsistentSources', () => {
-  const withAnn = (ann?: Record<string, string>): ComplianceCheckResult =>
-    ({ metadata: { name: 'r', namespace: 'ns', annotations: ann }, status: 'INCONSISTENT' }) as ComplianceCheckResult;
+  const withAnn = (ann?: Record<string, string>): ComplianceCheckResult => ({
+    metadata: { name: 'r', namespace: 'ns', annotations: ann },
+    status: 'INCONSISTENT',
+  });
 
   it('parses node:status pairs and the most-common status', () => {
     const { sources, mostCommon } = inconsistentSources(
@@ -62,17 +65,19 @@ describe('inconsistentSources', () => {
       expect(Array.isArray(sources)).toBeTruthy();
       // Whatever parses must keep the row shape the Results tooltip renders.
       for (const s of sources) {
-        expect(typeof s.node).toBe('string');
-        expect(typeof s.status).toBe('string');
+        expect(isString(s.node)).toBeTruthy();
+        expect(isString(s.status)).toBeTruthy();
       }
-      expect(mostCommon === null || typeof mostCommon === 'string').toBeTruthy();
+      expect(mostCommon === null || isString(mostCommon)).toBeTruthy();
     }
   });
 });
 
 describe('effectiveStatus', () => {
-  const inc = (ann: Record<string, string>) =>
-    ({ status: 'INCONSISTENT', metadata: { annotations: ann } }) as unknown as ComplianceCheckResult;
+  // SAFETY: Overview renders CRs whose metadata can lack name/namespace; the
+  // collapse must work from annotations alone.
+  const inc = (ann: Record<string, string>): ComplianceCheckResult =>
+    ({ status: 'INCONSISTENT', metadata: { annotations: ann } }) as ComplianceCheckResult;
 
   it('passes through a non-inconsistent status unchanged', () => {
     expect(effectiveStatus({ status: 'FAIL', metadata: {} })).toBe('FAIL');
@@ -82,11 +87,18 @@ describe('effectiveStatus', () => {
   // missing field is not a blank filter chip or a thrown CSV export.
   it('maps empty or non-string status to ERROR (operator tally parity)', () => {
     expect(effectiveStatus({ status: '', metadata: {} })).toBe('ERROR');
-    expect(effectiveStatus({ status: undefined as unknown as string, metadata: {} })).toBe(
-      'ERROR',
-    );
-    expect(effectiveStatus({ status: null as unknown as string, metadata: {} })).toBe('ERROR');
-    expect(effectiveStatus({ status: 42 as unknown as string, metadata: {} })).toBe('ERROR');
+    // The typed client promises `string`, but the apiserver stores JSON: a
+    // tampered CR ships null, numbers, or no field at all. Every junk shape
+    // must fold to ERROR exactly like the operator tally, never throw.
+    // SAFETY: deliberately corrupted CR payload; the collapse coerces junk.
+    const cr = (body: string) =>
+      JSON.parse(body) as {
+        status: string;
+        metadata?: { annotations?: Record<string, string> };
+      };
+    expect(effectiveStatus(cr('{"metadata": {}}'))).toBe('ERROR');
+    expect(effectiveStatus(cr('{"status": null, "metadata": {}}'))).toBe('ERROR');
+    expect(effectiveStatus(cr('{"status": 42, "metadata": {}}'))).toBe('ERROR');
   });
   // Operator ResultCounts fold SKIP into notApplicable; Overview N/A deep-links
   // and the Results filter must match that bucket.
@@ -178,6 +190,7 @@ describe('effectiveStatus', () => {
   // never throw. FAIL/ERROR among nodes must fail closed as INCONSISTENT.
   it('fuzz: never throws; result in {PASS,NOT-APPLICABLE,INCONSISTENT,passthrough}', () => {
     const passthrough = ['PASS', 'FAIL', 'ERROR', 'MANUAL', 'INFO', 'SKIP', 'NOT-APPLICABLE'];
+    let wrong: string | undefined;
     for (let i = 0; i < 2000; i++) {
       const rawStatus = i % 7 === 0 ? 'INCONSISTENT' : passthrough[i % passthrough.length];
       const r = {
@@ -201,19 +214,23 @@ describe('effectiveStatus', () => {
       }).not.toThrow();
       if (rawStatus !== 'INCONSISTENT') {
         // SKIP is folded into NOT-APPLICABLE (operator ResultCounts parity).
-        expect(got!).toBe(rawStatus === 'SKIP' ? 'NOT-APPLICABLE' : rawStatus);
-        continue;
-      }
-      expect(['PASS', 'NOT-APPLICABLE', 'INCONSISTENT']).toContain(got!);
-      const src = r.metadata.annotations['compliance.openshift.io/inconsistent-source'];
-      const mc = r.metadata.annotations['compliance.openshift.io/most-common-status'];
-      // Fail-closed: FAIL/ERROR as a per-node or most-common status must not collapse.
-      if (
-        /:(?:\s*)(FAIL|ERROR)(?:\s*(?:,|$))/i.test(src) ||
-        /^(FAIL|ERROR)$/i.test(mc.trim())
-      ) {
-        expect(got!).toBe('INCONSISTENT');
+        const expected = rawStatus === 'SKIP' ? 'NOT-APPLICABLE' : rawStatus;
+        if (got! !== expected) {
+          wrong ??= `iteration ${i}: ${rawStatus} rendered ${JSON.stringify(got!)}`;
+        }
+      } else if (!['PASS', 'NOT-APPLICABLE', 'INCONSISTENT'].includes(got!)) {
+        wrong ??= `iteration ${i}: INCONSISTENT collapsed to ${JSON.stringify(got!)}`;
+      } else {
+        const src = r.metadata.annotations['compliance.openshift.io/inconsistent-source'];
+        const mc = r.metadata.annotations['compliance.openshift.io/most-common-status'];
+        // Fail-closed: FAIL/ERROR as a per-node or most-common status must not collapse.
+        const conflict =
+          /:(?:\s*)(FAIL|ERROR)(?:\s*(?:,|$))/i.test(src) || /^(FAIL|ERROR)$/i.test(mc.trim());
+        if (conflict && got! !== 'INCONSISTENT') {
+          wrong ??= `iteration ${i}: FAIL/ERROR annotation collapsed to ${JSON.stringify(got!)}`;
+        }
       }
     }
+    expect(wrong).toBeUndefined();
   });
 });

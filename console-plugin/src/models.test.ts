@@ -208,27 +208,33 @@ describe('tailored suite ownership', () => {
         tailored = suiteTailoredName(labels);
         filter = suiteFilterKey(labels);
       }).not.toThrow();
+      let wrong: string | undefined;
       // Empty remainder after prefix must be rejected.
       if (suite === 'baseline-' || suite === 'baseline-tp-') {
-        expect(key).toBeUndefined();
-        expect(tailored).toBeUndefined();
-        expect(filter).toBeUndefined();
-        continue;
-      }
-      // Built-in and tailored are exclusive.
-      if (key !== undefined && tailored !== undefined) {
-        throw new Error(`both key=${key} and tailored=${tailored} for ${suite}`);
-      }
-      if (tailored !== undefined) {
-        expect(filter).toBe(`tp-${tailored}`);
-        expect(suite?.startsWith('baseline-tp-')).toBeTruthy();
+        if (key !== undefined || tailored !== undefined || filter !== undefined) {
+          wrong = `empty remainder accepted for ${suite}: key=${key} tailored=${tailored} filter=${filter}`;
+        }
+      } else if (key !== undefined && tailored !== undefined) {
+        // Built-in and tailored are exclusive.
+        wrong = `both key=${key} and tailored=${tailored} for ${suite}`;
+      } else if (tailored !== undefined) {
+        if (filter !== `tp-${tailored}`) {
+          wrong = `filter=${filter}, want tp-${tailored}`;
+        } else if (!suite?.startsWith('baseline-tp-')) {
+          wrong = `tailored=${tailored} without baseline-tp- prefix (suite=${suite})`;
+        }
       } else if (key !== undefined) {
-        expect(filter).toBe(key);
-        expect(suite).toBe(`baseline-${key}`);
-        expect(suite?.startsWith('baseline-tp-')).toBeFalsy();
-      } else {
-        expect(filter).toBeUndefined();
+        if (filter !== key) {
+          wrong = `filter=${filter}, want ${key}`;
+        } else if (suite !== `baseline-${key}`) {
+          wrong = `key=${key} from non-baseline suite ${suite}`;
+        } else if (suite?.startsWith('baseline-tp-')) {
+          wrong = `built-in key=${key} parsed from tailored suite ${suite}`;
+        }
+      } else if (filter !== undefined) {
+        wrong = `filter=${filter} without a parsed key or tailored name`;
       }
+      expect(wrong).toBeUndefined();
     }
   });
   it('checkProfileLabel uses display titles for built-ins, keeps tailored names, dashes unknown', () => {
@@ -271,17 +277,22 @@ describe('profileTitle', () => {
   // CR status.profiles[].key is not runtime type-checked; the coercion exists so
   // a tampered non-string key cannot throw on .toUpperCase.
   it('coerces tampered non-string keys instead of throwing', () => {
-    expect(profileTitle(null as unknown as string)).toBe('');
-    expect(profileTitle(undefined as unknown as string)).toBe('');
-    expect(profileTitle(42 as unknown as string)).toBe('42');
+    // SAFETY: deliberately tampered key (null); profileTitle must coerce, not throw.
+    expect(profileTitle(null as string)).toBe('');
+    // SAFETY: deliberately tampered key (undefined); profileTitle must coerce, not throw.
+    expect(profileTitle(undefined as string)).toBe('');
+    // SAFETY: deliberately tampered key (number); profileTitle must stringify, not throw.
+    expect(profileTitle(42 as string)).toBe('42');
   });
 });
 
 // Single source for the "Scanning is disabled" dead-end shown by all three tabs;
 // a drift here would make one tab render controls while another claims disabled.
 describe('scanningDisabled', () => {
-  const cb = (spec: Partial<ClusterBaseline['spec']>): ClusterBaseline =>
-    ({ spec }) as ClusterBaseline;
+  const cb = (spec: Partial<ClusterBaseline['spec']>): ClusterBaseline => ({
+    metadata: { name: 'cb' },
+    spec: { profiles: [], ...spec },
+  });
 
   it('is true when neither built-in nor tailored profiles are selected', () => {
     expect(scanningDisabled(undefined)).toBeTruthy();

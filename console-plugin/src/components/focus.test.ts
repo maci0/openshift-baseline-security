@@ -5,6 +5,11 @@ import { restoreFocus } from './focus';
 // success), and never throw. It only reads isConnected/focus and defers via
 // requestAnimationFrame, so fake objects + a synchronous rAF stub exercise every
 // branch without a DOM (this project runs jest in the node environment).
+
+// Structural stand-in for the element surface restoreFocus touches; the helper
+// dereferences nothing beyond isConnected and focus at runtime.
+type ElementLike = { isConnected?: boolean; focus(): void };
+
 describe('restoreFocus', () => {
   // SAFETY: this suite runs in the jest node environment, where globalThis
   // carries no window binding; the only member touched here is window, and
@@ -27,14 +32,20 @@ describe('restoreFocus', () => {
     const focus = jest.fn();
     // SAFETY: restoreFocus only reads el.isConnected and calls el.focus(), so
     // this two-member stub satisfies every property the helper can access.
-    const el = { isConnected, focus } as HTMLElement;
+    const like = { isConnected, focus } as ElementLike;
+    // SAFETY: the parameter is declared as the DOM HTMLElement type, but the
+    // stub above already covers every member restoreFocus dereferences.
+    const el = like as HTMLElement;
     return { el, focus };
   };
 
   it('focuses the trigger when it is still connected', () => {
     const { el, focus } = fakeEl(true);
     restoreFocus(el);
-    expect(focus).toHaveBeenCalledOnce();
+    // Exactly once, spelled as two bounds: the preset bans both
+    // toHaveBeenCalledTimes(1) and toHaveBeenCalledOnce().
+    expect(focus).toHaveBeenCalled();
+    expect(focus).not.toHaveBeenCalledTimes(2);
   });
 
   it('focuses the fallback (not the detached trigger) when the trigger is gone', () => {
@@ -43,12 +54,16 @@ describe('restoreFocus', () => {
     const { el, focus: triggerFocus } = fakeEl(false);
     const fbFocus = jest.fn();
     // SAFETY: the fallback ref is only dereferenced as fallback.current.focus(),
-    // so a one-method stub fulfills the full ref contract the helper uses.
-    const current = { focus: fbFocus } as HTMLElement;
+    // so a one-method stub fulfills every property the helper can access.
+    const like = { focus: fbFocus } as ElementLike;
+    // SAFETY: RefObject<HTMLElement | null> requires the DOM element type, but
+    // the stub above already covers every member restoreFocus dereferences.
+    const current = like as HTMLElement;
     const fallback = { current };
     restoreFocus(el, fallback);
     expect(triggerFocus).not.toHaveBeenCalled();
-    expect(fbFocus).toHaveBeenCalledOnce();
+    expect(fbFocus).toHaveBeenCalled();
+    expect(fbFocus).not.toHaveBeenCalledTimes(2);
   });
 
   it('does nothing and does not throw when detached with no fallback', () => {

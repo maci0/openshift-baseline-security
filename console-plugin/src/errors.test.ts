@@ -1,5 +1,9 @@
 import { errorMessage, isAlreadyExists } from './errors';
-import { fuzzRand, randomString } from './testing/fuzz';
+import { randomString } from './testing/fuzz';
+import { isString } from './parse';
+
+// Primitive-contract checks live in type guards (the one allowed typeof home).
+const isBool = (v: unknown): v is boolean => typeof v === 'boolean';
 
 describe('errorMessage', () => {
   it('returns null for empty values', () => {
@@ -102,7 +106,7 @@ describe('errorMessage', () => {
     ];
     for (const h of hostile) {
       const out = errorMessage(h);
-      expect(out === null || typeof out === 'string').toBeTruthy();
+      expect(out === null || isString(out)).toBeTruthy();
     }
   });
   it('fuzz: returns string|null and never throws for arbitrary input', () => {
@@ -118,7 +122,7 @@ describe('errorMessage', () => {
         i % 11 === 0 ? new Error(randomString(i % 16)) : null,
       ];
       const out = errorMessage(pool[i % pool.length]);
-      expect(out === null || typeof out === 'string').toBeTruthy();
+      expect(out === null || isString(out)).toBeTruthy();
     }
   });
 });
@@ -128,9 +132,7 @@ describe('isAlreadyExists', () => {
     expect(isAlreadyExists({ reason: 'AlreadyExists' })).toBeTruthy();
     expect(isAlreadyExists({ code: 409, reason: 'AlreadyExists' })).toBeTruthy();
     expect(isAlreadyExists({ message: 'tailoredprofiles "x" already exists' })).toBeTruthy();
-    expect(isAlreadyExists({ code: 409, message: 'tailoredprofiles "x" already exists' })).toBe(
-      true,
-    );
+    expect(isAlreadyExists({ code: 409, message: 'tailoredprofiles "x" already exists' })).toBeTruthy();
     expect(isAlreadyExists('tailoredprofiles "x" already exists')).toBeTruthy();
     expect(isAlreadyExists(new Error('tailoredprofiles "x" already exists'))).toBeTruthy();
     const named = new Error('conflict');
@@ -237,7 +239,7 @@ describe('isAlreadyExists', () => {
       expect(() => {
         out = isAlreadyExists(pool[i % pool.length]);
       }).not.toThrow();
-      expect(typeof out).toBe('boolean');
+      expect(isBool(out)).toBeTruthy();
     }
   });
 });

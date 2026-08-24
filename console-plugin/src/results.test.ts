@@ -2,8 +2,11 @@ import { resultsCsv, severityDisplayTitle, checkTitle, checkBody, changedChecksM
 import { machineConfigPoolHref } from './links';
 import { activeWaivedNames } from './waivers';
 import { ComplianceCheckResult } from './models';
+import { isString } from './parse';
 import { fuzzRand, mulberry32, randomString } from './testing/fuzz';
 
+// SAFETY: status is omitted on purpose; title/body parsing must work from the
+// name/description alone and never depend on the status field.
 const result = (name: string, description?: string): ComplianceCheckResult =>
   ({ metadata: { name, namespace: 'ns' }, description }) as ComplianceCheckResult;
 
@@ -68,19 +71,21 @@ const HOSTILE = [
 
 const pick = (rand: () => number): string => HOSTILE[Math.floor(rand() * HOSTILE.length)];
 
-const hostileResults = (rand: () => number): ComplianceCheckResult[] =>
-  Array.from({ length: Math.floor(rand() * 8) }, () => ({
+const hostileResults = (rand: () => number): ComplianceCheckResult[] => {
+  const rows = Array.from({ length: Math.floor(rand() * 8) }, () => ({
     metadata: {
       name: pick(rand),
       namespace: 'openshift-compliance',
       annotations: { 'baselinesecurity.openshift.io/waived': pick(rand) },
     },
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    status: pick(rand) as any,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    severity: pick(rand) as any,
+    status: pick(rand),
+    severity: pick(rand),
     description: pick(rand),
   }));
+  // SAFETY: fixtures mirror tampered CRs; forged/unknown status and severity
+  // tokens are realistic unvalidated input and export must harden them all.
+  return rows as ComplianceCheckResult[];
+};
 
 // Minimal RFC 4180 reader: honours quoted fields, escaped ("") quotes, and
 // newlines embedded inside quotes so a legitimately-quoted cell is not miscounted
@@ -175,33 +180,40 @@ describe('checkTitle', () => {
   // Missing/non-string metadata.name must still yield a non-empty title so
   // Results rows and CSV cells never render undefined.
   it('falls back to unknown when name is missing or non-string', () => {
+    // SAFETY: empty-name CR; title must fall back to "unknown", not throw.
     expect(
       checkTitle({ metadata: { name: '', namespace: 'ns' } } as ComplianceCheckResult),
     ).toBe('unknown');
-    expect(
-      checkTitle({
-        metadata: { name: 42 as unknown as string, namespace: 'ns' },
-      } as ComplianceCheckResult),
-    ).toBe('unknown');
-    expect(
-      checkTitle({
-        metadata: {} as ComplianceCheckResult['metadata'],
-        description: 'Title only',
-      } as ComplianceCheckResult),
-    ).toBe('Title only');
+    // The typed client promises `string`, but the apiserver stores JSON: a
+    // tampered CR can carry a numeric name or no metadata at all.
+    // SAFETY: deliberately corrupted CR payload; title falls back to "unknown".
+    const numericName = JSON.parse(
+      '{"metadata": {"name": 42, "namespace": "ns"}}',
+    ) as ComplianceCheckResult;
+    expect(checkTitle(numericName)).toBe('unknown');
+    // SAFETY: partially missing metadata; the description alone must still win.
+    const bareMetadata = JSON.parse(
+      '{"metadata": {}, "description": "Title only"}',
+    ) as ComplianceCheckResult;
+    expect(checkTitle(bareMetadata)).toBe('Title only');
   });
   it('fuzz: never throws and never returns empty', () => {
     for (let i = 0; i < 2000; i++) {
       const title = checkTitle(result('name', randomString(i % 64)));
-      expect(typeof title).toBe('string');
+      expect(isString(title)).toBeTruthy();
       expect(title.length).toBeGreaterThan(0);
     }
   });
   // CRs are not runtime type-checked: a tampered non-string description must
-  // fall back to the name, not throw on .indexOf/.trim.
+  // fall back to the name, not throw on .indexOf/.trim. JSON carries the junk
+  // (numbers, booleans, containers, null); NaN serializes to null, which
+  // exercises the identical non-string branch.
   it('fuzz: tolerates non-string (tampered CR) descriptions', () => {
-    for (const bad of [0, 42, true, {}, [], null, NaN] as unknown[]) {
-      const r = { metadata: { name: 'nm' }, description: bad } as unknown as ComplianceCheckResult;
+    const junks = ['0', '42', 'true', '{}', '[]', 'null'];
+    for (const raw of junks) {
+      // SAFETY: deliberately corrupted CR payload; the parsers must fall back
+      // to the name instead of throwing on string ops.
+      const r = JSON.parse(`{"metadata": {"name": "nm"}, "description": ${raw}}`) as ComplianceCheckResult;
       expect(checkTitle(r)).toBe('nm');
       expect(checkBody(r)).toBe('');
     }
@@ -220,12 +232,14 @@ describe('checkBody', () => {
   });
   it('fuzz: never throws', () => {
     for (let i = 0; i < 2000; i++) {
-      expect(typeof checkBody(result('n', randomString(i % 64)))).toBe('string');
+      expect(isString(checkBody(result('n', randomString(i % 64))))).toBeTruthy();
     }
   });
 });
 
 describe('resultsCsv', () => {
+  // SAFETY: arbitrary status/severity tokens (including formula-looking junk)
+  // are the point: CRs are unvalidated and csvCell must harden them all.
   const r = (name: string, status: string, severity: string, description?: string) =>
     ({ metadata: { name, namespace: 'ns' }, status, severity, description }) as ComplianceCheckResult;
   // Strip the UTF-8 BOM so line assertions stay readable.
@@ -310,7 +324,7 @@ describe('resultsCsv', () => {
   // Export must match the Results table: benign INCONSISTENT collapses so CSV
   // status is not a raw "INCONSISTENT" that fails filters and score math.
   it('collapses benign INCONSISTENT via resultFilterStatus', () => {
-    const inconsistent = {
+    const inconsistent: ComplianceCheckResult = {
       metadata: {
         name: 'inc',
         namespace: 'ns',
@@ -322,7 +336,7 @@ describe('resultsCsv', () => {
       status: 'INCONSISTENT',
       severity: 'medium',
       description: 'Benign split',
-    } as ComplianceCheckResult;
+    };
     const csv = resultsCsv([inconsistent]);
     expect(csvLines(csv)[1]).toBe('inc,Benign split,PASS,medium,false');
   });
@@ -334,11 +348,13 @@ describe('resultsCsv', () => {
   // Missing/non-string status must not throw (csvCell used to call .replace on
   // undefined) and must export ERROR so the row matches operator ResultCounts.
   it('tolerates missing status and exports ERROR (operator tally parity)', () => {
+    // SAFETY: stale CR without a status field; export must fold to ERROR
+    // (operator tally parity) instead of throwing on string ops.
     const missing = {
       metadata: { name: 'orphan', namespace: 'ns' },
       severity: 'low',
       description: 'No status field',
-    } as unknown as ComplianceCheckResult;
+    } as ComplianceCheckResult;
     expect(() => resultsCsv([missing])).not.toThrow();
     expect(csvLines(resultsCsv([missing]))[1]).toBe(
       'orphan,No status field,ERROR,low,false',
@@ -346,7 +362,9 @@ describe('resultsCsv', () => {
   });
   // Partial list items (no metadata) must not abort CSV export.
   it('tolerates missing metadata on a result row', () => {
-    const bare = { status: 'PASS', severity: 'low' } as unknown as ComplianceCheckResult;
+    // SAFETY: partial list item with no metadata block; export must render an
+    // empty name cell instead of aborting the whole CSV.
+    const bare = { status: 'PASS', severity: 'low' } as ComplianceCheckResult;
     expect(() => resultsCsv([bare])).not.toThrow();
     expect(csvLines(resultsCsv([bare]))[1]).toBe(',unknown,PASS,low,false');
   });
@@ -362,7 +380,7 @@ describe('resultsCsv', () => {
       const name = i < formulaSeeds.length ? formulaSeeds[i] : rand();
       const title = i % 3 === 0 ? formulaSeeds[i % formulaSeeds.length] : rand();
       const csv = resultsCsv([r(name, 'FAIL', 'high', title)]);
-      expect(typeof csv).toBe('string');
+      expect(isString(csv)).toBeTruthy();
       expect(csv.startsWith('\uFEFF')).toBeTruthy();
       // Total double-quotes are even (all escapes balanced).
       expect((csv.match(/"/g) ?? []).length % 2).toBe(0);
@@ -416,22 +434,31 @@ describe('resultsCsv', () => {
       const renderedTitle = checkTitle(r(name, 'FAIL', 'high', title));
       const nameClean = String(name ?? '').replace(/\0/g, '');
       const titleClean = String(renderedTitle ?? '').replace(/\0/g, '');
-      if (formulaRe.test(nameClean) && nameClean.length > 0) {
-        expect(unquote(cols[0]).startsWith("'")).toBeTruthy();
+      let leaked: string | undefined;
+      if (
+        formulaRe.test(nameClean) &&
+        nameClean.length > 0 &&
+        !unquote(cols[0]).startsWith("'")
+      ) {
+        leaked = `formula-looking name exported raw: ${JSON.stringify(cols[0])}`;
       }
-      if (formulaRe.test(titleClean) && titleClean.length > 0) {
-        expect(unquote(cols[1]).startsWith("'")).toBeTruthy();
+      if (
+        formulaRe.test(titleClean) &&
+        titleClean.length > 0 &&
+        !unquote(cols[1]).startsWith("'")
+      ) {
+        leaked ??= `formula-looking title exported raw: ${JSON.stringify(cols[1])}`;
       }
+      expect(leaked).toBeUndefined();
     }
   });
 });
 
 describe('nodeScanPool', () => {
-  const withScan = (scan?: string): ComplianceCheckResult =>
-    ({
-      metadata: { name: 'r', namespace: 'ns', labels: scan ? { 'compliance.openshift.io/scan-name': scan } : {} },
-      status: 'INCONSISTENT',
-    }) as ComplianceCheckResult;
+  const withScan = (scan?: string): ComplianceCheckResult => ({
+    metadata: { name: 'r', namespace: 'ns', labels: scan ? { 'compliance.openshift.io/scan-name': scan } : {} },
+    status: 'INCONSISTENT',
+  });
 
   it('extracts the MachineConfigPool from a node scan name', () => {
     expect(nodeScanPool(withScan('ocp4-cis-node-worker'))).toBe('worker');
@@ -447,7 +474,7 @@ describe('nodeScanPool', () => {
   it('fuzz: never throws for arbitrary scan names', () => {
     for (let i = 0; i < 500; i++) {
       const out = nodeScanPool(withScan(randomString(i % 30)));
-      expect(out === null || typeof out === 'string').toBeTruthy();
+      expect(out === null || isString(out)).toBeTruthy();
     }
   });
   it('machineConfigPoolHref builds an encoded MCP console path', () => {
@@ -459,6 +486,8 @@ describe('nodeScanPool', () => {
 });
 
 describe('changedChecksMany', () => {
+  // SAFETY: status is omitted on purpose; deep-link resolution must work from
+  // name/description alone and never depend on the status field.
   const res = (name: string, description?: string) =>
     ({ metadata: { name, namespace: 'openshift-compliance' }, description }) as ComplianceCheckResult;
 
@@ -483,7 +512,11 @@ describe('changedChecksMany', () => {
     // status.newlyFailed/fixed are not runtime type-checked; a corrupt element
     // (number/object/bool/array) must be dropped, not reach checkResultHref and
     // crash the Overview "Recent changes" render.
-    const hostile = [42, {}, true, ['x'], null, undefined, 'real'] as unknown as string[];
+    // SAFETY: deliberately corrupted list payload; the resolver must drop
+    // non-string elements instead of throwing on href building.
+    const hostile = JSON.parse(
+      '[42, {}, true, ["x"], null, null, "real"]',
+    ) as string[];
     expect(() => changedChecksMany([hostile], [])).not.toThrow();
     const [items] = changedChecksMany([hostile], []);
     expect(items).toHaveLength(1);
@@ -504,7 +537,7 @@ describe('changedChecksMany', () => {
       expect(items.length).toBe(names.filter(Boolean).length);
       for (const x of items) {
         expect(x.name.length).toBeGreaterThan(0);
-        expect(typeof x.title).toBe('string');
+        expect(isString(x.title)).toBeTruthy();
         expect(x.href).toContain(
           '/k8s/ns/openshift-compliance/compliance.openshift.io~v1alpha1~ComplianceCheckResult/',
         );

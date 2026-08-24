@@ -30,11 +30,22 @@ import {
   formatLocalDateTime,
   safeLocale,
 } from './dates';
-import { mulberry32 } from './testing/fuzz';
+import { isString } from './parse';
+
+// mulberry32: 32-bit seeded PRNG, enough spread for structural fuzzing.
+const rng = (seed: number) => (): number => {
+  seed = (seed + 0x6d2b79f5) | 0;
+  let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+  t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+};
+
+// Primitive-contract checks live in type guards (the one allowed typeof home).
+const isBool = (v: unknown): v is boolean => typeof v === 'boolean';
 
 // Nasty scalar leaves: types the CR schema forbids but the API can still deliver,
 // plus strings that break CSV/annotation walking if a helper trusts them.
-const LEAVES: unknown[] = [
+const LEAVES = [
   undefined,
   null,
   '',
@@ -62,14 +73,33 @@ const LEAVES: unknown[] = [
   '\r\n"quote",',
 ];
 
-const leaf = (next: () => number): unknown => LEAVES[Math.floor(next() * LEAVES.length)];
+// Named leaf domain so the generators below never expose bare unknown upward.
+type LeafValue = (typeof LEAVES)[number];
 
-const junk = (next: () => number, depth: number): unknown => {
+const leaf = (next: () => number): LeafValue => LEAVES[Math.floor(next() * LEAVES.length)];
+
+// Junk CR subtrees: leaves plus nested arrays and objects whose keys mirror real
+// CR field names, so the helpers' ?. paths meet hostile shapes.
+type JunkObject = {
+  name?: JunkValue;
+  annotations?: JunkValue;
+  labels?: JunkValue;
+  status?: JunkValue;
+  severity?: JunkValue;
+  description?: JunkValue;
+  x?: JunkValue;
+};
+
+type JunkValue = LeafValue | JunkValue[] | JunkObject;
+
+const junk = (next: () => number, depth: number): JunkValue => {
   const r = next();
   if (depth > 3 || r < 0.7) return leaf(next);
-  if (r < 0.85) return Array.from({ length: Math.floor(next() * 4) }, () => junk(next, depth + 1));
-  const o: Record<string, unknown> = {};
-  for (const k of ['name', 'annotations', 'labels', 'status', 'severity', 'description', 'x']) {
+  if (r < 0.85) {
+    return Array.from({ length: Math.floor(next() * 4) }, () => junk(next, depth + 1));
+  }
+  const o: JunkObject = {};
+  for (const k of ['name', 'annotations', 'labels', 'status', 'severity', 'description', 'x'] as const) {
     if (next() < 0.5) o[k] = junk(next, depth + 1);
   }
   return o;
@@ -77,30 +107,29 @@ const junk = (next: () => number, depth: number): unknown => {
 
 // A CR is always an object (real list elements never bare null); its fields are
 // junk. metadata is usually present-but-malformed so the ?. guards get exercised.
-const junkCR = (next: () => number): ComplianceCheckResult => {
-  const o: Record<string, unknown> = {
+const junkCR = (next: () => number): ComplianceCheckResult =>
+  // SAFETY: field layout mirrors a ComplianceCheckResult CR; field values are hostile junk on purpose.
+  ({
     status: leaf(next),
     severity: leaf(next),
     description: leaf(next),
     metadata: next() < 0.8 ? junk(next, 2) : leaf(next),
-  };
-  return o as unknown as ComplianceCheckResult;
-};
+  }) as ComplianceCheckResult;
 
 const ITER = 5000;
 
 describe('CR field fuzz (untrusted CR input never throws)', () => {
   it('effectiveStatus / checkSeverity / checkTitle / checkBody return safe strings', () => {
     for (let seed = 1; seed <= ITER; seed++) {
-      const next = mulberry32(seed);
+      const next = rng(seed);
       const cr = junkCR(next);
       try {
-        const st = effectiveStatus(cr as unknown as { status: string });
-        expect(typeof st).toBe('string');
+        const st = effectiveStatus(cr);
+        expect(isString(st)).toBeTruthy();
         expect(st.length).toBeGreaterThan(0);
-        expect(typeof checkSeverity(cr)).toBe('string');
-        expect(typeof checkTitle(cr)).toBe('string');
-        expect(typeof checkBody(cr)).toBe('string');
+        expect(isString(checkSeverity(cr))).toBeTruthy();
+        expect(isString(checkTitle(cr))).toBeTruthy();
+        expect(isString(checkBody(cr))).toBeTruthy();
       } catch (e) {
         throw new Error(`seed ${seed} threw: ${String(e)}`);
       }
@@ -109,7 +138,7 @@ describe('CR field fuzz (untrusted CR input never throws)', () => {
 
   it('resultsCsv survives junk rows: BOM prefix, NUL stripped, always a string', () => {
     for (let seed = 1; seed <= ITER; seed++) {
-      const next = mulberry32(seed);
+      const next = rng(seed);
       const rows = Array.from({ length: Math.floor(next() * 5) }, () => junkCR(next));
       let out: string;
       try {
@@ -117,7 +146,7 @@ describe('CR field fuzz (untrusted CR input never throws)', () => {
       } catch (e) {
         throw new Error(`seed ${seed} threw: ${String(e)}`);
       }
-      expect(typeof out).toBe('string');
+      expect(isString(out)).toBeTruthy();
       // UTF-8 BOM so spreadsheets detect encoding.
       expect(out.startsWith('﻿')).toBeTruthy();
       // csvCell strips NUL (can truncate cells in some tools); a tampered CR
@@ -129,7 +158,7 @@ describe('CR field fuzz (untrusted CR input never throws)', () => {
   // Filter / drill-down helpers also read untrusted annotations and labels.
   it('resultFilterStatus / inconsistentSources / suite parsers never throw', () => {
     for (let seed = 1; seed <= ITER; seed++) {
-      const next = mulberry32(seed);
+      const next = rng(seed);
       const cr = junkCR(next);
       // Mixed waiver shapes: array, Set, or absent (filter path branches).
       const waivers =
@@ -139,27 +168,21 @@ describe('CR field fuzz (untrusted CR input never throws)', () => {
             ? [{ name: String(leaf(next) ?? ''), expiresAt: String(leaf(next) ?? '') }]
             : new Set([String(leaf(next) ?? ''), 'chk']);
       try {
-        const st = resultFilterStatus(
-          cr as unknown as {
-            status: string;
-            metadata?: { name?: string; annotations?: Record<string, string> };
-          },
-          waivers as never,
-        );
-        expect(typeof st).toBe('string');
+        const st = resultFilterStatus(cr, waivers);
+        expect(isString(st)).toBeTruthy();
         expect(st.length).toBeGreaterThan(0);
         const { sources, mostCommon } = inconsistentSources(cr);
         expect(Array.isArray(sources)).toBeTruthy();
-        expect(mostCommon === null || typeof mostCommon === 'string').toBeTruthy();
+        expect(mostCommon === null || isString(mostCommon)).toBeTruthy();
         const pool = nodeScanPool(cr);
-        expect(pool === null || typeof pool === 'string').toBeTruthy();
-        const labels = cr.metadata?.labels as Record<string, string> | undefined;
+        expect(pool === null || isString(pool)).toBeTruthy();
+        const labels = cr.metadata?.labels;
         expect(() => suiteProfileKey(labels)).not.toThrow();
         expect(() => suiteTailoredName(labels)).not.toThrow();
         const scanLeaf = leaf(next);
-        const scan = typeof scanLeaf === 'string' ? scanLeaf : String(scanLeaf ?? '');
+        const scan = isString(scanLeaf) ? scanLeaf : String(scanLeaf ?? '');
         const fromScan = nodePoolFromScanName(scan);
-        expect(fromScan === null || typeof fromScan === 'string').toBeTruthy();
+        expect(fromScan === null || isString(fromScan)).toBeTruthy();
       } catch (e) {
         throw new Error(`seed ${seed} threw: ${String(e)}`);
       }
@@ -180,7 +203,7 @@ const cronToken = (next: () => number): string => {
 };
 const junkString = (next: () => number): string => {
   const l = leaf(next);
-  const base = typeof l === 'string' ? l : String(l ?? '');
+  const base = isString(l) ? l : String(l ?? '');
   const n = Math.floor(next() * 6);
   let s = base;
   for (let i = 0; i < n; i++) s += cronToken(next) + (next() < 0.5 ? ' ' : '');
@@ -190,10 +213,10 @@ const junkString = (next: () => number): string => {
 describe('string-parser fuzz (untrusted schedule / date / locale never throws)', () => {
   it('isValidCron returns a boolean for any input', () => {
     for (let seed = 1; seed <= ITER; seed++) {
-      const next = mulberry32(seed);
+      const next = rng(seed);
       const s = junkString(next);
       try {
-        expect(typeof isValidCron(s)).toBe('boolean');
+        expect(isBool(isValidCron(s))).toBeTruthy();
       } catch (e) {
         throw new Error(`seed ${seed} (${JSON.stringify(s)}) threw: ${String(e)}`);
       }
@@ -202,17 +225,20 @@ describe('string-parser fuzz (untrusted schedule / date / locale never throws)',
 
   it('date/locale formatters never throw and keep their return contract', () => {
     for (let seed = 1; seed <= ITER; seed++) {
-      const next = mulberry32(seed);
+      const next = rng(seed);
       const iso = junkString(next);
       const locale = next() < 0.5 ? undefined : junkString(next);
       try {
-        expect(typeof safeLocale(locale)).not.toBe('object'); // string | undefined
-        expect(typeof formatLocalDate(iso, locale)).toBe('string');
-        expect(typeof formatLocalDateTime(iso, locale)).toBe('string');
-        expect(typeof formatChartDate(iso as unknown as number, locale)).toBe('string');
-        expect(typeof formatCount(next() * 1e12 - 5e11, locale)).toBe('string');
+        const loc = safeLocale(locale); // contract: string | undefined
+        expect(loc === undefined || isString(loc)).toBeTruthy();
+        expect(isString(formatLocalDate(iso, locale))).toBeTruthy();
+        expect(isString(formatLocalDateTime(iso, locale))).toBeTruthy();
+        const badEpoch: unknown = iso;
+        // SAFETY: chart axes take epoch millis; a hostile non-numeric timestamp is deliberate.
+        expect(isString(formatChartDate(badEpoch as number, locale))).toBeTruthy();
+        expect(isString(formatCount(next() * 1e12 - 5e11, locale))).toBeTruthy();
         const eod = dateInputEndOfDayIso(iso);
-        expect(eod === undefined || typeof eod === 'string').toBeTruthy();
+        expect(eod === undefined || isString(eod)).toBeTruthy();
       } catch (e) {
         throw new Error(
           `seed ${seed} (iso=${JSON.stringify(iso)}, locale=${JSON.stringify(locale)}) threw: ${String(e)}`,

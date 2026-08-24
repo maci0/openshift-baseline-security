@@ -1,7 +1,8 @@
 import { isValidCron } from './cron';
 import { isValidK8sName } from './names';
+import { isString } from './parse';
 import { batchApplyPatch, batchApplyRequested, remediationApplyPatch, rescanPatch, resourceVersionTest, schedulePatch, tailoredProfileBindingPatch } from './patches';
-import { fuzzRand, randomString } from './testing/fuzz';
+import { randomString } from './testing/fuzz';
 
 describe('remediationApplyPatch', () => {
   it('adds the leaf when spec.remediation exists so absent defaulted fields are tolerated', () => {
@@ -25,8 +26,11 @@ describe('remediationApplyPatch', () => {
       for (const automatic of [true, false]) {
         const patch = remediationApplyPatch(has, automatic);
         expect(patch).toHaveLength(1);
-        const v = patch[0].value;
-        const apply = typeof v === 'string' ? v : (v as { apply: string }).apply;
+        const v: unknown = patch[0].value;
+        // SAFETY: remediationApplyPatch emits either the bare enum string (leaf
+        // add at /spec/remediation/apply) or an object holding it under `apply`.
+        const wrapped = v as { apply?: unknown };
+        const apply = isString(v) ? v : wrapped.apply;
         expect(['Automatic', 'Manual']).toContain(apply);
       }
     }
@@ -94,20 +98,25 @@ describe('rescanPatch', () => {
       const rv = i % 3 === 0 ? String(i) : undefined;
       const p = rescanPatch(hasAnnotations, token, rv);
       const expectGuard = !hasAnnotations && rv != null;
-      expect(p).toHaveLength(expectGuard ? 2 : 1);
-      if (expectGuard) {
-        expect(p[0]).toEqual({ op: 'test', path: '/metadata/resourceVersion', value: rv });
-      }
-      const last = p[p.length - 1];
-      if (hasAnnotations) {
-        expect(last.value).toBe(token);
-      } else {
-        expect(
-          (last.value as { 'compliance.openshift.io/rescan': string })[
-            'compliance.openshift.io/rescan'
-          ],
-        ).toBe(token);
-      }
+      const guard = expectGuard
+        ? [{ op: 'test', path: '/metadata/resourceVersion', value: rv }]
+        : [];
+      const add = hasAnnotations
+        ? [
+            {
+              op: 'add',
+              path: '/metadata/annotations/compliance.openshift.io~1rescan',
+              value: token,
+            },
+          ]
+        : [
+            {
+              op: 'add',
+              path: '/metadata/annotations',
+              value: { 'compliance.openshift.io/rescan': token },
+            },
+          ];
+      expect(p).toEqual([...guard, ...add]);
     }
   });
 });
@@ -145,14 +154,16 @@ describe('schedule editor helpers', () => {
     ];
     for (let i = 0; i < 2000; i++) {
       const s = i < seeds.length ? seeds[i] : randomString(i % 64);
-      let ok: boolean;
+      let ok: boolean | undefined;
       expect(() => {
         ok = isValidCron(s);
       }).not.toThrow();
-      expect(typeof ok!).toBe('boolean');
-      if (ok!) {
-        expect(s.trim().split(/\s+/)).toHaveLength(5);
+      expect(ok).toBeDefined();
+      let bad: string | undefined;
+      if (ok && s.trim().split(/\s+/).length !== 5) {
+        bad = `isValidCron accepted ${JSON.stringify(s)} (${s.trim().split(/\s+/).length} fields)`;
       }
+      expect(bad).toBeUndefined();
     }
   });
 
@@ -248,7 +259,9 @@ describe('batchApplyPatch', () => {
     const many = Array.from({ length: 300 }, (_, i) => `rem-${i}`);
     const patch = batchApplyPatch(true, many);
     expect(patch).toHaveLength(1);
-    const value = (patch[0] as { value: string }).value;
+    // SAFETY: with accepted names batchApplyPatch emits exactly one op whose
+    // value is the joined comma-separated annotation string.
+    const value = patch[0].value as string;
     expect(value.split(',')).toHaveLength(256);
     expect(value.startsWith('rem-0,')).toBeTruthy();
     expect(value.endsWith(',rem-255')).toBeTruthy();
@@ -269,12 +282,11 @@ describe('batchApplyPatch', () => {
       expect(Array.isArray(patch)).toBeTruthy();
       expect(patch.length).toBeLessThanOrEqual(1);
       if (patch.length === 0) continue;
-      const value =
-        typeof patch[0].value === 'string'
-          ? patch[0].value
-          : (patch[0].value as { 'baselinesecurity.openshift.io/batch-apply': string })[
-              'baselinesecurity.openshift.io/batch-apply'
-            ];
+      const v: unknown = patch[0].value;
+      // SAFETY: the single emitted op carries either the joined name string
+      // (nested add) or the whole annotations map holding that string.
+      const map = v as { 'baselinesecurity.openshift.io/batch-apply': string };
+      const value = isString(v) ? v : map['baselinesecurity.openshift.io/batch-apply'];
       const parts = value.split(',');
       expect(parts.length).toBeLessThanOrEqual(256);
       expect(new Set(parts).size).toBe(parts.length);
@@ -303,8 +315,10 @@ describe('batchApplyRequested', () => {
   // Annotation value is CR-editable; must never throw and true only when a
   // non-empty comma token exists after trim (operator batchRemediationNames).
   it('fuzz: never throws; true iff a non-empty token exists', () => {
+    const isAnnotationMap = (v: unknown): v is Record<string, string> =>
+      v != null && typeof v === 'object';
     for (let i = 0; i < 1000; i++) {
-      const raw =
+      const raw: Record<string, string> | null | undefined =
         i % 6 === 0
           ? undefined
           : i % 6 === 1
@@ -316,22 +330,24 @@ describe('batchApplyRequested', () => {
                 : i % 6 === 4
                   ? { [key]: ',, ,\t,' }
                   : { [key]: randomString(i % 64) + (i % 3 === 0 ? ',rem' : '') };
-      let got: boolean;
+      let got: boolean | undefined;
       expect(() => {
-        got = batchApplyRequested(raw as never);
+        got = batchApplyRequested(raw);
       }).not.toThrow();
-      expect(typeof got!).toBe('boolean');
-      if (raw == null || typeof raw !== 'object') {
-        expect(got!).toBeFalsy();
-        continue;
+      expect(got).toBeDefined();
+      let bad: string | undefined;
+      if (!isAnnotationMap(raw)) {
+        if (got) {
+          bad = `batchApplyRequested truthy for ${JSON.stringify(raw)}`;
+        }
+      } else {
+        const val = raw[key];
+        const hasToken = isString(val) && val.split(',').some((p) => p.trim());
+        if (got !== hasToken) {
+          bad = `batchApplyRequested=${got}, want ${hasToken} for ${JSON.stringify(raw)}`;
+        }
       }
-      const val = (raw as Record<string, unknown>)[key];
-      if (typeof val !== 'string') {
-        expect(got!).toBeFalsy();
-        continue;
-      }
-      const hasToken = val.split(',').some((p) => p.trim());
-      expect(got!).toBe(hasToken);
+      expect(bad).toBeUndefined();
     }
   });
 });

@@ -23,15 +23,19 @@ describe('scoreColor', () => {
     expect(scoreColor(score)).toContain(`status--${status}`);
   });
   it('fuzz: always a CSS var token', () => {
+    let wrong: string | undefined;
     for (let i = 0; i < 500; i++) {
       const s =
         i === 0 ? undefined : i === 1 ? Number.NaN : Math.floor(fuzzRand() * 200) - 50;
       const color = scoreColor(s);
       expect(color.startsWith('var(--pf-t--')).toBeTruthy();
-      if (s === undefined || Number.isNaN(s) || s < 60) {
-        expect(color).toContain('status--danger');
+      // Undefined, NaN, and anything below 60 must paint danger (NaN must not
+      // fall through the Math comparisons as a false success color).
+      if ((s === undefined || Number.isNaN(s) || s < 60) && !color.includes('status--danger')) {
+        wrong ??= `score ${String(s)} rendered ${color}, not danger`;
       }
     }
+    expect(wrong).toBeUndefined();
   });
 });
 
@@ -69,6 +73,7 @@ describe('effectiveScoringMode / historyScoringModeMismatch', () => {
 
   // Annotation is hand-editable CR metadata; unknown stamps and modes must not throw.
   it('fuzz: historyScoringModeMismatch never throws; empty stamp is not a mismatch', () => {
+    let wrong: string | undefined;
     for (let i = 0; i < 500; i++) {
       const stamp =
         i % 4 === 0 ? undefined : i % 4 === 1 ? '' : i % 4 === 2 ? 'Flat' : randomString(i % 16);
@@ -86,13 +91,14 @@ describe('effectiveScoringMode / historyScoringModeMismatch', () => {
       };
       const mismatch = historyScoringModeMismatch(baseline);
       expect(isBool(mismatch)).toBeTruthy();
-      if (!stamp) {
-        expect(mismatch).toBeFalsy();
+      if (!stamp && mismatch) {
+        wrong ??= `iteration ${i}: empty/absent stamp flagged as a mismatch`;
       }
       // effectiveScoringMode collapses anything except SeverityWeighted to Flat.
       const effective = effectiveScoringMode(baseline);
       expect(effective === 'Flat' || effective === 'SeverityWeighted').toBeTruthy();
     }
+    expect(wrong).toBeUndefined();
   });
 
   it('detects history points stamped under a different scoring mode', () => {
@@ -538,16 +544,21 @@ describe('aggregateCounts', () => {
     expect(totals.pass + totals.fail).toBe(3);
   });
   it('treats missing count fields from older persisted status as zero', () => {
+    // SAFETY: older persisted status omits the newer count fields on purpose;
+    // aggregateCounts must default them to zero, not propagate undefined.
     const totals = aggregateCounts({ pass: 1, fail: 2 } as ResultCounts);
     expect(totals).toEqual(c(1, 2, 0, 0, 0, 0, 0, 0));
   });
   it('folds a non-finite (NaN/Infinity) or non-numeric count to 0, never poisoning totals', () => {
     // A tampered non-numeric/non-finite count must not string-concatenate or
     // spread NaN/Infinity across the donut totals.
-    const totals = aggregateCounts(
-      { pass: Number.NaN, fail: Number.POSITIVE_INFINITY } as ResultCounts,
-      { pass: '5' as unknown as number, fail: 3 } as ResultCounts,
-    );
+    // SAFETY: stale persisted status may carry non-finite counts; the fold must
+    // keep totals finite.
+    const nonFinite = { pass: Number.NaN, fail: Number.POSITIVE_INFINITY } as ResultCounts;
+    // SAFETY: tampered persisted status carrying a numeric-string count ('5');
+    // aggregation must coerce it instead of concatenating or throwing.
+    const stringy = JSON.parse('{"pass": "5", "fail": 3}') as ResultCounts;
+    const totals = aggregateCounts(nonFinite, stringy);
     expect(totals.pass).toBe(5); // NaN -> 0, '5' -> 5
     expect(totals.fail).toBe(3); // Infinity -> 0, 3 -> 3
     expect(Number.isFinite(totals.pass + totals.fail)).toBeTruthy();
@@ -556,10 +567,12 @@ describe('aggregateCounts', () => {
     // Per-value folding is not enough: two finite 9e307 counts sum to Infinity.
     // The accumulator must saturate (keep the prior finite total) so donut
     // segments and the report total never receive a non-finite y value.
-    const totals = aggregateCounts(
-      { pass: 9e307, fail: -9e307 } as ResultCounts,
-      { pass: 9e307, fail: -9e307 } as ResultCounts,
-    );
+    // SAFETY: stale CR status omits the newer count fields; huge-but-finite
+    // contributions must saturate instead of overflowing to Infinity.
+    const first = { pass: 9e307, fail: -9e307 } as ResultCounts;
+    // SAFETY: same partial persisted shape; both halves must saturate.
+    const second = { pass: 9e307, fail: -9e307 } as ResultCounts;
+    const totals = aggregateCounts(first, second);
     expect(Number.isFinite(totals.pass)).toBeTruthy();
     expect(Number.isFinite(totals.fail)).toBeTruthy();
     // Saturation keeps the first contribution rather than inventing Infinity.
@@ -569,27 +582,30 @@ describe('aggregateCounts', () => {
   // Status count fields may be missing, huge, or negative from stale CRs.
   it('fuzz: never throws; all fields are finite numbers', () => {
     for (let i = 0; i < 500; i++) {
-      const g = (): ResultCounts =>
-        ({
-          pass: i % 7 === 0 ? undefined : (i % 1000) - 50,
-          fail: i % 5 === 0 ? undefined : (i % 800) - 20,
-          manual: i % 11 === 0 ? undefined : i % 30,
-          info: i % 13 === 0 ? undefined : i % 40,
-          error: i % 17 === 0 ? undefined : i % 10,
-          inconsistent: i % 19 === 0 ? undefined : i % 15,
-          waived: i % 23 === 0 ? undefined : i % 25,
-          notApplicable: i % 29 === 0 ? undefined : i % 12,
-        }) as ResultCounts;
+      const partial = () => ({
+        pass: i % 7 === 0 ? undefined : (i % 1000) - 50,
+        fail: i % 5 === 0 ? undefined : (i % 800) - 20,
+        manual: i % 11 === 0 ? undefined : i % 30,
+        info: i % 13 === 0 ? undefined : i % 40,
+        error: i % 17 === 0 ? undefined : i % 10,
+        inconsistent: i % 19 === 0 ? undefined : i % 15,
+        waived: i % 23 === 0 ? undefined : i % 25,
+        notApplicable: i % 29 === 0 ? undefined : i % 12,
+      });
+      // SAFETY: stale CR status carries undefined/garbage count fields; the
+      // aggregation must default them so every total stays a finite number.
+      const g = (): ResultCounts => partial() as ResultCounts;
       const totals = aggregateCounts(g(), g(), g());
       for (const v of Object.values(totals)) {
-        expect(typeof v).toBe('number');
-        expect(Number.isFinite(v)).toBeTruthy();
+        expect(isFiniteNumber(v)).toBeTruthy();
       }
     }
   });
 });
 
 describe('clusterScore', () => {
+  // SAFETY: minimal CR fixture; clusterScore reads only metadata.name and
+  // status.score and must tolerate partial CR shapes (no spec block).
   const cb = (name: string, score?: number): ClusterBaseline =>
     ({ metadata: { name }, status: score == null ? {} : { score } }) as ClusterBaseline;
 
@@ -616,7 +632,7 @@ describe('clusterScore', () => {
         cb(j === 1 ? 'cluster' : randomString((j + 1) % 12), i % 3 === 0 ? undefined : (i + j) % 101),
       );
       const got = clusterScore(i % 7 === 0 ? undefined : list);
-      expect(got === null || typeof got === 'number').toBeTruthy();
+      expect(got === null || isNum(got)).toBeTruthy();
     }
   });
 });

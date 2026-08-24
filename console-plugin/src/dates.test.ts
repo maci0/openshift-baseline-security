@@ -122,7 +122,7 @@ describe('dates throw-safety (fuzz sweep)', () => {
         expect(out).not.toContain('Invalid Date');
         // parseLocalDateOnly / new Date rejection path returns the input
         // verbatim; otherwise the localized output must be a non-empty string.
-        expect(out !== s || out.length > 0).toBe(true);
+        expect(out === s || out.length > 0).toBeTruthy();
       }
     }
   });
@@ -242,7 +242,7 @@ describe('localDateInputValue', () => {
     const utcSlice = d.toISOString().slice(0, 10);
     // When the UTC day differs, the local-day value must not equal it; when
     // both are the 12th the equality above already pins the local behavior.
-    expect(utcSlice !== '2026-07-12' || localDateInputValue(d) !== utcSlice).toBe(true);
+    expect(utcSlice === '2026-07-12' || localDateInputValue(d) !== utcSlice).toBeTruthy();
   });
 });
 

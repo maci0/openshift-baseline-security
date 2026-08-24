@@ -2,12 +2,11 @@ import { isValidK8sName, isValidTailoredProfileName } from './names';
 import {
   cleanRuleSelection,
   consoleRule,
-  TailoredProfileManifest,
   tailoredProfileManifest,
   tailoredProfileSpecMatches,
   toggledProfiles,
 } from './profiles';
-import { fuzzRand, randomString } from './testing/fuzz';
+import { randomString } from './testing/fuzz';
 
 describe('cleanRuleSelection', () => {
   it('trims, drops invalid names, dedupes, and lets disable win', () => {
@@ -24,7 +23,7 @@ describe('cleanRuleSelection', () => {
     const spec = tailoredProfileManifest('x', 'ocp4-cis', ['dup', 'off-only'], [
       'dup',
       'on-only',
-    ]).spec as { enableRules?: { name: string }[]; disableRules?: { name: string }[] };
+    ]).spec;
     expect((spec.disableRules ?? []).map((r) => r.name)).toEqual(selection.disable);
     expect((spec.enableRules ?? []).map((r) => r.name)).toEqual(selection.enable);
   });
@@ -70,9 +69,11 @@ describe('toggledProfiles', () => {
       const next = toggledProfiles(current, key, checked);
       expect(new Set(next).size).toBe(next.length);
       expect(next.length).toBeLessThanOrEqual(8);
-      if (checked) {
-        expect(next).toContain(key);
+      let bad: string | undefined;
+      if (checked && !next.includes(key)) {
+        bad = `checked add dropped key=${key}: [${next.join(',')}]`;
       }
+      expect(bad).toBeUndefined();
     }
   });
   // Toggle involution: enable X then disable X returns the prior set when the
@@ -84,21 +85,36 @@ describe('toggledProfiles', () => {
       const n = i % 8; // 0..7 so an add can succeed under MaxItems=8
       const current = keys.slice(0, n);
       const key = keys[i % keys.length];
+      let bad: string | undefined;
       if (current.includes(key)) {
         // Already present: enable is a no-op; disable then re-enable restores.
         const without = toggledProfiles(current, key, false);
-        expect(without).not.toContain(key);
-        expect(toggledProfiles(without, key, true).sort()).toEqual([...current].sort());
-        continue;
+        if (without.includes(key)) {
+          bad = `disable did not remove ${key}: [${without.join(',')}]`;
+        }
+        const restored = [...toggledProfiles(without, key, true)].sort();
+        const prior = [...current].sort();
+        if (!bad && (restored.length !== prior.length || restored.some((v, j) => v !== prior[j]))) {
+          bad = `disable/enable not involutive for ${key}`;
+        }
+      } else {
+        const added = toggledProfiles(current, key, true);
+        if (added.length === current.length) {
+          // MaxItems refused the add; leave current unchanged.
+          if (added.some((v, j) => v !== current[j])) {
+            bad = `refused add for ${key} mutated the list`;
+          }
+        } else if (!added.includes(key)) {
+          bad = `accepted add lost key=${key}: [${added.join(',')}]`;
+        } else {
+          const removed = [...toggledProfiles(added, key, false)].sort();
+          const prior = [...current].sort();
+          if (removed.length !== prior.length || removed.some((v, j) => v !== prior[j])) {
+            bad = `add/remove not involutive for ${key}`;
+          }
+        }
       }
-      const added = toggledProfiles(current, key, true);
-      if (added.length === current.length) {
-        // MaxItems refused the add; leave current unchanged.
-        expect(added).toEqual(current);
-        continue;
-      }
-      expect(added).toContain(key);
-      expect(toggledProfiles(added, key, false).sort()).toEqual([...current].sort());
+      expect(bad).toBeUndefined();
     }
   });
 });
@@ -111,12 +127,8 @@ describe('tailoredProfileManifest', () => {
       'dup',
       'on-only',
     ]);
-    const spec = m.spec as {
-      enableRules?: { name: string }[];
-      disableRules?: { name: string }[];
-    };
-    const enabled = (spec.enableRules ?? []).map((r) => r.name);
-    const disabled = (spec.disableRules ?? []).map((r) => r.name);
+    const enabled = (m.spec.enableRules ?? []).map((r) => r.name);
+    const disabled = (m.spec.disableRules ?? []).map((r) => r.name);
     expect(disabled).toContain('dup');
     expect(enabled).not.toContain('dup');
     expect(enabled).toContain('on-only');
@@ -124,15 +136,14 @@ describe('tailoredProfileManifest', () => {
   it('builds a TailoredProfile CR, omitting empty rule lists', () => {
     const m = tailoredProfileManifest('cis-custom', 'ocp4-cis', []);
     expect(m.kind).toBe('TailoredProfile');
-    expect((m.metadata as { name: string }).name).toBe('cis-custom');
-    expect((m.spec as { extends: string }).extends).toBe('ocp4-cis');
+    expect(m.metadata.name).toBe('cis-custom');
+    expect(m.spec.extends).toBe('ocp4-cis');
     expect(m.spec.disableRules).toBeUndefined();
   });
   it('includes enable/disable rules when provided', () => {
     const m = tailoredProfileManifest('x', 'ocp4-cis', ['r1', 'r2'], ['r3']);
-    const spec = m.spec as { enableRules: { name: string }[]; disableRules: { name: string }[] };
-    expect(spec.disableRules.map((r) => r.name)).toEqual(['r1', 'r2']);
-    expect(spec.enableRules.map((r) => r.name)).toEqual(['r3']);
+    expect(m.spec.disableRules?.map((r) => r.name)).toEqual(['r1', 'r2']);
+    expect(m.spec.enableRules?.map((r) => r.name)).toEqual(['r3']);
   });
   it('drops non-DNS-1123 rule names; empty extends defaults to ocp4-cis', () => {
     const m = tailoredProfileManifest(
@@ -141,10 +152,9 @@ describe('tailoredProfileManifest', () => {
       ['ok-rule', 'bad name', '../x', 'ok-rule', ''],
       ['also-ok', 'has spaces'],
     );
-    const spec = m.spec as { extends: string; enableRules?: { name: string }[]; disableRules?: { name: string }[] };
-    expect(spec.extends).toBe('ocp4-cis');
-    expect(spec.disableRules?.map((r) => r.name)).toEqual(['ok-rule']);
-    expect(spec.enableRules?.map((r) => r.name)).toEqual(['also-ok']);
+    expect(m.spec.extends).toBe('ocp4-cis');
+    expect(m.spec.disableRules?.map((r) => r.name)).toEqual(['ok-rule']);
+    expect(m.spec.enableRules?.map((r) => r.name)).toEqual(['also-ok']);
   });
   it('refuses invalid base profile extends (no silent CIS substitution)', () => {
     expect(() => tailoredProfileManifest('x', 'not a profile!!!', [])).toThrow(
@@ -164,8 +174,8 @@ describe('tailoredProfileManifest', () => {
   });
   it('trims a valid name before writing metadata and title', () => {
     const m = tailoredProfileManifest('  cis-custom  ', 'ocp4-cis', []);
-    expect((m.metadata as { name: string }).name).toBe('cis-custom');
-    expect((m.spec as { title: string }).title).toBe('cis-custom');
+    expect(m.metadata.name).toBe('cis-custom');
+    expect(m.spec.title).toBe('cis-custom');
   });
   // Form free-text (name, extends, rule lists) is untrusted. Invalid inputs must
   // throw a typed Error (fail closed) or produce a DNS-1123-only create payload.
@@ -195,31 +205,33 @@ describe('tailoredProfileManifest', () => {
         '',
         seeds[i % seeds.length],
       ];
-      let threw = false;
-      let m: TailoredProfileManifest | undefined;
+      const problems: string[] = [];
       try {
-        m = tailoredProfileManifest(name, extendsBase, rules, rules);
+        const m = tailoredProfileManifest(name, extendsBase, rules, rules);
+        if (m.kind !== 'TailoredProfile' || m.apiVersion !== 'compliance.openshift.io/v1alpha1') {
+          problems.push(
+            `unexpected envelope ${JSON.stringify({ kind: m.kind, apiVersion: m.apiVersion })}`,
+          );
+        }
+        if (!isValidTailoredProfileName(m.metadata.name)) {
+          problems.push(`metadata.name=${m.metadata.name}`);
+        }
+        if (!isValidK8sName(m.spec.extends)) {
+          problems.push(`spec.extends=${m.spec.extends}`);
+        }
+        for (const r of [...(m.spec.enableRules ?? []), ...(m.spec.disableRules ?? [])]) {
+          if (!isValidK8sName(r.name)) {
+            problems.push(`invalid rule name ${r.name}`);
+          }
+        }
       } catch (e) {
-        threw = true;
-        expect(e).toBeInstanceOf(Error);
-        expect((e as Error).message).toMatch(/invalid (TailoredProfile|base profile) name/);
-      }
-      if (!threw) {
-        expect(m).toBeDefined();
-        expect(m!.kind).toBe('TailoredProfile');
-        expect(m!.apiVersion).toBe('compliance.openshift.io/v1alpha1');
-        const metaName = (m!.metadata as { name: string }).name;
-        expect(isValidTailoredProfileName(metaName)).toBeTruthy();
-        const spec = m!.spec as {
-          extends: string;
-          enableRules?: { name: string }[];
-          disableRules?: { name: string }[];
-        };
-        expect(isValidK8sName(spec.extends)).toBeTruthy();
-        for (const r of [...(spec.enableRules ?? []), ...(spec.disableRules ?? [])]) {
-          expect(isValidK8sName(r.name)).toBeTruthy();
+        if (!(e instanceof Error)) {
+          problems.push(`threw non-Error: ${String(e)}`);
+        } else if (!/invalid (TailoredProfile|base profile) name/.test(e.message)) {
+          problems.push(`unexpected error message: ${e.message}`);
         }
       }
+      expect(problems).toEqual([]);
     }
   });
 });

@@ -1,6 +1,7 @@
 import { buildReportHtml } from './report';
 import { ClusterBaseline, ComplianceCheckResult, Waiver } from './models';
-import { fuzzRand, mulberry32, randomString } from './testing/fuzz';
+import { randomString } from './testing/fuzz';
+import { isString } from './parse';
 
 // buildReportHtml renders a self-contained HTML report from ClusterBaseline
 // status and ComplianceCheckResult CRs. Every one of those fields is untrusted:
@@ -29,7 +30,7 @@ const XSS = [
   '&amp;<b>',
   '\0<script>',
   '"onmouseover="alert(1)',
-  ' <script>', // line separator
+  ' <script>', // line separator
   '<'.repeat(500) + 'script',
   '',
   ' ',
@@ -37,7 +38,38 @@ const XSS = [
 // Tag-open markers that must never appear literally in the output.
 const FORBIDDEN = ['<script', '<img', '<svg', '<iframe', '<object', '<marquee', '<b>'];
 
+// Deterministic PRNG (mulberry32) so failures reproduce without a fixed corpus
+// file and CI stays stable (no Math.random).
+const rng = (seed: number) => () => {
+  seed |= 0;
+  seed = (seed + 0x6d2b79f5) | 0;
+  let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+  t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+};
+
 const pick = (rand: () => number): string => XSS[Math.floor(rand() * XSS.length)];
+
+// Hostile fixture contracts: numeric/status fields carry markup strings exactly
+// like a tampered CR would; each keeps the declared type in its union so the
+// single boundary cast stays legal without chained assertions.
+type HostileProfileCounts = { key: string; pass: string | number; fail: string | number };
+type HostileBaselineCR = {
+  metadata: { name: string };
+  spec: { profiles: string[]; tailoredProfiles: string[]; waivers: Waiver[] };
+  status: {
+    score: string | number;
+    lastScanTime: string;
+    profiles: HostileProfileCounts[];
+    tailoredProfiles: { name: string; pass: string | number }[];
+  };
+};
+type HostileResultCR = {
+  metadata: { name: string; namespace: string; labels: Record<string, string> };
+  status: string;
+  severity: string;
+  description: string;
+};
 
 // Build a baseline whose every untrusted string field carries an XSS payload.
 const hostileBaseline = (rand: () => number): ClusterBaseline => {
@@ -49,7 +81,7 @@ const hostileBaseline = (rand: () => number): ClusterBaseline => {
     expiresAt: pick(rand),
     reviewBy: pick(rand),
   }));
-  return {
+  const hostile: HostileBaselineCR = {
     metadata: { name: pick(rand) },
     spec: {
       // Include 'cis' so results labelled suite=baseline-cis pass the ownership
@@ -59,22 +91,20 @@ const hostileBaseline = (rand: () => number): ClusterBaseline => {
       waivers,
     },
     status: {
-      // Coercion path: pass/fail typed number but a tampered CR can carry markup.
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      score: rand() < 0.5 ? (pick(rand) as any) : Math.floor(rand() * 200) - 50,
+      // Coercion path: score/pass/fail are typed numbers but a tampered CR can
+      // carry markup instead.
+      score: rand() < 0.5 ? pick(rand) : Math.floor(rand() * 200) - 50,
       lastScanTime: pick(rand),
-      profiles: [
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        { key: pick(rand), pass: pick(rand) as any, fail: pick(rand) as any } as any,
-      ],
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      tailoredProfiles: [{ name: pick(rand), pass: pick(rand) as any } as any],
+      profiles: [{ key: pick(rand), pass: pick(rand), fail: pick(rand) }],
+      tailoredProfiles: [{ name: pick(rand), pass: pick(rand) }],
     },
   };
+  // SAFETY: fixture mirrors a tampered ClusterBaseline CR; numeric/status fields deliberately carry markup strings.
+  return hostile as ClusterBaseline;
 };
 
-const hostileResults = (rand: () => number): ComplianceCheckResult[] =>
-  Array.from({ length: Math.floor(rand() * 5) }, () => ({
+const hostileResults = (rand: () => number): ComplianceCheckResult[] => {
+  const rows: HostileResultCR[] = Array.from({ length: Math.floor(rand() * 5) }, () => ({
     metadata: {
       name: pick(rand),
       namespace: 'openshift-compliance',
@@ -88,19 +118,20 @@ const hostileResults = (rand: () => number): ComplianceCheckResult[] =>
         'compliance.openshift.io/check-severity': pick(rand),
       },
     },
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    status: (rand() < 0.5 ? 'FAIL' : pick(rand)) as any,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    severity: pick(rand) as any,
+    status: rand() < 0.5 ? 'FAIL' : pick(rand),
+    severity: pick(rand),
     description: pick(rand),
   }));
+  // SAFETY: fixtures mirror tampered ComplianceCheckResult CRs; markup rides every field.
+  return rows as ComplianceCheckResult[];
+};
 
 describe('buildReportHtml fuzz sweep', () => {
   const NOW = new Date('2026-07-13T00:00:00Z');
 
   it('never emits an unescaped injected tag and never throws', () => {
     for (let seed = 0; seed < 400; seed++) {
-      const rand = mulberry32(seed);
+      const rand = rng(seed);
       const baseline = hostileBaseline(rand);
       const results = hostileResults(rand);
 
@@ -138,7 +169,7 @@ describe('buildReportHtml fuzz sweep', () => {
 // categories per profile, and the donut's "no evaluated checks" score guard.
 describe('buildReportHtml data correctness', () => {
   const NOW = new Date('2026-07-13T00:00:00Z');
-  const withStatus = (status: Record<string, unknown>): ClusterBaseline => ({
+  const withStatus = (status: NonNullable<ClusterBaseline['status']>): ClusterBaseline => ({
     metadata: { name: 'cluster' },
     spec: { profiles: ['cis'] },
     status,
@@ -181,7 +212,12 @@ describe('buildReportHtml data correctness', () => {
 
   it('shows the score when at least one check was evaluated', () => {
     const html = buildReportHtml(
-      withStatus({ score: 88, profiles: [{ key: 'cis', pass: 5, fail: 0 }] }),
+      withStatus({
+        score: 88,
+        profiles: [
+          { key: 'cis', pass: 5, fail: 0, manual: 0, info: 0, error: 0, inconsistent: 0, waived: 0, notApplicable: 0 },
+        ],
+      }),
       [],
       NOW,
     );
@@ -203,9 +239,9 @@ describe('buildReportHtml', () => {
       lastScanTime: '2026-07-11T09:00:00Z',
       profiles: [{ key: 'cis', profileNames: [], pass: 212, fail: 7, manual: 21, info: 0, error: 0, inconsistent: 37, waived: 0, notApplicable: 0 }],
     },
-  } as unknown as ClusterBaseline;
+  } satisfies ClusterBaseline;
   const now = new Date('2026-07-11T00:00:00Z');
-  const reportResults = [
+  const reportResults: ComplianceCheckResult[] = [
     {
       metadata: {
         name: 'fail-check',
@@ -225,7 +261,7 @@ describe('buildReportHtml', () => {
       status: 'FAIL',
       severity: 'high',
     },
-  ] as ComplianceCheckResult[];
+  ];
   const html = buildReportHtml(cb, reportResults, now);
   it('includes score and per-profile counts', () => {
     expect(html).toContain('94 / 100');
@@ -253,12 +289,37 @@ describe('buildReportHtml', () => {
     expect(html).toContain('Fail &lt;script&gt;title&lt;/script&gt;');
     expect(html).not.toContain('foreign-fail');
   });
+  // Hand-edited CR shapes: every mistyped field keeps the declared type in its
+  // union so one boundary cast per fixture stays legal (no chained assertions).
+  type TamperedBaseline = {
+    metadata: { name: string | number };
+    spec: {
+      profiles: string[];
+      waivers: {
+        name: string | number;
+        reason: string | object;
+        requestedBy: string | null;
+        approvedBy: string | readonly never[];
+        expiresAt: string;
+      }[];
+    };
+    status: {
+      score: string | number;
+      profiles: { key: string | number; pass: string | number | null; fail: string | number | null }[];
+    };
+  };
+  type TamperedRow = {
+    metadata: { name: string | number; namespace: string; labels: Record<string, string> };
+    status: string;
+    severity: string | number;
+    description: string | number;
+  };
   // Waiver reasons, check names/titles, and profile keys are untrusted CR text.
   // The report must never throw and must never emit raw & < > " ' from those fields.
   it('fuzz: never throws; escapes untrusted waiver/check text', () => {
     for (let i = 0; i < 500; i++) {
       const hostile = randomString(i % 48);
-      const baseline = {
+      const baseline: ClusterBaseline = {
         metadata: { name: 'cluster' },
         spec: {
           profiles: ['cis'],
@@ -289,8 +350,8 @@ describe('buildReportHtml', () => {
             },
           ],
         },
-      } as unknown as ClusterBaseline;
-      const results = [
+      };
+      const results: ComplianceCheckResult[] = [
         {
           metadata: {
             name: hostile || 'chk',
@@ -301,38 +362,48 @@ describe('buildReportHtml', () => {
           severity: 'high',
           description: hostile,
         },
-      ] as ComplianceCheckResult[];
-      let out: string;
+      ];
+      let html = '';
       expect(() => {
-        out = buildReportHtml(baseline, results, now);
+        html = buildReportHtml(baseline, results, now);
       }).not.toThrow();
-      expect(typeof out!).toBe('string');
-      // Non-string tampered CR fields must not throw through esc()/checkTitle.
+      expect(isString(html)).toBeTruthy();
+      // Non-string tampered CR fields must not throw through esc()/checkTitle;
+      // exercised once per sweep and asserted unconditionally below.
+      let tamperedThrew: string | undefined;
       if (i === 0) {
-        const tampered = {
+        const tampered: TamperedBaseline = {
           metadata: { name: 42 },
           spec: {
             profiles: ['cis'],
             waivers: [{ name: 7, reason: {}, requestedBy: null, approvedBy: [], expiresAt: '2099-01-01T00:00:00Z' }],
           },
           status: { score: 'x', profiles: [{ key: 3, pass: 'a', fail: null }] },
-        } as unknown as ClusterBaseline;
-        const tamperedResults = [
-          { metadata: { name: 9, labels: { 'compliance.openshift.io/suite': 'baseline-cis' } }, status: 'FAIL', severity: 5, description: 12 },
-        ] as unknown as ComplianceCheckResult[];
-        expect(() => buildReportHtml(tampered, tamperedResults, now)).not.toThrow();
-      }
-      // Raw angle-bracket script from untrusted fields must not appear unescaped.
-      if (hostile.includes('<') || hostile.includes('>') || hostile.includes('&')) {
-        // esc() escapes every < > & " ' occurrence, so a payload containing any
-        // special must be transformed: the exact raw string may never survive
-        // anywhere in the document (entity presence elsewhere proves nothing).
-        // Empty/whitespace-only hostile may not land in a cell; only assert when
-        // the raw special would otherwise be injectable as element text.
-        if (hostile.trim()) {
-          expect(out!.includes(hostile)).toBeFalsy();
+        };
+        const tamperedRows: TamperedRow[] = [
+          { metadata: { name: 9, namespace: 'openshift-compliance', labels: { 'compliance.openshift.io/suite': 'baseline-cis' } }, status: 'FAIL', severity: 5, description: 12 },
+        ];
+        try {
+          // SAFETY: hand-edited CR fixtures carry wrong-typed fields; the builder must tolerate them.
+          buildReportHtml(tampered as ClusterBaseline, tamperedRows as ComplianceCheckResult[], now);
+        } catch (e) {
+          tamperedThrew = String(e);
         }
       }
+      expect(tamperedThrew).toBeUndefined();
+      // Raw angle-bracket script from untrusted fields must not appear unescaped.
+      // esc() escapes every < > & " ' occurrence, so a payload containing any
+      // special must be transformed: the exact raw string may never survive
+      // anywhere in the document (entity presence elsewhere proves nothing).
+      // Empty/whitespace-only hostile may not land in a cell; only assert when
+      // the raw special would otherwise be injectable as element text.
+      let leaked: string | undefined;
+      if ((hostile.includes('<') || hostile.includes('>') || hostile.includes('&')) && hostile.trim()) {
+        leaked = html.includes(hostile)
+          ? `raw untrusted payload survived unescaped: ${JSON.stringify(hostile.slice(0, 60))}`
+          : undefined;
+      }
+      expect(leaked).toBeUndefined();
     }
   });
 });
