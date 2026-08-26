@@ -1,5 +1,5 @@
 // Normalize k8s watch / fetch errors (string | Error | { message }) for Alerts.
-// Returns null when there is no user-actionable text so callers can fall back
+// Returns null when there is no text a user can act on, so callers can fall back
 // to a translated fail message (errorMessage(e) ?? t('…')).
 import { isString } from './parse';
 
@@ -89,7 +89,7 @@ const statusMessageFromJson = (json: RejectionField): string | null => {
   }
 };
 
-// Phrases from HttpError.messages / statusText that are not actionable alone
+// Phrases from HttpError.messages / statusText that say nothing on their own
 // when a Status body is also available (prefer json.message).
 const isGenericHttpStatusMessage = (m: string): boolean => {
   switch (m) {

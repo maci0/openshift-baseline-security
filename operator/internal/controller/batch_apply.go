@@ -247,7 +247,7 @@ func (r *ClusterBaselineReconciler) finishRemediationBatch(
 				missing = append(missing, name)
 				continue
 			}
-			// Name every failure so a multi-rem batch requeue is actionable.
+			// Name every failure so a multi-rem batch requeue says which ones broke.
 			getErr = fmt.Errorf("getting remediation %q: %w", name, err)
 			applied = false
 			continue

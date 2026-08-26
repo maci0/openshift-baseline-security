@@ -365,8 +365,7 @@ const ResultsTab: React.FC<{
     return waivers.flatMap((w, index) =>
       w.name && !names.has(w.name) ? [{ name: w.name, index }] : [],
     );
-    // waivers read via waiversKey (content-stable); results identity is stable per page.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- content key + stable results identity
   }, [loaded, resultsError, waiversKey, results]);
 
   const removeWaiverByIndex = (index: number, name: string) => {

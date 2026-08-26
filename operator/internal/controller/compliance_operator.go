@@ -301,7 +301,7 @@ func pickComplianceOperatorCSV(items []unstructured.Unstructured, ns string, suc
 
 func (r *ClusterBaselineReconciler) setComplianceOperatorReady(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline, sub *unstructured.Unstructured) error {
 	// Wrong-type installedCSV must not look like "still Installing" forever
-	// (empty string path): surface the shape error so Degraded is actionable.
+	// (empty string path): surface the shape error so Degraded names the cause.
 	csvName, _, err := unstructured.NestedString(sub.Object, "status", "installedCSV")
 	if err != nil {
 		return fmt.Errorf("reading Subscription status.installedCSV: %w", err)

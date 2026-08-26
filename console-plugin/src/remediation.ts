@@ -22,7 +22,7 @@ const unsetValueAnn = 'compliance.openshift.io/unset-value';
 
 // A node remediation reboots nodes when applied. A MachineConfig always does.
 // So does any other object rendered by a node scan ("…-node-<pool>") that the MCO
-// applies, notably a KubeletConfig, plus a partially rendered remediation with no
+// applies (a KubeletConfig, for one), plus a partially rendered remediation with no
 // kind yet. So fall back to the scan-name label (the same signal the operator's
 // poolFromRemediation uses) for ANY non-MachineConfig kind, not only an empty one,
 // or such a remediation gets no reboot warning and is silently excluded from the
@@ -66,9 +66,9 @@ export const remediationObjectText = (rem: ComplianceRemediation): string => {
 
 // Human-readable summary of why a remediation is blocked on dependencies.
 // Sources (Compliance Operator):
-//   depends-on     — comma-separated XCCDF rule IDs that must PASS first
-//   depends-on-obj — JSON list of {apiVersion,kind,name,namespace?} objects
-//   unset-value    — comma-separated variable names still required
+//   depends-on:     comma-separated XCCDF rule IDs that must PASS first
+//   depends-on-obj: JSON list of {apiVersion,kind,name,namespace?} objects
+//   unset-value:    comma-separated variable names still required
 // Falls back to status.errorMessage when annotations are empty so Error and
 // MissingDependencies with only a status message still surface something.
 // Untrusted cluster data: never throws on malformed JSON / hostile strings.

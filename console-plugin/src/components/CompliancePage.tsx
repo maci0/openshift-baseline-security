@@ -160,7 +160,7 @@ const CompliancePage: React.FC = () => {
         setRescanStarted(true);
       }
       if (failed.length) {
-        // Surface the first rejection so a 403/409 is actionable, not just a count.
+        // Surface the first rejection so a 403/409 says what failed, not just a count.
         const detail = errorMessage(failed[0].reason);
         const counts = {
           formattedCount: formatCount(failed.length, i18n.language),

@@ -10,7 +10,7 @@
 # Check: the normalized bundle file must appear as a contiguous block inside its
 # normalized config source (which may be multi-doc). Normalization strips
 # comments, blank lines, and the namespace:/apiVersion: lines that kustomize/OLM
-# add or move, so the check is robust to those without a full YAML parser.
+# add or move, so the check tolerates those without a full YAML parser.
 #
 # Run from operator/ (make verify-bundle-static) or with REPO_ROOT set.
 set -euo pipefail
