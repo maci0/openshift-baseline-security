@@ -502,6 +502,10 @@ func condMessage(s string) string {
 	return s[:end] + "..."
 }
 
+// Scan end timestamps further ahead than this are treated as a corrupt or
+// skewed Compliance Operator clock, not a real scan.
+const scanTimestampSkewTolerance = time.Hour
+
 // parseScanEndTimestamp parses a ComplianceScan status.endTimestamp. Accepts
 // RFC3339 with optional fractional seconds. Far-future values are rejected so
 // clock skew / corrupt data cannot pin LastScanTime ahead of real scans.
@@ -515,8 +519,7 @@ func parseScanEndTimestamp(ts string, now time.Time) (time.Time, bool) {
 	if err != nil {
 		return time.Time{}, false
 	}
-	// Allow modest clock skew; anything further ahead is treated as garbage.
-	if t.After(now.Add(time.Hour)) {
+	if t.After(now.Add(scanTimestampSkewTolerance)) {
 		return time.Time{}, false
 	}
 	// Reject pre-epoch timestamps (corrupt / skewed CO clock): no real scan

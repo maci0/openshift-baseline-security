@@ -54,8 +54,8 @@ func (d *defaultClusterBaseline) Start(ctx context.Context) error {
 	var syncAttempt int
 	for !d.waitForCacheSyncFn()(ctx) {
 		if ctx.Err() != nil {
-			// Shutdown is normal (ctx cancelled).
-			return nil
+			// Shutdown is normal: a Runnable returning ctx.Err() is fatal to the manager.
+			return nil //nolint:nilerr // graceful shutdown, not a runtime failure
 		}
 		syncAttempt++
 		if syncAttempt == 1 || syncAttempt%6 == 0 {

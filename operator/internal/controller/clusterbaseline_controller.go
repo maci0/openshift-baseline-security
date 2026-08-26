@@ -57,6 +57,9 @@ const (
 	// instant and ComplianceStatusStale false-pages ~15m later on a healthy operator.
 	// Matches the steady (slow) poll so the metric never crosses the 900s threshold.
 	goneHeartbeat = time.Minute
+	// Retry gap while a compliance CRD is still unregistered, so a late Compliance
+	// Operator install picks up watches without restarting the operator.
+	watchRetryInterval = 30 * time.Second
 	// Desired HA for the console plugin Deployment.
 	pluginReplicas = int32(2)
 	// Ready threshold for ConsolePluginReady=True: one ready pod is enough for
@@ -513,8 +516,8 @@ func (l *lazyComplianceWatch) Start(ctx context.Context) error {
 		}
 		pending = still
 		// NewTimer (not time.After): stop on ctx cancel so a shutdown mid-wait
-		// does not leave a 30s timer holding the Runnable goroutine's stack.
-		timer := time.NewTimer(30 * time.Second)
+		// does not leave the retry timer holding the Runnable goroutine's stack.
+		timer := time.NewTimer(watchRetryInterval)
 		select {
 		case <-ctx.Done():
 			timer.Stop()
