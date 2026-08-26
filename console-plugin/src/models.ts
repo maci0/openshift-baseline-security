@@ -345,36 +345,6 @@ export const nodePoolFromScanName = (scan: string): string | null => {
 };
 
 /**
- * Display key encoded in a CO object's suite label for built-in profiles
- * ("baseline-<key>"). Tailored suites ("baseline-tp-<name>") are excluded so
- * callers use suiteTailoredName / suiteFilterKey instead. Returns undefined
- * when not a built-in baseline suite.
- */
-export const suiteProfileKey = (
-  labels: Record<string, string> | undefined,
-): string | undefined => {
-  const suite = labels?.[SUITE_LABEL];
-  if (!suite?.startsWith('baseline-') || suite.startsWith('baseline-tp-')) {
-    return undefined;
-  }
-  const key = suite.slice('baseline-'.length);
-  return key || undefined;
-};
-
-/** TailoredProfile name for a "baseline-tp-<name>" suite, else undefined. */
-export const suiteTailoredName = (
-  labels: Record<string, string> | undefined,
-): string | undefined => {
-  const suite = labels?.[SUITE_LABEL];
-  if (!suite?.startsWith('baseline-tp-')) {
-    return undefined;
-  }
-  // Reject empty name ("baseline-tp-") to match the operator's tailoredNameFromSuite.
-  const name = suite.slice('baseline-tp-'.length);
-  return name || undefined;
-};
-
-/**
  * Row-filter / deep-link id for a suite label: built-in profile key, or
  * "tp-<name>" for tailored (matches Overview resultsHref and e2e filters).
  * Parses the suite label once (hot path: Results filters over thousands of rows).
@@ -480,7 +450,7 @@ const nameIn = (list: NameSet | undefined, name: string): boolean => {
  * a selected profile, or a tailored suite for a bound TailoredProfile.
  * Callers that filter thousands of results should pass Set instances so
  * membership is O(1) per check instead of a linear includes scan.
- * Parses the suite label once (avoids dual suiteTailoredName + suiteProfileKey).
+ * Parses the suite label once, in one pass over the two prefixes.
  */
 export const isOwnedByBaseline = (
   labels: Record<string, string> | undefined,
@@ -499,17 +469,3 @@ export const isOwnedByBaseline = (
   return !!key && nameIn(profiles, key);
 };
 
-/**
- * Filter a list of CO objects down to those owned by this baseline. Builds the
- * profile / tailored membership Sets once so isOwnedByBaseline stays O(1) per
- * object when filtering thousands of scans / check results / remediations.
- */
-export const filterOwnedByBaseline = <T extends { metadata: { labels?: Record<string, string> } }>(
-  list: T[] | undefined,
-  profiles: readonly string[] | undefined,
-  tailoredProfiles: readonly string[] | undefined,
-): T[] => {
-  const p = new Set(profiles ?? []);
-  const t = new Set(tailoredProfiles ?? []);
-  return (list ?? []).filter((r) => isOwnedByBaseline(r.metadata.labels, p, t));
-};

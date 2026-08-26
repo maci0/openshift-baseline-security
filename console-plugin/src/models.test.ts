@@ -1,7 +1,6 @@
 import {
   checkProfileLabel,
   ClusterBaseline,
-  filterOwnedByBaseline,
   isOwnedByBaseline,
   isProfileKey,
   nodePoolFromScanName,
@@ -13,10 +12,9 @@ import {
   PROFILE_MAX_ITEMS,
   suiteFilterKey,
   suiteFilterKeyTitle,
-  suiteProfileKey,
-  suiteTailoredName,
   profileTitle,
 } from './models';
+import { randomString } from './testing/fuzz';
 
 // models.ts requires PROFILE_KEYS / ProfileKey / PROFILE_INFO / PROFILE_MAX_ITEMS
 // to stay in lockstep with the operator CRD enum and Profiles MaxItems=8. The
@@ -91,7 +89,7 @@ describe('isOwnedByBaseline', () => {
   });
 });
 
-describe('filterOwnedByBaseline', () => {
+describe('list filtering by ownership', () => {
   const item = (suite?: string) => ({
     metadata: {
       name: suite ?? 'none',
@@ -107,32 +105,20 @@ describe('filterOwnedByBaseline', () => {
       item('other'),
       item(undefined),
     ];
-    const got = filterOwnedByBaseline(list, ['cis'], ['custom']);
+    const got = list.filter((r) => isOwnedByBaseline(r.metadata.labels, ['cis'], ['custom']));
     expect(got.map((r) => r.metadata.name)).toEqual(['baseline-cis', 'baseline-tp-custom']);
   });
 
-  it('returns empty for undefined/empty input and drops foreign suites', () => {
-    expect(filterOwnedByBaseline(undefined, ['cis'], [])).toEqual([]);
-    expect(filterOwnedByBaseline([], ['cis'], [])).toEqual([]);
-    expect(filterOwnedByBaseline([item('baseline-stig')], ['cis'], [])).toEqual([]);
+  it('drops foreign suites when nothing matches', () => {
+    const got = [item('baseline-stig')].filter((r) =>
+      isOwnedByBaseline(r.metadata.labels, ['cis'], []),
+    );
+    expect(got).toEqual([]);
   });
 });
 
 describe('tailored suite ownership', () => {
   const lbl = (suite: string) => ({ 'compliance.openshift.io/suite': suite });
-  it('suiteTailoredName extracts the tailored name', () => {
-    expect(suiteTailoredName(lbl('baseline-tp-custom'))).toBe('custom');
-    expect(suiteTailoredName(lbl('baseline-cis'))).toBeUndefined();
-    expect(suiteTailoredName(undefined)).toBeUndefined();
-    // empty name after prefix is rejected (matches operator tailoredNameFromSuite)
-    expect(suiteTailoredName(lbl('baseline-tp-'))).toBeUndefined();
-  });
-  it('suiteProfileKey ignores tailored suites', () => {
-    expect(suiteProfileKey(lbl('baseline-cis'))).toBe('cis');
-    expect(suiteProfileKey(lbl('baseline-tp-custom'))).toBeUndefined();
-    expect(suiteProfileKey(lbl('baseline-'))).toBeUndefined();
-    expect(suiteProfileKey(undefined)).toBeUndefined();
-  });
   it('suiteFilterKey maps built-in and tailored suites for Results filters', () => {
     expect(suiteFilterKey(lbl('baseline-cis'))).toBe('cis');
     expect(suiteFilterKey(lbl('baseline-tp-custom'))).toBe('tp-custom');
@@ -173,66 +159,55 @@ describe('tailored suite ownership', () => {
     expect(ownedSuiteSelector([''], [''])).toBeUndefined();
   });
 
-  // Suite labels come from untrusted cluster objects. Parsers must never throw,
-  // reject empty remainders, and keep tailored vs built-in mutually exclusive.
-  it('fuzz: suite parsers never throw; empty remainder rejected; tailored exclusive', () => {
-    // Deterministic PRNG so CI failures are reproducible.
-    let seed = 0xcafebabe;
-    const fuzzRand = (): number => {
-      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
-      return seed / 0x100000000;
-    };
-    const rand = (n: number) =>
-      Array.from({ length: n }, () => String.fromCharCode(Math.floor(fuzzRand() * 0xffff))).join(
-        '',
-      );
+  // Suite labels come from untrusted cluster objects. suiteFilterKey must never
+  // throw, must reject an empty remainder after either prefix, and must agree
+  // with isOwnedByBaseline on which suites belong to this baseline.
+  it('fuzz: suiteFilterKey matches the label spec and isOwnedByBaseline agrees', () => {
     for (let i = 0; i < 2000; i++) {
       const suite =
         i % 6 === 0
-          ? `baseline-${rand(i % 20)}`
+          ? `baseline-${randomString(i % 20)}`
           : i % 6 === 1
-            ? `baseline-tp-${rand(i % 20)}`
+            ? `baseline-tp-${randomString(i % 20)}`
             : i % 6 === 2
               ? 'baseline-'
               : i % 6 === 3
                 ? 'baseline-tp-'
                 : i % 6 === 4
-                  ? rand(i % 40)
+                  ? randomString(i % 40)
                   : undefined;
       const labels = suite === undefined ? undefined : lbl(suite);
-      let key: string | undefined;
-      let tailored: string | undefined;
       let filter: string | undefined;
       expect(() => {
-        key = suiteProfileKey(labels);
-        tailored = suiteTailoredName(labels);
         filter = suiteFilterKey(labels);
       }).not.toThrow();
+
+      // Independent restatement of the label grammar, not a call back into the
+      // parser: "baseline-tp-<name>" -> "tp-<name>", "baseline-<key>" -> key,
+      // empty remainder or foreign prefix -> undefined.
+      let want: string | undefined;
+      if (suite?.startsWith('baseline-tp-')) {
+        const name = suite.slice('baseline-tp-'.length);
+        want = name ? `tp-${name}` : undefined;
+      } else if (suite?.startsWith('baseline-')) {
+        const key = suite.slice('baseline-'.length);
+        want = key || undefined;
+      }
+
       let wrong: string | undefined;
-      // Empty remainder after prefix must be rejected.
-      if (suite === 'baseline-' || suite === 'baseline-tp-') {
-        if (key !== undefined || tailored !== undefined || filter !== undefined) {
-          wrong = `empty remainder accepted for ${suite}: key=${key} tailored=${tailored} filter=${filter}`;
-        }
-      } else if (key !== undefined && tailored !== undefined) {
-        // Built-in and tailored are exclusive.
-        wrong = `both key=${key} and tailored=${tailored} for ${suite}`;
-      } else if (tailored !== undefined) {
-        if (filter !== `tp-${tailored}`) {
-          wrong = `filter=${filter}, want tp-${tailored}`;
-        } else if (!suite?.startsWith('baseline-tp-')) {
-          wrong = `tailored=${tailored} without baseline-tp- prefix (suite=${suite})`;
-        }
-      } else if (key !== undefined) {
-        if (filter !== key) {
-          wrong = `filter=${filter}, want ${key}`;
-        } else if (suite !== `baseline-${key}`) {
-          wrong = `key=${key} from non-baseline suite ${suite}`;
-        } else if (suite?.startsWith('baseline-tp-')) {
-          wrong = `built-in key=${key} parsed from tailored suite ${suite}`;
-        }
+      if (filter !== want) {
+        wrong = `suiteFilterKey(${suite}) = ${filter}, want ${want}`;
       } else if (filter !== undefined) {
-        wrong = `filter=${filter} without a parsed key or tailored name`;
+        // A parsed key names exactly one membership set; the other must not match.
+        const tailored = filter.startsWith('tp-');
+        const name = tailored ? filter.slice('tp-'.length) : filter;
+        if (!isOwnedByBaseline(labels, tailored ? [] : [name], tailored ? [name] : [])) {
+          wrong = `isOwnedByBaseline rejects its own filter key ${filter} (suite=${suite})`;
+        } else if (isOwnedByBaseline(labels, tailored ? [name] : [], tailored ? [] : [name])) {
+          wrong = `isOwnedByBaseline matched ${filter} against the wrong set (suite=${suite})`;
+        }
+      } else if (isOwnedByBaseline(labels, [''], [''])) {
+        wrong = `unparseable suite ${suite} reported as owned`;
       }
       expect(wrong).toBeUndefined();
     }

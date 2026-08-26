@@ -53,9 +53,9 @@ than a copied date.
 | 0 Fast local correctness | CI `ci.yml`, every PR/push | see latest Actions run on `main` | gating |
 | 1 Generated/build artifacts | CI `ci.yml` (`make bundle`, `yarn build`) | see latest Actions run | gating |
 | 2 Hardening (`-race`, fuzz) | CI `ci.yml` job `fuzz` on schedule + workflow_dispatch; seeds also run under `make test` | see latest scheduled Actions run | gating (nightly) |
-| 3 API admission (envtest) | manual (not yet automated) | envtest harness not yet run; live informer/batch rows below reuse this label | — |
+| 3 API admission (envtest) | manual (not yet automated) | envtest harness not yet run; live informer/batch rows below reuse this label | n/a |
 | 4 Live OpenShift (Go e2e + Playwright) | manual, logged below | 2026-07-11 | pass |
-| 5 Release / supply chain | manual (pre-release) | not yet run | — |
+| 5 Release / supply chain | manual (pre-release) | not yet run | n/a |
 
 ### Live verification log (Tiers 4–5)
 
@@ -64,20 +64,20 @@ rot). Record topology, versions, and the concrete result.
 
 | Date | Tier | Scope | Cluster topology | OCP / CO | Result |
 |---|---|---|---|---|---|
-| 2026-07-09 | 4 | First zero-config CIS scan; Overview donut, Results, Remediations, nav placement | SNO (1 master+worker) | 4.22 / CO 1.9.1 | pass — score ~95, Available=True, Degraded=False |
-| 2026-07-10 | 4 | Multi-node + multi-benchmark: CIS+PCI-DSS on 3 nodes; INCONSISTENT surfaced; dashboard item; donut legend | SNO + 2 day-2 workers | 4.22 / CO 1.9.1 | pass — score 94 pooled, 86 INCONSISTENT counted, node scan fans out 3 pods |
-| 2026-07-10 | 1 | OLM bundle validation | n/a (local) | operator-sdk bundle validate | pass — "All validation tests completed successfully" |
-| 2026-07-10 | 4 | Full automated e2e after round-3 deploy: Go 11 tests (incl. score-vs-live-results ground truth, per-profile+INCONSISTENT match, nextScanTime future, node-scan fan-out, tailored scored) + Playwright 20 (incl. Inconsistent slice, PCI-DSS cards, dashboard link, INCONSISTENT filter, CSV download) | SNO + 2 day-2 workers | 4.22 / CO 1.9.1 | pass — Go 11/11, Playwright 20/20; score 94 = 514 PASS/(514+31 FAIL) verified against live CheckResults |
-| 2026-07-10 | 2+4 | Waivers + INCONSISTENT drill-down round. Battery: Go e2e 12 (added live waiver round-trip: waive a FAIL → moves to Waived bucket, out of denominator) + Playwright 22 (added per-node drill-down table, Waive action) + promtool alerts + operator -race + all 11 fuzz targets + bundle validate | SNO + 2 day-2 workers | 4.22 / CO 1.9.1 | pass — Go 12/12, Playwright 22/22, jest 68, promtool SUCCESS, fuzz 11/11; live waive dropped cis.fail 7→6, waived 0→1 |
-| 2026-07-10 | 4 | Lifecycle scenarios after waiver-self-healing + MCP-drill-down deploy: invalid-schedule Degrade+recover, schedule→NextScanTime advance, console Removed→teardown+deregister→Managed→redeploy. Full battery re-run | SNO + 2 day-2 workers | 4.22 / CO 1.9.1 | pass — Go 15/15, Playwright 22/22, jest 72, -race clean |
-| 2026-07-10 | 4 | Deploy 0.3.0 (r6: stuck-install grace, errorMessage guard) + full e2e re-run | SNO + 2 day-2 workers | 4.22 / CO 1.9.1 | pass — Go 15/15, Playwright 22/22; Available=True, score 94, cluster self-cleaned |
-| 2026-07-11 | 4 | 0.3.1: per-profile cards now show Inconsistent (was donut-only); light+dark screenshots; dark-theme spec | SNO + 2 day-2 workers | 4.22 / CO 1.9.1 | pass — Go e2e 16/16, Playwright 26/26 (incl. dark theme + per-profile Inconsistent), jest 78 |
-| 2026-07-11 | 4 | 0.4.0 compliance-features expansion (waiver governance, regressions, guided remediation/MCP batch, tailored authoring, schedule editor, severity-weighted score, Helm, report, console dashboard, hardening profile). Full battery | SNO + 2 day-2 workers | 4.22 / CO 1.9.1 | pass — operator unit+race+fuzz(15)+promtool, jest 90, Go e2e 16/16, Playwright 26/26, bundle validate, helm lint |
-| 2026-07-11 | 4 | Operator-managed console dashboard (Observe -> Dashboards, no Grafana; verified live with UWM: score singlestat + trend + checks), metrics ServiceMonitor/PrometheusRule in the bundle, benign-INCONSISTENT collapse, Helm dropped. Rebuilt operator + plugin (r10), redeployed | SNO + 2 day-2 workers | 4.22 / CO 1.9.1 | pass — Go e2e 16/16, Playwright 26/26, jest 95; INCONSISTENT 86->3 (only genuine PASS/FAIL splits kept), score 94->95, dashboard renders live |
-| 2026-07-12 | 3 | Dynamic informer (openspec 6.2/6.3): lazy watches on ComplianceScan/Remediation/CheckResult added once CRDs register (RESTMapper probe, 30s retry), events reconcile the singleton (coalesced), poll kept as fallback. Operator r16 | SNO + 2 day-2 workers | 4.22 / CO 1.9.1 | pass — leader logged all 3 watches established; Go e2e green; operator unit incl. enqueue mapping; Available=True, score 95 |
-| 2026-07-12 | 3 | Batch remediation (openspec 3.4): fixed poolFromRemediation (scan-name fallback; the MC role label is often empty so the batch paused no pool), added cancel-resume (all remediations reverted to apply=false resumes at once), live Go e2e for pause/resume (cancel path, non-control-plane pool, skips otherwise). Operator r15 | SNO + 2 day-2 workers | 4.22 / CO 1.9.1 | pass — Go e2e 16 pass + 1 safe skip, operator unit incl. pool-fallback + cancel-resume; score 95 |
-| 2026-07-11 | 4 | Phase 2 close-out: regressions "Recent changes" card on Overview (newly-failing + fixed since last scan, deep-linked per check, empty state distinguishes no-change vs no-prior-scan). Plugin r14 | SNO + 2 day-2 workers | 4.22 / CO 1.9.1 | pass — Playwright 27/27, jest 105; card + empty state render live |
-| 2026-07-11 | 4 | UI bug/eyesore pass (plugin r11): Results Profile column to disambiguate repeated check titles, remediation batch-error feedback + empty state + centered spinner, tailored-profile DNS-1123 name validation + orphan-safe create, distinct donut colors (Error/Waived), time-scaled score-trend axis (deduped dates), expiring-waiver alert now links to waived checks, missing i18n keys added. Cluster cleaned (build clutter + stale image tags pruned) | SNO + 2 day-2 workers | 4.22 / CO 1.9.1 | pass — Playwright 27/27, jest 100, typecheck clean; Profile column + fixes verified live on r11 |
+| 2026-07-09 | 4 | First zero-config CIS scan; Overview donut, Results, Remediations, nav placement | SNO (1 master+worker) | 4.22 / CO 1.9.1 | pass: score ~95, Available=True, Degraded=False |
+| 2026-07-10 | 4 | Multi-node + multi-benchmark: CIS+PCI-DSS on 3 nodes; INCONSISTENT surfaced; dashboard item; donut legend | SNO + 2 day-2 workers | 4.22 / CO 1.9.1 | pass: score 94 pooled, 86 INCONSISTENT counted, node scan fans out 3 pods |
+| 2026-07-10 | 1 | OLM bundle validation | n/a (local) | operator-sdk bundle validate | pass: "All validation tests completed successfully" |
+| 2026-07-10 | 4 | Full automated e2e after round-3 deploy: Go 11 tests (incl. score-vs-live-results ground truth, per-profile+INCONSISTENT match, nextScanTime future, node-scan fan-out, tailored scored) + Playwright 20 (incl. Inconsistent slice, PCI-DSS cards, dashboard link, INCONSISTENT filter, CSV download) | SNO + 2 day-2 workers | 4.22 / CO 1.9.1 | pass: Go 11/11, Playwright 20/20; score 94 = 514 PASS/(514+31 FAIL) verified against live CheckResults |
+| 2026-07-10 | 2+4 | Waivers + INCONSISTENT drill-down round. Battery: Go e2e 12 (added live waiver round-trip: waive a FAIL → moves to Waived bucket, out of denominator) + Playwright 22 (added per-node drill-down table, Waive action) + promtool alerts + operator -race + all 11 fuzz targets + bundle validate | SNO + 2 day-2 workers | 4.22 / CO 1.9.1 | pass: Go 12/12, Playwright 22/22, jest 68, promtool SUCCESS, fuzz 11/11; live waive dropped cis.fail 7→6, waived 0→1 |
+| 2026-07-10 | 4 | Lifecycle scenarios after waiver-self-healing + MCP-drill-down deploy: invalid-schedule Degrade+recover, schedule→NextScanTime advance, console Removed→teardown+deregister→Managed→redeploy. Full battery re-run | SNO + 2 day-2 workers | 4.22 / CO 1.9.1 | pass: Go 15/15, Playwright 22/22, jest 72, -race clean |
+| 2026-07-10 | 4 | Deploy 0.3.0 (r6: stuck-install grace, errorMessage guard) + full e2e re-run | SNO + 2 day-2 workers | 4.22 / CO 1.9.1 | pass: Go 15/15, Playwright 22/22; Available=True, score 94, cluster self-cleaned |
+| 2026-07-11 | 4 | 0.3.1: per-profile cards now show Inconsistent (was donut-only); light+dark screenshots; dark-theme spec | SNO + 2 day-2 workers | 4.22 / CO 1.9.1 | pass: Go e2e 16/16, Playwright 26/26 (incl. dark theme + per-profile Inconsistent), jest 78 |
+| 2026-07-11 | 4 | 0.4.0 compliance-features expansion (waiver governance, regressions, guided remediation/MCP batch, tailored authoring, schedule editor, severity-weighted score, Helm, report, console dashboard, hardening profile). Full battery | SNO + 2 day-2 workers | 4.22 / CO 1.9.1 | pass: operator unit+race+fuzz(15)+promtool, jest 90, Go e2e 16/16, Playwright 26/26, bundle validate, helm lint |
+| 2026-07-11 | 4 | Operator-managed console dashboard (Observe -> Dashboards, no Grafana; verified live with UWM: score singlestat + trend + checks), metrics ServiceMonitor/PrometheusRule in the bundle, benign-INCONSISTENT collapse, Helm dropped. Rebuilt operator + plugin (r10), redeployed | SNO + 2 day-2 workers | 4.22 / CO 1.9.1 | pass: Go e2e 16/16, Playwright 26/26, jest 95; INCONSISTENT 86->3 (only genuine PASS/FAIL splits kept), score 94->95, dashboard renders live |
+| 2026-07-12 | 3 | Dynamic informer (openspec 6.2/6.3): lazy watches on ComplianceScan/Remediation/CheckResult added once CRDs register (RESTMapper probe, 30s retry), events reconcile the singleton (coalesced), poll kept as fallback. Operator r16 | SNO + 2 day-2 workers | 4.22 / CO 1.9.1 | pass: leader logged all 3 watches established; Go e2e green; operator unit incl. enqueue mapping; Available=True, score 95 |
+| 2026-07-12 | 3 | Batch remediation (openspec 3.4): fixed poolFromRemediation (scan-name fallback; the MC role label is often empty so the batch paused no pool), added cancel-resume (all remediations reverted to apply=false resumes at once), live Go e2e for pause/resume (cancel path, non-control-plane pool, skips otherwise). Operator r15 | SNO + 2 day-2 workers | 4.22 / CO 1.9.1 | pass: Go e2e 16 pass + 1 safe skip, operator unit incl. pool-fallback + cancel-resume; score 95 |
+| 2026-07-11 | 4 | Phase 2 close-out: regressions "Recent changes" card on Overview (newly-failing + fixed since last scan, deep-linked per check, empty state distinguishes no-change vs no-prior-scan). Plugin r14 | SNO + 2 day-2 workers | 4.22 / CO 1.9.1 | pass: Playwright 27/27, jest 105; card + empty state render live |
+| 2026-07-11 | 4 | UI bug/eyesore pass (plugin r11): Results Profile column to disambiguate repeated check titles, remediation batch-error feedback + empty state + centered spinner, tailored-profile DNS-1123 name validation + orphan-safe create, distinct donut colors (Error/Waived), time-scaled score-trend axis (deduped dates), expiring-waiver alert now links to waived checks, missing i18n keys added. Cluster cleaned (build clutter + stale image tags pruned) | SNO + 2 day-2 workers | 4.22 / CO 1.9.1 | pass: Playwright 27/27, jest 100, typecheck clean; Profile column + fixes verified live on r11 |
 
 ## Fixture and harness strategy
 
@@ -198,7 +198,7 @@ per-node annotation) when nodes disagree.
       for `ocp4-cis-node-worker` once 2 workers joined).
 - [x] Results are consolidated per rule, not multiplied per node (94 unique =
       94 total for the worker node scan).
-- [x] **INCONSISTENT counted, not silently dropped** — the original tally had no
+- [x] **INCONSISTENT counted, not silently dropped**: the original tally had no
       case, hiding checks from the rollup (`TestAggregateStatus` asserts the
       Inconsistent bucket; donut has an Inconsistent slice).
 - [x] **Inconsistent excluded from the score denominator** (like Manual)
@@ -260,14 +260,14 @@ per-node annotation) when nodes disagree.
 ## C. Tailored profiles
 
 - [x] Owned tailored suite recognized (`TestTailoredSuiteHelpers`, jest
-      `suiteTailoredName` / `isOwnedByBaseline` tailored).
+      `isOwnedByBaseline` tailored).
 - [x] Tailored PVC counted in scan storage, including role-suffixed names
       (`TestCheckScanStorageTailoredPVC`).
 - [x] **Ambiguous tailored base does not steal foreign PVCs**: base `ocp4`
       does not match Pending `ocp4-cis`; short `a` does not match `anything`
       (`TestCheckScanStorageTailoredPVC`, `TestMatchesAnyProfile`).
 - [x] **Empty / `baseline-tp-` suite labels rejected** (operator
-      `tailoredNameFromSuite`, jest `suiteTailoredName`).
+      `tailoredNameFromSuite`, jest `suiteFilterKey`).
 - [x] **suiteFilterKey / deep-link ids**: tailored results filter as `tp-<name>`
       (jest `suiteFilterKey`; Overview `resultsHref('…', 'tp-…')`).
 - [ ] **Tailored + built-in of the same base** (e.g. `cis` and a `cis-custom`
@@ -796,7 +796,7 @@ stale Available or eternal Progressing.
       Operator stuck install, missing StorageClass, ConsolePlugin unavailable,
       RBAC denied, and no scan results.
 - [ ] **Alert runbooks**: `ComplianceScoreLow` and `ComplianceChecksFailing`
-      annotations point admins to actionable console/CLI steps.
+      annotations point admins to concrete console/CLI steps.
 - [ ] **Must-gather smoke**: `operator/hack/must-gather.sh` runs without
       cluster-admin-only assumptions beyond documented RBAC and redacts or
       avoids secrets.
@@ -1000,7 +1000,7 @@ Beyond existing fuzz targets, properties that should always hold:
       suite labels remain the ownership boundary.
 - [ ] **Policy engine (Gatekeeper/Kyverno) denies ScanSetting create**:
       ScanConfigured False with ReconcileError or binding error; message
-      actionable.
+      names the rejecting policy.
 - [ ] **NetworkPolicy denies operator → API**: probes fail; document symptoms
       vs CO install failure.
 
@@ -1284,15 +1284,15 @@ Classic boundary table. Automate as table-driven unit tests where possible.
 
 | Knob | On | Off / unset | Test |
 |---|---|---|---|
-| `installComplianceOperator=Automatic` | creates Sub | — | [x] unit |
-| `installComplianceOperator=Manual` | never creates Sub | — | [x] unit |
+| `installComplianceOperator=Automatic` | creates Sub | n/a | [x] unit |
+| `installComplianceOperator=Manual` | never creates Sub | n/a | [x] unit |
 | `BASELINE_SECURITY_SKIP_DEFAULT_CR=true` | no default CR | creates default | [ ] |
 | `console.managementState=Removed` | teardown plugin | Managed deploy | [x] partial |
 | `remediation.apply=Automatic` | ScanSetting auto flags | Manual false | [x] unit |
 | `RELATED_IMAGE_CONSOLE_PLUGIN` empty | ImageMissing | deploy image | [x] unit |
 | `complianceCatalogSource` custom | Sub.source override | redhat-operators | [x] unit |
 | metrics `--metrics-bind-address=0` | metrics off | :8443 | [ ] |
-| metrics insecure + non-loopback | forced secure | — | [x] addr class |
+| metrics insecure + non-loopback | forced secure | n/a | [x] addr class |
 
 - [ ] One integration test file that walks every knob and asserts the primary
       side effect (table-driven).

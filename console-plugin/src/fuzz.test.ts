@@ -18,8 +18,7 @@ import { checkBody, checkTitle, nodeScanPool, resultsCsv } from './results';
 import {
   ComplianceCheckResult,
   nodePoolFromScanName,
-  suiteProfileKey,
-  suiteTailoredName,
+  suiteFilterKey,
 } from './models';
 import { isValidCron } from './cron';
 import {
@@ -177,8 +176,7 @@ describe('CR field fuzz (untrusted CR input never throws)', () => {
         const pool = nodeScanPool(cr);
         expect(pool === null || isString(pool)).toBeTruthy();
         const labels = cr.metadata?.labels;
-        expect(() => suiteProfileKey(labels)).not.toThrow();
-        expect(() => suiteTailoredName(labels)).not.toThrow();
+        expect(() => suiteFilterKey(labels)).not.toThrow();
         const scanLeaf = leaf(next);
         const scan = isString(scanLeaf) ? scanLeaf : String(scanLeaf ?? '');
         const fromScan = nodePoolFromScanName(scan);
