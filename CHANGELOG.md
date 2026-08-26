@@ -42,6 +42,12 @@ depend on those tags.
 
 ## [Unreleased]
 
+### Fixed
+
+- CI: run `yarn lint:oxlint` in the console-plugin job. The type-aware
+  anti-slop rules were configured but never gated, so a violation could land
+  on `main` unnoticed.
+
 ## [0.5.14] - 2026-08-26
 
 ### Added

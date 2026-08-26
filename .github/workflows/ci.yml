@@ -123,6 +123,9 @@ jobs:
             sleep $((attempt * 5))
           done
       - run: yarn lint
+      # Separate from `yarn lint`: oxlint carries the type-aware anti-slop rules,
+      # which eslint has no port of. Ungated, they would drift silently.
+      - run: yarn lint:oxlint
       - run: yarn typecheck
       - run: yarn test
       # SOURCE_DATE_EPOCH matches image/local production build (webpack/minifiers).
