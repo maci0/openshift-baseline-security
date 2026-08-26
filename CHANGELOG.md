@@ -42,6 +42,8 @@ depend on those tags.
 
 ## [Unreleased]
 
+## [0.5.15] - 2026-08-26
+
 ### Security
 
 - Go: bump the toolchain pin 1.26.5 -> 1.26.6 (`go.mod`, both Dockerfiles).
@@ -604,7 +606,8 @@ Initial packaged release.
   Remediations, Profiles).
 - OLM bundle + file-based catalog; string-enum spec; OpenShift-style conditions.
 
-[Unreleased]: https://github.com/maci0/openshift-baseline-security/compare/v0.5.14...HEAD
+[Unreleased]: https://github.com/maci0/openshift-baseline-security/compare/v0.5.15...HEAD
+[0.5.15]: https://github.com/maci0/openshift-baseline-security/compare/v0.5.14...v0.5.15
 [0.5.14]: https://github.com/maci0/openshift-baseline-security/compare/v0.5.13...v0.5.14
 [0.5.13]: https://github.com/maci0/openshift-baseline-security/compare/v0.5.12...v0.5.13
 [0.5.12]: https://github.com/maci0/openshift-baseline-security/compare/v0.5.11...v0.5.12
