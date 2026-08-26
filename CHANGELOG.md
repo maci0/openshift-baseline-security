@@ -42,6 +42,18 @@ depend on those tags.
 
 ## [Unreleased]
 
+### Security
+
+- Go: bump the toolchain pin 1.26.5 -> 1.26.6 (`go.mod`, both Dockerfiles).
+  Clears six standard-library advisories govulncheck reported as reachable
+  from `Reconcile` and `main`, among them GO-2026-5972 (`encoding/asn1`) and
+  GO-2026-5026 (`net/http` via `golang.org/x/net/idna`). govulncheck now
+  reports no called vulnerabilities.
+- Console: pin resolutions `fast-uri` ^3.1.5 (GHSA-7p8r-x3mc-p8w7, high),
+  `js-yaml@^3.13.1` ^3.15.1 (GHSA-5p4m-2wfm-xmqj, high), and `undici` ^8.9.0
+  (GHSA-4cwx-7wf7-3272 high, GHSA-8xcm-r25x-g524 moderate, via node-gyp).
+  `yarn npm audit` reports no suggestions.
+
 ### Fixed
 
 - CI: run `yarn lint:oxlint` in the console-plugin job. The type-aware
