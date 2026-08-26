@@ -96,6 +96,8 @@ Describes `main`; install from published OLM tags for only the released surface.
 
 ## Layout
 
+- `AGENTS.md`: contributor contract (gate, version lockstep, house rules);
+  `operator/` and `console-plugin/` each carry their own
 - `CHANGELOG.md`: consumer-facing release notes and migration notes
 - `SECURITY.md`: supported versions and vulnerability reporting
 - `docs/SPEC.md`: design specification (read this first)

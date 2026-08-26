@@ -48,6 +48,12 @@ depend on those tags.
   anti-slop rules were configured but never gated, so a violation could land
   on `main` unnoticed.
 
+### Docs
+
+- Add `AGENTS.md` at the repo root and under `operator/` and `console-plugin/`:
+  the gate, the version lockstep, generated-file rules, and the per-component
+  conventions. `CLAUDE.md` symlinks to each.
+
 ## [0.5.14] - 2026-08-26
 
 ### Added
