@@ -3,7 +3,7 @@ module github.com/maci0/baseline-security-operator
 go 1.26.6
 
 require (
-	github.com/go-logr/logr v1.4.3
+	github.com/go-logr/logr v1.4.4
 	github.com/prometheus/client_golang v1.23.2
 	github.com/robfig/cron/v3 v3.0.1
 	k8s.io/api v0.35.1
