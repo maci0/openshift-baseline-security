@@ -42,8 +42,49 @@ depend on those tags.
 
 ## [Unreleased]
 
+### Added
+
+- Release workflow: CycloneDX SBOMs for the operator, console-plugin, bundle,
+  and catalog images, generated in a separate job (publish digests unchanged),
+  uploaded as artifacts and attached to the GitHub release when one exists.
+
+### Changed
+
+- Console plugin installs only the Victory chart components it uses instead of
+  the `victory` umbrella package, and no longer pulls `@types/react-dom`. No
+  rendering change; the build no longer carries candlestick, histogram,
+  errorbar, canvas, or brush-line modules.
+
+### Fixed
+
+- Console: a compliance score whose pass/fail counts overflow now renders as no
+  score instead of `NaN`/`Infinity`. A `NaN` score compares false against every
+  threshold, which painted the badge green on unscoreable data. Donut segments
+  and report totals saturate so they stay finite.
+- Console: the tailored-profile rule pickers silently dropped matches past the
+  100-option cap; they now render a notice saying how many results are hidden.
+- Console: profile-catalog watch failures surface as an alert, and a rescan that
+  throws synchronously reaches the error banner instead of being swallowed.
+- Console: a waiver's stored expiry and the comparison against it now agree on
+  the local day boundary, and fail closed on an invalid date-only value.
+- Console: the auto-dismiss timer sets its ref in an effect rather than during
+  render (a render-phase ref write is unsafe under concurrent rendering).
+- Operator: default-`ClusterBaseline` creation retries the cache sync while the
+  process is live instead of giving up after one failed pass.
+- Operator: an unreadable metrics certificate is logged once per episode with
+  its cause, and `Infrastructure` topology read failures are rate-limited
+  instead of silently forcing the HA console-plugin layout on single-node.
+- Operator: finishing a remediation batch tolerates a corrupt restored batch
+  (list capped, invalid remediation names treated as missing) instead of issuing
+  a Get per entry until the grace period expires.
+- Operator: resuming an orphaned batch clears its annotations through the shared
+  helper, so a concurrent resubmit carrying real remediation names survives.
+
 ### Security
 
+- Release workflow: the `workflow_dispatch` version input is passed through an
+  env var instead of being expanded into `run:`, where a crafted input could
+  execute arbitrary commands.
 - Go: bump indirect grpc 1.79.3 -> 1.82.1 (GO-2026-6061) and otel 1.40.0 ->
   1.43.0 (GO-2026-5506; grpc 1.82.1 requires otel 1.43.0). govulncheck reports
   no called vulnerabilities.
@@ -55,6 +96,11 @@ depend on those tags.
 
 - README: add a Quickstart with a complete `oc apply` install sequence at the
   top of the file.
+- Clarify that `spec.scoring.mode` is only ever changed by editing the CR; the
+  console reads it and never patches it.
+- Each ADR now carries the date it was recorded, and new records must have one.
+- Repo hygiene: text files pinned to LF via `.gitattributes` (a CRLF checkout
+  breaks the make recipes, `hack/*.sh` shebangs, and Dockerfile `RUN` lines).
 
 ## [0.5.13] - 2026-07-23
 
@@ -86,7 +132,7 @@ depend on those tags.
 
 ### Changed
 
-- Console: streamlined the create/edit tailored-profile modal. Current rule
+- Console: reworked the create/edit tailored-profile modal. Current rule
   selections show as removable chips with a count badge; the advanced
   enable-extra-rules picker is a collapsible section (auto-opens when editing a
   profile that already has enable rules); a one-line intro explains the base +
