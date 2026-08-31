@@ -1,7 +1,7 @@
 # ubi9/go-toolset 1.26.6 (matches go.mod / Makefile GOTOOLCHAIN; bump digest with RH).
 # Base digest may ship a slightly older patch; GOTOOLCHAIN pins go1.26.6 for the
 # stdlib CVE floor (downloaded in the networked RUN, used offline at compile).
-FROM registry.access.redhat.com/ubi9/go-toolset@sha256:f99dd81b20e5971ef9f63a51ac27cf0aa591ff9921d021490548b67fd9b17144 AS build
+FROM registry.access.redhat.com/ubi9/go-toolset@sha256:1a755651ffe1a438f137418d183f18ebad527ec929206c17804f93490a97869e AS build
 # BuildKit special-case ARG: clamps image/layer timestamps when passed by the client.
 ARG SOURCE_DATE_EPOCH=0
 # Pin the go.mod toolchain. Image Go may lag by a patch; never float to latest.
