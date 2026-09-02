@@ -76,6 +76,8 @@ spec:
       url: https://github.com/maci0/openshift-baseline-security
     - name: Changelog
       url: https://github.com/maci0/openshift-baseline-security/blob/main/CHANGELOG.md
+    - name: License
+      url: https://github.com/maci0/openshift-baseline-security/blob/main/LICENSE
   # Install into openshift-baseline-security so RBAC subjects and the metrics
   # Service match the ServiceAccount namespace in the bundle manifests.
   installModes:

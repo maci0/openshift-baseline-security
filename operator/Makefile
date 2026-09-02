@@ -52,7 +52,7 @@ export LC_ALL := C
 # SOURCE_DATE_EPOCH build-arg lets BuildKit clamp image/layer timestamps.
 # DOCKER_BUILDKIT is required for --provenance/--sbom and SOURCE_DATE_EPOCH clamping.
 export DOCKER_BUILDKIT := 1
-DOCKER_BUILD_FLAGS ?= --pull --provenance=false --sbom=false --build-arg SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH)
+DOCKER_BUILD_FLAGS ?= --pull --provenance=false --sbom=false --build-arg SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) --build-arg VERSION=$(VERSION)
 
 # Hardened defaults for pure filesystem validation/render docker runs.
 # Pull first via ensure_image (network=none cannot pull). Host mounts are
@@ -387,6 +387,16 @@ verify-versions:
 		|| { echo "CSV links must include name: Changelog so OperatorHub consumers can find release notes"; fail=1; }; \
 	grep -qE 'url: https://github.com/maci0/openshift-baseline-security/blob/.*/CHANGELOG\.md' "$$csv" \
 		|| { echo "CSV Changelog link must point at the GitHub CHANGELOG.md (OLM UI has no local file)"; fail=1; }; \
+	grep -qE 'name: License' "$$csv" \
+		|| { echo "CSV links must include name: License so OperatorHub consumers can find the Apache-2.0 text"; fail=1; }; \
+	grep -qE 'url: https://github.com/maci0/openshift-baseline-security/blob/.*/LICENSE' "$$csv" \
+		|| { echo "CSV License link must point at the GitHub LICENSE"; fail=1; }; \
+	grep -qE '^    capabilities: Basic Install$$' "$$csv" \
+		|| { echo "CSV capabilities must be Basic Install (no OLM replaces graph pre-1.0; Seamless Upgrades would be a lie)"; fail=1; }; \
+	cmp -s ../LICENSE LICENSE \
+		|| { echo "operator/LICENSE must match ../LICENSE (image /licenses copy)"; fail=1; }; \
+	cmp -s ../LICENSE ../console-plugin/LICENSE \
+		|| { echo "console-plugin/LICENSE must match ../LICENSE (image /licenses copy)"; fail=1; }; \
 	grep -qE 'Migration notes|CHANGELOG' "$$csv" \
 		|| { echo "CSV description must mention Migration notes or CHANGELOG so OLM consumers see the upgrade path"; fail=1; }; \
 	grep -qE "go-toolset $(GO_VERSION_RE)|go-toolset.*$(GO_VERSION_RE)" Dockerfile \
@@ -423,6 +433,18 @@ verify-versions:
 		|| { echo "console-plugin Dockerfile must skip Playwright browser download during yarn install"; fail=1; }; \
 	grep -qE '^RUN --network=none' catalog.Dockerfile \
 		|| { echo "catalog.Dockerfile opm cache RUN must use --network=none (local FBC only)"; fail=1; }; \
+	for df in Dockerfile Dockerfile.ci bundle.Dockerfile catalog.Dockerfile ../console-plugin/Dockerfile; do \
+		grep -qE 'COPY --chmod=0644 LICENSE /licenses/LICENSE' "$$df" \
+			|| { echo "$$df must COPY LICENSE to /licenses/LICENSE (Apache-2.0 redistribution)"; fail=1; }; \
+		grep -qE 'org.opencontainers.image.licenses="Apache-2.0"' "$$df" \
+			|| { echo "$$df must set org.opencontainers.image.licenses=Apache-2.0"; fail=1; }; \
+		grep -qE 'org.opencontainers.image.source="https://github.com/maci0/openshift-baseline-security"' "$$df" \
+			|| { echo "$$df must set org.opencontainers.image.source to the GitHub repo"; fail=1; }; \
+		grep -qE "^ARG VERSION=$(VERSION_RE)$$" "$$df" \
+			|| { echo "$$df ARG VERSION must be $(VERSION) (matches Makefile; image label would drift)"; fail=1; }; \
+		grep -qF 'org.opencontainers.image.version="$${VERSION}"' "$$df" \
+			|| { echo "$$df must set org.opencontainers.image.version from ARG VERSION"; fail=1; }; \
+	done; \
 	nvm=$$(tr -d '[:space:]' < ../console-plugin/.nvmrc); \
 	grep -qE "Node in this digest is $${nvm}" ../console-plugin/Dockerfile \
 		|| { echo "console-plugin Dockerfile must document Node $${nvm} (matches .nvmrc); image/node would drift"; fail=1; }; \

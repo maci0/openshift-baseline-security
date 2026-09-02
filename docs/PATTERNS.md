@@ -155,7 +155,8 @@ hosts).
 **Here**: install the operator deployment into
 `openshift-baseline-security` with the cluster-wide `AllNamespaces` install
 mode (the metrics Service and RBAC subjects are fixed to that namespace,
-while the controller watches cluster-scoped resources). `make bundle`
+while the controller watches cluster-scoped resources). CSV capability is
+`Basic Install` because there is no OLM `replaces` graph pre-1.0. `make bundle`
 validates in the operator-sdk container; `make
 bundle-build/bundle-push/catalog-build` produce bundle + FBC catalog images.
 

@@ -29,9 +29,18 @@ RUN --network=none CGO_ENABLED=0 go build -trimpath -buildvcs=false -mod=readonl
 # ubi9/ubi-micro
 FROM registry.access.redhat.com/ubi9/ubi-micro@sha256:35de56a9413112f1474e392ebc35e0cf6f0fb484c8e8877bbae59b513694b41f
 ARG SOURCE_DATE_EPOCH=0
+# Default matches Makefile VERSION; make docker-build passes --build-arg VERSION.
+ARG VERSION=0.5.15
 # Own the binary as the runtime UID (non-root cannot rewrite a root-owned path
 # under a read-only rootfs anyway; keeps ownership consistent with USER).
 # --chmod: host umask must not change the shipped layer digest.
 COPY --from=build --chown=65532:65532 --chmod=0755 /tmp/manager /usr/bin/manager
+# Apache-2.0 requires redistributing the license with the binary.
+COPY --chmod=0644 LICENSE /licenses/LICENSE
+LABEL org.opencontainers.image.title="Baseline Security Operator"
+LABEL org.opencontainers.image.description="Cluster-scoped OpenShift compliance baseline operator."
+LABEL org.opencontainers.image.source="https://github.com/maci0/openshift-baseline-security"
+LABEL org.opencontainers.image.licenses="Apache-2.0"
+LABEL org.opencontainers.image.version="${VERSION}"
 USER 65532:65532
 ENTRYPOINT ["/usr/bin/manager"]

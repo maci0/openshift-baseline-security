@@ -44,6 +44,9 @@ depend on those tags.
 
 ### Fixed
 
+- OperatorHub lists the package as Basic Install. The CSV advertised Seamless
+  Upgrades even though 0.x bundles have no `replaces` graph, so OLM cannot
+  upgrade between versions.
 - Console: the score scale "100" is formatted with the console locale, so
   native-digit locales (ar-SA, fa, ...) no longer mix Latin 100 with a
   localized score.
@@ -54,6 +57,9 @@ depend on those tags.
 
 ### Changed
 
+- Operator, plugin, bundle, and catalog images ship the Apache-2.0 license at
+  `/licenses/LICENSE` and OCI source, license, and version labels.
+- OperatorHub CSV links include the project License.
 - Operator and plugin image COPY steps pin file modes so a host umask cannot
   change the published layer digest.
 - Console plugin image install skips package lifecycle scripts and Playwright

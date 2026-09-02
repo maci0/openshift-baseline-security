@@ -33,11 +33,18 @@ RUN --network=none yarn build
 # ubi9/nginx-120
 FROM registry.access.redhat.com/ubi9/nginx-120@sha256:2f3271f0fafbe12cc80843b94d2f1b36d75419f70f3f4ced69218765b106bde6
 ARG SOURCE_DATE_EPOCH=0
+ARG VERSION=0.5.15
 # Runtime UID owns static assets and nginx.conf (read-only rootfs still applies
 # in the Deployment; ownership matches USER so the process can open its files).
 # --chmod: host umask must not change the shipped layer digest (dirs stay traversable).
 COPY --from=build --chown=1001:1001 --chmod=0755 /usr/src/app/dist /opt/app-root/src
 COPY --chown=1001:1001 --chmod=0644 nginx.conf /etc/nginx/nginx.conf
+COPY --chmod=0644 LICENSE /licenses/LICENSE
+LABEL org.opencontainers.image.title="Baseline Security Console Plugin"
+LABEL org.opencontainers.image.description="OpenShift console plugin for baseline compliance results."
+LABEL org.opencontainers.image.source="https://github.com/maci0/openshift-baseline-security"
+LABEL org.opencontainers.image.licenses="Apache-2.0"
+LABEL org.opencontainers.image.version="${VERSION}"
 USER 1001
 # Document the only listen port (TLS; no plaintext 8080).
 EXPOSE 9443

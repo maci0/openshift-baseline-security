@@ -1,5 +1,7 @@
 # Console plugin image build. Flags match operator/Makefile DOCKER_BUILD_FLAGS
 # (reproducible digests: no provenance/SBOM, fixed SOURCE_DATE_EPOCH, re-pull base).
+# Image version label uses the Dockerfile ARG VERSION default (lockstep via
+# operator `make verify-versions`); do not add a sixth VERSION source here.
 IMG ?= quay.io/openshift-baseline-security/baseline-security-console-plugin:latest
 SOURCE_DATE_EPOCH ?= 0
 export SOURCE_DATE_EPOCH

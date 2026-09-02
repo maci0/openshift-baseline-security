@@ -278,6 +278,14 @@ jobs:
           test "${user}" != "0"
           test "${user}" != "root"
           test "${user}" != "0:0"
+      - name: verify OCI license and source labels
+        run: |
+          lic=$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.licenses"}}' "${{ matrix.tag }}")
+          echo "org.opencontainers.image.licenses=${lic}"
+          test "$lic" = "Apache-2.0"
+          src=$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.source"}}' "${{ matrix.tag }}")
+          echo "org.opencontainers.image.source=${src}"
+          test "$src" = "https://github.com/maci0/openshift-baseline-security"
       # Cheap post-build smoke: entrypoint/binary or labeled bundle package exists.
       # Hardened run: no network, read-only rootfs, drop caps (local image only).
       - name: smoke ${{ matrix.name }}
@@ -294,6 +302,7 @@ jobs:
               # Manifest is the console's load contract; non-empty rejects a blank COPY.
               # No TLS certs in the image, so only filesystem checks (not nginx -t).
               run_hardened --entrypoint test "${{ matrix.tag }}" -s /opt/app-root/src/plugin-manifest.json
+              run_hardened --entrypoint test "${{ matrix.tag }}" -s /licenses/LICENSE
               ;;
             bundle)
               # FROM scratch: no shell; package label is the OLM identity.
@@ -351,13 +360,21 @@ jobs:
           test "${user}" != "0"
           test "${user}" != "root"
           test "${user}" != "0:0"
+      - name: verify catalog OCI license and source labels
+        run: |
+          lic=$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.licenses"}}' baseline-security-operator-catalog:ci)
+          echo "org.opencontainers.image.licenses=${lic}"
+          test "$lic" = "Apache-2.0"
+          src=$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.source"}}' baseline-security-operator-catalog:ci)
+          echo "org.opencontainers.image.source=${src}"
+          test "$src" = "https://github.com/maci0/openshift-baseline-security"
       - name: smoke catalog configs
         run: |
           # Precomputed FBC must be present and readable as the non-root USER.
           docker run --rm --network=none --read-only --tmpfs /tmp \
             --cap-drop ALL --security-opt no-new-privileges:true \
             --user 1001 --entrypoint ls baseline-security-operator-catalog:ci \
-            /configs/package.yaml /configs/bundle.yaml
+            /configs/package.yaml /configs/bundle.yaml /licenses/LICENSE
 
   # Single required status check for branch protection (fuzz/e2e stay optional).
   required:

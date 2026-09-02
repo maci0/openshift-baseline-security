@@ -408,7 +408,8 @@ ComplianceAsCode/compliance-operator master, and npm dist-tags).
   `quay.io/<org>/baseline-security-console-plugin`, both multi-stage UBI9
   builds, Dockerfiles at each component root; the CI build variant
   (`operator/Dockerfile.ci`, using `registry.ci.openshift.org` builders)
-  ships since 0.5.0.
+  ships since 0.5.0. Runtime images copy `LICENSE` to `/licenses/LICENSE`
+  and set OCI labels (`org.opencontainers.image.{source,licenses,version}`).
 - **OLM**: one package `baseline-security-operator`; bundle carries the
   ClusterBaseline CRD, CSV (with `console.openshift.io` related-images for
   the plugin image via `RELATED_IMAGE_CONSOLE_PLUGIN` env, so disconnected
@@ -442,6 +443,7 @@ openshift-baseline-security/
 │   ├── test/e2e/                   # live-cluster Go suite (make test-e2e)
 │   ├── Dockerfile
 │   ├── Dockerfile.ci               # registry.ci.openshift.org build variant
+│   ├── LICENSE                     # copy of root Apache-2.0 (image /licenses)
 │   ├── Makefile
 │   ├── go.mod
 │   └── AGENTS.md                   # operator-specific rules
@@ -457,6 +459,7 @@ openshift-baseline-security/
 │   ├── package.json
 │   ├── webpack.config.ts
 │   ├── Dockerfile
+│   ├── LICENSE                     # copy of root Apache-2.0 (image /licenses)
 │   └── AGENTS.md                   # plugin-specific rules
 ├── docs/{SPEC,THREAT_MODEL,OBSERVABILITY,DESIGN-DECISIONS,PATTERNS,STANDARDS,TEST-PLAN}.md
 │                                   # SPEC.md is this document; THREAT_MODEL.md is the living threat model

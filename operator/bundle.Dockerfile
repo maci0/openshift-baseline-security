@@ -1,6 +1,7 @@
 FROM scratch
 # BuildKit special-case ARG: clamps image/layer timestamps when passed by the client.
 ARG SOURCE_DATE_EPOCH=0
+ARG VERSION=0.5.15
 
 LABEL operators.operatorframework.io.bundle.mediatype.v1=registry+v1
 LABEL operators.operatorframework.io.bundle.manifests.v1=manifests/
@@ -9,7 +10,13 @@ LABEL operators.operatorframework.io.bundle.package.v1=baseline-security-operato
 LABEL operators.operatorframework.io.bundle.channels.v1=alpha
 LABEL operators.operatorframework.io.bundle.channel.default.v1=alpha
 LABEL com.redhat.openshift.versions="=v4.22"
+LABEL org.opencontainers.image.title="Baseline Security Operator bundle"
+LABEL org.opencontainers.image.description="OLM bundle for the Baseline Security Operator."
+LABEL org.opencontainers.image.source="https://github.com/maci0/openshift-baseline-security"
+LABEL org.opencontainers.image.licenses="Apache-2.0"
+LABEL org.opencontainers.image.version="${VERSION}"
 
 # --chmod: host umask must not change the shipped layer digest (dirs stay traversable).
 COPY --chmod=0755 bundle/manifests /manifests/
 COPY --chmod=0755 bundle/metadata /metadata/
+COPY --chmod=0644 LICENSE /licenses/LICENSE

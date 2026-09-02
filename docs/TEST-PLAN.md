@@ -687,6 +687,11 @@ an accepted risk neither inflates nor tanks the score.
 
 ## P. Packaging, images & supply chain
 
+- [x] **License + OCI labels**: Dockerfiles copy `LICENSE` to
+      `/licenses/LICENSE` and set `org.opencontainers.image.{source,licenses,version}`
+      with `ARG VERSION` lockstep (`make verify-versions`).
+- [x] **CSV capability level**: `Basic Install`, matching the documented
+      absence of an OLM `replaces` graph (`make verify-versions`).
 - [ ] **Operator image smoke**: built manager runs as non-root, health probes
       and secure metrics only.
 - [ ] **Console image smoke**: nginx non-root, TLS + HTTP/2 only on 9443,
