@@ -1,5 +1,8 @@
 # Human-facing roles, aggregated into the built-in view/admin roles so
 # console users get sensible access without extra bindings.
+# Viewer lists every kind the console watches (including TailoredProfiles
+# and Rules on the Profiles tab). Admin adds the writes: ClusterBaseline
+# patch, scan rescan, remediation apply, TailoredProfile create/update.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -18,6 +21,8 @@ rules:
       - compliancesuites
       - complianceremediations
       - profiles
+      - tailoredprofiles
+      - rules
     verbs: [get, list, watch]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -36,3 +41,6 @@ rules:
   - apiGroups: [compliance.openshift.io]
     resources: [complianceremediations]
     verbs: [get, list, watch, update, patch]
+  - apiGroups: [compliance.openshift.io]
+    resources: [tailoredprofiles]
+    verbs: [get, list, watch, create, update, patch]

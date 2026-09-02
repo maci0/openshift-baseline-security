@@ -48,6 +48,13 @@ depend on those tags.
   `approvedBy`, and drop `kubectl.kubernetes.io/last-applied-configuration` so
   those names are not copied into a support archive.
 
+### Fixed
+
+- Aggregated `baseline-security-viewer` can list TailoredProfiles and Rules
+  (the Profiles tab watches both; a view-only user previously got a catalog
+  watch error). `baseline-security-admin` can create and update
+  TailoredProfiles, matching the console authoring flow.
+
 ### Docs
 
 - Threat model: add `docs/THREAT_MODEL.md` (entry points, trust boundaries,

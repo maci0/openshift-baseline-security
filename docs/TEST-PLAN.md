@@ -377,6 +377,10 @@ per-node annotation) when nodes disagree.
       counts; successful scans still rescanned.
 - [x] **Console capability disabled**: plugin deregisters cleanly
       (`TestEnsureConsolePluginDisabled`, `TestConsoleTeardownToleratesMissingCRDs`).
+- [x] **Aggregated viewer/admin roles match console API use**: viewer lists
+      TailoredProfiles and Rules (Profiles catalog watches); admin
+      create/update/patch TailoredProfiles (`TestViewerRoleCoversConsoleReads`,
+      `TestAdminRoleAllowsTailoredProfileAuthoring`).
 - [ ] **HorizontalNav stability**: watch updates to ClusterBaseline do not
       remount tab roots (module-level route components / context pattern).
 - [ ] **i18n key coverage**: every `t('…')` string exists in

@@ -356,9 +356,11 @@ and Red Hat-updated.
 - Plugin: no service account of consequence (nginx serves static files);
   every API call is the user's own token via the console proxy.
 - Aggregated ClusterRoles shipped for humans:
-  `baseline-security-viewer` (read CRs + check results, bound via
-  cluster-reader aggregation label) and `baseline-security-admin`
-  (edit ClusterBaseline, annotate scans, and patch remediations).
+  `baseline-security-viewer` (read ClusterBaseline plus Compliance Operator
+  check results, scans, suites, remediations, Profiles, TailoredProfiles,
+  and Rules; bound via the cluster-reader aggregation label) and
+  `baseline-security-admin` (edit ClusterBaseline, annotate scans, patch
+  remediations, and create/update TailoredProfiles).
 - Remediation apply is the only dangerous write in the system and is
   confirmation-gated and RBAC-gated (user token + admin role + modal).
 - Plugin loads no external sources, so the console default CSP applies

@@ -18,4 +18,6 @@ rules:
       - compliancesuites
       - complianceremediations
       - profiles
+      - tailoredprofiles
+      - rules
     verbs: [get, list, watch]

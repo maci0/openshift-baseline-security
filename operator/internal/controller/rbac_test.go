@@ -144,6 +144,84 @@ func TestCSVSubscriptionRBACAllowsUpdate(t *testing.T) {
 	}
 }
 
+func mustReadUserRolesYAML(t *testing.T) string {
+	t.Helper()
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller failed")
+	}
+	path := filepath.Join(filepath.Dir(thisFile), "..", "..", "config", "rbac", "user_roles.yaml")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read user_roles.yaml: %v", err)
+	}
+	return string(raw)
+}
+
+// clusterRoleDoc returns the YAML document whose metadata.name is name.
+func clusterRoleDoc(rolesYAML, name string) string {
+	for _, doc := range strings.Split(rolesYAML, "---") {
+		for _, line := range strings.Split(doc, "\n") {
+			if strings.TrimSpace(line) == "name: "+name {
+				return doc
+			}
+		}
+	}
+	return ""
+}
+
+// TestViewerRoleCoversConsoleReads pins the aggregated viewer ClusterRole to
+// every compliance.openshift.io kind the console watches on the Profiles tab
+// (profiles, tailoredprofiles, rules) in addition to results/scans/suites.
+// Omitting tailoredprofiles or rules 403s those watches for view-only users.
+func TestViewerRoleCoversConsoleReads(t *testing.T) {
+	doc := clusterRoleDoc(mustReadUserRolesYAML(t), "baseline-security-viewer")
+	if doc == "" {
+		t.Fatal("user_roles.yaml missing baseline-security-viewer")
+	}
+	if !strings.Contains(doc, "resources: [clusterbaselines]") {
+		t.Fatal("viewer role missing clusterbaselines")
+	}
+	for _, resource := range []string{
+		"compliancecheckresults",
+		"compliancescans",
+		"compliancesuites",
+		"complianceremediations",
+		"profiles",
+		"tailoredprofiles",
+		"rules",
+	} {
+		if !strings.Contains(doc, "- "+resource) {
+			t.Fatalf("viewer role missing resource %q", resource)
+		}
+	}
+	for _, verb := range []string{"create", "update", "patch", "delete"} {
+		if rbacVerbListed(doc, verb) || csvVerbsInclude(doc, verb) {
+			t.Fatalf("viewer role must stay read-only, found verb %q", verb)
+		}
+	}
+}
+
+// TestAdminRoleAllowsTailoredProfileAuthoring pins create/update/patch on
+// tailoredprofiles so a user with the aggregated admin role can use the
+// console authoring flow (k8sCreate / k8sUpdate) without cluster-admin.
+func TestAdminRoleAllowsTailoredProfileAuthoring(t *testing.T) {
+	doc := clusterRoleDoc(mustReadUserRolesYAML(t), "baseline-security-admin")
+	if doc == "" {
+		t.Fatal("user_roles.yaml missing baseline-security-admin")
+	}
+	idx := strings.Index(doc, "resources: [tailoredprofiles]")
+	if idx < 0 {
+		t.Fatal("admin role missing tailoredprofiles")
+	}
+	block := doc[idx:]
+	for _, verb := range []string{"get", "list", "watch", "create", "update", "patch"} {
+		if !csvVerbsInclude(block, verb) {
+			t.Fatalf("admin tailoredprofiles missing verb %q", verb)
+		}
+	}
+}
+
 // csvVerbsInclude matches a verb as a list token in "verbs: [a, b, c]" form
 // (not a bare substring of another word such as "updated").
 func csvVerbsInclude(block, verb string) bool {
