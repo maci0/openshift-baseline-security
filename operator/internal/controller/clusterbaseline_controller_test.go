@@ -3319,6 +3319,60 @@ func TestSetComplianceOperatorReady(t *testing.T) {
 	}
 }
 
+func TestSetComplianceOperatorReadyFromCSVPhaseShape(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name       string
+		phase      any
+		omitStatus bool
+		wantReason string
+		wantSub    string
+	}{
+		{name: "empty string", phase: "", wantReason: "CSVNotReady", wantSub: "phase=unknown"},
+		{name: "missing status", omitStatus: true, wantReason: "CSVNotReady", wantSub: "phase=unknown"},
+		{name: "wrong type", phase: int64(42), wantReason: "CSVNotReady", wantSub: "unreadable CSV status.phase"},
+		{name: "succeeded", phase: "Succeeded", wantReason: "CSVSucceeded"},
+		{name: "failed", phase: "Failed", wantReason: "CSVFailed", wantSub: "phase=Failed"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			csv := &unstructured.Unstructured{Object: map[string]any{
+				"metadata": map[string]any{"name": "compliance-operator.v1.9.1"},
+			}}
+			if !tc.omitStatus {
+				if err := unstructured.SetNestedField(csv.Object, tc.phase, "status", "phase"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			cb := &baselinev1alpha1.ClusterBaseline{}
+			setComplianceOperatorReadyFromCSV(cb, csv)
+			c := meta.FindStatusCondition(cb.Status.Conditions, "ComplianceOperatorReady")
+			if c == nil || c.Reason != tc.wantReason {
+				t.Fatalf("condition = %+v, want reason %q", c, tc.wantReason)
+			}
+			if tc.wantSub != "" && !strings.Contains(c.Message, tc.wantSub) {
+				t.Fatalf("message %q does not contain %q", c.Message, tc.wantSub)
+			}
+			if tc.wantReason != "CSVSucceeded" && cb.Status.ComplianceOperatorVersion != "" {
+				t.Fatalf("non-Succeeded must clear version, got %q", cb.Status.ComplianceOperatorVersion)
+			}
+		})
+	}
+}
+
+func TestReconcileTimeoutBounds(t *testing.T) {
+	t.Parallel()
+	// Must outlast a paged CCR list (500/page) on a slow API, but still bound a
+	// hung apiserver call on the singleton worker (shorter than install grace).
+	if reconcileTimeout < 2*time.Minute {
+		t.Fatalf("reconcileTimeout %s too short for paged CCR aggregation", reconcileTimeout)
+	}
+	if reconcileTimeout > coInstallGrace {
+		t.Fatalf("reconcileTimeout %s must stay under coInstallGrace %s", reconcileTimeout, coInstallGrace)
+	}
+}
+
 func TestRemoveConsolePlugin(t *testing.T) {
 	scheme := testScheme(t)
 	dep := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: pluginName, Namespace: pluginNS}}

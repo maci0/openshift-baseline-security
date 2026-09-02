@@ -60,6 +60,12 @@ const (
 	// Retry gap while a compliance CRD is still unregistered, so a late Compliance
 	// Operator install picks up watches without restarting the operator.
 	watchRetryInterval = 30 * time.Second
+	// Bound one Reconcile so a hung apiserver List/Get cannot occupy the
+	// singleton worker (batch MCP resume, score, plugin) until process restart.
+	// Shorter than this false-fails multi-profile CCR paging (500/page with
+	// descriptions) on a slow API; longer leaves a wedged call past useful
+	// recovery. controller-runtime default is 0 (no timeout).
+	reconcileTimeout = 5 * time.Minute
 	// Desired HA for the console plugin Deployment.
 	pluginReplicas = int32(2)
 	// Ready threshold for ConsolePluginReady=True: one ready pod is enough for
@@ -427,6 +433,7 @@ func (r *ClusterBaselineReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&appsv1.Deployment{}).
 		Owns(&corev1.Service{}).
 		Named("clusterbaseline").
+		WithOptions(controller.Options{ReconciliationTimeout: reconcileTimeout}).
 		Build(r)
 	if err != nil {
 		return err
@@ -507,6 +514,12 @@ func (l *lazyComplianceWatch) Start(ctx context.Context) error {
 			// RESTMapping fails with NoMatch until the CRD is registered; the
 			// mapper is dynamic and refreshes, so a later attempt succeeds.
 			if _, err := l.mapper.RESTMapping(gvk.GroupKind(), gvk.Version); err != nil {
+				// NoMatch is install lag (CRDs not registered yet): retry quietly.
+				// Any other mapper failure (RBAC, internal) would otherwise hide
+				// that event-driven watches never start, leaving only the 1m poll.
+				if !meta.IsNoMatchError(err) {
+					logger.Info("watch mapping not ready yet; will retry", "kind", gvk.Kind, "error", err)
+				}
 				still = append(still, gvk)
 				continue
 			}

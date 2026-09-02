@@ -327,8 +327,17 @@ func (r *ClusterBaselineReconciler) setComplianceOperatorReady(ctx context.Conte
 
 func setComplianceOperatorReadyFromCSV(cb *baselinev1alpha1.ClusterBaseline, csv *unstructured.Unstructured) {
 	phase, _, err := unstructured.NestedString(csv.Object, "status", "phase")
-	// Wrong-type or missing phase must not report "phase=" (empty); treat as unknown.
-	if err != nil || phase == "" {
+	if err != nil {
+		// Type-mismatched phase is not "unknown" (that reads as CO reporting an
+		// empty phase). Keep CSVNotReady so rollup still Progresses then
+		// InstallStalls; name the NestedString error so on-call sees the shape.
+		cb.Status.ComplianceOperatorVersion = ""
+		setCond(cb, "ComplianceOperatorReady", metav1.ConditionFalse, "CSVNotReady",
+			fmt.Sprintf("unreadable CSV status.phase: %s", err.Error()))
+		return
+	}
+	// Missing phase must not report "phase=" (empty); treat as unknown.
+	if phase == "" {
 		phase = "unknown"
 	}
 	if phase == "Succeeded" {

@@ -82,6 +82,16 @@ depend on those tags.
   on macOS still strips `requestedBy`/`approvedBy`.
 - Operator CI image runtime stage now honors `SOURCE_DATE_EPOCH` (it was only
   set on the builder), so CI and release image timestamps can match.
+- Operator: a hung apiserver call during reconcile now times out after 5
+  minutes instead of occupying the singleton worker until process restart
+  (batch resume, score, and plugin ensure could not proceed while one List
+  was stuck).
+- Operator: a Compliance Operator CSV whose `status.phase` is the wrong type
+  now reports the parse error on `ComplianceOperatorReady` instead of
+  `phase=unknown`.
+- Operator: RESTMapper failures other than missing CRDs while starting
+  compliance watches are logged, so a mapper or RBAC problem is visible
+  instead of only the 1m poll.
 - Aggregated `baseline-security-viewer` can list TailoredProfiles and Rules
   (the Profiles tab watches both; a view-only user previously got a catalog
   watch error). `baseline-security-admin` can create and update

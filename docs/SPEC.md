@@ -195,7 +195,9 @@ Responsibilities:
    poll requeue remains as fallback (1m steady, 15s while Progressing
    or a remediation batch is Applying; also shortens toward the soonest
    active waiver `expiresAt`, floored at 1s) until watches are up or if
-   they fail. Owns the plugin Deployment/Service. Deleting
+   they fail. Each reconcile is bounded by a 5-minute timeout so a hung
+   apiserver call cannot stall the singleton worker until process restart.
+   Owns the plugin Deployment/Service. Deleting
    ClusterBaseline does **not** uninstall the Compliance Operator.
 
 ### 4.2 API: `ClusterBaseline` CRD

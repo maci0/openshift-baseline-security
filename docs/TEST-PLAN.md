@@ -652,9 +652,17 @@ an accepted risk neither inflates nor tanks the score.
       `readOnlyRootFilesystem: true`, optional metrics cert volume missing.
 - [ ] **API outage resilience**: transient list/create/update failures do not
       terminate the manager; reconcile retries and status recovers.
+- [x] **Reconcile timeout**: a hung apiserver call cannot occupy the singleton
+      worker forever (`reconcileTimeout` on `controller.Options.ReconciliationTimeout`;
+      `TestReconcileTimeoutBounds`).
+- [x] **Unreadable CSV status.phase**: a type-mismatched phase is CSVNotReady
+      with the NestedString error in the message, not `phase=unknown`
+      (`TestSetComplianceOperatorReadyFromCSVPhaseShape`).
 - [ ] **Watch-start before dependency CRDs exist**: manager starts without
       Compliance Operator CRDs; NoKindMatch paths keep the CR usable instead of
       crashing.
+- [x] **Lazy watch mapper errors**: NoMatch stays quiet (install lag); other
+      RESTMapping failures log at Info and retry (`lazyComplianceWatch.Start`).
 - [ ] **RELATED_IMAGE_CONSOLE_PLUGIN unset**: ImageMissing, scans still
       reconcile, Available can still become True when CO+scans ready.
 
