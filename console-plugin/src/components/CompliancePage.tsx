@@ -296,7 +296,13 @@ const CompliancePage: React.FC = () => {
                           return;
                         }
                         try {
-                          const html = buildReportHtml(baseline, ownedResults, new Date(), t);
+                          const html = buildReportHtml(
+                            baseline,
+                            ownedResults,
+                            new Date(),
+                            t,
+                            i18n.language,
+                          );
                           const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
                           // Prefer a blob URL over document.write: no blank-window
                           // document mutation, and opener is dropped when available.

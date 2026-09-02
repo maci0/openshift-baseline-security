@@ -78,6 +78,43 @@ export const safeLocale = (locale?: string): string | undefined => {
   }
 };
 
+// CSS/HTML dir from a BCP 47 tag. Used when document.dir is unset (report
+// export, tests) so Arabic/Hebrew/Persian sessions still get RTL chrome.
+// Prefers Intl.Locale#getTextInfo (Node 22 / Chromium); falls back to the
+// primary language subtag when the Locale Info API is missing.
+export const textDirection = (locale?: string): 'ltr' | 'rtl' => {
+  const tag = safeLocale(locale);
+  if (!tag) return 'ltr';
+  try {
+    // SAFETY: TypeScript's es2021 Intl.Locale typings omit getTextInfo
+    // (Locale Info API). Node 22 and Chromium implement it; the catch covers
+    // engines that throw or lack the method.
+    const dir = (
+      new Intl.Locale(tag) as Intl.Locale & {
+        getTextInfo: () => { direction: string };
+      }
+    ).getTextInfo().direction;
+    if (dir === 'rtl') return 'rtl';
+    if (dir === 'ltr') return 'ltr';
+  } catch {
+    switch (tag.split('-')[0].toLowerCase()) {
+      case 'ar':
+      case 'fa':
+      case 'he':
+      case 'ur':
+      case 'ps':
+      case 'sd':
+      case 'yi':
+      case 'ckb':
+      case 'dv':
+        return 'rtl';
+      default:
+        break;
+    }
+  }
+  return 'ltr';
+};
+
 // Display helpers for ISO timestamps from CR/user text. Unparseable values
 // return the raw string instead of "Invalid Date" so hand-edits stay debuggable.
 const parsedLocalDate = (iso: string): Date | null => {

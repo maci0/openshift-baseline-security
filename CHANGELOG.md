@@ -42,6 +42,16 @@ depend on those tags.
 
 ## [Unreleased]
 
+### Fixed
+
+- Console: the score scale "100" is formatted with the console locale, so
+  native-digit locales (ar-SA, fa, ...) no longer mix Latin 100 with a
+  localized score.
+- Console: exported HTML reports take the console language for dates and
+  counts, set RTL from the locale when document dir is unset, and isolate
+  bidirectional check and waiver text so it cannot reverse surrounding
+  punctuation.
+
 ### Changed
 
 - Operator and plugin image COPY steps pin file modes so a host umask cannot

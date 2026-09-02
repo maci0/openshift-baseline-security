@@ -210,6 +210,51 @@ describe('buildReportHtml data correctness', () => {
     expect(html).not.toContain('42 / 100');
   });
 
+  it('uses the passed locale for native digits, html lang, and RTL dir', () => {
+    const html = buildReportHtml(
+      withStatus({
+        score: 88,
+        profiles: [
+          { key: 'cis', pass: 5, fail: 0, manual: 0, info: 0, error: 0, inconsistent: 0, waived: 0, notApplicable: 0 },
+        ],
+      }),
+      [],
+      NOW,
+      undefined,
+      'ar-SA',
+    );
+    expect(html).toContain('lang="ar-SA"');
+    expect(html).toContain('dir="rtl"');
+    expect(html).toContain('٨٨ / ١٠٠');
+    expect(html).not.toContain('88 / 100');
+  });
+
+  it('isolates untrusted check titles so BIDI cannot reverse surrounding chrome', () => {
+    const html = buildReportHtml(
+      withStatus({
+        score: 0,
+        profiles: [
+          { key: 'cis', pass: 0, fail: 1, manual: 0, info: 0, error: 0, inconsistent: 0, waived: 0, notApplicable: 0 },
+        ],
+      }),
+      [
+        {
+          metadata: {
+            name: 'rtl-check',
+            namespace: 'openshift-compliance',
+            labels: { 'compliance.openshift.io/suite': 'baseline-cis' },
+          },
+          status: 'FAIL',
+          severity: 'high',
+          description: 'عنوان\nbody',
+        },
+      ],
+      NOW,
+    );
+    expect(html).toContain('<span dir="auto">rtl-check</span>');
+    expect(html).toContain('<span dir="auto">عنوان</span>');
+  });
+
   it('shows the score when at least one check was evaluated', () => {
     const html = buildReportHtml(
       withStatus({

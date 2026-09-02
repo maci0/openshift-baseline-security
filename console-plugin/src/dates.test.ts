@@ -7,6 +7,7 @@ import {
   formatCount,
   formatChartDate,
   localDateInputValue,
+  textDirection,
 } from './dates';
 import { randomString } from './testing/fuzz';
 import { isString } from './parse';
@@ -84,6 +85,7 @@ describe('dates throw-safety (fuzz sweep)', () => {
     it(`never throws for input ${label}`, () => {
       for (const loc of [undefined, ...HOSTILE]) {
         expect(() => safeLocale(loc)).not.toThrow();
+        expect(() => textDirection(loc)).not.toThrow();
         expect(() => formatLocalDate(s, loc)).not.toThrow();
         expect(() => formatLocalDateTime(s, loc)).not.toThrow();
         expect(() => formatChartDate(new Date(s), loc)).not.toThrow();
@@ -194,10 +196,33 @@ describe('formatLocalDate / formatLocalDateTime', () => {
   });
 });
 
+describe('textDirection', () => {
+  it('returns rtl for Arabic, Hebrew, Persian and related tags', () => {
+    for (const tag of ['ar', 'ar-SA', 'he', 'he-IL', 'fa', 'fa_IR', 'ur', 'ps']) {
+      expect(textDirection(tag)).toBe('rtl');
+    }
+  });
+  it('returns ltr for Latin/CJK tags and for invalid/missing tags', () => {
+    for (const tag of ['en', 'en-US', 'de-DE', 'ja', 'zh-CN', undefined, '', '!!']) {
+      expect(textDirection(tag)).toBe('ltr');
+    }
+  });
+  it('never throws on hostile tags', () => {
+    for (const loc of HOSTILE) {
+      expect(() => textDirection(loc)).not.toThrow();
+      expect(textDirection(loc) === 'ltr' || textDirection(loc) === 'rtl').toBeTruthy();
+    }
+  });
+});
+
 describe('formatCount', () => {
   it('formats with locale grouping', () => {
     expect(formatCount(1234, 'en-US')).toBe('1,234');
     expect(formatCount(1234, 'de-DE')).toBe('1.234');
+  });
+  it('uses native digits for ar-SA so a formatted 100 matches the score', () => {
+    expect(formatCount(100, 'ar-SA')).toBe('١٠٠');
+    expect(formatCount(88, 'ar-SA')).toBe('٨٨');
   });
   it('accepts underscore locale tags and invalid tags without throwing', () => {
     expect(formatCount(42, 'en_US')).toMatch(/42/);

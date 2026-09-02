@@ -682,8 +682,9 @@ an accepted risk neither inflates nor tanks the score.
       confirmation modal, and Export CSV are reachable without a mouse.
 - [ ] **Focus management**: opening and closing modals restores focus to the
       triggering control.
-- [ ] **Translation coverage**: every user-facing string exists in the en
-      locale file; no raw key leakage for new donut slices (Info, Inconsistent).
+- [x] **Translation coverage**: every user-facing string exists in the en
+      locale file; no raw key leakage for new donut slices (Info, Inconsistent)
+      (jest `i18n locale coverage`).
 - [ ] **Narrow viewport**: dashboard cards, donut legend, table filters, and
       remediation modals do not overlap or clip text at common laptop/tablet
       widths.
@@ -1066,8 +1067,12 @@ Beyond existing fuzz targets, properties that should always hold:
 - [ ] **Pluralization**: rescan failure string with count=1 vs count=5.
 - [ ] **Empty message Degraded**: condition message empty → UI still shows
       title "Scanning degraded" without "undefined".
-- [ ] **Bidirectional text in check titles**: CSV and modal do not reorder
-      surrounding punctuation into garbage.
+- [x] **Bidirectional text in check titles**: Results modal and table titles
+      use `dir=auto`; HTML report wraps untrusted cells in `dir=auto` (jest
+      `isolates untrusted check titles`). CSV column tokens stay English.
+- [x] **Score scale digits follow locale**: `of 100` / `n / 100` interpolate
+      `formatCount(100)` (jest `formatCount` ar-SA; report `ar-SA` native
+      digits and `dir=rtl`).
 - [ ] **Locale file parity with dist**: production webpack emits the same keys
       as `locales/en/…` (build gate).
 

@@ -546,8 +546,11 @@ const ResultsTab: React.FC<{
                 setWaiveError(null);
                 setSelected(obj);
               }}
-              // Fixed-height virtualized rows: ellipsis + title tooltip so long
-              // check names do not wrap/overflow the cell.
+              // dir=auto: check titles are untrusted CO text and may be RTL;
+              // without it ellipsis sits on the wrong edge and BIDI can
+              // reverse surrounding punctuation. Fixed-height virtualized
+              // rows: ellipsis + title tooltip so long names do not wrap.
+              dir="auto"
               style={{
                 display: 'inline-block',
                 maxWidth: '100%',
@@ -862,6 +865,7 @@ const ResultsTab: React.FC<{
               })()}
               <Content
                 component="p"
+                dir="auto"
                 style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}
               >
                 {checkBody(selectedLive) || t('No description provided.')}
@@ -912,7 +916,7 @@ const ResultsTab: React.FC<{
                             // Index in the key: hostile data could repeat a node name.
                             return (
                               <Tr key={`${s.node}-${i}`}>
-                                <Td>{s.node}</Td>
+                                <Td dir="auto">{s.node}</Td>
                                 <Td>
                                   <Label isCompact color={style.color} icon={style.icon}>
                                     {s.status ? statusDisplayTitle(st, t) : '—'}
@@ -947,6 +951,7 @@ const ResultsTab: React.FC<{
                   <Title headingLevel="h3">{t('How to verify')}</Title>
                   <Content
                     component="pre"
+                    dir="auto"
                     style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}
                   >
                     {selectedLive.instructions}
@@ -993,19 +998,19 @@ const ResultsTab: React.FC<{
                             {reasonText && (
                               <DescriptionListGroup>
                                 <DescriptionListTerm>{t('Reason')}</DescriptionListTerm>
-                                <DescriptionListDescription>{reasonText}</DescriptionListDescription>
+                                <DescriptionListDescription dir="auto">{reasonText}</DescriptionListDescription>
                               </DescriptionListGroup>
                             )}
                             {requestedByText && (
                               <DescriptionListGroup>
                                 <DescriptionListTerm>{t('Requested by')}</DescriptionListTerm>
-                                <DescriptionListDescription>{requestedByText}</DescriptionListDescription>
+                                <DescriptionListDescription dir="auto">{requestedByText}</DescriptionListDescription>
                               </DescriptionListGroup>
                             )}
                             {approvedByText && (
                               <DescriptionListGroup>
                                 <DescriptionListTerm>{t('Approved by')}</DescriptionListTerm>
-                                <DescriptionListDescription>{approvedByText}</DescriptionListDescription>
+                                <DescriptionListDescription dir="auto">{approvedByText}</DescriptionListDescription>
                               </DescriptionListGroup>
                             )}
                             {w.expiresAt && (

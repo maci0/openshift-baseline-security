@@ -41,13 +41,22 @@ const ClusterScoreItem: React.FC = () => {
     );
   }
   // Locale-aware digits/grouping so ar/fa/hi (and others) match console locale.
+  // Format the scale the same way as the score so ar-SA (and similar) do not
+  // mix native-digit scores with a Latin "100".
   const scoreText = formatCount(score, i18n.language);
+  const maxText = formatCount(100, i18n.language);
   return (
     <a
       href="/baseline-security"
-      aria-label={t('Compliance score {{score}} of 100', { score: scoreText })}
+      aria-label={t('Compliance score {{score}} of {{max}}', {
+        score: scoreText,
+        max: 100,
+        formattedMax: maxText,
+      })}
     >
-      <span style={{ color: scoreColor(score) }}>{t('{{score}} / 100', { score: scoreText })}</span>
+      <span style={{ color: scoreColor(score) }}>
+        {t('{{score}} / {{max}}', { score: scoreText, max: 100, formattedMax: maxText })}
+      </span>
     </a>
   );
 };

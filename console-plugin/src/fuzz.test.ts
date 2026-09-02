@@ -28,6 +28,7 @@ import {
   formatLocalDate,
   formatLocalDateTime,
   safeLocale,
+  textDirection,
 } from './dates';
 import { isString } from './parse';
 
@@ -229,6 +230,8 @@ describe('string-parser fuzz (untrusted schedule / date / locale never throws)',
       try {
         const loc = safeLocale(locale); // contract: string | undefined
         expect(loc === undefined || isString(loc)).toBeTruthy();
+        const dir = textDirection(locale);
+        expect(dir === 'ltr' || dir === 'rtl').toBeTruthy();
         expect(isString(formatLocalDate(iso, locale))).toBeTruthy();
         expect(isString(formatLocalDateTime(iso, locale))).toBeTruthy();
         const badEpoch: unknown = iso;

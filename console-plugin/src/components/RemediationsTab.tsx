@@ -715,7 +715,7 @@ const RemediationsTab: React.FC<{
               const errorDetail = rem.status?.errorMessage?.trim();
               return (
                 <Tr key={rem.metadata.name}>
-                  <Td dataLabel={t('Remediation')} modifier="breakWord">
+                  <Td dataLabel={t('Remediation')} modifier="breakWord" dir="auto">
                     {rem.metadata.name}
                   </Td>
                   <Td dataLabel={t('Kind')}>

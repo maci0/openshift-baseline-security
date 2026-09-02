@@ -10,7 +10,13 @@ import {
 import { checkTitle, severityDisplayTitle } from './results';
 import { aggregateCounts, checkSeverity } from './scoring';
 import { effectiveStatus } from './status';
-import { formatCount, formatLocalDate, formatLocalDateTime, safeLocale } from './dates';
+import {
+  formatCount,
+  formatLocalDate,
+  formatLocalDateTime,
+  safeLocale,
+  textDirection,
+} from './dates';
 import { stripFormatChars } from './parse';
 import { waiverExpired } from './waivers';
 
@@ -33,6 +39,11 @@ const esc = (s: string): string =>
   // so the lookup below cannot miss. Format characters (BIDI, zero-width) are
   // stripped first so untrusted CR text cannot reverse or hide neighboring cells.
   stripFormatChars(String(s ?? '')).replace(htmlEscapeRe, (c) => htmlEscapes[c as keyof typeof htmlEscapes]);
+
+// Isolate untrusted CR text (check titles, waiver reasons, names) so a
+// bidirectional override cannot reverse surrounding punctuation or column
+// labels. dir=auto also puts ellipsis on the correct side for RTL titles.
+const autoDir = (s: string): string => `<span dir="auto">${esc(s)}</span>`;
 
 // Interpolation variables for report chrome. Keys are open-ended ({{count}},
 // {{formattedCount}}, {{name}}, ...) but values must render as text, so the
@@ -73,22 +84,30 @@ export const buildReportHtml = (
   results: ComplianceCheckResult[] = [],
   now: Date = new Date(),
   translate: ReportTranslate = defaultReportTranslate,
+  localeTag?: string,
 ): string => {
   const t = translate;
   // Inherit console locale/dir so the report matches the operator's language and
   // RTL layout when opened from a translated console session. Dates and counts
   // use the same BCP 47 tag so formatting is not tied to the browser OS alone.
+  // Prefer the caller's i18n language (console session) over document.lang,
+  // which can be missing or a different granularity (en vs en-US).
   // globalThis (not a typeof probe) so SSR-free console rendering still works
   // when the plugin bundle is evaluated outside a document (early boot).
   const docEl = globalThis.document?.documentElement;
   // safeLocale normalizes underscore form and rejects invalid tags (toLocale*
   // throws RangeError). Fall back to "en" for the html lang attribute only;
   // formatting still uses undefined (runtime default) when the tag is bad.
-  const locale = safeLocale(docEl?.lang || 'en');
+  const locale = safeLocale(localeTag || docEl?.lang || 'en');
   const htmlLang = locale ?? 'en';
-  const htmlDir = docEl?.dir === 'rtl' ? 'rtl' : 'ltr';
+  // Explicit document.dir wins (the console already mirrored the page); otherwise
+  // derive RTL from the locale so an Arabic session still gets a RTL report when
+  // document.dir is unset (tests, some embeddings).
+  const htmlDir =
+    docEl?.dir === 'rtl' ? 'rtl' : docEl?.dir === 'ltr' ? 'ltr' : textDirection(locale);
   // Same non-finite guard and locale validation as Overview counts.
   const fmt = (n: number): string => formatCount(n, locale);
+  const maxText = fmt(100);
   const st = baseline.status ?? {};
   // Aggregate all eight status categories across built-in + tailored profiles,
   // the same set the on-screen composition donut and per-profile cards show.
@@ -106,7 +125,11 @@ export const buildReportHtml = (
   // (0/0) and the UI shows "—", so the report must not print a number over it.
   const score =
     totalChecks > 0 && st.score != null
-      ? t('{{score}} / 100', { score: fmt(Number(st.score)) })
+      ? t('{{score}} / {{max}}', {
+          score: fmt(Number(st.score)),
+          max: 100,
+          formattedMax: maxText,
+        })
       : t('Not scanned');
   const profileRows = [
     ...(st.profiles ?? []).map((p) => ({ name: t(profileTitle(p.key ?? '')), c: p })),
@@ -120,7 +143,7 @@ export const buildReportHtml = (
         // Coerce counts to numbers: the CR status is not runtime type-checked,
         // so a tampered non-numeric value cannot inject markup here. All eight
         // categories, same order as the on-screen per-profile card rows.
-        `<tr><td>${esc(name)}</td><td>${fmt(Number(c.pass) || 0)}</td><td>${fmt(Number(c.fail) || 0)}</td>` +
+        `<tr><td>${autoDir(name)}</td><td>${fmt(Number(c.pass) || 0)}</td><td>${fmt(Number(c.fail) || 0)}</td>` +
         `<td>${fmt(Number(c.manual) || 0)}</td><td>${fmt(Number(c.info) || 0)}</td>` +
         `<td>${fmt(Number(c.inconsistent) || 0)}</td><td>${fmt(Number(c.error) || 0)}</td>` +
         `<td>${fmt(Number(c.waived) || 0)}</td><td>${fmt(Number(c.notApplicable) || 0)}</td></tr>`,
@@ -149,10 +172,10 @@ export const buildReportHtml = (
       continue;
     }
     failingParts.push(
-      `<tr><td>${esc(name)}</td><td>${esc(checkTitle(r))}</td>` +
+      `<tr><td>${autoDir(name)}</td><td>${autoDir(checkTitle(r))}</td>` +
         // checkProfileLabel returns i18n source titles for built-ins; t() leaves
         // tailored names and the empty em dash unchanged when no key exists.
-        `<td>${esc(t(checkProfileLabel(labels)))}</td>` +
+        `<td>${autoDir(t(checkProfileLabel(labels)))}</td>` +
         `<td>${esc(severityDisplayTitle(checkSeverity(r), t))}</td></tr>`,
     );
   }
@@ -160,8 +183,8 @@ export const buildReportHtml = (
   const waiverRows = activeWaivers
     .map(
       (w) =>
-        `<tr><td>${esc(w.name)}</td><td>${esc(w.reason ?? '')}</td>` +
-        `<td>${esc(w.requestedBy ?? '')}</td><td>${esc(w.approvedBy ?? '')}</td>` +
+        `<tr><td>${autoDir(w.name)}</td><td>${autoDir(w.reason ?? '')}</td>` +
+        `<td>${autoDir(w.requestedBy ?? '')}</td><td>${autoDir(w.approvedBy ?? '')}</td>` +
         `<td>${w.expiresAt ? esc(formatLocalDate(w.expiresAt, locale)) : ''}</td>` +
         `<td>${w.reviewBy ? esc(formatLocalDate(w.reviewBy, locale)) : ''}</td></tr>`,
     )
@@ -179,7 +202,7 @@ export const buildReportHtml = (
   // system-ui first so CJK/Arabic/Cyrillic glyphs resolve to platform fonts.
   return `<!doctype html><html lang="${esc(htmlLang)}" dir="${htmlDir}"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"><meta name="referrer" content="no-referrer"><title>${esc(t('Compliance report'))}</title>
 <style>:root{color-scheme:light}body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans","Helvetica Neue",Arial,sans-serif;margin:2rem;color:#151515;background:#fff}h1{margin-bottom:0}
-table{border-collapse:collapse;margin:1rem 0;width:100%}th,td{border:1px solid #ccc;padding:4px 8px;text-align:start}
+table{border-collapse:collapse;margin:1rem 0;width:100%}th,td{border:1px solid #ccc;padding:4px 8px;text-align:start;overflow-wrap:anywhere;unicode-bidi:isolate}
 .muted{color:#666}</style></head><body>
 <h1>${esc(t('Compliance report'))}</h1>
 <p class="muted">${esc(t('Generated {{when}} • last scan {{lastScan}}', {

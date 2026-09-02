@@ -623,8 +623,10 @@ const Overview: React.FC<{
       <Label
         isCompact
         color={scoreLabelColor(pScore)}
-        aria-label={t('Compliance score {{score}} of 100', {
+        aria-label={t('Compliance score {{score}} of {{max}}', {
           score: formatCount(pScore, locale),
+          max: 100,
+          formattedMax: formatCount(100, locale),
         })}
       >
         {formatCount(pScore, locale)}
