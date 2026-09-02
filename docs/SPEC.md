@@ -413,8 +413,9 @@ ComplianceAsCode/compliance-operator master, and npm dist-tags).
   ClusterBaseline CRD, CSV (with `console.openshift.io` related-images for
   the plugin image via `RELATED_IMAGE_CONSOLE_PLUGIN` env, so disconnected
   mirroring works), OLM channel `alpha` (pre-1.0; `stable` is a later goal).
-  File-based catalog (FBC) image for a CatalogSource; goal:
-  community-operators submission once v1 is stable.
+  No `replaces` graph: each bundle is a standalone channel head, and CSV
+  `capabilities` is `Basic Install`. File-based catalog (FBC) image for a
+  CatalogSource; goal: community-operators submission once v1 is stable.
 - **Install UX**: OperatorHub → install → operator default-creates
   `ClusterBaseline/cluster` (CIS) when none exists. Opt out with
   `BASELINE_SECURITY_SKIP_DEFAULT_CR=true` on the CSV deployment.

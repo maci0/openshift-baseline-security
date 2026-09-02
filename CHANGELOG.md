@@ -58,6 +58,9 @@ depend on those tags.
   change the published layer digest.
 - Console plugin image install skips package lifecycle scripts and Playwright
   browser download, so the webpack layer cannot fetch unpinned binaries.
+- OperatorHub CSV `capabilities` is `Basic Install` (was `Seamless
+  Upgrades`). Pre-1.0 bundles have no `replaces` graph, so the listing must
+  not advertise an OLM upgrade path that does not exist.
 - Support: ClusterBaseline must-gather dumps omit waiver `requestedBy` and
   `approvedBy`, and drop `kubectl.kubernetes.io/last-applied-configuration` so
   those names are not copied into a support archive.
@@ -173,6 +176,21 @@ depend on those tags.
   ranked threats, mitigations mapped to code) and link it from SECURITY.md.
 - Document operator process flags and env vars in the README, and comment
   the optional ClusterBaseline spec fields on the sample CR.
+- README Versioning: the no-`replaces` upgrade path is install-the-new-head
+  (CatalogSource tag + delete a leftover Subscription/CSV); OperatorHub
+  capability is Basic Install.
+
+### Migration notes
+
+- If `BASELINE_SECURITY_SKIP_DEFAULT_CR` is set to anything other than a
+  known true/false spelling, the operator now exits at process start
+  instead of silently creating `ClusterBaseline/cluster`. Unset, empty,
+  and known false spellings still create the CR; known true spellings
+  still skip it.
+- Moving from an installed 0.5.x CSV is not an OLM auto-upgrade (no
+  `replaces` graph since 0.5.5). Point the CatalogSource at the new catalog
+  tag and install that head; delete a leftover Subscription/CSV.
+  ClusterBaseline CRs stay.
 
 ## [0.5.15] - 2026-08-26
 
@@ -463,6 +481,12 @@ depend on those tags.
   `scansettings` and `machineconfigpools`, and `watch` on `scansettingbindings`.
   These are accessed by name (Get/Patch) or a one-shot List only, never watched,
   so the verbs were dead grants. OLM applies the narrowed ClusterRole on upgrade.
+- Dropped the OLM `replaces` upgrade graph (CSV `spec.replaces` and catalog
+  channel edges). Each bundle is a standalone `alpha` channel head.
+  **Upgrade impact**: OLM will not auto-upgrade an installed 0.5.0 (or
+  earlier) CSV to 0.5.5. Point the CatalogSource at the 0.5.5 catalog tag
+  and install that head; delete the previous Subscription/CSV if it
+  remains. ClusterBaseline CRs and the CRD stay.
 
 ### Added
 

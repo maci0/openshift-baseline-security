@@ -106,7 +106,7 @@ ready even if nearby unit tests pass.
 | Console is safe for read-only admins | F, G, H, Q, U, AE, AO | RBAC disabled states, dark-UX banners, keyboard/modal checks |
 | Remediation UX is explicit about blast radius | G, U, AE, AZ | node-remediation warning, unapply/no-warning path, forced confirm |
 | Operator behaves like an OpenShift component | D, J, M, O, R, T, AR, AN | condition matrix, negative-space suite, multi-admin races, finalizer cleanup |
-| Release artifacts install and upgrade cleanly | L, N, P, W, AJ, AQ | CRD drift/admission, OLM upgrade ladder, disaster restore notes |
+| Release artifacts install and upgrade cleanly | L, N, P, W, AJ, AQ | CRD drift/admission, standalone channel-head install (no replaces graph), disaster restore notes |
 | Admins can troubleshoot failures | E, I, T, X, AS, AA | PVC degraded path, promtool rules, log/audit quality, alert boundaries |
 | Content bumps do not invent health | AP, V, AY | missing Profile, prune/re-add, unknown status strings |
 
@@ -570,8 +570,10 @@ an accepted risk neither inflates nor tanks the score.
       `inconsistent` / `info` as zero (`aggregateCounts` missing-field
       regression).
 - [x] **Bundle validates**: `make bundle` runs operator-sdk bundle validation.
-- [ ] **OLM `replaces` chain**: 0.2.1 replaces 0.2.0 cleanly; bundle CRD is not
-      stale vs `config/crd` (CI `make manifests && git diff --exit-code`).
+- [x] **No OLM `replaces` graph pre-1.0**: `make verify-versions` fails if
+      the CSV has `spec.replaces` / `spec.skipRange` or advertises anything
+      other than `Basic Install`. Bundle CRD freshness is CI
+      `make manifests && git diff --exit-code`.
 - [ ] **Image digest pinning**: `RELATED_IMAGE_CONSOLE_PLUGIN` @sha256 change
       rolls the plugin deployment (tag reuse would silently keep the old layer).
 - [ ] **Generated CRD ordering drift**: `make build` / `make bundle` does not

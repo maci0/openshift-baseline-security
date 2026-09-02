@@ -265,8 +265,16 @@ for development and labs; use the OLM install above for production.
 Pre-1.0 SemVer on a single `alpha` OLM channel; the CRD is `v1alpha1`.
 Breaking behavior may land in minor releases, so read
 [CHANGELOG.md](CHANGELOG.md) (**Changed** / **Removed** / **Migration notes**)
-before upgrading. Only the latest published 0.x is supported; published
-image/CSV tags are immutable.
+before moving to a newer bundle. Only the latest published 0.x is supported;
+published image/CSV tags are immutable.
+
+There is no OLM `replaces` graph. OperatorHub capability is **Basic Install**
+(not Seamless Upgrades). To take a newer 0.x: point the CatalogSource at that
+catalog tag (`:X.Y.Z`; do not reuse a published tag) and install the new
+channel head. If a previous CSV remains installed, delete its Subscription
+and CSV first; the CRD and `ClusterBaseline` objects stay. `make deploy`
+applies over the previous kustomize tree (and drops the pre-0.5.7 operator
+PDB).
 
 - **Host**: OpenShift 4.22 only (`=v4.22`, `minKubeVersion 1.35.0`,
   `@console/pluginAPI >=4.22.0-0 <4.23.0-0`).

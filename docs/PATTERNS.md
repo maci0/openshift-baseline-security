@@ -38,6 +38,10 @@ minor bumps but must be called out under Changed/Removed in the changelog.
 Only the latest 0.x line is supported (no backports); see CHANGELOG support
 window and root `SECURITY.md`. Console host peer range is
 `@console/pluginAPI: >=4.22.0-0 <4.23.0-0` (matches `=v4.22`).
+OperatorHub `capabilities` is `Basic Install` (not `Seamless Upgrades`)
+because there is no `replaces` graph; `make verify-versions` rejects a CSV
+`spec.replaces` / `spec.skipRange` and any capability other than Basic
+Install.
 
 **Pattern**: two models.
 - Payload components: `main` tracks the next OCP; `release-4.y` branches cut

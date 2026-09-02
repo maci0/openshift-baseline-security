@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to build/push (e.g. 0.5.8), for manual re-publish'
+        description: 'Cut version matching Makefile VERSION and git tag vX.Y.Z (not a re-tag of a published cut)'
         required: true
 
 permissions:
@@ -36,10 +36,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-tags: true
 
       # Version from the tag (strip leading v) or the manual input; must match
       # the Makefile VERSION so a release never ships images tagged differently
-      # from the CSV's own image references.
+      # from the CSV's own image references. Refuse a cut whose git tag is
+      # missing, a different commit than HEAD, or whose CHANGELOG still has
+      # Unreleased bullets (would publish unreleased work as :VERSION).
       - name: resolve and verify version
         # Input passed via env, never shell-interpolated: ${{ }} expansion into
         # run: would let a crafted workflow_dispatch version execute commands.
@@ -57,6 +60,17 @@ jobs:
             echo "tag/input version ($ver) != operator/Makefile VERSION ($mk)" >&2
             exit 1
           fi
+          if ! git rev-parse -q --verify "refs/tags/v$ver" >/dev/null; then
+            echo "git tag v$ver missing; tag the cut before publishing" >&2
+            exit 1
+          fi
+          tagged=$(git rev-parse "refs/tags/v$ver^{commit}")
+          head=$(git rev-parse HEAD)
+          if [ "$tagged" != "$head" ]; then
+            echo "refusing to publish $ver from $head; v$ver points at $tagged" >&2
+            exit 1
+          fi
+          make -C operator RELEASE_GATE=1 REQUIRE_GIT_TAGS=1 verify-versions
           echo "VERSION=$ver" >> "$GITHUB_ENV"
 
       - uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
@@ -172,8 +186,9 @@ jobs:
           upload-artifact: true
           upload-release-assets: false
 
-      # Attach to the release when one exists (tag push); manual re-publish runs
-      # keep the SBOMs as workflow artifacts instead of failing the job.
+      # Attach to the release when one exists (tag push); a dispatch from that
+      # tagged commit without a GitHub release keeps SBOMs as workflow artifacts
+      # instead of failing the job.
       - name: attach SBOMs to release
         env:
           GH_TOKEN: ${{ github.token }}

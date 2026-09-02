@@ -13,7 +13,7 @@ metadata:
           "spec": {"profiles": ["cis"]}
         }
       ]
-    capabilities: Seamless Upgrades
+    capabilities: Basic Install
     categories: Security
     # openshift-* namespaces are platform-reserved and unscraped by default;
     # create the install namespace pre-labeled for cluster monitoring so the
@@ -49,11 +49,14 @@ spec:
     plugin: dashboard, filterable check results, remediation apply, profile
     and TailoredProfile selection, and report export.
 
-    Maturity is alpha (SemVer 0.x): read Migration notes in the project
-    Changelog before upgrading between minor versions (breaking behavior may
-    land in minors until 1.0). Supported host is OpenShift 4.22 only
-    (minKubeVersion 1.35.0). Requires a default StorageClass for scan result
-    storage.
+    Maturity is alpha (SemVer 0.x). There is no OLM replaces upgrade graph:
+    each bundle is a standalone alpha channel head, so OperatorHub capability
+    is Basic Install. Read Migration notes in the project Changelog before
+    moving to a newer 0.x (breaking behavior may land in minors until 1.0).
+    Point the CatalogSource at the new catalog tag and install that head;
+    delete the previous Subscription/CSV if it remains (ClusterBaseline CRs
+    stay). Supported host is OpenShift 4.22 only (minKubeVersion 1.35.0).
+    Requires a default StorageClass for scan result storage.
   maturity: alpha
   version: 0.5.15
   minKubeVersion: 1.35.0

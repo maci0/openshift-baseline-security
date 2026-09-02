@@ -279,7 +279,8 @@ CATALOG_IMG ?= quay.io/openshift-baseline-security/baseline-security-operator-ca
 # Fail if CSV, console-plugin package.json, catalog channel entry, README,
 # CHANGELOG, and Makefile VERSION disagree. No OLM replaces graph is maintained
 # (pre-release, no installed base), so there is no PREV_VERSION and no upgrade
-# edge to keep in sync. Release process: bump VERSION here, the CSV
+# edge to keep in sync (CSV capabilities must be Basic Install; spec.replaces
+# and spec.skipRange are rejected). Release process: bump VERSION here, the CSV
 # name/version/images, console-plugin package.json (version +
 # consolePlugin.version), move CHANGELOG [Unreleased] into ## [VERSION] with a
 # [VERSION]: compare footer plus [Unreleased]: ...vVERSION...HEAD, set README
@@ -309,6 +310,11 @@ verify-versions:
 		|| { echo "CSV name is not baseline-security-operator.v$(VERSION)"; fail=1; }; \
 	grep -qE '^  version: $(VERSION_RE)$$' "$$csv" \
 		|| { echo "CSV spec.version is not $(VERSION)"; fail=1; }; \
+	grep -qE '^    capabilities: Basic Install$$' "$$csv" \
+		|| { echo "CSV capabilities must be Basic Install; Seamless Upgrades would advertise an OLM upgrade path that does not exist without spec.replaces"; fail=1; }; \
+	if grep -qE '^  (replaces|skipRange):' "$$csv"; then \
+		echo "CSV has spec.replaces or spec.skipRange; pre-1.0 policy is a standalone channel head with no OLM upgrade graph"; fail=1; \
+	fi; \
 	grep -qE "containerImage:.*:$(VERSION_RE)$$" "$$csv" \
 		|| { echo "CSV containerImage annotation is not tagged :$(VERSION); OLM UI would show the wrong operator image"; fail=1; }; \
 	grep -qE '^  "version": "$(VERSION_RE)"' "$$pkg" \

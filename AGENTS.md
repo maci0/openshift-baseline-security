@@ -47,11 +47,15 @@ Cutting a release:
 4. `RELEASE_GATE=1 make verify-versions`, which fails if `[Unreleased]` still has
    entries.
 5. Tag `vX.Y.Z`. `REQUIRE_GIT_TAGS=1` adds the tag's existence to the check.
+   The release workflow runs both gates before pushing images, and refuses to
+   publish a version from a commit other than `vX.Y.Z`.
 
 Published image, tag, and CSV version strings are immutable: never re-push,
 re-tag, or force-move one. OLM unpack caches serve stale content on a same-tag
 republish. No `replaces` upgrade graph exists pre-1.0: every bundle is a
-standalone channel head, so there is no `PREV_VERSION` anywhere.
+standalone channel head, so there is no `PREV_VERSION` anywhere. CSV
+`capabilities` is `Basic Install` (`make verify-versions` rejects
+`spec.replaces` / `spec.skipRange` and any other capability).
 
 ## Docs that must move with the code
 

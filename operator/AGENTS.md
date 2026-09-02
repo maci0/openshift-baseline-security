@@ -41,6 +41,8 @@ than guessing.
 - `verify-versions`: the release version across the CSV, plugin
   `package.json`, `CHANGELOG.md`, `README.md`, plus the Go toolchain pin
   agreeing between `go.mod`, both Dockerfiles, and `.ci-operator.yaml`.
+  Also: CSV `capabilities` is `Basic Install`, and the CSV has no
+  `spec.replaces` / `spec.skipRange`.
 - `verify-product-lockstep`: score weights, caps, the `ProfileKey` set, and
   annotation keys shared between Go and the console plugin (ADR-024). Adding a
   profile means touching the CRD enum, the Go constants, and the plugin's
