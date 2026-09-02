@@ -94,6 +94,7 @@ Describes `main`; install from published OLM tags for only the released surface.
   [docs/OBSERVABILITY.md](docs/OBSERVABILITY.md).
 - **Support**: `operator/hack/must-gather.sh` collects operator + compliance
   state (Secret objects and waiver `requestedBy`/`approvedBy` are omitted).
+  `--help` prints usage; a partial collection exits 1.
 
 ## Layout
 
@@ -277,9 +278,12 @@ image/CSV tags are immutable.
 ## Operator process configuration
 
 The manager reads flags and a small set of env vars at start, logs the
-non-secret values (image refs as set/valid only), and exits on an invalid
+non-secret values (image refs as set/valid only), and exits 2 on an invalid
 listen address, a relative `--metrics-cert-dir`, an empty health-probe
-address, or an unrecognized `BASELINE_SECURITY_SKIP_DEFAULT_CR` value.
+address, or unexpected positional arguments. An unrecognized
+`BASELINE_SECURITY_SKIP_DEFAULT_CR` value exits 1. `--help` prints usage
+on stdout.
+
 ClusterBaseline spec (profiles, schedule, scoring, remediations, waivers)
 is the product config; see `operator/config/samples/` and the CRD.
 

@@ -647,6 +647,9 @@ an accepted risk neither inflates nor tanks the score.
       `BASELINE_SECURITY_SKIP_DEFAULT_CR=true` (and 1/yes/on) is truthy;
       false/0/no/off/unset are falsy; unknown values error so start fails
       (`TestParseEnvBool`, `FuzzParseEnvBool`).
+- [x] **Manager CLI usage**: leftover positional args are rejected
+      (`TestUnexpectedArgsError`); `--help` lists process env vars
+      (`TestPrintUsageIncludesEnv`).
 - [ ] **Leader-only default creation**: two operator replicas do not race the
       default CR creation; only the elected leader runs the runnable.
 - [ ] **Leader loss**: demoted process exits (controller-runtime safety);
@@ -850,6 +853,15 @@ stale Available or eternal Progressing.
 - [x] **Must-gather attribution redaction**: ClusterBaseline dump drops
       `requestedBy`/`approvedBy` and `last-applied-configuration`
       (`hack/must-gather.sh --self-test`).
+- [x] **Must-gather CLI usage**: `--help`/`-h` print usage on stdout and
+      exit 0; unknown flags and extra args exit 2 (`TestHackMustGatherHelp`,
+      `TestHackMustGatherUnknownOption`, `TestHackMustGatherExtraArgs`).
+- [x] **prometheusrule_to_rules.py CLI**: `--help` exits 0 on stdout; wrong
+      argc or unknown options exit 2; extract writes a top-level `groups:`
+      file (`TestPrometheusRuleToRulesHelp`, `TestPrometheusRuleToRulesExtract`).
+- [x] **hack script --help**: `test-alerts.sh`, `verify-bundle-static.sh`,
+      and `verify-product-lockstep.sh` print usage and exit 0 instead of
+      running (`TestHackVerifyAndTestAlertsHelp`).
 - [ ] **Must-gather smoke**: `operator/hack/must-gather.sh` runs without
       cluster-admin-only assumptions beyond documented RBAC and redacts or
       avoids secrets.

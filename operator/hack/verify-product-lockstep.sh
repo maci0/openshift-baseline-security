@@ -3,6 +3,25 @@
 # Run from operator/ (make verify-product-lockstep) or any cwd with REPO_ROOT set.
 set -euo pipefail
 
+if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+  if [ "$#" -ne 1 ]; then
+    echo "verify-product-lockstep.sh: --help takes no arguments" >&2
+    exit 2
+  fi
+  cat <<'EOF'
+Usage: hack/verify-product-lockstep.sh
+
+Fail if operator Go and console TypeScript product contracts drift.
+Run from operator/ (make verify-product-lockstep) or with REPO_ROOT set.
+EOF
+  exit 0
+fi
+if [ "$#" -ne 0 ]; then
+  echo "verify-product-lockstep.sh: unexpected arguments: $*" >&2
+  echo "Usage: hack/verify-product-lockstep.sh" >&2
+  exit 2
+fi
+
 ROOT="${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 API="${ROOT}/operator/api/v1alpha1/clusterbaseline_types.go"
 SCORE="${ROOT}/operator/internal/controller/scoring.go"

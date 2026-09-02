@@ -2,6 +2,7 @@
 # Collect baseline-security state for support/debugging.
 # Usage: hack/must-gather.sh [output-dir]   (defaults to ./must-gather)
 #        hack/must-gather.sh --self-test    (redaction unit test; no cluster)
+#        hack/must-gather.sh --help
 set -euo pipefail
 
 # spec.waivers[].requestedBy and approvedBy identify cluster users (audit
@@ -117,17 +118,61 @@ EOF
   )
 }
 
+usage() {
+  cat <<'EOF'
+Usage: hack/must-gather.sh [output-dir]
+       hack/must-gather.sh --self-test
+       hack/must-gather.sh --help
+
+Collect baseline-security operator and Compliance Operator state for support.
+Writes YAML and logs into output-dir (default: ./must-gather). Requires an
+authenticated oc context. Secret objects and waiver requestedBy/approvedBy
+are omitted.
+
+Options:
+  --self-test   Run redaction unit tests; no cluster required
+  -h, --help    Show this help
+EOF
+}
+
+if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+  if [ "$#" -ne 1 ]; then
+    echo "must-gather.sh: --help takes no arguments" >&2
+    usage >&2
+    exit 2
+  fi
+  usage
+  exit 0
+fi
+
 if [ "${1:-}" = "--self-test" ]; then
+  if [ "$#" -ne 1 ]; then
+    echo "must-gather.sh: --self-test takes no arguments" >&2
+    usage >&2
+    exit 2
+  fi
   self_test
   exit 0
+fi
+
+if [ "$#" -gt 1 ]; then
+  echo "must-gather.sh: unexpected arguments: $*" >&2
+  usage >&2
+  exit 2
 fi
 
 OUT="${1:-must-gather}"
 # Refuse empty, stdout marker, or flag-shaped paths so a bad invocation cannot
 # mkdir "-" / "" or treat an option as a directory.
-if [ -z "$OUT" ] || [ "$OUT" = "-" ] || [[ "$OUT" == -* ]]; then
+if [ -z "$OUT" ] || [ "$OUT" = "-" ]; then
   echo "invalid output directory: ${OUT:-<empty>}" >&2
-  exit 1
+  usage >&2
+  exit 2
+fi
+if [[ "$OUT" == -* ]]; then
+  echo "must-gather.sh: unknown option: $OUT" >&2
+  usage >&2
+  exit 2
 fi
 mkdir -p -- "$OUT"
 # Owner-only: dumps include logs/events that may carry cluster-sensitive data.
@@ -249,4 +294,5 @@ oc get consoleplugin baseline-security-console-plugin -o yaml > "$OUT/consoleplu
 echo "Collected baseline-security must-gather into $OUT"
 if [ "$failures" -gt 0 ]; then
   echo "warning: ${failures} collection step(s) failed (see warnings above); archive may be incomplete" >&2
+  exit 1
 fi

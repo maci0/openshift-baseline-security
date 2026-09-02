@@ -10,6 +10,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -58,7 +59,19 @@ func main() {
 	flag.BoolVar(&enableLeaderElection, "leader-elect", true, "Enable leader election.")
 	opts := zap.Options{}
 	opts.BindFlags(flag.CommandLine)
+	// --help must be pipeable (`manager --help | less`). Parse errors still
+	// print "flag provided but not defined" on stderr via flag.Output().
+	flag.Usage = func() {
+		if err := printUsage(os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+		}
+	}
 	flag.Parse()
+	if err := unexpectedArgsError(flag.Args()); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		flag.Usage()
+		os.Exit(2)
+	}
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 	setupLog := ctrl.Log.WithName("setup")
@@ -79,26 +92,26 @@ func main() {
 	// still probes :8081, so the pod never becomes Ready. Fail fast.
 	if probeAddr == "" {
 		setupLog.Error(errEmptyHealthProbeAddr, "health-probe-bind-address must not be empty (Deployment probes :8081)")
-		os.Exit(1)
+		os.Exit(2)
 	}
 	// Reject host:port typos before manager start so a bad Deployment arg is
 	// obvious in setup logs instead of a later bind failure.
 	if err := validateListenAddr(metricsAddr, true); err != nil {
 		setupLog.Error(err, "invalid metrics-bind-address (want host:port, or 0 to disable)",
 			"metricsBindAddress", metricsAddr)
-		os.Exit(1)
+		os.Exit(2)
 	}
 	if err := validateListenAddr(probeAddr, false); err != nil {
 		setupLog.Error(err, "invalid health-probe-bind-address (want host:port)",
 			"healthProbeBindAddress", probeAddr)
-		os.Exit(1)
+		os.Exit(2)
 	}
 	// Relative cert dirs depend on process CWD and break under a read-only
 	// rootfs / different workdir. Require absolute when set.
 	if err := validateMetricsCertDir(metricsCertDir); err != nil {
 		setupLog.Error(err, "invalid metrics-cert-dir (want absolute path, or empty for self-signed only)",
 			"metricsCertDir", metricsCertDir)
-		os.Exit(1)
+		os.Exit(2)
 	}
 
 	if !secureMetrics && metricsAddr != "0" && !isLoopbackMetricsAddr(metricsAddr) {
@@ -339,4 +352,46 @@ func lookupFlag(name string) string {
 		return ""
 	}
 	return f.Value.String()
+}
+
+// unexpectedArgsError is non-nil when flag.Parse left positional arguments.
+// The manager takes flags only; leftover args are almost always a boolean
+// flag written as `--metrics-secure false` (space, so `false` is positional
+// and the bool stays at its default).
+func unexpectedArgsError(args []string) error {
+	if len(args) == 0 {
+		return nil
+	}
+	return fmt.Errorf("unexpected arguments: %s", strings.Join(args, " "))
+}
+
+// printUsage writes --help to w (stdout when used as flag.Usage so the text
+// is pipeable). Env vars that affect the process are listed so --help matches
+// the README process-configuration table.
+func printUsage(w io.Writer) error {
+	name := filepath.Base(os.Args[0])
+	if _, err := fmt.Fprintf(w, "Usage: %s [flags]\n\n", name); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, "ClusterBaseline operator process. Product config is ClusterBaseline/cluster.\n\n"); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, "Flags:\n"); err != nil {
+		return err
+	}
+	orig := flag.CommandLine.Output()
+	flag.CommandLine.SetOutput(w)
+	flag.PrintDefaults()
+	flag.CommandLine.SetOutput(orig)
+	if _, err := fmt.Fprintf(w, "\nEnvironment:\n"); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, "  %s\n        If true, do not create ClusterBaseline/cluster when none exist.\n", envSkipDefaultCR); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, "  %s\n        Console plugin image to deploy. Unset leaves ImageMissing.\n", controller.EnvRelatedImageConsolePlugin); err != nil {
+		return err
+	}
+	_, err := fmt.Fprintf(w, "  KUBECONFIG\n        Out-of-cluster kubeconfig. --kubeconfig wins if both are set.\n")
+	return err
 }

@@ -98,6 +98,11 @@ depend on those tags.
 - Console: `expiresAt`/`reviewBy` values with hour 24, minute 60, or second 60
   are rejected in the waive form, matching apiserver RFC3339 admission, instead
   of a patch that then 422s.
+- Support: `must-gather.sh --help` prints usage instead of treating the flag
+  as an output directory; unknown options and extra arguments exit 2; a
+  partial collection now exits 1 so scripts notice an incomplete archive.
+- Operator: invalid process flags (listen address, cert dir, leftover
+  arguments) exit 2; `--help` writes usage to stdout, including env vars.
 - Aggregated `baseline-security-viewer` can list TailoredProfiles and Rules
   (the Profiles tab watches both; a view-only user previously got a catalog
   watch error). `baseline-security-admin` can create and update

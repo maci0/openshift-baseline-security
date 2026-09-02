@@ -5,8 +5,6 @@ so promtool can unit-test the alerts (promtool wants `groups:`, not the CR wrapp
 Stdlib only: no PyYAML. The checked-in PrometheusRule uses 2-space indent and
 puts `groups:` as a direct child of `spec:`. We slice that block and dedent by
 two spaces so the output starts with top-level `groups:`.
-
-Usage: prometheusrule_to_rules.py <prometheusrule.yaml> <out-rules.yaml>
 """
 from __future__ import annotations
 
@@ -40,11 +38,30 @@ def extract_groups(text: str) -> str:
     return "".join(out)
 
 
+def usage() -> str:
+    return f"Usage: {Path(sys.argv[0]).name} <prometheusrule.yaml> <out-rules.yaml>"
+
+
 def main() -> int:
-    if len(sys.argv) != 3:
-        print(__doc__, file=sys.stderr)
+    args = sys.argv[1:]
+    if args and args[0] in ("-h", "--help"):
+        if len(args) != 1:
+            print(usage(), file=sys.stderr)
+            print("error: --help takes no arguments", file=sys.stderr)
+            return 2
+        print(__doc__.strip())
+        print()
+        print(usage())
+        return 0
+    if args and args[0].startswith("-"):
+        print(usage(), file=sys.stderr)
+        print(f"error: unknown option: {args[0]}", file=sys.stderr)
         return 2
-    src, dst = Path(sys.argv[1]), Path(sys.argv[2])
+    if len(args) != 2:
+        print(usage(), file=sys.stderr)
+        print(f"error: expected 2 arguments, got {len(args)}", file=sys.stderr)
+        return 2
+    src, dst = Path(args[0]), Path(args[1])
     try:
         # encoding= so LC_ALL=C (Makefile) does not decode as ASCII.
         # write_bytes keeps LF on platforms whose text mode would emit CRLF.
