@@ -18,9 +18,9 @@
 //   - scanstorage.go: Pending PVC / StorageClass readiness condition
 //   - aggregate.go: check-result scoring, counts, profile status
 //   - history_reconcile.go: suite-completion history advance and scan-diff base
-//   - history.go: score history rings, failure-diff, per-profile ring sync
+//   - history.go: score history rings, failure-diff, per-profile ring sync, scan endTimestamp parse
 //   - scoring.go: pass/fail and severity-weighted score math, severity lookup
-//   - conditions.go: status condition helpers and Available/Progressing/Degraded rollups
+//   - conditions.go: status condition helpers (condIsTrue/condTrue, setCond) and rollups
 //   - inconsistent.go: benign INCONSISTENT collapse for multi-node checks
 //   - matching.go: suite/binding names (built-in + tailored), profile matching, pure set/list helpers
 //   - batch.go: remediation-batch annotations, pool/name helpers, grace timer

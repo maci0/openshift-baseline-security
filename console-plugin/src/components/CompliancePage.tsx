@@ -25,6 +25,7 @@ import {
   COMPLIANCE_NAMESPACE,
   ComplianceCheckResult,
   ComplianceCheckResultGVK,
+  ComplianceScan,
   ComplianceScanGVK,
   ComplianceScanModel,
   ownedSuiteSelector,
@@ -44,18 +45,8 @@ import {
   ResultsRoute,
 } from './BaselineContext';
 
-type Scan = {
-  metadata: {
-    name: string;
-    namespace: string;
-    labels?: Record<string, string>;
-    annotations?: Record<string, string>;
-    resourceVersion?: string;
-  };
-};
-
 // Stable empties so `?? []` does not allocate a new array every render (hooks deps).
-const EMPTY_SCANS: Scan[] = [];
+const EMPTY_SCANS: ComplianceScan[] = [];
 const EMPTY_RESULTS: ComplianceCheckResult[] = [];
 
 const CompliancePage: React.FC = () => {
@@ -94,7 +85,7 @@ const CompliancePage: React.FC = () => {
   );
   const scansWatch = React.useMemo(() => listWatch(ComplianceScanGVK), [listWatch]);
   const resultsWatch = React.useMemo(() => listWatch(ComplianceCheckResultGVK), [listWatch]);
-  const [scans, , scansError] = useK8sWatchResource<Scan[]>(scansWatch);
+  const [scans, , scansError] = useK8sWatchResource<ComplianceScan[]>(scansWatch);
   const [checkResults, checkResultsHookLoaded, checkResultsError] =
     useK8sWatchResource<ComplianceCheckResult[]>(resultsWatch);
   // null watch reports loaded=true immediately; wait for the baseline (and for

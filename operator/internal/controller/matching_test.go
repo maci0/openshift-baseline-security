@@ -8,7 +8,6 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
@@ -160,24 +159,6 @@ func TestMatchesAnyProfile(t *testing.T) {
 	}
 	if matchesAnyProfile("x", nil) || matchesAnyProfile("x", map[string]bool{}) {
 		t.Fatal("empty profiles must never match")
-	}
-}
-
-func TestWithoutPlugin(t *testing.T) {
-	in := []string{"a", pluginName, "b", pluginName}
-	got := withoutPlugin(in, pluginName)
-	if len(got) != 2 || got[0] != "a" || got[1] != "b" {
-		t.Fatalf("%v", got)
-	}
-	// Input must not be mutated.
-	if len(in) != 4 {
-		t.Fatalf("input mutated: %v", in)
-	}
-	if len(withoutPlugin([]string{"x"}, pluginName)) != 1 {
-		t.Fatal("untouched when absent")
-	}
-	if len(withoutPlugin(nil, pluginName)) != 0 {
-		t.Fatal("nil input")
 	}
 }
 
@@ -553,89 +534,6 @@ func TestSanitizeStatusProfilesTailoredRelated(t *testing.T) {
 	}
 }
 
-func TestParseScanEndTimestamp(t *testing.T) {
-	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
-	ok, valid := parseScanEndTimestamp("2026-07-09T01:00:00Z", now)
-	if !valid || !ok.Equal(time.Date(2026, 7, 9, 1, 0, 0, 0, time.UTC)) {
-		t.Fatalf("basic RFC3339: %v %v", ok, valid)
-	}
-	// Fractional seconds parse but are truncated to whole seconds: LastScanTime
-	// and history snapshots persist as metav1.Time (RFC3339, second precision), so
-	// a sub-second value must not recompute larger than its stored form and defeat
-	// equal-scan dedup (duplicate history point every reconcile).
-	frac, valid := parseScanEndTimestamp("2026-07-09T01:00:00.123456789Z", now)
-	if !valid || !frac.Equal(time.Date(2026, 7, 9, 1, 0, 0, 0, time.UTC)) {
-		t.Fatalf("fractional seconds should parse and truncate to the second: %v %v", frac, valid)
-	}
-	if _, valid = parseScanEndTimestamp("", now); valid {
-		t.Fatal("empty should fail")
-	}
-	if _, valid = parseScanEndTimestamp("not-a-time", now); valid {
-		t.Fatal("garbage should fail")
-	}
-	// Far future must not pin LastScanTime.
-	far := now.Add(48 * time.Hour).UTC().Format(time.RFC3339)
-	if _, valid = parseScanEndTimestamp(far, now); valid {
-		t.Fatal("far-future endTimestamp must be rejected")
-	}
-	// Modest skew still accepted.
-	skew := now.Add(30 * time.Minute).UTC().Format(time.RFC3339)
-	if _, valid = parseScanEndTimestamp(skew, now); !valid {
-		t.Fatal("near-future within 1h should be accepted")
-	}
-	// Pre-epoch (corrupt/skewed clock) must be rejected: a negative Unix value
-	// would pin LastScanTime and poison the ComplianceScanStale age alert.
-	for _, pre := range []string{"0001-01-01T00:00:01Z", "1950-01-01T00:00:00Z", "1969-12-31T23:59:59Z"} {
-		if _, valid = parseScanEndTimestamp(pre, now); valid {
-			t.Fatalf("pre-epoch endTimestamp %q must be rejected", pre)
-		}
-	}
-	// The Unix epoch itself and after are accepted (real scans are post-1970).
-	if _, valid = parseScanEndTimestamp("1970-01-01T00:00:00Z", now); !valid {
-		t.Fatal("epoch endTimestamp should be accepted")
-	}
-}
-
-func TestCondMessage(t *testing.T) {
-	if condMessage("short") != "short" {
-		t.Fatal("short message unchanged")
-	}
-	long := strings.Repeat("x", 2000)
-	got := condMessage(long)
-	if len(got) != 1024 || !strings.HasSuffix(got, "...") {
-		t.Fatalf("condMessage len=%d suffix=%q", len(got), got[len(got)-3:])
-	}
-	// Multi-byte runes near the cut must not produce invalid UTF-8.
-	// "界" is 3 bytes; pad so a naive byte cut would split it.
-	multi := strings.Repeat("a", 1020) + "世界世界"
-	got = condMessage(multi)
-	if !utf8.ValidString(got) {
-		t.Fatal("condMessage produced invalid UTF-8")
-	}
-	if !strings.HasSuffix(got, "...") {
-		t.Fatalf("expected ellipsis suffix, got %q", got[len(got)-10:])
-	}
-	if len(got) > 1024 {
-		t.Fatalf("condMessage longer than cap: %d", len(got))
-	}
-}
-
-func TestSetCondCapsMessage(t *testing.T) {
-	cb := &baselinev1alpha1.ClusterBaseline{}
-	// InvalidSchedule embeds the user schedule; a huge cron must not land
-	// unbounded on the condition (status admission / etcd size).
-	huge := strings.Repeat("0 ", 2000)
-	setCond(cb, "ScanConfigured", metav1.ConditionFalse, "InvalidSchedule",
-		fmt.Sprintf("spec.schedule %q is not a valid standard cron schedule: bad", huge))
-	c := meta.FindStatusCondition(cb.Status.Conditions, "ScanConfigured")
-	if c == nil || len(c.Message) > 1024 {
-		t.Fatalf("setCond must cap message, got len=%d", len(c.Message))
-	}
-	if !strings.HasSuffix(c.Message, "...") {
-		t.Fatalf("expected truncated message, got %q", c.Message[len(c.Message)-20:])
-	}
-}
-
 // TestProfileNamesExact pins each profile key to the EXACT Compliance Operator
 // Profile names its ScanSettingBinding references. A typo (e.g. "ocp4-moderat")
 // compiles and passes the prefix-only check in TestProfileNames, but produces a
@@ -789,40 +687,6 @@ func FuzzMatchesAnyProfile(f *testing.F) {
 	})
 }
 
-func FuzzWithoutPlugin(f *testing.F) {
-	f.Add("a,b,c", "b")
-	f.Add("", "x")
-	f.Add("x", "x")
-	f.Fuzz(func(t *testing.T, csv, drop string) {
-		var in []string
-		if csv != "" {
-			in = strings.Split(csv, ",")
-		}
-		origLen := len(in)
-		got := withoutPlugin(in, drop)
-		if len(in) != origLen {
-			t.Fatal("input mutated")
-		}
-		for _, p := range got {
-			if p == drop {
-				t.Fatalf("drop %q still present in %v", drop, got)
-			}
-		}
-		for _, p := range got {
-			found := false
-			for _, o := range in {
-				if o == p {
-					found = true
-					break
-				}
-			}
-			if !found {
-				t.Fatalf("extra element %q", p)
-			}
-		}
-	})
-}
-
 func FuzzAppendHistoryRing(f *testing.F) {
 	f.Add(int32(1), 30, 40)
 	f.Add(int32(0), 0, 5)
@@ -953,81 +817,6 @@ func FuzzTailoredNameFromSuite(f *testing.F) {
 		}
 		if got := tailoredBindingName(name); got != suite {
 			t.Fatalf("round-trip: tailoredBindingName(%q)=%q, want %q", name, got, suite)
-		}
-	})
-}
-
-// FuzzNextScanTime: an arbitrary (untrusted spec.schedule) string must never
-// panic; it either parses to a future time or returns nil.
-func FuzzNextScanTime(f *testing.F) {
-	for _, seed := range []string{"", "0 1 * * *", "*/5 * * * *", "@daily", "not a cron", "0 1 * * * * *", "61 0 * * *"} {
-		f.Add(seed)
-	}
-	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
-	f.Fuzz(func(t *testing.T, schedule string) {
-		next := nextScanTime(schedule, now)
-		if next != nil && next.Time.Before(now) {
-			t.Fatalf("nextScanTime(%q) returned a past time %v", schedule, next.Time)
-		}
-	})
-}
-
-// FuzzParseScanEndTimestamp: ComplianceScan status.endTimestamp is untrusted
-// cluster data. Must never panic; accept only parseable times within 1h skew.
-func FuzzParseScanEndTimestamp(f *testing.F) {
-	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
-	for _, seed := range []string{
-		"", "not-a-time", "2026-07-09T01:00:00Z", "2026-07-09T01:00:00.123456789Z",
-		now.Add(30 * time.Minute).UTC().Format(time.RFC3339),
-		now.Add(48 * time.Hour).UTC().Format(time.RFC3339),
-		"2026-07-10T12:00:00+00:00", "0001-01-01T00:00:00Z",
-	} {
-		f.Add(seed)
-	}
-	f.Fuzz(func(t *testing.T, ts string) {
-		got, ok := parseScanEndTimestamp(ts, now)
-		if !ok {
-			return
-		}
-		if got.After(now.Add(time.Hour)) {
-			t.Fatalf("accepted far-future timestamp %q -> %v", ts, got)
-		}
-		// Re-parse must agree (canonical RFC3339 forms only).
-		if _, ok2 := parseScanEndTimestamp(got.UTC().Format(time.RFC3339Nano), now); !ok2 {
-			t.Fatalf("accepted %q but reformatted value rejected", ts)
-		}
-	})
-}
-
-// FuzzCondMessage: condition messages embed untrusted cron text, PVC names, and
-// wrap errors. Truncation must stay <=1024 bytes and always emit valid UTF-8.
-func FuzzCondMessage(f *testing.F) {
-	for _, seed := range []string{
-		"", "short", strings.Repeat("x", 2000),
-		strings.Repeat("a", 1020) + "世界世界",
-		"\x80\x81", // invalid UTF-8 lead bytes
-		strings.Repeat("界", 400),
-	} {
-		f.Add(seed)
-	}
-	f.Fuzz(func(t *testing.T, s string) {
-		got := condMessage(s)
-		if len(got) > 1024 {
-			t.Fatalf("condMessage len %d > 1024", len(got))
-		}
-		if len(s) <= 1024 {
-			// Short path is identity (may preserve invalid UTF-8 from wrap errors).
-			if got != s {
-				t.Fatalf("short input mutated: in=%q out=%q", s, got)
-			}
-			return
-		}
-		// Truncation must stay on a UTF-8 boundary so CR JSON remains valid.
-		if !utf8.ValidString(got) {
-			t.Fatal("condMessage produced invalid UTF-8")
-		}
-		if !strings.HasSuffix(got, "...") {
-			t.Fatalf("long message missing ellipsis: %q", got[max(0, len(got)-10):])
 		}
 	})
 }

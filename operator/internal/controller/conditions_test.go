@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -372,4 +373,104 @@ func TestConditionProgressing(t *testing.T) {
 	if conditionProgressing(&metav1.Condition{Status: metav1.ConditionFalse, Reason: "Unavailable"}) {
 		t.Fatal("Unavailable should not progress")
 	}
+}
+
+func TestCondIsTrue(t *testing.T) {
+	if condIsTrue(nil) {
+		t.Fatal("nil must be false")
+	}
+	if condIsTrue(&metav1.Condition{Status: metav1.ConditionFalse}) {
+		t.Fatal("False must be false")
+	}
+	if !condIsTrue(&metav1.Condition{Status: metav1.ConditionTrue}) {
+		t.Fatal("True must be true")
+	}
+}
+
+func TestCondTrue(t *testing.T) {
+	cb := &baselinev1alpha1.ClusterBaseline{}
+	if condTrue(cb, "Available") {
+		t.Fatal("missing condition must be false")
+	}
+	setCond(cb, "Available", metav1.ConditionTrue, "AsExpected", "")
+	if !condTrue(cb, "Available") {
+		t.Fatal("True Available must be true")
+	}
+	setCond(cb, "Available", metav1.ConditionFalse, "NotReady", "")
+	if condTrue(cb, "Available") {
+		t.Fatal("False Available must be false")
+	}
+}
+
+func TestCondMessage(t *testing.T) {
+	if condMessage("short") != "short" {
+		t.Fatal("short message unchanged")
+	}
+	long := strings.Repeat("x", 2000)
+	got := condMessage(long)
+	if len(got) != 1024 || !strings.HasSuffix(got, "...") {
+		t.Fatalf("condMessage len=%d suffix=%q", len(got), got[len(got)-3:])
+	}
+	// Multi-byte runes near the cut must not produce invalid UTF-8.
+	// "界" is 3 bytes; pad so a naive byte cut would split it.
+	multi := strings.Repeat("a", 1020) + "世界世界"
+	got = condMessage(multi)
+	if !utf8.ValidString(got) {
+		t.Fatal("condMessage produced invalid UTF-8")
+	}
+	if !strings.HasSuffix(got, "...") {
+		t.Fatalf("expected ellipsis suffix, got %q", got[len(got)-10:])
+	}
+	if len(got) > 1024 {
+		t.Fatalf("condMessage longer than cap: %d", len(got))
+	}
+}
+
+func TestSetCondCapsMessage(t *testing.T) {
+	cb := &baselinev1alpha1.ClusterBaseline{}
+	// InvalidSchedule embeds the user schedule; a huge cron must not land
+	// unbounded on the condition (status admission / etcd size).
+	huge := strings.Repeat("0 ", 2000)
+	setCond(cb, "ScanConfigured", metav1.ConditionFalse, "InvalidSchedule",
+		fmt.Sprintf("spec.schedule %q is not a valid standard cron schedule: bad", huge))
+	c := meta.FindStatusCondition(cb.Status.Conditions, "ScanConfigured")
+	if c == nil || len(c.Message) > 1024 {
+		t.Fatalf("setCond must cap message, got len=%d", len(c.Message))
+	}
+	if !strings.HasSuffix(c.Message, "...") {
+		t.Fatalf("expected truncated message, got %q", c.Message[len(c.Message)-20:])
+	}
+}
+
+// FuzzCondMessage: condition messages embed untrusted cron text, PVC names, and
+// wrap errors. Truncation must stay <=1024 bytes and always emit valid UTF-8.
+func FuzzCondMessage(f *testing.F) {
+	for _, seed := range []string{
+		"", "short", strings.Repeat("x", 2000),
+		strings.Repeat("a", 1020) + "世界世界",
+		"\x80\x81", // invalid UTF-8 lead bytes
+		strings.Repeat("界", 400),
+	} {
+		f.Add(seed)
+	}
+	f.Fuzz(func(t *testing.T, s string) {
+		got := condMessage(s)
+		if len(got) > 1024 {
+			t.Fatalf("condMessage len %d > 1024", len(got))
+		}
+		if len(s) <= 1024 {
+			// Short path is identity (may preserve invalid UTF-8 from wrap errors).
+			if got != s {
+				t.Fatalf("short input mutated: in=%q out=%q", s, got)
+			}
+			return
+		}
+		// Truncation must stay on a UTF-8 boundary so CR JSON remains valid.
+		if !utf8.ValidString(got) {
+			t.Fatal("condMessage produced invalid UTF-8")
+		}
+		if !strings.HasSuffix(got, "...") {
+			t.Fatalf("long message missing ellipsis: %q", got[max(0, len(got)-10):])
+		}
+	})
 }

@@ -67,6 +67,8 @@ export const CompositionDonut = React.memo<{
   locale: string | undefined;
 }>(({ score, totalChecks, donutData, donutColors, segments, locale }) => {
   const { t } = useTranslation('plugin__baseline-security-console-plugin');
+  const maxText = formatCount(100, locale);
+  const ofMax = t('of {{max}}', { max: 100, formattedMax: maxText });
   if (totalChecks === 0) {
     return (
       <ChartDonut
@@ -80,7 +82,7 @@ export const CompositionDonut = React.memo<{
         // meaningless, and the ariaDesc already says it is unavailable. A stale
         // non-null status.score must not paint a number over a "No results" ring.
         title="—"
-        subTitle={t('of 100')}
+        subTitle={ofMax}
         titleComponent={<DonutScoreTitle score={null} />}
         height={200}
         width={300}
@@ -100,8 +102,10 @@ export const CompositionDonut = React.memo<{
     >
       <ChartDonut
         ariaTitle={t('Check results')}
-        ariaDesc={t('Compliance score {{score}} of 100. Composition of compliance check results.', {
+        ariaDesc={t('Compliance score {{score}} of {{max}}. Composition of compliance check results.', {
           score: score != null ? formatCount(score, locale) : t('unavailable'),
+          max: 100,
+          formattedMax: maxText,
         })}
         animate={false}
         constrainToVisibleArea
@@ -114,7 +118,7 @@ export const CompositionDonut = React.memo<{
           })
         }
         title={score != null ? formatCount(score, locale) : '—'}
-        subTitle={t('of 100')}
+        subTitle={ofMax}
         titleComponent={<DonutScoreTitle score={score} />}
         height={200}
         width={200}

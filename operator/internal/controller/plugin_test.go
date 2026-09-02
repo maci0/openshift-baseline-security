@@ -121,7 +121,54 @@ func FuzzValidRelatedImage(f *testing.F) {
 	})
 }
 
-// FuzzUnstructuredMetadataReads: CCR/remediation metadata maps are untrusted
-// cluster JSON. Labels/annotations may be map[string]string, map[string]any, or
-// the wrong type entirely. Helpers must never panic and must return "" on
-// missing/wrong types; string values round-trip when present.
+func TestWithoutPlugin(t *testing.T) {
+	in := []string{"a", pluginName, "b", pluginName}
+	got := withoutPlugin(in, pluginName)
+	if len(got) != 2 || got[0] != "a" || got[1] != "b" {
+		t.Fatalf("%v", got)
+	}
+	// Input must not be mutated.
+	if len(in) != 4 {
+		t.Fatalf("input mutated: %v", in)
+	}
+	if len(withoutPlugin([]string{"x"}, pluginName)) != 1 {
+		t.Fatal("untouched when absent")
+	}
+	if len(withoutPlugin(nil, pluginName)) != 0 {
+		t.Fatal("nil input")
+	}
+}
+
+func FuzzWithoutPlugin(f *testing.F) {
+	f.Add("a,b,c", "b")
+	f.Add("", "x")
+	f.Add("x", "x")
+	f.Fuzz(func(t *testing.T, csv, drop string) {
+		var in []string
+		if csv != "" {
+			in = strings.Split(csv, ",")
+		}
+		origLen := len(in)
+		got := withoutPlugin(in, drop)
+		if len(in) != origLen {
+			t.Fatal("input mutated")
+		}
+		for _, p := range got {
+			if p == drop {
+				t.Fatalf("drop %q still present in %v", drop, got)
+			}
+		}
+		for _, p := range got {
+			found := false
+			for _, o := range in {
+				if o == p {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Fatalf("extra element %q", p)
+			}
+		}
+	})
+}

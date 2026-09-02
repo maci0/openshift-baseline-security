@@ -395,17 +395,6 @@ func (r *ClusterBaselineReconciler) postureLog(logger logr.Logger, sig, msg stri
 	logger.Info(msg, keysAndValues...)
 }
 
-// condIsTrue is true when c is present (non-nil) and True. One definition of
-// "condition is True" so call sites cannot drift on the nil guard.
-func condIsTrue(c *metav1.Condition) bool {
-	return c != nil && c.Status == metav1.ConditionTrue
-}
-
-// condTrue is true when the named status condition is present and True.
-func condTrue(cb *baselinev1alpha1.ClusterBaseline, typ string) bool {
-	return condIsTrue(meta.FindStatusCondition(cb.Status.Conditions, typ))
-}
-
 // reconcileOwned drives every owned object and refreshes status fields.
 func (r *ClusterBaselineReconciler) reconcileOwned(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline) error {
 	// Remediation batch first: pause/resume/cancel/grace must not wait behind a

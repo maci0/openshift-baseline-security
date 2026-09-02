@@ -215,6 +215,18 @@ export type CheckStatus =
   | 'SKIP'
   | 'NOT-APPLICABLE';
 
+// Compliance Operator Scan (subset used for rescan patches): identity plus
+// resourceVersion for the optimistic-concurrency annotation patch.
+export type ComplianceScan = {
+  metadata: {
+    name: string;
+    namespace: string;
+    labels?: Record<string, string>;
+    annotations?: Record<string, string>;
+    resourceVersion?: string;
+  };
+};
+
 export type ComplianceCheckResult = {
   metadata: {
     name: string;

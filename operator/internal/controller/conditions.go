@@ -502,39 +502,6 @@ func condMessage(s string) string {
 	return s[:end] + "..."
 }
 
-// Scan end timestamps further ahead than this are treated as a corrupt or
-// skewed Compliance Operator clock, not a real scan.
-const scanTimestampSkewTolerance = time.Hour
-
-// parseScanEndTimestamp parses a ComplianceScan status.endTimestamp. Accepts
-// RFC3339 with optional fractional seconds. Far-future values are rejected so
-// clock skew / corrupt data cannot pin LastScanTime ahead of real scans.
-func parseScanEndTimestamp(ts string, now time.Time) (time.Time, bool) {
-	if ts == "" {
-		return time.Time{}, false
-	}
-	// RFC3339Nano is a superset of RFC3339 (fractional seconds optional), so it
-	// parses plain RFC3339 too; no separate fallback needed.
-	t, err := time.Parse(time.RFC3339Nano, ts)
-	if err != nil {
-		return time.Time{}, false
-	}
-	if t.After(now.Add(scanTimestampSkewTolerance)) {
-		return time.Time{}, false
-	}
-	// Reject pre-epoch timestamps (corrupt / skewed CO clock): no real scan
-	// predates 1970, and a negative Unix value would pin LastScanTime and poison
-	// the age-based ComplianceScanStale alert. Symmetric with the far-future guard.
-	if t.Before(time.Unix(0, 0)) {
-		return time.Time{}, false
-	}
-	// Truncate to whole seconds: LastScanTime and history snapshots are metav1.Time,
-	// which marshals at RFC3339 (second) granularity. A sub-second endTimestamp would
-	// otherwise recompute larger than the persisted (truncated) value every reconcile,
-	// defeating equal-scan dedup and re-appending a duplicate history point each cycle.
-	return t.Truncate(time.Second), true
-}
-
 func setCond(cb *baselinev1alpha1.ClusterBaseline, typ string, status metav1.ConditionStatus, reason, msg string) {
 	// Reason is required (minLength 1) and pattern-constrained on the CRD.
 	// Never write empty: a hand-edited detail condition with Reason "" would
@@ -564,6 +531,17 @@ func setCondFalseLogOnce(ctx context.Context, cb *baselinev1alpha1.ClusterBaseli
 	if prev == nil || prev.Status != metav1.ConditionFalse || prev.Reason != reason {
 		log.FromContext(ctx).Info(logMsg, keysAndValues...)
 	}
+}
+
+// condIsTrue is true when c is present (non-nil) and True. One definition of
+// "condition is True" so call sites cannot drift on the nil guard.
+func condIsTrue(c *metav1.Condition) bool {
+	return c != nil && c.Status == metav1.ConditionTrue
+}
+
+// condTrue is true when the named status condition is present and True.
+func condTrue(cb *baselinev1alpha1.ClusterBaseline, typ string) bool {
+	return condIsTrue(meta.FindStatusCondition(cb.Status.Conditions, typ))
 }
 
 // conditionProgressing is true for non-terminal False detail reasons that mean

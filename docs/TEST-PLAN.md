@@ -657,6 +657,8 @@ an accepted risk neither inflates nor tanks the score.
       (`TestConditionProgressing`).
 - [x] **CRDsMissing is not Progressing** (Manual install without CO settles)
       (`TestConditionProgressing`).
+- [x] **condIsTrue nil-guard**: missing and False conditions are not True
+      (`TestCondIsTrue`, `TestCondTrue`).
 - [x] **Default ClusterBaseline creation**: manager creates `cluster` once when
       none exists, after cache sync, and tolerates AlreadyExists
       (`TestEnsureOnceCreatesWhenEmpty`, `TestEnsureOnceToleratesAlreadyExists`,

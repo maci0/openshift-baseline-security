@@ -259,3 +259,18 @@ func TestScanIntervalSecondsConcurrent(t *testing.T) {
 		t.Fatalf("cache entries after concurrent fill = %d, want 1", n)
 	}
 }
+
+// FuzzNextScanTime: an arbitrary (untrusted spec.schedule) string must never
+// panic; it either parses to a future time or returns nil.
+func FuzzNextScanTime(f *testing.F) {
+	for _, seed := range []string{"", "0 1 * * *", "*/5 * * * *", "@daily", "not a cron", "0 1 * * * * *", "61 0 * * *"} {
+		f.Add(seed)
+	}
+	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
+	f.Fuzz(func(t *testing.T, schedule string) {
+		next := nextScanTime(schedule, now)
+		if next != nil && next.Time.Before(now) {
+			t.Fatalf("nextScanTime(%q) returned a past time %v", schedule, next.Time)
+		}
+	})
+}
