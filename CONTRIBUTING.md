@@ -53,16 +53,16 @@ yarn lint && yarn lint:oxlint && yarn typecheck && yarn test
 
 1. Branch `fix/`, `feat/`, `docs/`, or `chore/` from `main`. Never commit to `main`.
 2. Operator edits: `cd operator && make test lint`. Also `make generate manifests`
-   if you touched API markers or RBAC, and commit the output. CI fails on
-   `git diff --exit-code` after that command.
+   if you touched API markers or the manager ClusterRole (`config/rbac/role.yaml`),
+   and commit the output. CI fails on `git diff --exit-code` after that command.
 3. Plugin edits: `cd console-plugin && yarn lint && yarn lint:oxlint && yarn typecheck && yarn test`.
    `yarn ci` also runs the production webpack build (CI does).
 4. Consumer-visible behavior: a `[Unreleased]` entry in `CHANGELOG.md` (symptom,
    not the patch). See the changelog header for what is in contract.
-5. Regenerated files (`operator/config/crd/`, `operator/config/rbac/`,
+5. Regenerated files (`operator/config/crd/`, `operator/config/rbac/role.yaml`,
    `operator/api/v1alpha1/zz_generated.deepcopy.go`, the CRD copy under
    `operator/bundle/manifests/`): `cd operator && make generate manifests`.
-   The CSV is hand-maintained; do not generate it.
+   Other `config/rbac/` files and the CSV are hand-maintained; do not generate them.
 
 `cd operator && make ci` is the single command that matches the GitHub Actions
 `operator` job (unit tests, lint, govulncheck, alert tests, generated-file

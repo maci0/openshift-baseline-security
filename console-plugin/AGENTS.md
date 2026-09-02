@@ -17,15 +17,15 @@ Node 22 exactly, pinned by `.nvmrc` to the same patch as the digest-pinned
 ## Gate
 
 ```sh
-yarn lint          # eslint, type-aware rules over src, e2e, webpack.config.ts
+yarn lint          # eslint ./src ./e2e webpack.config.ts (type-aware except webpack)
 yarn lint:oxlint   # oxlint: @rikalabs/oxlint-standards strict + local anti-slop
 yarn typecheck     # tsc --noEmit
 yarn test          # jest
-yarn ci            # the four above plus the production webpack build (GHA job)
+yarn ci            # the four above plus the production webpack build
 ```
 
 One file: `yarn test src/scoring.test.ts`. Watch: `yarn test:watch`.
-`make help` lists the same commands. Scripts refuse a Node major other than 22.
+`make help` lists the same commands.
 
 Both linters are required and neither subsumes the other: oxlint carries the
 type-aware anti-slop rules eslint has no port of. `tools/oxlint/anti-slop/` is
@@ -38,9 +38,7 @@ error go away.
 
 ## Module layout
 
-Domain logic lives in flat modules under `src/` (`models`, `scoring`, `status`,
-`results`, `remediation`, `report`, `waivers`, `patches`, `profiles`, `links`,
-`names`, `cron`, `dates`, `download`, `errors`, `parse`), each with a colocated
+Domain logic lives in flat modules under `src/` with a colocated
 `<module>.test.ts`. Components under `src/components/` are presentation and
 data-fetching only.
 

@@ -3,7 +3,7 @@
 #
 # Most operator/bundle/manifests/ files are generated or already guarded
 # (CRD by cp+git-diff, PrometheusRule/ServiceMonitor by verify-monitoring-bundle,
-# CSV RBAC by verify-csv-rbac). The static RBAC/Service/ConfigMap/PDB/scraper
+# CSV RBAC by verify-csv-rbac). The static RBAC/Service/ConfigMap/Secret/scraper
 # manifests below are hand-copied from config/ with no other guardrail, so a
 # permission or setting change in config/ can silently ship a stale bundle.
 #
