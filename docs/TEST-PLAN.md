@@ -19,8 +19,8 @@ run. A checklist item should name the cheapest tier that can prove it.
 
 | Tier | Purpose | Command / harness | Gate |
 |---|---|---|---|
-| 0 | Fast local correctness | `operator: make lint test`; `console-plugin: yarn lint && yarn typecheck && yarn test --runInBand`; repo: `git diff --check` | Every PR |
-| 1 | Generated/build artifacts | `operator: make build && make bundle`; repo: `kubectl kustomize operator/config/default`; `console-plugin: yarn build` | Every PR touching manifests, packaging, or frontend |
+| 0 | Fast local correctness | `operator: make test lint`; `console-plugin: yarn lint && yarn lint:oxlint && yarn typecheck && yarn test` | Every PR |
+| 1 | Generated/build artifacts | `operator: make build && make bundle`; repo: `kubectl kustomize operator/config/default`; `console-plugin: yarn build` (`yarn ci` is tier 0 plus this build) | Every PR touching manifests, packaging, or frontend |
 | 2 | Hardening | `operator: go test -race ./... && make fuzz` | Nightly and before release |
 | 3 | API admission | envtest or server-side dry-run against generated CRDs | PRs touching API markers/CRD schema |
 | 4 | Live OpenShift | Go e2e with `KUBECONFIG`; Playwright with `CONSOLE_URL`, `KUBEADMIN_PASSWORD`, and seeded Compliance Operator data | Release candidates |

@@ -22,6 +22,12 @@ cd operator       && make test lint            # + make fuzz before a release
 cd console-plugin && yarn lint && yarn lint:oxlint && yarn typecheck && yarn test
 ```
 
+`make -C operator ci` is the local replica of the GHA `operator` job (also
+`govulncheck`, alert tests, generated-file drift, `make bundle`; needs docker).
+`cd console-plugin && yarn ci` is the replica of the GHA `console-plugin` job
+except `yarn npm audit`. `make help` in each directory lists the rest.
+Human clone-to-PR path: `CONTRIBUTING.md`.
+
 CI runs the same targets plus `make govulncheck`, `make bundle`, the
 `verify-*` lockstep targets, and a generated-file drift check
 (`make generate manifests && git diff --exit-code`). Extended fuzzing and the

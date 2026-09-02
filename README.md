@@ -98,6 +98,7 @@ Describes `main`; install from published OLM tags for only the released surface.
 
 ## Layout
 
+- `CONTRIBUTING.md`: clone-to-PR commands (setup, single-test loop, `make ci` / `yarn ci`)
 - `AGENTS.md`: contributor contract (gate, version lockstep, house rules);
   `operator/` and `console-plugin/` each carry their own
 - `CHANGELOG.md`: consumer-facing release notes and migration notes
@@ -315,26 +316,39 @@ is the product config; see `operator/config/samples/` and the CRD.
 
 ## Development
 
+Commands from a clean clone through a first PR: [CONTRIBUTING.md](CONTRIBUTING.md).
+`make -C operator help` and `make -C console-plugin help` list them.
+
 ```sh
-# operator: build, unit test, lint, run against the current kubeconfig
-# (Makefile pins GOTOOLCHAIN to match go.mod; needs Go 1.25+ or auto-download.)
-cd operator && make test && make lint && make install && make run
+# operator: unit test + lint. Makefile sets GOTOOLCHAIN from go.mod (1.26.x);
+# host Go 1.21+ downloads that toolchain. `make ci` is the GHA operator job
+# (needs docker for alert tests and bundle validate).
+cd operator && make test lint
 
 # console plugin (Node 22 per .nvmrc / package.json engines; Yarn 4 via corepack)
 cd console-plugin
 corepack enable
+yarn_pm=$(node -p "require('./package.json').packageManager")
+corepack prepare "${yarn_pm}" --activate
 yarn install --immutable
-yarn lint && yarn typecheck && yarn test && yarn build
+yarn lint && yarn lint:oxlint && yarn typecheck && yarn test
+# yarn ci also runs the production webpack build (matches GHA)
 # against a live console: yarn start (serves on :9001)
+# one file: yarn test src/scoring.test.ts   watch: yarn test:watch
 ```
 
 `make run` needs `RELATED_IMAGE_CONSOLE_PLUGIN` pointing at a plugin image
-the cluster can pull.
+the cluster can pull, and `oc` against the current kubeconfig (`make install`
+applies the CRD first).
 
 ## Testing
 
-- Unit + fuzz (Go): `cd operator && make test`.
-- Unit (TypeScript): `cd console-plugin && yarn test`.
+- Unit + fuzz (Go): `cd operator && make test`. One test:
+  `cd operator && go test ./internal/controller/ -count=1 -run TestName`.
+- Unit (TypeScript): `cd console-plugin && yarn test`. One file:
+  `cd console-plugin && yarn test src/scoring.test.ts`. Watch: `yarn test:watch`.
+- Full GHA replica: `cd operator && make ci` (needs docker);
+  `cd console-plugin && yarn ci`.
 - E2E, live cluster (Go): `cd operator && make test-e2e` with `KUBECONFIG`
   set. Asserts the ClusterBaseline reaches `Available` with a score and
   healthy conditions, the owned ScanSetting/bindings and console plugin

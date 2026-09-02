@@ -88,6 +88,23 @@ GO_VERSION_RE := $(subst .,\.,$(GO_VERSION))
 # Go minor (1.26 from 1.26.6) for the CI builder image tag (golang-1.26-...).
 GO_MINOR := $(basename $(GO_VERSION))
 
+.PHONY: help
+help:
+	@echo "Operator contributor targets:"
+	@echo "  make test          fmt-check, vet, mod-verify, go test ./..., must-gather --self-test"
+	@echo "  make lint          golangci-lint $(GOLANGCI_LINT_VERSION)"
+	@echo "  make ci            local replica of the CI operator job (needs docker)"
+	@echo "  make fuzz          short seed-corpus fuzz (run before a release)"
+	@echo "  make govulncheck   vulnerability scan (pinned)"
+	@echo "  make build         generate, manifests, fmt-check, vet, bin/manager"
+	@echo "  make run           build and run against the current kubeconfig"
+	@echo "  make bundle        verify-* then operator-sdk bundle validate (needs docker)"
+	@echo "  make test-e2e      live-cluster e2e (needs KUBECONFIG)"
+	@echo "  make test-alerts   promtool alert unit tests (needs docker)"
+	@echo "  make fmt           rewrite with gofmt"
+	@echo "  make generate manifests  controller-gen; commit the output"
+	@echo "Single test: go test ./internal/controller/ -count=1 -run TestName"
+
 .PHONY: all
 all: build
 
@@ -213,7 +230,25 @@ GOVULNCHECK_VERSION ?= v1.6.0
 govulncheck:
 	go run golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION) ./...
 
+# Local replica of .github/workflows/ci.yml job "operator" (not image/catalog
+# builds). Sequential on purpose: `make -j ci` must not race generate with test.
+# test-alerts and bundle need docker. generate+manifests then git diff matches
+# CI's drift check; scoped to generated paths so an unrelated dirty file in
+# the worktree does not fail the replica.
+.PHONY: ci
+ci:
+	$(MAKE) --no-print-directory test
+	$(MAKE) --no-print-directory build
+	$(MAKE) --no-print-directory lint
+	$(MAKE) --no-print-directory govulncheck
+	$(MAKE) --no-print-directory test-alerts
+	$(MAKE) --no-print-directory generate manifests
+	@git diff --exit-code -- api config/crd config/rbac bundle/manifests/baselinesecurity.openshift.io_clusterbaselines.yaml \
+		|| { echo "generated files drifted; run: make generate manifests" >&2; exit 1; }
+	$(MAKE) --no-print-directory bundle
+
 # Keep in lockstep with operator/Dockerfile RUN go build flags (reproducible, stripped, PIE).
+
 # -buildid= clears the GNU build-id note so local and image binaries can match bit-for-bit.
 GO_BUILD_FLAGS ?= -trimpath -buildvcs=false -mod=readonly -buildmode=pie
 GO_LDFLAGS ?= -s -w -buildid=

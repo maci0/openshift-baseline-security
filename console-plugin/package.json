@@ -8,16 +8,18 @@
   },
   "scripts": {
     "clean": "rm -rf dist",
-    "check-node": "node -e \"const m=+process.versions.node.split('.')[0]; if(m!==22){console.error('Node 22 required (got '+process.versions.node+'; see .nvmrc)'); process.exit(1)}\"",
+    "check-node": "node -e \"const m=+process.versions.node.split('.')[0]; if(m!==22){console.error('Node 22 required (got '+process.versions.node+'; see .nvmrc / package.json engines)'); process.exit(1)}\"",
     "build": "yarn check-node && yarn typecheck && yarn clean && NODE_ENV=production TZ=UTC LC_ALL=C SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-0} yarn ts-node node_modules/.bin/webpack && test -s dist/plugin-manifest.json && test -s dist/locales/en/plugin__baseline-security-console-plugin.json && ls dist/plugin-entry*.min.js >/dev/null",
-    "build-dev": "yarn clean && yarn ts-node node_modules/.bin/webpack",
-    "start": "yarn ts-node node_modules/.bin/webpack serve",
+    "build-dev": "yarn check-node && yarn clean && yarn ts-node node_modules/.bin/webpack",
+    "start": "yarn check-node && yarn ts-node node_modules/.bin/webpack serve",
     "ts-node": "ts-node -O '{\"module\":\"commonjs\"}'",
-    "lint": "eslint ./src ./e2e webpack.config.ts",
-    "lint:oxlint": "oxlint",
-    "typecheck": "tsc --noEmit",
-    "test": "jest",
-    "test-e2e": "playwright test -c e2e/playwright.config.ts"
+    "lint": "yarn check-node && eslint ./src ./e2e webpack.config.ts",
+    "lint:oxlint": "yarn check-node && oxlint",
+    "typecheck": "yarn check-node && tsc --noEmit",
+    "test": "yarn check-node && jest",
+    "test:watch": "yarn check-node && jest --watch",
+    "test-e2e": "yarn check-node && playwright test -c e2e/playwright.config.ts",
+    "ci": "yarn lint && yarn lint:oxlint && yarn typecheck && yarn test && yarn build"
   },
   "devDependencies": {
     "@openshift-console/dynamic-plugin-sdk": "4.22.0",

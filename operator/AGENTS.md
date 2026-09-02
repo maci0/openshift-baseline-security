@@ -8,9 +8,11 @@ over the cluster-scoped singleton `ClusterBaseline/cluster`.
 ```sh
 make test          # fmt-check, vet, mod-verify, go test ./...
 make lint          # golangci-lint, pinned version, 0 issues required
+make ci            # local replica of the GHA operator job (needs docker)
 make fuzz          # 53 targets, seed corpus only; run before a release cut
 make govulncheck
 make bundle        # every verify-* target, then operator-sdk bundle validate
+make help          # contributor-facing targets
 ```
 
 GNU Make 3.82+ is required (`.SHELLFLAGS` pipefail). macOS `/usr/bin/make` is 3.81; use Homebrew `gmake`.
@@ -78,3 +80,5 @@ than guessing.
 client. `test/e2e/` needs a live cluster and `KUBECONFIG` (`make test-e2e`),
 and is never part of the per-PR gate. Assert on returned errors from fake-client
 calls rather than discarding them.
+
+One package or test: `go test ./internal/controller/ -count=1 -run TestName`.
