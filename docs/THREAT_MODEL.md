@@ -160,7 +160,7 @@ STRIDE, tied to entry points. Not a generic checklist.
 
 | Class | Concrete threat |
 |-------|-----------------|
-| Tampering | Substituted operator or plugin image. Recurring: `workflow_dispatch` shell injection (fixed 0.5.11 by env-passing the version). `ValidRelatedImage` does not pin digest or registry. |
+| Tampering | Substituted operator or plugin image. Recurring: `workflow_dispatch` shell injection (fixed 0.5.11 by env-passing the version). `ValidRelatedImage` does not pin digest or registry. A compromised npm package with a `postinstall` cannot run during `yarn install` (`enableScripts: false` in `console-plugin/.yarnrc.yml`; image `YARN_ENABLE_SCRIPTS=false`). |
 | Denial of service | Standard-library infinite loop on invalid input via status text (fixed: `golang.org/x/text` bump, 0.5.9). Recurring class: untrusted string → parser. Fuzz targets exist; `make fuzz` is release-gate, not per-PR. |
 
 ## 5. Mitigations mapping
@@ -183,6 +183,7 @@ Existing controls, with the threats they cover:
 | React text rendering; report `esc()`; CSV formula prefix; `safeDownloadName` | `ResultsTab.tsx`, `report.ts`, `results.ts`, `download.ts` | XSS / CWE-1236 / download path |
 | Fuzz targets on untrusted maps, image refs, cron, scoring | `operator/internal/controller/*_test.go`, `console-plugin/src/fuzz.test.ts` | Recurring parser panics |
 | Hermetic image builds (`--network=none`, lockfile, digest bases) | `operator/Dockerfile`, `console-plugin/Dockerfile` | Build-time supply chain |
+| Yarn install without lifecycle scripts | `console-plugin/.yarnrc.yml` `enableScripts: false`; `console-plugin/Dockerfile` `YARN_ENABLE_SCRIPTS=false` | Compromised registry package cannot run `preinstall`/`install`/`postinstall` |
 | Release version not interpolated into `run:` | `.github/workflows/release.yml` | Workflow command injection |
 
 Threats with no (or only UI) mitigation:

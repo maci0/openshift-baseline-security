@@ -7,7 +7,7 @@ USER root
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 # Hermetic locale/time; fixed epoch for minifiers that honor SOURCE_DATE_EPOCH.
 # No global Yarn cache: install must use only this layer's node_modules + lockfile.
-# YARN_ENABLE_SCRIPTS=false: do not run registry package lifecycle scripts.
+# No registry lifecycle scripts: matches .yarnrc.yml enableScripts: false.
 # PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: @playwright/test must not fetch browsers.
 ENV TZ=UTC LC_ALL=C SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH} YARN_ENABLE_GLOBAL_CACHE=false PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 YARN_ENABLE_SCRIPTS=false
 # Base image has no corepack; pin so the build does not pull floating latest from npm.

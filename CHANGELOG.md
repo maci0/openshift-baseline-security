@@ -76,6 +76,13 @@ depend on those tags.
   Remediations, and Profiles load when those tabs are opened. A Retry alert
   is shown if a chunk fails to load.
 
+### Security
+
+- Console: `yarn install` no longer runs package lifecycle scripts
+  (`enableScripts: false`, image `YARN_ENABLE_SCRIPTS=false`). A compromised
+  transitive with a `postinstall` cannot execute during local/CI install or
+  the plugin image build.
+
 ### Fixed
 
 - Support: must-gather waiver redaction runs with BSD sed, so a dump collected

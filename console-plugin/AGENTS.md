@@ -7,8 +7,9 @@ PatternFly 6, `@openshift-console/dynamic-plugin-sdk` on the 4.22 line.
 
 **Yarn 4, not bun.** This package is standardized on Yarn (`packageManager` in
 `package.json` is the single source; `corepack prepare` activates it) with
-`enableImmutableInstalls` and `checksumBehavior: throw`. Do not migrate it, and
-do not add a `package-lock.json` beside `yarn.lock`.
+`enableImmutableInstalls`, `checksumBehavior: throw`, and `enableScripts: false`
+(no registry lifecycle scripts at install). Do not migrate it, and do not add
+a `package-lock.json` beside `yarn.lock`.
 
 Node 22 exactly, pinned by `.nvmrc` to the same patch as the digest-pinned
 `ubi9/nodejs-22` build image. `yarn build` refuses any other major.
