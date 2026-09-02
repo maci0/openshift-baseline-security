@@ -750,6 +750,9 @@ stale Available or eternal Progressing.
 
 - [x] Invalid cron soft-fail preserves last-good schedule
       (`TestEnsureScanConfigCreatesAndPrunes`).
+- [x] Scan-interval memoizer is bounded, ignores parse failures, and shares one
+      walk across concurrent publishers (`TestScanIntervalCacheBounded`,
+      `TestScanIntervalSecondsInvalidNotCached`, `TestScanIntervalSecondsConcurrent`).
 - [x] History ring cap 30, no aliasing after truncate
       (`TestAppendHistoryRing`, `FuzzAppendHistoryRing`).
 - [x] **DST / timezone**: cron is evaluated in UTC (CO ScanSettings fire on the

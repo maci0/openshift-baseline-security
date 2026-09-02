@@ -122,6 +122,15 @@ func clearPublishedMetrics() {
 // Call after setRollupConditions (and on the reconcile-error Degraded path) so
 // condition gauges match the status about to be (or just) written.
 func publishMetrics(cb *baselinev1alpha1.ClusterBaseline) {
+	// Walk the cron horizon before metricsMu: a per-minute schedule's first
+	// compute is ~0.3s, and holding the gauges lock across it would stall every
+	// concurrent publisher (tests, or a future raise of MaxConcurrentReconciles).
+	scanning := len(cb.Spec.Profiles) > 0 || len(cb.Spec.TailoredProfiles) > 0
+	var interval float64
+	if scanning {
+		interval = scanIntervalSeconds(cb.Spec.Schedule, time.Now())
+	}
+
 	metricsMu.Lock()
 	defer metricsMu.Unlock()
 
@@ -174,7 +183,6 @@ func publishMetrics(cb *baselinev1alpha1.ClusterBaseline) {
 	// (no profiles and no tailored). status.lastScanTime may still hold the
 	// last known scan for the UI/history, but ComplianceScanStale must not page
 	// for an admin who turned scanning off.
-	scanning := len(cb.Spec.Profiles) > 0 || len(cb.Spec.TailoredProfiles) > 0
 	if scanning && cb.Status.LastScanTime != nil && !cb.Status.LastScanTime.IsZero() {
 		lastScanTimestamp.Set(float64(cb.Status.LastScanTime.Unix()))
 	} else {
@@ -184,7 +192,7 @@ func publishMetrics(cb *baselinev1alpha1.ClusterBaseline) {
 	// invalid, which surfaces separately as InvalidSchedule/Degraded), so the
 	// alert's interval guard skips those cases.
 	if scanning {
-		scanIntervalSecondsGauge.Set(scanIntervalSeconds(cb.Spec.Schedule, time.Now()))
+		scanIntervalSecondsGauge.Set(interval)
 	} else {
 		scanIntervalSecondsGauge.Set(0)
 	}

@@ -1,6 +1,8 @@
 package controller
 
 import (
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 )
@@ -165,5 +167,95 @@ func TestScanIntervalSeconds(t *testing.T) {
 		if got := scanIntervalSeconds(c.schedule, now); got != c.want {
 			t.Fatalf("scanIntervalSeconds(%q) = %v, want %v", c.schedule, got, c.want)
 		}
+	}
+}
+
+func resetScanIntervalCache(t *testing.T) {
+	t.Helper()
+	scanIntervalMu.Lock()
+	clear(scanIntervalCache)
+	clear(scanIntervalInflight)
+	scanIntervalMu.Unlock()
+	t.Cleanup(func() {
+		scanIntervalMu.Lock()
+		clear(scanIntervalCache)
+		clear(scanIntervalInflight)
+		scanIntervalMu.Unlock()
+	})
+}
+
+func scanIntervalCacheLen(t *testing.T) int {
+	t.Helper()
+	scanIntervalMu.Lock()
+	defer scanIntervalMu.Unlock()
+	return len(scanIntervalCache)
+}
+
+// Max gap is a property of the cron, so a later `now` must reuse the memoized
+// value rather than walk a different 14-month window.
+func TestScanIntervalSecondsCachedAcrossNow(t *testing.T) {
+	resetScanIntervalCache(t)
+	now := time.Date(2026, 7, 10, 3, 0, 0, 0, time.UTC)
+	first := scanIntervalSeconds("0 1 * * *", now)
+	if first != 86400 {
+		t.Fatalf("first = %v, want 86400", first)
+	}
+	later := scanIntervalSeconds("0 1 * * *", now.AddDate(0, 6, 0))
+	if later != first {
+		t.Fatalf("cached interval = %v, want %v", later, first)
+	}
+	if n := scanIntervalCacheLen(t); n != 1 {
+		t.Fatalf("cache entries = %d, want 1", n)
+	}
+}
+
+func TestScanIntervalSecondsInvalidNotCached(t *testing.T) {
+	resetScanIntervalCache(t)
+	now := time.Date(2026, 7, 10, 3, 0, 0, 0, time.UTC)
+	if got := scanIntervalSeconds("not a cron", now); got != 0 {
+		t.Fatalf("invalid = %v, want 0", got)
+	}
+	if n := scanIntervalCacheLen(t); n != 0 {
+		t.Fatalf("invalid schedule cached: %d entries", n)
+	}
+}
+
+func TestScanIntervalCacheBounded(t *testing.T) {
+	resetScanIntervalCache(t)
+	now := time.Date(2026, 7, 10, 3, 0, 0, 0, time.UTC)
+	for i := 0; i < scanIntervalCacheMax+20; i++ {
+		sched := fmt.Sprintf("%d %d * * *", i%60, (i/60)%24)
+		if got := scanIntervalSeconds(sched, now); got != 86400 {
+			t.Fatalf("scanIntervalSeconds(%q) = %v, want 86400", sched, got)
+		}
+	}
+	if n := scanIntervalCacheLen(t); n > scanIntervalCacheMax {
+		t.Fatalf("cache size = %d, want <= %d", n, scanIntervalCacheMax)
+	} else if n < scanIntervalCacheMax {
+		t.Fatalf("cache size = %d, want cap %d after %d unique keys", n, scanIntervalCacheMax, scanIntervalCacheMax+20)
+	}
+}
+
+func TestScanIntervalSecondsConcurrent(t *testing.T) {
+	resetScanIntervalCache(t)
+	now := time.Date(2026, 7, 10, 3, 0, 0, 0, time.UTC)
+	const n = 32
+	var wg sync.WaitGroup
+	wg.Add(n)
+	got := make([]float64, n)
+	for i := 0; i < n; i++ {
+		go func() {
+			defer wg.Done()
+			got[i] = scanIntervalSeconds("0 1 * * 1-5", now)
+		}()
+	}
+	wg.Wait()
+	for i, v := range got {
+		if v != 259200 {
+			t.Fatalf("goroutine %d = %v, want 259200", i, v)
+		}
+	}
+	if n := scanIntervalCacheLen(t); n != 1 {
+		t.Fatalf("cache entries after concurrent fill = %d, want 1", n)
 	}
 }

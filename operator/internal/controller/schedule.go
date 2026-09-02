@@ -74,14 +74,29 @@ func nextScanTime(schedule string, now time.Time) *metav1.Time {
 	return &next
 }
 
+const (
+	// scanIntervalCacheMax is well above one live spec.schedule (the singleton
+	// CR has one cron). Extra slots cover process-lifetime edits and tests.
+	// At the cap, one arbitrary entry is dropped so a burst of unique keys
+	// cannot flush the working set and recompute every schedule at once.
+	scanIntervalCacheMax = 100
+	// scanIntervalWalkMax backstops a cron.Next that never crosses the
+	// 14-month horizon. Five-field cron cannot exceed ~620k minute fires
+	// over that window.
+	scanIntervalWalkMax = 1_000_000
+)
+
 // scanIntervalCache memoizes scanIntervalSeconds per normalized schedule: the
 // full-horizon walk below costs ~0.3s for a per-minute cron, too much for every
 // metrics publish but fine once per distinct schedule per process lifetime.
-// Guarded by a mutex for -race safety in tests; reconcile itself is
-// single-threaded. Cleared wholesale if it ever grows past a sanity bound.
+// Max gap is a property of the cron, not of `now`, so the key is the normalized
+// expression. A truncated walk is not stored: an underestimate would false-page
+// ComplianceScanStale at 1.5x. Inflight channels collapse concurrent misses of
+// the same key so a per-minute cron cannot be walked N times at once.
 var (
-	scanIntervalMu    sync.Mutex
-	scanIntervalCache = map[string]float64{}
+	scanIntervalMu       sync.Mutex
+	scanIntervalCache    = map[string]float64{}
+	scanIntervalInflight = map[string]chan struct{}{}
 )
 
 // scanIntervalSeconds returns the LARGEST gap between consecutive fires over
@@ -101,35 +116,62 @@ func scanIntervalSeconds(schedule string, now time.Time) float64 {
 	if err != nil {
 		return 0
 	}
-	scanIntervalMu.Lock()
-	defer scanIntervalMu.Unlock()
-	if v, ok := scanIntervalCache[norm]; ok {
-		return v
+	for {
+		scanIntervalMu.Lock()
+		if v, ok := scanIntervalCache[norm]; ok {
+			scanIntervalMu.Unlock()
+			return v
+		}
+		if wait, busy := scanIntervalInflight[norm]; busy {
+			scanIntervalMu.Unlock()
+			<-wait
+			continue
+		}
+		done := make(chan struct{})
+		scanIntervalInflight[norm] = done
+		scanIntervalMu.Unlock()
+
+		maxGap, complete := computeScanInterval(sched, now)
+
+		scanIntervalMu.Lock()
+		delete(scanIntervalInflight, norm)
+		if complete {
+			if _, exists := scanIntervalCache[norm]; !exists && len(scanIntervalCache) >= scanIntervalCacheMax {
+				for k := range scanIntervalCache {
+					delete(scanIntervalCache, k)
+					break
+				}
+			}
+			scanIntervalCache[norm] = maxGap
+		}
+		close(done)
+		scanIntervalMu.Unlock()
+		return maxGap
 	}
+}
+
+// computeScanInterval walks consecutive fires from now. complete is false when
+// the iteration cap is hit before the horizon, so the caller must not cache
+// maxGap (it may under-report the true weekend/month gap).
+func computeScanInterval(sched cron.Schedule, now time.Time) (float64, bool) {
 	prev := sched.Next(now.UTC())
 	if prev.IsZero() {
-		return 0
+		return 0, true
 	}
 	horizon := prev.AddDate(1, 2, 0)
-	// ~620k iterations for a per-minute cron over 14 months; the hard cap only
-	// backstops a pathological parser edge, far above any real schedule.
 	var maxGap float64
-	for i := 0; i < 1_000_000; i++ {
+	for i := 0; i < scanIntervalWalkMax; i++ {
 		next := sched.Next(prev)
 		if next.IsZero() {
-			break
+			return maxGap, true
 		}
 		if gap := next.Sub(prev).Seconds(); gap > maxGap {
 			maxGap = gap
 		}
 		prev = next
 		if prev.After(horizon) {
-			break
+			return maxGap, true
 		}
 	}
-	if len(scanIntervalCache) > 100 {
-		clear(scanIntervalCache)
-	}
-	scanIntervalCache[norm] = maxGap
-	return maxGap
+	return maxGap, false
 }
