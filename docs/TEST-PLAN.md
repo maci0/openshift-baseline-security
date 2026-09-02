@@ -797,6 +797,9 @@ stale Available or eternal Progressing.
       RBAC denied, and no scan results.
 - [ ] **Alert runbooks**: `ComplianceScoreLow` and `ComplianceChecksFailing`
       annotations point admins to concrete console/CLI steps.
+- [x] **Must-gather attribution redaction**: ClusterBaseline dump drops
+      `requestedBy`/`approvedBy` and `last-applied-configuration`
+      (`hack/must-gather.sh --self-test`).
 - [ ] **Must-gather smoke**: `operator/hack/must-gather.sh` runs without
       cluster-admin-only assumptions beyond documented RBAC and redacts or
       avoids secrets.

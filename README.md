@@ -92,7 +92,8 @@ Describes `main`; install from published OLM tags for only the released surface.
 - **Observability**: Prometheus metrics, PrometheusRule alerts, and a native
   Observe → Dashboards score trend, scraped by platform monitoring. Reference:
   [docs/OBSERVABILITY.md](docs/OBSERVABILITY.md).
-- **Support**: `operator/hack/must-gather.sh` collects operator + compliance state.
+- **Support**: `operator/hack/must-gather.sh` collects operator + compliance
+  state (Secret objects and waiver `requestedBy`/`approvedBy` are omitted).
 
 ## Layout
 

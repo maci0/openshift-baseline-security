@@ -42,6 +42,12 @@ depend on those tags.
 
 ## [Unreleased]
 
+### Changed
+
+- Support: ClusterBaseline must-gather dumps omit waiver `requestedBy` and
+  `approvedBy`, and drop `kubectl.kubernetes.io/last-applied-configuration` so
+  those names are not copied into a support archive.
+
 ### Docs
 
 - Threat model: add `docs/THREAT_MODEL.md` (entry points, trust boundaries,

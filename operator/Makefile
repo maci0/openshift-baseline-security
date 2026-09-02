@@ -131,6 +131,7 @@ vet:
 .PHONY: test
 test: fmt-check vet mod-verify
 	go test ./...
+	./hack/must-gather.sh --self-test
 
 # Live-cluster e2e; requires KUBECONFIG pointing at a cluster with the operator
 # installed (make deploy or OLM) and a ClusterBaseline reconciled.

@@ -1,7 +1,122 @@
 #!/usr/bin/env bash
 # Collect baseline-security state for support/debugging.
 # Usage: hack/must-gather.sh [output-dir]   (defaults to ./must-gather)
+#        hack/must-gather.sh --self-test    (redaction unit test; no cluster)
 set -euo pipefail
+
+# spec.waivers[].requestedBy and approvedBy identify cluster users (audit
+# attribution). kubectl last-applied-configuration can embed the same fields
+# as a JSON blob. Strip both from a ClusterBaseline YAML dump so those
+# identities do not leave the cluster in a support archive. Waiver name and
+# reason stay: they are required to debug scoring.
+redact_clusterbaseline_dump() {
+  local f="$1"
+  [ -s "$f" ] || return 0
+  # GNU sed (OpenShift support hosts). kubectl YAML emits each mapping key on
+  # its own line; last-applied-configuration is typically one quoted line.
+  # The JSON substitutions catch a folded annotation value that survives the
+  # key-line delete.
+  sed -E -i \
+    -e '/kubectl\.kubernetes\.io\/last-applied-configuration:/d' \
+    -e '/^[[:space:]]+(requestedBy|approvedBy):/d' \
+    -e 's/"requestedBy":"[^"]*"[[:space:]]*,?[[:space:]]*//g' \
+    -e 's/"approvedBy":"[^"]*"[[:space:]]*,?[[:space:]]*//g' \
+    "$f"
+}
+
+# Offline check that attribution does not survive a typical kubectl YAML dump.
+# No oc, no cluster. Invoked as --self-test and from `make test`.
+self_test() {
+  (
+    work="$(mktemp -d)"
+    trap 'rm -rf -- "$work"' EXIT
+    out="$work/clusterbaseline.yaml"
+    cat > "$out" <<'EOF'
+apiVersion: baselinesecurity.openshift.io/v1alpha1
+kind: ClusterBaseline
+metadata:
+  name: cluster
+  annotations:
+    kubectl.kubernetes.io/last-applied-configuration: '{"spec":{"waivers":[{"requestedBy":"alice","approvedBy":"bob","name":"ocp4-cis-some-check"}]}}'
+    baselinesecurity.openshift.io/other: keep
+spec:
+  waivers:
+    - name: ocp4-cis-some-check
+      reason: accepted risk
+      requestedBy: alice
+      approvedBy: bob
+      expiresAt: "2099-01-01T00:00:00Z"
+EOF
+    redact_clusterbaseline_dump "$out"
+    if grep -q 'requestedBy' "$out"; then
+      echo "FAIL: requestedBy still present" >&2
+      cat "$out" >&2
+      exit 1
+    fi
+    if grep -q 'approvedBy' "$out"; then
+      echo "FAIL: approvedBy still present" >&2
+      cat "$out" >&2
+      exit 1
+    fi
+    if grep -q 'last-applied-configuration' "$out"; then
+      echo "FAIL: last-applied-configuration still present" >&2
+      cat "$out" >&2
+      exit 1
+    fi
+    grep -q 'name: ocp4-cis-some-check' "$out" || {
+      echo "FAIL: waiver name dropped" >&2
+      cat "$out" >&2
+      exit 1
+    }
+    grep -q 'reason: accepted risk' "$out" || {
+      echo "FAIL: waiver reason dropped" >&2
+      cat "$out" >&2
+      exit 1
+    }
+    grep -q 'baselinesecurity.openshift.io/other: keep' "$out" || {
+      echo "FAIL: unrelated annotation dropped" >&2
+      cat "$out" >&2
+      exit 1
+    }
+
+    # Folded last-applied-configuration: the key line is deleted but the JSON
+    # continuation remains; JSON substitutions must still strip attribution.
+    folded="$work/folded.yaml"
+    cat > "$folded" <<'EOF'
+metadata:
+  annotations:
+    kubectl.kubernetes.io/last-applied-configuration: >
+      {"spec":{"waivers":[{"requestedBy":"alice","approvedBy":"bob","name":"x"}]}}
+spec:
+  waivers:
+    - name: x
+      reason: r
+EOF
+    redact_clusterbaseline_dump "$folded"
+    if grep -q 'requestedBy' "$folded"; then
+      echo "FAIL: folded requestedBy still present" >&2
+      cat "$folded" >&2
+      exit 1
+    fi
+    if grep -q 'approvedBy' "$folded"; then
+      echo "FAIL: folded approvedBy still present" >&2
+      cat "$folded" >&2
+      exit 1
+    fi
+    grep -q '"name":"x"' "$folded" || {
+      echo "FAIL: folded JSON name dropped" >&2
+      cat "$folded" >&2
+      exit 1
+    }
+    echo "must-gather redaction self-test ok"
+  )
+}
+
+if [ "${1:-}" = "--self-test" ]; then
+  self_test
+  exit 0
+fi
+
 OUT="${1:-must-gather}"
 # Refuse empty, stdout marker, or flag-shaped paths so a bad invocation cannot
 # mkdir "-" / "" or treat an option as a directory.
@@ -11,6 +126,7 @@ if [ -z "$OUT" ] || [ "$OUT" = "-" ] || [[ "$OUT" == -* ]]; then
 fi
 mkdir -p -- "$OUT"
 # Owner-only: dumps include logs/events that may carry cluster-sensitive data.
+# Waiver requestedBy/approvedBy are stripped from clusterbaseline.yaml below.
 chmod 700 -- "$OUT"
 
 # Bound every API call. must-gather is run precisely when the cluster is
@@ -37,8 +153,13 @@ warn_fail() {
 }
 
 # ClusterBaseline status (score, conditions, remediationBatch, relatedObjects).
-oc get clusterbaseline cluster -o yaml > "$OUT/clusterbaseline.yaml" 2>/dev/null \
-  || warn_fail clusterbaseline.yaml
+# Strip waiver attribution after a successful get so names do not leave the
+# cluster; keep the dump even if redaction is a no-op (no waivers present).
+if oc get clusterbaseline cluster -o yaml > "$OUT/clusterbaseline.yaml" 2>/dev/null; then
+  redact_clusterbaseline_dump "$OUT/clusterbaseline.yaml"
+else
+  warn_fail clusterbaseline.yaml
+fi
 oc get clusterbaseline cluster -o jsonpath='{range .status.conditions[*]}{.type}={.status} reason={.reason} msg={.message}{"\n"}{end}' \
   > "$OUT/clusterbaseline-conditions.txt" 2>/dev/null \
   || warn_fail clusterbaseline-conditions.txt
