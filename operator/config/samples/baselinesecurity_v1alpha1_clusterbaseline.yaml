@@ -1,7 +1,24 @@
+# ClusterBaseline is a cluster-scoped singleton and must be named cluster.
+# Applying this file matches the operator's zero-config default CR (CIS).
+# Omit any optional field to keep the CRD/controller default.
 apiVersion: baselinesecurity.openshift.io/v1alpha1
 kind: ClusterBaseline
 metadata:
   name: cluster
 spec:
+  # Empty list disables scanning (CR and history stay).
+  # Default on create is [cis]. Known keys: cis, pci-dss,
+  # nist-moderate, nist-high, stig, nerc-cip, e8, bsi.
   profiles:
     - cis
+  # tailoredProfiles: []  # names in openshift-compliance (max 32)
+  # schedule: "0 1 * * *"  # five-field cron (UTC); empty uses this
+  # installComplianceOperator: Automatic  # or Manual
+  # complianceCatalogSource: redhat-operators  # omit to auto-detect
+  # console:
+  #   managementState: Managed  # or Removed
+  # remediation:
+  #   apply: Manual  # Automatic applies after each scan (reboots)
+  # scoring:
+  #   mode: Flat  # or SeverityWeighted
+  # waivers: []  # accepted-risk exclusions from the score (max 256)

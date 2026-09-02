@@ -613,10 +613,14 @@ an accepted risk neither inflates nor tanks the score.
       (`TestConditionProgressing`).
 - [x] **CRDsMissing is not Progressing** (Manual install without CO settles)
       (`TestConditionProgressing`).
-- [ ] **Default ClusterBaseline creation**: manager creates `cluster` once when
-      none exists, after cache sync, and tolerates AlreadyExists.
-- [ ] **Default creation opt-out**:
-      `BASELINE_SECURITY_SKIP_DEFAULT_CR=true` prevents default CR creation.
+- [x] **Default ClusterBaseline creation**: manager creates `cluster` once when
+      none exists, after cache sync, and tolerates AlreadyExists
+      (`TestEnsureOnceCreatesWhenEmpty`, `TestEnsureOnceToleratesAlreadyExists`,
+      `TestStartRetriesWhenCacheSyncsLate`).
+- [x] **Default creation opt-out**:
+      `BASELINE_SECURITY_SKIP_DEFAULT_CR=true` (and 1/yes/on) is truthy;
+      false/0/no/off/unset are falsy; unknown values error so start fails
+      (`TestParseEnvBool`, `FuzzParseEnvBool`).
 - [ ] **Leader-only default creation**: two operator replicas do not race the
       default CR creation; only the elected leader runs the runnable.
 - [ ] **Leader loss**: demoted process exits (controller-runtime safety);
@@ -1293,7 +1297,7 @@ Classic boundary table. Automate as table-driven unit tests where possible.
 |---|---|---|---|
 | `installComplianceOperator=Automatic` | creates Sub | n/a | [x] unit |
 | `installComplianceOperator=Manual` | never creates Sub | n/a | [x] unit |
-| `BASELINE_SECURITY_SKIP_DEFAULT_CR=true` | no default CR | creates default | [ ] |
+| `BASELINE_SECURITY_SKIP_DEFAULT_CR=true` | no default CR | creates default | [x] parse |
 | `console.managementState=Removed` | teardown plugin | Managed deploy | [x] partial |
 | `remediation.apply=Automatic` | ScanSetting auto flags | Manual false | [x] unit |
 | `RELATED_IMAGE_CONSOLE_PLUGIN` empty | ImageMissing | deploy image | [x] unit |

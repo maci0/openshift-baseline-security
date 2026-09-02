@@ -346,8 +346,9 @@ must treat -1 as "absent", not as a numeric score.
 **Decision:** On manager start, create `ClusterBaseline/cluster` with defaults
 (CIS profile, Automatic CO install, Managed console) when no CR exists. Opt
 out with env `BASELINE_SECURITY_SKIP_DEFAULT_CR=true` (GitOps / pre-seeded
-CRs). Permanent auth/RBAC create failures stop retrying; transient errors
-retry.
+CRs). Unrecognized values fail process start so a typo cannot silently
+create the CR. Permanent auth/RBAC create failures stop retrying; transient
+errors retry.
 
 **Alternatives:** Require the admin to apply a sample CR; only document
 `kubectl apply -f samples/`.

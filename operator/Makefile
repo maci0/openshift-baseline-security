@@ -193,6 +193,7 @@ fuzz:
 	go test ./cmd/ -run=^$$ -fuzz=^FuzzIsLoopbackMetricsAddr$$ -fuzztime=3s
 	go test ./cmd/ -run=^$$ -fuzz=^FuzzValidateListenAddr$$ -fuzztime=3s
 	go test ./cmd/ -run=^$$ -fuzz=^FuzzValidateMetricsCertDir$$ -fuzztime=3s
+	go test ./cmd/ -run=^$$ -fuzz=^FuzzParseEnvBool$$ -fuzztime=3s
 	go test ./internal/controller/ -run=^$$ -fuzz=^FuzzDashboardConfigMapCurrent$$ -fuzztime=3s
 	go test ./internal/controller/ -run=^$$ -fuzz=^FuzzClampString$$ -fuzztime=3s
 

@@ -192,7 +192,9 @@ Then install "Baseline Security" from OperatorHub into the
 `openshift-baseline-security` namespace using the cluster-wide
 `AllNamespaces` install mode. The operator default-creates a
 `ClusterBaseline/cluster` with the CIS profile and starts scanning; opt out
-with `BASELINE_SECURITY_SKIP_DEFAULT_CR=true` on the CSV deployment.
+with `BASELINE_SECURITY_SKIP_DEFAULT_CR=true` on the CSV deployment
+(unrecognized values fail process start; see
+[Operator process configuration](#operator-process-configuration)).
 
 The bundle ships the metrics ServiceMonitor / PrometheusRule / dashboard
 (scraped by platform monitoring); see
@@ -264,6 +266,33 @@ image/CSV tags are immutable.
 - **Release process and version-source lockstep**:
   [docs/PATTERNS.md](docs/PATTERNS.md) §2 (`make verify-versions` enforces it).
 - **Security reporting**: [SECURITY.md](SECURITY.md).
+
+## Operator process configuration
+
+The manager reads flags and a small set of env vars at start, logs the
+non-secret values (image refs as set/valid only), and exits on an invalid
+listen address, a relative `--metrics-cert-dir`, an empty health-probe
+address, or an unrecognized `BASELINE_SECURITY_SKIP_DEFAULT_CR` value.
+ClusterBaseline spec (profiles, schedule, scoring, remediations, waivers)
+is the product config; see `operator/config/samples/` and the CRD.
+
+| Knob | Default | Notes |
+|---|---|---|
+| `--metrics-bind-address` | `:8443` | `0` disables the endpoint |
+| `--metrics-secure` | `true` | Forced true unless the bind is loopback or disabled |
+| `--metrics-cert-dir` | `/var/run/metrics-certs` | Absolute path; empty falls back to self-signed |
+| `--health-probe-bind-address` | `:8081` | Required; empty is fatal (Deployment probes `:8081`) |
+| `--leader-elect` | `true` | The Deployment runs 2 replicas |
+| `--zap-devel` | `false` | Console debug logs; not for production |
+| `--zap-encoder` | json (prod) / console (devel) | `json` or `console` |
+| `--zap-log-level` | info (prod) / debug (devel) | `debug`, `info`, `error`, `panic`, or an integer verbosity |
+| `--zap-stacktrace-level` | error (prod) / warn (devel) | `info`, `error`, or `panic` |
+| `RELATED_IMAGE_CONSOLE_PLUGIN` | unset | Plugin image the operator deploys; unset leaves `ImageMissing` |
+| `BASELINE_SECURITY_SKIP_DEFAULT_CR` | unset (create CR) | true/1/yes/on skips the default CR; false/0/no/off is the same as unset; any other value exits |
+| `GOMEMLIMIT` | `440MiB` in the Deployment | Go GC soft cap (not read by operator code) |
+
+`make run` sets `--leader-elect=false --metrics-bind-address=0` and fills
+`RELATED_IMAGE_CONSOLE_PLUGIN` from `PLUGIN_IMG` when the env is unset.
 
 ## Development
 

@@ -189,23 +189,103 @@ func TestValidateMetricsCertDir(t *testing.T) {
 	}
 }
 
-func TestEnvTruthy(t *testing.T) {
+func TestParseEnvBool(t *testing.T) {
+	const key = "BASELINE_SECURITY_SKIP_DEFAULT_CR"
 	for _, v := range []string{"true", "TRUE", " True ", "1", "yes", "YES", "on", "ON", "y", "t", "enable", "enabled"} {
-		t.Setenv("BASELINE_SECURITY_SKIP_DEFAULT_CR", v)
-		if !envTruthy("BASELINE_SECURITY_SKIP_DEFAULT_CR") {
-			t.Fatalf("%q should be truthy", v)
+		t.Setenv(key, v)
+		got, err := parseEnvBool(key)
+		if err != nil || !got {
+			t.Fatalf("%q should be true: got=%v err=%v", v, got, err)
 		}
 	}
-	for _, v := range []string{"", "false", "0", "no", "maybe", " truex", "onx", "disable"} {
-		t.Setenv("BASELINE_SECURITY_SKIP_DEFAULT_CR", v)
-		if envTruthy("BASELINE_SECURITY_SKIP_DEFAULT_CR") {
-			t.Fatalf("%q should be falsy", v)
+	for _, v := range []string{"", "false", "FALSE", " 0 ", "no", "NO", "off", "n", "f", "disable", "disabled"} {
+		t.Setenv(key, v)
+		got, err := parseEnvBool(key)
+		if err != nil || got {
+			t.Fatalf("%q should be false: got=%v err=%v", v, got, err)
 		}
 	}
-	t.Setenv("BASELINE_SECURITY_SKIP_DEFAULT_CR", "")
-	if envTruthy("BASELINE_SECURITY_UNSET_KEY") {
-		t.Fatal("unset key should be falsy")
+	for _, v := range []string{"maybe", " truex", "onx", "skip", "true extra"} {
+		t.Setenv(key, v)
+		got, err := parseEnvBool(key)
+		if err == nil {
+			t.Fatalf("%q should be rejected, got %v", v, got)
+		}
+		if !errors.Is(err, errInvalidEnvBool) {
+			t.Fatalf("%q err = %v, want %v", v, err, errInvalidEnvBool)
+		}
+		if got {
+			t.Fatalf("%q must not return true on error", v)
+		}
 	}
+	t.Setenv(key, "")
+	got, err := parseEnvBool("BASELINE_SECURITY_UNSET_KEY")
+	if err != nil || got {
+		t.Fatalf("unset key should be false: got=%v err=%v", got, err)
+	}
+}
+
+func TestLookupFlagMissing(t *testing.T) {
+	if got := lookupFlag("this-flag-does-not-exist"); got != "" {
+		t.Fatalf("missing flag = %q, want empty", got)
+	}
+}
+
+// A multi-kilobyte junk value must still fail closed and not paste the whole
+// blob into the error (setup logs would balloon).
+func TestParseEnvBoolTruncatesRejectedValue(t *testing.T) {
+	const key = "BASELINE_SECURITY_SKIP_DEFAULT_CR"
+	t.Setenv(key, strings.Repeat("x", envBoolValueMaxLog+32))
+	_, err := parseEnvBool(key)
+	if err == nil {
+		t.Fatal("oversize junk must be rejected")
+	}
+	if !strings.Contains(err.Error(), "...") {
+		t.Fatalf("rejected value should be truncated: %v", err)
+	}
+	if strings.Count(err.Error(), "x") > envBoolValueMaxLog {
+		t.Fatalf("error still contains the full value: len=%d", len(err.Error()))
+	}
+}
+
+// FuzzParseEnvBool: BASELINE_SECURITY_SKIP_DEFAULT_CR is untrusted env text.
+// Known spellings must parse; everything else must error rather than silently
+// create (or skip) the default ClusterBaseline.
+func FuzzParseEnvBool(f *testing.F) {
+	for _, seed := range []string{
+		"", "true", "false", "1", "0", "yes", "no", "on", "off",
+		"maybe", "skip", "TRUE", " True ", "onx", "true extra", "enable",
+		"disable", strings.Repeat("x", 80),
+	} {
+		f.Add(seed)
+	}
+	f.Fuzz(func(t *testing.T, v string) {
+		if len(v) > 256 {
+			v = v[:256]
+		}
+		t.Setenv("BASELINE_SECURITY_SKIP_DEFAULT_CR", v)
+		got, err := parseEnvBool("BASELINE_SECURITY_SKIP_DEFAULT_CR")
+		switch strings.ToLower(strings.TrimSpace(v)) {
+		case "1", "true", "yes", "on", "y", "t", "enable", "enabled":
+			if err != nil || !got {
+				t.Fatalf("truthy %q: got=%v err=%v", v, got, err)
+			}
+		case "", "0", "false", "no", "off", "n", "f", "disable", "disabled":
+			if err != nil || got {
+				t.Fatalf("falsy %q: got=%v err=%v", v, got, err)
+			}
+		default:
+			if err == nil {
+				t.Fatalf("unknown %q must error", v)
+			}
+			if !errors.Is(err, errInvalidEnvBool) {
+				t.Fatalf("unknown %q err = %v, want %v", v, err, errInvalidEnvBool)
+			}
+			if got {
+				t.Fatalf("unknown %q must not return true", v)
+			}
+		}
+	})
 }
 
 func TestMetricsTLSOptsMinVersion(t *testing.T) {

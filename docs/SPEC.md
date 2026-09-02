@@ -402,6 +402,8 @@ ComplianceAsCode/compliance-operator master, and npm dist-tags).
 - **Install UX**: OperatorHub → install → operator default-creates
   `ClusterBaseline/cluster` (CIS) when none exists. Opt out with
   `BASELINE_SECURITY_SKIP_DEFAULT_CR=true` on the CSV deployment.
+  Unrecognized values fail process start (they must not silently create
+  the CR). Known false spellings (false/0/no/off) match unset.
 
 ## 9. Repo layout
 
@@ -485,7 +487,8 @@ Resolved during implementation:
 
 - Default-create: implemented. The operator creates `ClusterBaseline/cluster`
   (CIS) on start when none exists; opt out with
-  `BASELINE_SECURITY_SKIP_DEFAULT_CR=true`.
+  `BASELINE_SECURITY_SKIP_DEFAULT_CR=true`. An unrecognized value fails
+  process start instead of silently creating the CR.
 - Nav placement: "Compliance" at the top of the Administration section
   (`insertBefore` cluster-settings).
 - MANUAL results: excluded from the score, surfaced as a separate count per

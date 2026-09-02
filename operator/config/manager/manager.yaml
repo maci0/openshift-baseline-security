@@ -81,9 +81,11 @@ spec:
             # relatedImages; make deploy rewrites this from PLUGIN_IMG.
             - name: RELATED_IMAGE_CONSOLE_PLUGIN
               value: quay.io/openshift-baseline-security/baseline-security-console-plugin:latest
-            # Optional: set to "true" (also accepts 1/yes) to skip creating
-            # ClusterBaseline/cluster when none exist. Must match envSkipDefaultCR
-            # in cmd/main.go (BASELINE_SECURITY_SKIP_DEFAULT_CR).
+            # Optional: set to "true" (also 1/yes/on) to skip creating
+            # ClusterBaseline/cluster when none exist. Known false
+            # (false/0/no/off) is the same as unset. Any other value
+            # fails process start. Must match envSkipDefaultCR in
+            # cmd/main.go (BASELINE_SECURITY_SKIP_DEFAULT_CR).
             # - name: BASELINE_SECURITY_SKIP_DEFAULT_CR
             #   value: "true"
           ports:

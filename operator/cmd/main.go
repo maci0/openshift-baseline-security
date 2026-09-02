@@ -113,7 +113,11 @@ func main() {
 	relatedImageSet := relatedImage != ""
 	// Log only validity so registry paths never hit stdout.
 	relatedImageValid := relatedImageSet && controller.ValidRelatedImage(relatedImage)
-	skipDefaultCR := envTruthy(envSkipDefaultCR)
+	skipDefaultCR, err := parseEnvBool(envSkipDefaultCR)
+	if err != nil {
+		setupLog.Error(err, "invalid "+envSkipDefaultCR+" (unset creates ClusterBaseline/cluster)")
+		os.Exit(1)
+	}
 	setupLog.Info("configuration",
 		"metricsBindAddress", metricsAddr,
 		"metricsSecure", secureMetrics,
@@ -121,6 +125,9 @@ func main() {
 		"healthProbeBindAddress", probeAddr,
 		"leaderElect", enableLeaderElection,
 		"zapDevelopment", opts.Development,
+		"zapEncoder", lookupFlag("zap-encoder"),
+		"zapLogLevel", lookupFlag("zap-log-level"),
+		"zapStacktraceLevel", lookupFlag("zap-stacktrace-level"),
 		"relatedImageConsolePluginSet", relatedImageSet,
 		"relatedImageConsolePluginValid", relatedImageValid,
 		"skipDefaultClusterBaseline", skipDefaultCR,
@@ -286,15 +293,50 @@ func isLoopbackMetricsAddr(addr string) bool {
 	return host == "127.0.0.1" || host == "localhost" || host == "::1"
 }
 
-// envTruthy is true for common affirmative env values (true/1/yes), after
-// trim and case-fold. Empty, "false", "0", and junk are false.
-func envTruthy(key string) bool {
-	// Accept the common boolean spellings so a skip opt-out written as `on`/`y`/`t`
-	// is honored rather than silently creating the default CR anyway.
-	switch strings.ToLower(strings.TrimSpace(os.Getenv(key))) {
-	case "1", "true", "yes", "on", "y", "t", "enable", "enabled":
-		return true
-	default:
-		return false
+// errInvalidEnvBool is returned by parseEnvBool for a set, non-empty value that
+// is not a known true/false spelling. Callers must fail start: treating junk as
+// false would silently create ClusterBaseline/cluster when an admin thought
+// they had opted out.
+var errInvalidEnvBool = errors.New("invalid boolean environment variable")
+
+// envBoolValueMaxLog caps the rejected value in the error so a multi-kilobyte
+// mis-set env cannot bloat setup logs.
+const envBoolValueMaxLog = 64
+
+// parseEnvBool reads key as a boolean. Unset, empty, and whitespace-only are
+// false (the skip-default-CR opt-out is off). Known true/false spellings are
+// accepted after trim and case-fold; anything else is an error so a typo
+// cannot silently take the default.
+func parseEnvBool(key string) (bool, error) {
+	raw, ok := os.LookupEnv(key)
+	if !ok {
+		return false, nil
 	}
+	v := strings.ToLower(strings.TrimSpace(raw))
+	if v == "" {
+		return false, nil
+	}
+	switch v {
+	case "1", "true", "yes", "on", "y", "t", "enable", "enabled":
+		return true, nil
+	case "0", "false", "no", "off", "n", "f", "disable", "disabled":
+		return false, nil
+	default:
+		shown := raw
+		if len(shown) > envBoolValueMaxLog {
+			shown = shown[:envBoolValueMaxLog] + "..."
+		}
+		return false, fmt.Errorf("%w: %s=%q (want true/false, 1/0, yes/no, on/off)", errInvalidEnvBool, key, shown)
+	}
+}
+
+// lookupFlag returns the string form of a parsed flag, or empty if missing.
+// Used to log zap encoder/level overrides (empty means the zap default for
+// --zap-devel true/false).
+func lookupFlag(name string) string {
+	f := flag.Lookup(name)
+	if f == nil {
+		return ""
+	}
+	return f.Value.String()
 }

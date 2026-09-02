@@ -54,11 +54,18 @@ depend on those tags.
   (the Profiles tab watches both; a view-only user previously got a catalog
   watch error). `baseline-security-admin` can create and update
   TailoredProfiles, matching the console authoring flow.
+- Operator: an unrecognized `BASELINE_SECURITY_SKIP_DEFAULT_CR` value now
+  fails at process start instead of silently creating
+  `ClusterBaseline/cluster`. Known true/false spellings (true/false, 1/0,
+  yes/no, on/off, and the same aliases as before) are unchanged; unset still
+  creates the default CR.
 
 ### Docs
 
 - Threat model: add `docs/THREAT_MODEL.md` (entry points, trust boundaries,
   ranked threats, mitigations mapped to code) and link it from SECURITY.md.
+- Document operator process flags and env vars in the README, and comment
+  the optional ClusterBaseline spec fields on the sample CR.
 
 ## [0.5.15] - 2026-08-26
 

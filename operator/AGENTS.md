@@ -8,7 +8,7 @@ over the cluster-scoped singleton `ClusterBaseline/cluster`.
 ```sh
 make test          # fmt-check, vet, mod-verify, go test ./...
 make lint          # golangci-lint, pinned version, 0 issues required
-make fuzz          # 52 targets, seed corpus only; run before a release cut
+make fuzz          # 53 targets, seed corpus only; run before a release cut
 make govulncheck
 make bundle        # every verify-* target, then operator-sdk bundle validate
 ```
