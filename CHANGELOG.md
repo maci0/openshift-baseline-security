@@ -42,6 +42,22 @@ depend on those tags.
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-09-02
+
+### Fixed
+
+- Operator, console plugin, bundle, and catalog images: `/licenses` was
+  created with mode 0644 and so could not be traversed by the image's
+  non-root user, making the shipped `/licenses/LICENSE` unreadable. A
+  single `COPY --chmod=0644` also stamps the parent directory BuildKit
+  creates; the directory is now copied at 0755 and the file at 0644.
+
+### Security
+
+- Console plugin build pulls browserslist 4.28.8, clearing two high-severity
+  advisories (GHSA-c83g-rgw3-j3cx unbounded cache growth, GHSA-73wf-gq98-2v4g
+  crash / prototype write via custom stats) that reached the tree through
+  webpack. Build-time only; nothing shipped in the plugin bundle changes.
 ## [0.6.0] - 2026-09-02
 
 ### Changed
@@ -785,7 +801,8 @@ Initial packaged release.
   Remediations, Profiles).
 - OLM bundle + file-based catalog; string-enum spec; OpenShift-style conditions.
 
-[Unreleased]: https://github.com/maci0/openshift-baseline-security/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/maci0/openshift-baseline-security/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/maci0/openshift-baseline-security/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/maci0/openshift-baseline-security/compare/v0.5.15...v0.6.0
 [0.5.15]: https://github.com/maci0/openshift-baseline-security/compare/v0.5.14...v0.5.15
 [0.5.14]: https://github.com/maci0/openshift-baseline-security/compare/v0.5.13...v0.5.14

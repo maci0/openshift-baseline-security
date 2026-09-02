@@ -27,8 +27,12 @@ FROM registry.ci.openshift.org/ocp/4.22:base-rhel9
 # BuildKit special-case ARG: must be declared in this stage too or layer
 # timestamps are not clamped (release Dockerfile already does this).
 ARG SOURCE_DATE_EPOCH=0
-ARG VERSION=0.6.0
+ARG VERSION=0.6.1
 COPY --from=build --chown=65532:65532 --chmod=0755 /tmp/manager /usr/bin/manager
+# Two COPYs on purpose: --chmod also stamps the parent dir BuildKit creates,
+# so a single 0644 copy leaves /licenses non-traversable for the non-root USER.
+# Both modes are explicit so a host umask cannot move the layer digest.
+COPY --chmod=0755 LICENSE /licenses/
 COPY --chmod=0644 LICENSE /licenses/LICENSE
 LABEL org.opencontainers.image.title="Baseline Security Operator"
 LABEL org.opencontainers.image.description="Cluster-scoped OpenShift compliance baseline operator."

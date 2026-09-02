@@ -33,12 +33,16 @@ RUN --network=none yarn build
 # ubi9/nginx-120
 FROM registry.access.redhat.com/ubi9/nginx-120@sha256:75970114ae16df650158245bfc81968e88704d23d98d986684152f3837d4bddf
 ARG SOURCE_DATE_EPOCH=0
-ARG VERSION=0.6.0
+ARG VERSION=0.6.1
 # Runtime UID owns static assets and nginx.conf (read-only rootfs still applies
 # in the Deployment; ownership matches USER so the process can open its files).
 # --chmod: host umask must not change the shipped layer digest (dirs stay traversable).
 COPY --from=build --chown=1001:1001 --chmod=0755 /usr/src/app/dist /opt/app-root/src
 COPY --chown=1001:1001 --chmod=0644 nginx.conf /etc/nginx/nginx.conf
+# Two COPYs on purpose: --chmod also stamps the parent dir BuildKit creates,
+# so a single 0644 copy leaves /licenses non-traversable for the non-root USER.
+# Both modes are explicit so a host umask cannot move the layer digest.
+COPY --chmod=0755 LICENSE /licenses/
 COPY --chmod=0644 LICENSE /licenses/LICENSE
 LABEL org.opencontainers.image.title="Baseline Security Console Plugin"
 LABEL org.opencontainers.image.description="OpenShift console plugin for baseline compliance results."

@@ -1,7 +1,7 @@
 FROM scratch
 # BuildKit special-case ARG: clamps image/layer timestamps when passed by the client.
 ARG SOURCE_DATE_EPOCH=0
-ARG VERSION=0.6.0
+ARG VERSION=0.6.1
 
 LABEL operators.operatorframework.io.bundle.mediatype.v1=registry+v1
 LABEL operators.operatorframework.io.bundle.manifests.v1=manifests/
@@ -19,4 +19,8 @@ LABEL org.opencontainers.image.version="${VERSION}"
 # --chmod: host umask must not change the shipped layer digest (dirs stay traversable).
 COPY --chmod=0755 bundle/manifests /manifests/
 COPY --chmod=0755 bundle/metadata /metadata/
+# Two COPYs on purpose: --chmod also stamps the parent dir BuildKit creates,
+# so a single 0644 copy leaves /licenses non-traversable for the non-root USER.
+# Both modes are explicit so a host umask cannot move the layer digest.
+COPY --chmod=0755 LICENSE /licenses/
 COPY --chmod=0644 LICENSE /licenses/LICENSE

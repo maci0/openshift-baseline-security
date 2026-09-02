@@ -1,6 +1,6 @@
 # Roadmap
 
-Status of **openshift-baseline-security**. Current release **0.6.0**
+Status of **openshift-baseline-security**. Current release **0.6.1**
 (cluster-scoped `ClusterBaseline` API `v1alpha1`, string-enum spec, OLM
 channel `alpha`). See [CHANGELOG.md](CHANGELOG.md) for consumer-facing notes
 and upgrade impact. Verified end to end on a single-node OpenShift 4.22

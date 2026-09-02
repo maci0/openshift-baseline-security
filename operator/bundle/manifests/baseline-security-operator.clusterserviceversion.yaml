@@ -1,7 +1,7 @@
 apiVersion: operators.coreos.com/v1alpha1
 kind: ClusterServiceVersion
 metadata:
-  name: baseline-security-operator.v0.6.0
+  name: baseline-security-operator.v0.6.1
   namespace: placeholder
   annotations:
     alm-examples: |-
@@ -21,7 +21,7 @@ metadata:
     operatorframework.io/suggested-namespace: openshift-baseline-security
     operatorframework.io/suggested-namespace-template: |-
       {"apiVersion":"v1","kind":"Namespace","metadata":{"name":"openshift-baseline-security","labels":{"openshift.io/cluster-monitoring":"true"}}}
-    containerImage: quay.io/openshift-baseline-security/baseline-security-operator:0.6.0
+    containerImage: quay.io/openshift-baseline-security/baseline-security-operator:0.6.1
     repository: https://github.com/maci0/openshift-baseline-security
     support: Community (best-effort via GitHub issues at https://github.com/maci0/openshift-baseline-security/issues)
     createdAt: "2026-07-14T00:00:00Z"
@@ -58,7 +58,7 @@ spec:
     stay). Supported host is OpenShift 4.22 only (minKubeVersion 1.35.0).
     Requires a default StorageClass for scan result storage.
   maturity: alpha
-  version: 0.6.0
+  version: 0.6.1
   minKubeVersion: 1.35.0
   keywords: [security, compliance, cis, benchmark, openscap]
   maintainers:
@@ -342,7 +342,7 @@ spec:
                           topologyKey: kubernetes.io/hostname
                 containers:
                   - name: manager
-                    image: quay.io/openshift-baseline-security/baseline-security-operator:0.6.0
+                    image: quay.io/openshift-baseline-security/baseline-security-operator:0.6.1
                     args:
                       - --leader-elect
                       - --metrics-bind-address=:8443
@@ -356,7 +356,7 @@ spec:
                       - name: GOMEMLIMIT
                         value: 440MiB
                       - name: RELATED_IMAGE_CONSOLE_PLUGIN
-                        value: quay.io/openshift-baseline-security/baseline-security-console-plugin:0.6.0
+                        value: quay.io/openshift-baseline-security/baseline-security-console-plugin:0.6.1
                       # Optional: set to "true" (also 1/yes/on) to skip creating
                       # ClusterBaseline/cluster when none exist. Known false
                       # (false/0/no/off) is the same as unset. Any other value
@@ -425,6 +425,6 @@ spec:
                       sizeLimit: 64Mi
   relatedImages:
     - name: manager
-      image: quay.io/openshift-baseline-security/baseline-security-operator:0.6.0
+      image: quay.io/openshift-baseline-security/baseline-security-operator:0.6.1
     - name: console-plugin
-      image: quay.io/openshift-baseline-security/baseline-security-console-plugin:0.6.0
+      image: quay.io/openshift-baseline-security/baseline-security-console-plugin:0.6.1
