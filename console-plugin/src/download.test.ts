@@ -114,6 +114,8 @@ describe('downloadBlob', () => {
       // Zero-width / BOM must not hide path segments or extension spoofing.
       ['a\u200Bb.csv', 'a_b.csv'],
       ['x\uFEFFy.csv', 'x_y.csv'],
+      // Word joiner (Cf) must not hide an extension swap.
+      ['ok\u2060.exe.csv', 'ok_.exe.csv'],
     ];
     for (const [input, want] of cases) {
       const dom = installDom();
@@ -181,7 +183,7 @@ describe('downloadBlob', () => {
         expect(d).not.toContain('\\');
         expect(d).not.toContain('..');
         expect(d).not.toMatch(/\p{Cc}/u);
-        expect(d).not.toMatch(/[\u200B-\u200D\u200E\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/);
+        expect(d).not.toMatch(/\p{Cf}/u);
         expect(dom.anchor.rel).toBe('noopener noreferrer');
         expect(dom.revokeObjectURL).toHaveBeenCalledWith('blob:mock-url');
       } finally {

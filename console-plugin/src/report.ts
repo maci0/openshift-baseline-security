@@ -11,6 +11,7 @@ import { checkTitle, severityDisplayTitle } from './results';
 import { aggregateCounts, checkSeverity } from './scoring';
 import { effectiveStatus } from './status';
 import { formatCount, formatLocalDate, formatLocalDateTime, safeLocale } from './dates';
+import { stripFormatChars } from './parse';
 import { waiverExpired } from './waivers';
 
 // HTML-escape untrusted text (waiver reasons, rule titles) for the report.
@@ -29,8 +30,9 @@ const reportInterpRe = /\{\{(\w+)\}\}/g;
 // tampered numeric/object/null value must not throw and abort report export.
 const esc = (s: string): string =>
   // SAFETY: htmlEscapeRe matches only the five characters keyed in htmlEscapes,
-  // so the lookup below cannot miss.
-  String(s ?? '').replace(htmlEscapeRe, (c) => htmlEscapes[c as keyof typeof htmlEscapes]);
+  // so the lookup below cannot miss. Format characters (BIDI, zero-width) are
+  // stripped first so untrusted CR text cannot reverse or hide neighboring cells.
+  stripFormatChars(String(s ?? '')).replace(htmlEscapeRe, (c) => htmlEscapes[c as keyof typeof htmlEscapes]);
 
 // Interpolation variables for report chrome. Keys are open-ended ({{count}},
 // {{formattedCount}}, {{name}}, ...) but values must render as text, so the

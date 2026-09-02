@@ -512,7 +512,8 @@ an accepted risk neither inflates nor tanks the score.
       results href, history ring, profile names, `withoutPlugin`,
       `matchesAnyProfile` (role-suffix oracle).
 - [x] CSV formula-injection neutralized, including whitespace-prefixed sigils
-      (jest `resultsCsv`).
+      and Unicode format-character prefixes (ZWSP, BIDI, BOM) (jest
+      `resultsCsv`).
 - [x] **Unpaired surrogates in filter URLs** do not throw (jest `resultsHref`
       fuzz).
 - [x] **History never rewinds** when the newest suite is dropped
@@ -538,8 +539,10 @@ an accepted risk neither inflates nor tanks the score.
       responsive; text is not interpreted as HTML; CSV stays browser-safe.
 - [ ] **Unicode / RTL / emoji in rule titles**: filter, CSV, and modal do not
       corrupt surrounding layout.
-- [ ] **CSV formula variants**: fullwidth `＝`, tab-only cells, multiline
-      cells with formula on line 2 (document residual risk if not neutralized).
+- [x] **CSV formula variants**: fullwidth `＝`, tab-only cells, ZWSP/BIDI/BOM
+      hiding a sigil (jest `resultsCsv`). Residual: a formula on line 2 of a
+      quoted multiline cell is not prefixed (spreadsheets treat the cell as
+      text once quoted).
 
 ## L. Deployment & upgrade
 

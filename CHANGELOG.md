@@ -89,6 +89,17 @@ depend on those tags.
   not-applicable rows (WAIVED had no status style of its own). They now use
   a teal label, matching the Overview composition donut.
 
+### Security
+
+- Console: CSV export strips Unicode format characters (zero-width, BIDI, BOM)
+  before formula-prefix hardening, so a hidden `=` in a check title cannot
+  reach a spreadsheet as a live formula.
+- Console: waiver `requestedBy` / `approvedBy` / `reason` drop control and
+  BIDI marks so audit names cannot spoof another identity in the UI or
+  printable report.
+- Console plugin nginx no longer includes the UBI extra conf directories,
+  which can start a plaintext listener beside TLS port 9443.
+
 ### Docs
 
 - Threat model: add `docs/THREAT_MODEL.md` (entry points, trust boundaries,

@@ -4,7 +4,7 @@ import { checkSeverity } from './scoring';
 import { resultFilterStatus } from './status';
 import { activeWaivedNames } from './waivers';
 import { checkResultHref } from './links';
-import { isString } from './parse';
+import { isString, stripFormatChars } from './parse';
 
 // Localized severity label for Results UI and the printable report. Keep a single
 // switch so chip titles and report cells cannot drift. Unknown / empty use the
@@ -61,12 +61,14 @@ export const checkBody = (r: ComplianceCheckResult): string => {
 };
 
 // RFC 4180 CSV cell with spreadsheet-formula hardening. Values come from CR
-// data, i.e. untrusted input. Drop NULs (can truncate cells in some tools).
-// Prefix formula-looking cells with an apostrophe before quoting so spreadsheet
-// apps import them as literal text. Also catch leading whitespace before a
-// formula sigil (Excel often trims then evaluates).
-// Fullwidth / Unicode sigils (＝＋－＠, U+2212 minus) and leading '|' (legacy
-// Excel DDE) are treated the same as ASCII formula starters (CWE-1236).
+// data, i.e. untrusted input. Drop NULs (can truncate cells in some tools)
+// and Unicode format characters (zero-width, BIDI, BOM) so a hidden `=`
+// cannot bypass the prefix check. Prefix formula-looking cells with an
+// apostrophe before quoting so spreadsheet apps import them as literal text.
+// Also catch leading whitespace before a formula sigil (Excel often trims
+// then evaluates). Fullwidth / Unicode sigils (＝＋－＠, U+2212 minus) and
+// leading '|' (legacy Excel DDE) are treated the same as ASCII formula
+// starters (CWE-1236).
 // Module-level regexes so multi-thousand-row exports do not recompile patterns.
 const csvNulRe = /\0/g;
 const csvFormulaRe = /^\s*[=+\-@|\t\r\n\uFF1D\uFF0B\uFF0D\uFF20\u2212]/;
@@ -75,7 +77,8 @@ const csvDoubleQuoteRe = /"/g;
 const csvCell = (v: string): string => {
   // Coerce first: untrusted CR fields and resultFilterStatus may yield
   // non-string values (missing status, non-string name). Export must never throw.
-  const cleaned = String(v ?? '').replace(csvNulRe, '');
+  // Format-strip after NUL so a ZWSP/BOM cannot hide a leading formula sigil.
+  const cleaned = stripFormatChars(String(v ?? '').replace(csvNulRe, ''));
   const safe = csvFormulaRe.test(cleaned) ? `'${cleaned}` : cleaned;
   return csvQuoteRe.test(safe) ? `"${safe.replace(csvDoubleQuoteRe, '""')}"` : safe;
 };

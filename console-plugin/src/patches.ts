@@ -2,7 +2,7 @@
 import { isValidCron } from './cron';
 import { TAILORED_PROFILE_MAX_ITEMS, WAIVER_MAX_ITEMS, Waiver } from './models';
 import { isValidK8sName, isValidTailoredProfileName } from './names';
-import { isString } from './parse';
+import { isString, stripControlAndFormat } from './parse';
 
 // One RFC 6902 operation emitted by the patch builders in this module. value
 // is the JSON payload written at path; tests assert exact shapes.
@@ -162,9 +162,11 @@ export const addWaiverPatch = (waivers: Waiver[] | undefined | null, entry: Waiv
   const name = entry.name;
   // Trim optional text fields once: whitespace-only is empty; MaxLength is on
   // the stored value so padding cannot smuggle past the bound after a later trim.
-  const reason = entry.reason?.trim() ?? '';
-  const requestedBy = entry.requestedBy?.trim() ?? '';
-  const approvedBy = entry.approvedBy?.trim() ?? '';
+  // Strip controls and BIDI/zero-width marks so audit names cannot spoof another
+  // identity in the UI, CSV, or printable report.
+  const reason = stripControlAndFormat(entry.reason?.trim() ?? '');
+  const requestedBy = stripControlAndFormat(entry.requestedBy?.trim() ?? '');
+  const approvedBy = stripControlAndFormat(entry.approvedBy?.trim() ?? '');
   // Match ClusterBaseline CRD bounds so over-long / malformed fields fail closed
   // here (empty ops) instead of only at apiserver admission.
   if (

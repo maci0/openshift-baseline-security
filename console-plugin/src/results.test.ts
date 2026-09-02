@@ -302,6 +302,9 @@ describe('resultsCsv', () => {
       r('a\0b', 'PASS', 'low'), // NUL stripped (can truncate cells)
       r('\uFF1Dcmd', 'PASS', 'low'), // fullwidth equals
       r('|DDE', 'PASS', 'low'), // legacy Excel DDE
+      r('\u200B=cmd', 'PASS', 'low'), // zero-width space hiding =
+      r('\u202E=cmd', 'PASS', 'low'), // BIDI override hiding =
+      r('\uFEFF@import', 'PASS', 'low'), // BOM hiding @
     ]);
     const lines = csvLines(csv);
     // status "-1" is an unknown CO status: effectiveStatus folds it to ERROR (the
@@ -317,6 +320,13 @@ describe('resultsCsv', () => {
     expect(csv).toContain(`'\uFF1Dcmd`);
     expect(csv).toContain(`'|DDE`);
     expect(csv).not.toContain('\0');
+    // Format characters must not survive, and the hidden sigil must still be
+    // apostrophe-prefixed (CWE-1236 via ZWSP/BIDI/BOM).
+    expect(csv).not.toContain('\u200B');
+    expect(csv).not.toContain('\u202E');
+    expect(csv).not.toContain('\uFEFF=');
+    expect(csv).toContain(`'=cmd`);
+    expect(csv).toContain(`'@import`);
   });
   it('handles empty input (header only)', () => {
     expect(resultsCsv([])).toBe('\uFEFFname,title,status,severity,waived');
@@ -374,7 +384,19 @@ describe('resultsCsv', () => {
         String.fromCharCode(Math.floor(fuzzRand() * 128)),
       ).join('');
     // Formula-looking prefixes (CWE-1236) that must be neutralized with a leading '.
-    const formulaSeeds = ['=cmd', '+SUM(1)', '-1', '@import', '|DDE', '\tTab', '\rCR', ' =eq', '\uFF1Dfull'];
+    const formulaSeeds = [
+      '=cmd',
+      '+SUM(1)',
+      '-1',
+      '@import',
+      '|DDE',
+      '\tTab',
+      '\rCR',
+      ' =eq',
+      '\uFF1Dfull',
+      '\u200B=cmd',
+      '\u202E+SUM(1)',
+    ];
     const formulaRe = /^\s*[=+\-@|\t\r\n\uFF1D\uFF0B\uFF0D\uFF20\u2212]/;
     for (let i = 0; i < 2000; i++) {
       const name = i < formulaSeeds.length ? formulaSeeds[i] : rand();
@@ -432,8 +454,12 @@ describe('resultsCsv', () => {
       };
       // Formula-looking name / rendered title must be apostrophe-prefixed in the row.
       const renderedTitle = checkTitle(r(name, 'FAIL', 'high', title));
-      const nameClean = String(name ?? '').replace(/\0/g, '');
-      const titleClean = String(renderedTitle ?? '').replace(/\0/g, '');
+      const nameClean = String(name ?? '')
+        .replace(/\0/g, '')
+        .replace(/\p{Cf}/gu, '');
+      const titleClean = String(renderedTitle ?? '')
+        .replace(/\0/g, '')
+        .replace(/\p{Cf}/gu, '');
       let leaked: string | undefined;
       if (
         formulaRe.test(nameClean) &&

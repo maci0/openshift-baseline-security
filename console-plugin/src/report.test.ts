@@ -272,6 +272,31 @@ describe('buildReportHtml', () => {
     expect(html).toContain('&lt;script&gt;');
     expect(html).not.toContain('<script>x</script>');
   });
+  it('strips BIDI and zero-width marks from untrusted report text', () => {
+    const bidi = buildReportHtml(
+      {
+        metadata: { name: 'cluster' },
+        spec: {
+          profiles: ['cis'],
+          waivers: [
+            {
+              name: 'chk',
+              reason: 'risk\u202E',
+              requestedBy: '\u200Balice',
+              expiresAt: '2099-01-01T00:00:00Z',
+            },
+          ],
+        },
+        status: { score: 1, profiles: [] },
+      },
+      [],
+      now,
+    );
+    expect(bidi).toContain('alice');
+    expect(bidi).toContain('risk');
+    expect(bidi).not.toContain('\u202E');
+    expect(bidi).not.toContain('\u200B');
+  });
   it('sets a no-script Content-Security-Policy on the report document', () => {
     expect(html).toContain('Content-Security-Policy');
     expect(html).toContain("default-src 'none'");

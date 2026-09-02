@@ -57,6 +57,7 @@ import {
 import { Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table';
 import { downloadBlob } from '../download';
 import { errorMessage } from '../errors';
+import { stripControlAndFormat } from '../parse';
 import { checkResultHref, machineConfigPoolHref } from '../links';
 import {
   addWaiverPatch,
@@ -964,6 +965,9 @@ const ResultsTab: React.FC<{
                 (() => {
                   const w = findWaiver(selectedLive.metadata.name, waivers);
                   const expired = !!w && waiverExpired(w);
+                  const reasonText = stripControlAndFormat(w?.reason ?? '');
+                  const requestedByText = stripControlAndFormat(w?.requestedBy ?? '');
+                  const approvedByText = stripControlAndFormat(w?.approvedBy ?? '');
                   return (
                     <>
                       <Title
@@ -986,22 +990,22 @@ const ResultsTab: React.FC<{
                                   )}
                           </Content>
                           <DescriptionList isCompact isHorizontal>
-                            {w.reason && (
+                            {reasonText && (
                               <DescriptionListGroup>
                                 <DescriptionListTerm>{t('Reason')}</DescriptionListTerm>
-                                <DescriptionListDescription>{w.reason}</DescriptionListDescription>
+                                <DescriptionListDescription>{reasonText}</DescriptionListDescription>
                               </DescriptionListGroup>
                             )}
-                            {w.requestedBy && (
+                            {requestedByText && (
                               <DescriptionListGroup>
                                 <DescriptionListTerm>{t('Requested by')}</DescriptionListTerm>
-                                <DescriptionListDescription>{w.requestedBy}</DescriptionListDescription>
+                                <DescriptionListDescription>{requestedByText}</DescriptionListDescription>
                               </DescriptionListGroup>
                             )}
-                            {w.approvedBy && (
+                            {approvedByText && (
                               <DescriptionListGroup>
                                 <DescriptionListTerm>{t('Approved by')}</DescriptionListTerm>
-                                <DescriptionListDescription>{w.approvedBy}</DescriptionListDescription>
+                                <DescriptionListDescription>{approvedByText}</DescriptionListDescription>
                               </DescriptionListGroup>
                             )}
                             {w.expiresAt && (

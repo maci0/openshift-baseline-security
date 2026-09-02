@@ -444,6 +444,21 @@ describe('waivers', () => {
         value: [{ name: 'chk3', reason: 'padded' }],
       },
     ]);
+    // BIDI / zero-width marks in audit fields must not be stored (spoofing).
+    expect(
+      addWaiverPatch(undefined, {
+        name: 'chk4',
+        reason: 'risk\u202E',
+        requestedBy: '\u200Balice',
+        approvedBy: 'bob\uFEFF',
+      }),
+    ).toEqual([
+      {
+        op: 'add',
+        path: '/spec/waivers',
+        value: [{ name: 'chk4', reason: 'risk', requestedBy: 'alice', approvedBy: 'bob' }],
+      },
+    ]);
   });
   it('addWaiverPatch replaces an existing entry instead of duplicating', () => {
     expect(addWaiverPatch([{ name: 'chk', reason: 'old' }], { name: 'chk', reason: 'new' })).toEqual(
