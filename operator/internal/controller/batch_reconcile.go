@@ -406,7 +406,7 @@ func (r *ClusterBaselineReconciler) applyOwnedRemediation(
 			// corruption as done (not getErr).
 			if isPermanentBatchTargetReject(err) {
 				log.FromContext(ctx).Info("batch apply skipped: permanent target reject",
-					"remediation", name, "baseline", cb.Name, "error", err.Error())
+					"remediation", name, "name", cb.Name, "error", err.Error())
 				return nil
 			}
 			return err
@@ -415,14 +415,14 @@ func (r *ClusterBaselineReconciler) applyOwnedRemediation(
 		// NotFound as done). Log so a missing apply is visible in operator logs.
 		if rem == nil {
 			log.FromContext(ctx).Info("batch apply skipped: remediation not found",
-				"remediation", name, "baseline", cb.Name)
+				"remediation", name, "name", cb.Name)
 			return nil
 		}
 		// apply shape already validated in getBatchRemediation; re-read for patch.
 		apply, _, err := unstructured.NestedBool(rem.Object, "spec", "apply")
 		if err != nil {
 			log.FromContext(ctx).Info("batch apply skipped: unreadable spec.apply",
-				"remediation", name, "baseline", cb.Name, "error", err.Error())
+				"remediation", name, "name", cb.Name, "error", err.Error())
 			return nil
 		}
 		if apply {
@@ -472,13 +472,13 @@ func (r *ClusterBaselineReconciler) resumeBatchPoolsOnDelete(ctx context.Context
 		// rejects these outright; here we skip and keep resuming what we can.
 		if len(names) > batchMaxRemediations {
 			log.FromContext(ctx).Info("batch-apply annotation exceeds max during pool recovery; capping",
-				"count", len(names), "max", batchMaxRemediations, "baseline", cb.Name)
+				"count", len(names), "max", batchMaxRemediations, "name", cb.Name)
 			names = names[:batchMaxRemediations]
 		}
 		for _, name := range names {
 			if len(utilvalidation.IsDNS1123Subdomain(name)) > 0 {
 				log.FromContext(ctx).Info("skipping invalid remediation name while recovering batch pools",
-					"remediation", name, "baseline", cb.Name)
+					"remediation", name, "name", cb.Name)
 				continue
 			}
 			rem := u(remediationGVK)
@@ -487,7 +487,7 @@ func (r *ClusterBaselineReconciler) resumeBatchPoolsOnDelete(ctx context.Context
 					// Info: pool rediscovery skipped this name; if batch-pools
 					// was also empty, on-call needs to know why no MCP resume ran.
 					log.FromContext(ctx).Info("remediation missing while recovering batch pools",
-						"remediation", name, "baseline", cb.Name, "notFound", apierrors.IsNotFound(err))
+						"remediation", name, "name", cb.Name, "notFound", apierrors.IsNotFound(err))
 					continue
 				}
 				return fmt.Errorf("getting remediation %q while recovering batch pools: %w", name, err)
@@ -496,7 +496,7 @@ func (r *ClusterBaselineReconciler) resumeBatchPoolsOnDelete(ctx context.Context
 			// MachineConfigPool through the operator's service account.
 			if !remediationOwnedByBaseline(suites, rem) {
 				log.FromContext(ctx).Info("skipping foreign remediation while recovering batch pools",
-					"remediation", name, "baseline", cb.Name)
+					"remediation", name, "name", cb.Name)
 				continue
 			}
 			if p := poolFromRemediation(rem); p != "" {

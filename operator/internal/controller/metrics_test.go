@@ -158,6 +158,57 @@ func TestPublishMetrics(t *testing.T) {
 	}
 }
 
+// Detail conditions (plugin/CO/scan/storage) must publish alongside rollups so
+// ImageMissing / CRDsMissing are visible in Prometheus without scraping the CR.
+func TestPublishMetricsDetailConditions(t *testing.T) {
+	resetMetrics(t)
+	cb := &baselinev1alpha1.ClusterBaseline{}
+	setCond(cb, "ComplianceOperatorReady", metav1.ConditionTrue, "CSVSucceeded", "")
+	setCond(cb, "ScanConfigured", metav1.ConditionTrue, "BindingsCreated", "")
+	setCond(cb, "ScanStorageReady", metav1.ConditionTrue, "AsExpected", "")
+	setCond(cb, "ConsolePluginReady", metav1.ConditionFalse, "ImageMissing", "RELATED_IMAGE unset")
+	publishMetrics(cb)
+
+	if got := testutil.ToFloat64(conditionStatus.WithLabelValues("ComplianceOperatorReady")); got != 1 {
+		t.Fatalf("ComplianceOperatorReady = %v, want 1", got)
+	}
+	if got := testutil.ToFloat64(conditionStatus.WithLabelValues("ScanConfigured")); got != 1 {
+		t.Fatalf("ScanConfigured = %v, want 1", got)
+	}
+	if got := testutil.ToFloat64(conditionStatus.WithLabelValues("ScanStorageReady")); got != 1 {
+		t.Fatalf("ScanStorageReady = %v, want 1", got)
+	}
+	// False (ImageMissing) must read 0, not stay at the init seed or look True.
+	if got := testutil.ToFloat64(conditionStatus.WithLabelValues("ConsolePluginReady")); got != 0 {
+		t.Fatalf("ConsolePluginReady ImageMissing = %v, want 0", got)
+	}
+
+	setCond(cb, "ConsolePluginReady", metav1.ConditionTrue, "Deployed", "")
+	publishMetrics(cb)
+	if got := testutil.ToFloat64(conditionStatus.WithLabelValues("ConsolePluginReady")); got != 1 {
+		t.Fatalf("ConsolePluginReady Deployed = %v, want 1", got)
+	}
+}
+
+// Every condition type the operator writes must be a published gauge label so a
+// new detail condition cannot land on the CR and stay invisible to metrics.
+func TestPublishedConditionTypesMatchOperatorConditions(t *testing.T) {
+	if len(publishedConditionTypes) != len(operatorConditionTypes) {
+		t.Fatalf("published %d condition types, operator writes %d",
+			len(publishedConditionTypes), len(operatorConditionTypes))
+	}
+	seen := map[string]struct{}{}
+	for _, typ := range publishedConditionTypes {
+		if _, ok := operatorConditionTypes[typ]; !ok {
+			t.Fatalf("published condition type %q is not an operator-written type", typ)
+		}
+		if _, dup := seen[typ]; dup {
+			t.Fatalf("published condition type %q duplicated", typ)
+		}
+		seen[typ] = struct{}{}
+	}
+}
+
 // Batch started-at gauge tracks StartedAt so dashboards can show pause age
 // without scraping the CR; clears with the batch.
 func TestPublishMetricsBatchStartedTimestamp(t *testing.T) {

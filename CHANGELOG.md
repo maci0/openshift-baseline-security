@@ -61,6 +61,10 @@ depend on those tags.
 - OperatorHub CSV `capabilities` is `Basic Install` (was `Seamless
   Upgrades`). Pre-1.0 bundles have no `replaces` graph, so the listing must
   not advertise an OLM upgrade path that does not exist.
+- Operator: `baseline_security_condition` now also publishes the detail
+  conditions ComplianceOperatorReady, ScanConfigured, ScanStorageReady, and
+  ConsolePluginReady, so plugin and dependency readiness is visible on the
+  Observe dashboard without scraping the CR.
 - Support: ClusterBaseline must-gather dumps omit waiver `requestedBy` and
   `approvedBy`, and drop `kubectl.kubernetes.io/last-applied-configuration` so
   those names are not copied into a support archive.

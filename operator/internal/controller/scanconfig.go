@@ -74,7 +74,7 @@ func (r *ClusterBaselineReconciler) ensureScanConfig(ctx context.Context, cb *ba
 	})
 	if err != nil {
 		if meta.IsNoMatchError(err) {
-			setScanCRDsMissing(cb)
+			setScanCRDsMissing(ctx, cb)
 			return nil
 		}
 		return fmt.Errorf("ensuring ScanSetting %s/%s: %w", complianceNamespace, scanSettingName, err)
@@ -101,7 +101,7 @@ func (r *ClusterBaselineReconciler) ensureScanConfig(ctx context.Context, cb *ba
 	bindings := uList(bindingGVK)
 	if err := r.List(ctx, bindings, client.InNamespace(complianceNamespace)); err != nil {
 		if meta.IsNoMatchError(err) {
-			setScanCRDsMissing(cb)
+			setScanCRDsMissing(ctx, cb)
 			return nil
 		}
 		return fmt.Errorf("listing ScanSettingBindings in %s: %w", complianceNamespace, err)
@@ -169,7 +169,7 @@ func (r *ClusterBaselineReconciler) ensureScanBinding(ctx context.Context, cb *b
 		// instead of returning an error that spins controller-runtime backoff and
 		// short-circuits aggregation / CO-readiness for those cycles.
 		if meta.IsNoMatchError(err) {
-			setScanCRDsMissing(cb)
+			setScanCRDsMissing(ctx, cb)
 			return nil
 		}
 		return fmt.Errorf("ensuring ScanSettingBinding %s/%s: %w", complianceNamespace, name, err)

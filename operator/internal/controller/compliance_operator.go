@@ -358,8 +358,13 @@ func setComplianceOperatorReadyFromCSV(cb *baselinev1alpha1.ClusterBaseline, csv
 
 // setScanCRDsMissing marks ScanConfigured false when the compliance.openshift.io
 // CRDs are absent (no REST mapping), so a missing Compliance Operator degrades
-// gracefully instead of erroring the reconcile.
-func setScanCRDsMissing(cb *baselinev1alpha1.ClusterBaseline) {
-	setCond(cb, "ScanConfigured", metav1.ConditionFalse, "CRDsMissing",
-		"compliance.openshift.io CRDs not installed")
+// gracefully instead of erroring the reconcile. Logs on the False/CRDsMissing
+// transition: this does not roll up to Degraded, and Available=False may be
+// attributed to ComplianceOperatorReady first, so without this line the scan
+// CRD gap is only on the CR.
+func setScanCRDsMissing(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline) {
+	setCondFalseLogOnce(ctx, cb, "ScanConfigured", "CRDsMissing",
+		"compliance.openshift.io CRDs not installed",
+		"compliance CRDs not installed; scan config skipped",
+		"name", cb.Name)
 }

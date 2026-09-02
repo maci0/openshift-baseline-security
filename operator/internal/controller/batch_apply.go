@@ -223,7 +223,7 @@ func (r *ClusterBaselineReconciler) finishRemediationBatch(
 	names := batch.Remediations
 	if len(names) > batchMaxRemediations {
 		log.FromContext(ctx).Info("status remediation batch exceeds max while waiting; capping",
-			"count", len(names), "max", batchMaxRemediations, "baseline", cb.Name)
+			"count", len(names), "max", batchMaxRemediations, "name", cb.Name)
 		names = names[:batchMaxRemediations]
 	}
 	for _, name := range names {

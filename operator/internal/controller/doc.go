@@ -33,5 +33,5 @@
 //   - compliance_version.go: OLM CSV version comparison for CO selection
 //   - metrics.go: Prometheus gauges after rollup (score, checks, observed
 //     timestamp, last scan, newly failed, remediation batch active/started,
-//     condition rollups)
+//     condition rollups and detail readiness)
 package controller

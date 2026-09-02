@@ -495,6 +495,11 @@ an accepted risk neither inflates nor tanks the score.
 - [x] **Remediation batch started-at gauge**: tracks
       `status.remediationBatch.startedAt`, clears when the batch ends
       (`TestPublishMetricsBatchStartedTimestamp`).
+- [x] **Detail condition gauges**: ComplianceOperatorReady, ScanConfigured,
+      ScanStorageReady, and ConsolePluginReady publish on
+      `baseline_security_condition` next to the rollups, including False
+      (ImageMissing = 0) (`TestPublishMetricsDetailConditions`,
+      `TestPublishedConditionTypesMatchOperatorConditions`).
 - [ ] **ServiceMonitor scrape**: with cluster monitoring (namespace
       openshift.io/cluster-monitoring label) + scraper SA token, metrics
       endpoint returns 200 and includes custom gauges (live or kind).

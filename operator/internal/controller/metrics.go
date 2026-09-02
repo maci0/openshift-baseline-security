@@ -30,12 +30,14 @@ var (
 		Name: "baseline_security_remediation_batch_active",
 		Help: "1 when a remediation batch is in progress (MachineConfigPools may be paused), 0 otherwise.",
 	})
-	// Rollup conditions (Available / Progressing / Degraded). 1 when Status is
-	// True, 0 when False or absent. Low cardinality (3 fixed types) so alerts can
-	// fire on Degraded without scraping the CR API.
+	// Conditions: rollups (Available / Progressing / Degraded) plus the four
+	// detail types the operator writes. 1 when Status is True, 0 when False or
+	// absent. Fixed 7-value type label so alerts can fire on Degraded without
+	// scraping the CR, and so plugin/CO/scan/storage readiness is visible on
+	// the Observe dashboard (ImageMissing never Degrades).
 	conditionStatus = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "baseline_security_condition",
-		Help: "ClusterBaseline rollup condition: 1 if True, 0 if False or absent. Labels: type (Available|Progressing|Degraded).",
+		Help: "ClusterBaseline condition: 1 if True, 0 if False or absent. Label type is a rollup (Available|Progressing|Degraded) or detail (ComplianceOperatorReady|ScanConfigured|ScanStorageReady|ConsolePluginReady).",
 	}, []string{"type"})
 	// Last completed scan (status.lastScanTime). 0 when never scanned, CR gone,
 	// or scanning disabled (empty profiles+tailored): ComplianceScanStale must
@@ -77,8 +79,13 @@ var (
 	publishedChecks = map[[2]string]struct{}{}
 )
 
-// Rollup condition types published as gauges (must stay fixed; label cardinality).
-var publishedConditionTypes = []string{"Available", "Progressing", "Degraded"}
+// Condition types published as gauges (must stay fixed; label cardinality).
+// Keep in lockstep with operatorConditionTypes: a type the operator writes but
+// does not publish here is invisible to Prometheus and the Observe dashboard.
+var publishedConditionTypes = []string{
+	"Available", "Progressing", "Degraded",
+	"ComplianceOperatorReady", "ScanConfigured", "ScanStorageReady", "ConsolePluginReady",
+}
 
 func init() {
 	metrics.Registry.MustRegister(

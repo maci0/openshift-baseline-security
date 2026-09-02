@@ -20,7 +20,7 @@ it, discovery finds zero targets and nothing is scraped (`ComplianceStatusStale`
 |---|---|
 | `baseline_security_compliance_score` | Overall score 0-100 (`-1` when unavailable). Flat: pass/(pass+fail); SeverityWeighted: severity-weighted ratio. |
 | `baseline_security_checks` | Check-result count by `profile` and `status` label. `profile` is a built-in ProfileKey or `tp:<name>` for a TailoredProfile. `status` is `pass`, `fail`, `manual`, `info`, `error`, `inconsistent`, `waived`, or `notApplicable` (camelCase matches `status.*.notApplicable`). |
-| `baseline_security_condition` | Rollup condition, 1 True / 0 False-or-absent. Label `type` = Available\|Progressing\|Degraded. |
+| `baseline_security_condition` | Condition, 1 True / 0 False-or-absent. Label `type` = Available\|Progressing\|Degraded (rollups; `ClusterBaselineDegraded` reads Degraded) or ComplianceOperatorReady\|ScanConfigured\|ScanStorageReady\|ConsolePluginReady (detail). ImageMissing / CRDsMissing never Degrade, so the detail series are how Prometheus sees plugin and scan-CRD readiness. |
 | `baseline_security_last_scan_timestamp_seconds` | Unix time of the last completed scan; 0 when never scanned or scanning disabled. |
 | `baseline_security_scan_interval_seconds` | Approx seconds between scans for `spec.schedule` (drives the stale-scan alert threshold); 0 when disabled/invalid. |
 | `baseline_security_newly_failed` | Checks newly failed since the previous completed scan (`len(status.newlyFailed)`). |

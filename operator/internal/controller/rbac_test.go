@@ -243,20 +243,6 @@ func csvVerbsInclude(block, verb string) bool {
 	return false
 }
 
-func mustReadUserRolesYAML(t *testing.T) string {
-	t.Helper()
-	_, thisFile, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller failed")
-	}
-	path := filepath.Join(filepath.Dir(thisFile), "..", "..", "config", "rbac", "user_roles.yaml")
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read user_roles.yaml: %v", err)
-	}
-	return string(raw)
-}
-
 // userRoleDoc returns the YAML document whose metadata.name matches, or "".
 func userRoleDoc(userRolesYAML, name string) string {
 	for _, doc := range strings.Split(userRolesYAML, "\n---\n") {

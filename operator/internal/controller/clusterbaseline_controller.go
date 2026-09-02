@@ -181,6 +181,7 @@ type ClusterBaselineReconciler struct {
 
 func (r *ClusterBaselineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
+	started := time.Now()
 
 	cb := &baselinev1alpha1.ClusterBaseline{}
 	if err := r.Get(ctx, req.NamespacedName, cb); err != nil {
@@ -200,7 +201,7 @@ func (r *ClusterBaselineReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		}
 		// API/timeout failures: CRT also logs the reconcile error, but without
 		// the object name or that metrics were intentionally left unchanged.
-		logger.Error(err, "get ClusterBaseline failed", "name", req.Name)
+		logger.Error(err, "get ClusterBaseline failed", "name", req.Name, "duration", time.Since(started))
 		return ctrl.Result{}, err
 	}
 	// CR exists again: re-arm the gone-transition log for the next deletion.
@@ -212,16 +213,17 @@ func (r *ClusterBaselineReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		if err := r.resumeBatchPoolsOnDelete(ctx, cb); err != nil {
 			// Structured context: finalizer stays until resume succeeds; without
 			// this log on-call only sees a generic reconcile error.
-			logger.Error(err, "resume batch pools on delete failed", "name", cb.Name)
+			logger.Error(err, "resume batch pools on delete failed", "name", cb.Name, "duration", time.Since(started))
 			return ctrl.Result{}, err
 		}
 		if err := r.deregisterConsolePlugin(ctx); err != nil {
-			logger.Error(err, "deregister console plugin on delete failed", "name", cb.Name)
+			logger.Error(err, "deregister console plugin on delete failed",
+				"name", cb.Name, "duration", time.Since(started))
 			return ctrl.Result{}, err
 		}
 		if controllerutil.RemoveFinalizer(cb, finalizerName) {
 			if err := r.Update(ctx, cb); err != nil {
-				logger.Error(err, "remove finalizer failed", "name", cb.Name)
+				logger.Error(err, "remove finalizer failed", "name", cb.Name, "duration", time.Since(started))
 				return ctrl.Result{}, err
 			}
 			// Finalizer gone: object is about to GC. Clear gauges now; a later
@@ -234,7 +236,7 @@ func (r *ClusterBaselineReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	}
 	if controllerutil.AddFinalizer(cb, finalizerName) {
 		if err := r.Update(ctx, cb); err != nil {
-			logger.Error(err, "add finalizer failed", "name", cb.Name)
+			logger.Error(err, "add finalizer failed", "name", cb.Name, "duration", time.Since(started))
 			return ctrl.Result{}, err
 		}
 		return ctrl.Result{}, nil // update requeues
@@ -253,7 +255,8 @@ func (r *ClusterBaselineReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		setCond(cb, "Degraded", metav1.ConditionTrue, "ReconcileError", err.Error())
 		// Structured Error before return: controller-runtime also logs the error,
 		// but without the CR name or that Degraded was attempted.
-		logger.Error(err, "reconcile failed", "name", cb.Name)
+		logger.Error(err, "reconcile failed",
+			"name", cb.Name, "generation", cb.Generation, "duration", time.Since(started))
 		// Snapshot BEFORE the status write: a real apiserver's /status response
 		// carries the STORED metadata, and the client decodes it back into cb,
 		// resetting the in-memory stamp to the old persisted value. Reading the
@@ -262,14 +265,16 @@ func (r *ClusterBaselineReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		if serr := r.Status().Update(ctx, cb); serr != nil {
 			// Error, not V(1): without this log the CR can look healthy while
 			// every reconcile fails and the Degraded condition never sticks.
-			logger.Error(serr, "status update after reconcile error failed", "name", cb.Name)
+			logger.Error(serr, "status update after reconcile error failed",
+				"name", cb.Name, "generation", cb.Generation, "duration", time.Since(started))
 		} else if stamped != preReconcileMode {
 			// The best-effort write above persisted any ring point recordHistory
 			// advanced under a just-flipped mode; keep the durable stamp aligned so
 			// a transient post-history error (e.g. checkScanStorage) cannot leave the
 			// stamp lagging the rings and fire a spurious historyScoringModeMismatch.
 			if perr := r.persistHistoryScoringMode(ctx, cb); perr != nil {
-				logger.Error(perr, "persist history scoring-mode stamp after reconcile error failed", "name", cb.Name)
+				logger.Error(perr, "persist history scoring-mode stamp after reconcile error failed",
+					"name", cb.Name, "generation", cb.Generation, "duration", time.Since(started))
 			}
 		}
 		// Publish after Degraded is set so ClusterBaselineDegraded can fire even
@@ -290,7 +295,8 @@ func (r *ClusterBaselineReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	// wiping history rings again on every completed scan after a mode flip.
 	stamped := cb.Annotations[historyScoringModeAnn]
 	if err := r.Status().Update(ctx, cb); err != nil {
-		logger.Error(err, "status update failed", "name", cb.Name)
+		logger.Error(err, "status update failed",
+			"name", cb.Name, "generation", cb.Generation, "duration", time.Since(started))
 		return ctrl.Result{}, err
 	}
 	publishMetrics(cb)
@@ -300,7 +306,8 @@ func (r *ClusterBaselineReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	// historyScoringModeMismatch signal) behind, not prematurely ahead.
 	if stamped != preReconcileMode {
 		if err := r.persistHistoryScoringMode(ctx, cb); err != nil {
-			logger.Error(err, "persist history scoring-mode stamp failed", "name", cb.Name)
+			logger.Error(err, "persist history scoring-mode stamp failed",
+				"name", cb.Name, "generation", cb.Generation, "duration", time.Since(started))
 			return ctrl.Result{}, err
 		}
 	}
@@ -348,6 +355,7 @@ func (r *ClusterBaselineReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		"progressing", progressing,
 		"degraded", degraded,
 		"batchActive", cb.Status.RemediationBatch != nil,
+		"duration", time.Since(started),
 	}
 	// Log the Degraded / not-Available summary at Info only when the posture first
 	// enters this (state, reason); a steady failing state at the 1m poll drops to
@@ -500,6 +508,15 @@ type lazyComplianceWatch struct {
 	cache  cache.Cache
 	mapper meta.RESTMapper
 	gvks   []schema.GroupVersionKind
+
+	// loggedWaitingCRDs gates the RESTMapping-miss Info to the first wait: CRDs
+	// absent at startup is expected and would otherwise log every 30s per kind
+	// until the Compliance Operator registers them.
+	loggedWaitingCRDs bool
+	// lastWatchErrLog rate-limits Watch() failures (CRDs present, informer add
+	// failed). That path is unexpected; Error once then every
+	// historyStallLogInterval, V(1) in between, matching dashboard/infra logs.
+	lastWatchErrLog time.Time
 }
 
 // Run on the leader only: the watches feed the same reconcile the leader owns.
@@ -521,6 +538,15 @@ func (l *lazyComplianceWatch) Start(ctx context.Context) error {
 					logger.Info("watch mapping not ready yet; will retry", "kind", gvk.Kind, "error", err)
 				}
 				still = append(still, gvk)
+				// Expected until CO CRDs register. One Info for the wait, then V(1)
+				// so default logs are not a 30s CRD-install heartbeat.
+				if !l.loggedWaitingCRDs {
+					l.loggedWaitingCRDs = true
+					logger.Info("waiting for compliance CRDs to register watches", "kind", gvk.Kind)
+				} else {
+					logger.V(1).Info("waiting for compliance CRDs to register watches",
+						"kind", gvk.Kind, "error", err)
+				}
 				continue
 			}
 			// Metadata only: the handler needs namespace + suite label. Full CCR
@@ -533,11 +559,16 @@ func (l *lazyComplianceWatch) Start(ctx context.Context) error {
 			src := source.Kind(l.cache, client.Object(obj),
 				handler.EnqueueRequestsFromMapFunc(enqueueSingleton))
 			if err := l.ctrl.Watch(src); err != nil {
-				// Info (not V(1)): CRDs are present so this is not install lag.
-				// Default production log level would hide a permanent Watch
-				// failure (RBAC, cache) and leave only the 1m poll as safety net.
-				logger.Info("watch not established yet; will retry", "kind", gvk.Kind, "error", err)
+				// CRDs are present so this is not install lag (RBAC, cache). Error
+				// so a permanent Watch failure is visible at default level, but
+				// rate-limited: retry is every 30s and an unbounded Error stream
+				// would bury other signals. V(1) keeps the full cadence.
 				still = append(still, gvk)
+				logger.V(1).Info("watch not established yet; will retry", "kind", gvk.Kind, "error", err)
+				if l.lastWatchErrLog.IsZero() || time.Since(l.lastWatchErrLog) >= historyStallLogInterval {
+					l.lastWatchErrLog = time.Now()
+					logger.Error(err, "watch not established yet; will retry", "kind", gvk.Kind)
+				}
 				continue
 			}
 			logger.Info("watching compliance resource", "kind", gvk.Kind)
