@@ -110,7 +110,6 @@ func applyPluginContainer(pod *corev1.PodSpec, image string) {
 	pod.Resources = nil
 	pod.Overhead = nil
 	pod.HostnameOverride = nil
-	pod.WorkloadRef = nil
 	pod.DNSConfig = nil
 	pod.EnableServiceLinks = ptr.To(false)
 	pod.DNSPolicy = corev1.DNSClusterFirst

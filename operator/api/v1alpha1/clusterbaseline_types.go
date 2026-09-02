@@ -505,10 +505,6 @@ type ClusterBaselineList struct {
 	Items           []ClusterBaseline `json:"items"`
 }
 
-func init() {
-	SchemeBuilder.Register(&ClusterBaseline{}, &ClusterBaselineList{})
-}
-
 // AllProfileKeys returns every ProfileKey enum value in stable display order.
 // Length must equal Profiles MaxItems and the Enum marker cardinality.
 func AllProfileKeys() []ProfileKey {

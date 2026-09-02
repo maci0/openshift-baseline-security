@@ -1,7 +1,7 @@
 # ubi9/go-toolset 1.26.6 (matches go.mod / Makefile GOTOOLCHAIN; bump digest with RH).
 # Base digest may ship a slightly older patch; GOTOOLCHAIN pins go1.26.6 for the
 # stdlib CVE floor (downloaded in the networked RUN, used offline at compile).
-FROM registry.access.redhat.com/ubi9/go-toolset@sha256:f99dd81b20e5971ef9f63a51ac27cf0aa591ff9921d021490548b67fd9b17144 AS build
+FROM registry.access.redhat.com/ubi9/go-toolset@sha256:1a755651ffe1a438f137418d183f18ebad527ec929206c17804f93490a97869e AS build
 # BuildKit special-case ARG: clamps image/layer timestamps when passed by the client.
 ARG SOURCE_DATE_EPOCH=0
 # Pin the go.mod toolchain. Image Go may lag by a patch; never float to latest.
@@ -27,7 +27,7 @@ RUN --network=none CGO_ENABLED=0 go build -trimpath -buildvcs=false -mod=readonl
 	&& test -s /tmp/manager
 
 # ubi9/ubi-micro
-FROM registry.access.redhat.com/ubi9/ubi-micro@sha256:35de56a9413112f1474e392ebc35e0cf6f0fb484c8e8877bbae59b513694b41f
+FROM registry.access.redhat.com/ubi9/ubi-micro@sha256:f332c99eb8f798a8486821c91937f10ad64ee83d7e739303be2df051040918f6
 ARG SOURCE_DATE_EPOCH=0
 # Default matches Makefile VERSION; make docker-build passes --build-arg VERSION.
 ARG VERSION=0.5.15

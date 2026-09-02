@@ -1,6 +1,6 @@
 # ubi9/nodejs-22 (digest-pinned for reproducible builds; bump deliberately).
 # Node in this digest is 22.23.1; keep console-plugin/.nvmrc on the same patch.
-FROM registry.access.redhat.com/ubi9/nodejs-22@sha256:0905d5a102059b449b95cf3a926e073e026524e06b132b401c36c9c4f7096e37 AS build
+FROM registry.access.redhat.com/ubi9/nodejs-22@sha256:57ad03c5db9382cd266af665819f60e5b1490fc27ee589320159df59f9eb453b AS build
 # BuildKit special-case ARG: clamps image/layer timestamps when passed by the client.
 ARG SOURCE_DATE_EPOCH=0
 USER root
@@ -31,7 +31,7 @@ RUN --network=none yarn build
 # Image-equivalent layout (document root /opt/app-root/src) with TLS only on 9443.
 # nginx.conf is checked into the repo (no brittle sed against the base image).
 # ubi9/nginx-120
-FROM registry.access.redhat.com/ubi9/nginx-120@sha256:2f3271f0fafbe12cc80843b94d2f1b36d75419f70f3f4ced69218765b106bde6
+FROM registry.access.redhat.com/ubi9/nginx-120@sha256:75970114ae16df650158245bfc81968e88704d23d98d986684152f3837d4bddf
 ARG SOURCE_DATE_EPOCH=0
 ARG VERSION=0.5.15
 # Runtime UID owns static assets and nginx.conf (read-only rootfs still applies

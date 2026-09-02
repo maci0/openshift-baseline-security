@@ -22,7 +22,7 @@ const waiversContentKey = (waivers: Waiver[] | undefined): string =>
 export const useWaiverExpiryClock = (
   waivers: Waiver[] | undefined,
   offsetsMs: readonly number[] = [],
-): { key: string; tick: number } => {
+) => {
   const key = waiversContentKey(waivers);
   const [tick, setTick] = React.useState(0);
   React.useEffect(() => {
