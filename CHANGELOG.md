@@ -55,6 +55,12 @@ depend on those tags.
   tabs when no profile is selected.
 - Console: Remediations empty copy no longer tells admins to rescan after new
   failures when failing checks may already exist without auto-fixes.
+- Console plugin nginx now gzip-compresses JavaScript and JSON (`Vary:
+  Accept-Encoding`) and accepts HTTP/2 on 9443, so plugin assets transfer in
+  fewer bytes and multiplex on one connection.
+- Overview paints score cards before loading Victory charts. Results,
+  Remediations, and Profiles load when those tabs are opened. A Retry alert
+  is shown if a chunk fails to load.
 
 ### Fixed
 

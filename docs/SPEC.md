@@ -166,7 +166,7 @@ Responsibilities:
 3. **Console plugin deployment** (G3): nginx Deployment (2 replicas with
    preferred pod anti-affinity on multi-node topologies; collapses to 1
    replica with no PDB on SingleReplica clusters so the single node can
-   drain; TLS on 9443, service-serving-cert mounted at
+   drain; TLS + HTTP/2 on 9443, gzip for JS/JSON, service-serving-cert mounted at
    `/var/serving-cert`), Service, cluster-scoped `ConsolePlugin` CR
    (created if missing), and registration on
    `consoles.operator.openshift.io/cluster` `spec.plugins` (removed on CR

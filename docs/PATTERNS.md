@@ -113,11 +113,13 @@ provides correctness, the second is warm standby).
   user's token, so RBAC is the user's own. `useAccessReview` to disable
   writes the user cannot perform.
 - Serving: ubi9/nginx-120 base, document root `/opt/app-root/src`, checked-in
-  `nginx.conf` (TLS only on 9443, no plaintext 8080) with the service-serving
-  certificate (`service.beta.openshift.io/serving-cert-secret-name`);
-  ConsolePlugin CR points at the Service; plugin name appended to
+  `nginx.conf` (TLS + HTTP/2 on 9443, no plaintext 8080, gzip for JS/JSON
+  with `Vary: Accept-Encoding`) with the service-serving certificate
+  (`service.beta.openshift.io/serving-cert-secret-name`); ConsolePlugin CR
+  points at the Service; plugin name appended to
   `consoles.operator.openshift.io/cluster` `spec.plugins` (and removed on
-  uninstall).
+  uninstall). Default Overview tab is in the page chunk; Victory charts and
+  the other tabs are async chunks with a Retry alert if a GET fails.
 
 **Here**: all of the above, including `useAccessReview` gating on rescan,
 profile/schedule/scoring/waiver patches, TailoredProfile authoring,

@@ -516,6 +516,12 @@ an accepted risk neither inflates nor tanks the score.
       `resultsCsv`).
 - [x] **Unpaired surrogates in filter URLs** do not throw (jest `resultsHref`
       fuzz).
+- [x] **History sparkline input** drops unparseable times and non-finite
+      scores (jest `toTrendData`); content key is stable across reallocations
+      (jest `historyContentKey`).
+- [x] **Async plugin chunk load failure** delivers a failed state (jest
+      `watchChunk`) so Overview charts and lazy tabs can show Retry instead of
+      a blank region.
 - [x] **History never rewinds** when the newest suite is dropped
       (`TestRecordHistoryDoesNotRewind`).
 - [x] **Late score for the same endTimestamp** appends/refreshes history
@@ -655,9 +661,9 @@ an accepted risk neither inflates nor tanks the score.
 
 - [ ] **Operator image smoke**: built manager runs as non-root, health probes
       and secure metrics only.
-- [ ] **Console image smoke**: nginx non-root, TLS only on 9443,
-      `ssl_protocols TLSv1.2 TLSv1.3`, `server_tokens off`; fails closed until
-      service-ca cert files exist.
+- [ ] **Console image smoke**: nginx non-root, TLS + HTTP/2 only on 9443,
+      `ssl_protocols TLSv1.2 TLSv1.3`, `server_tokens off`, gzip for JS/JSON
+      with `gzip_vary on`; fails closed until service-ca cert files exist.
 - [ ] **Docker context audit**: `.dockerignore` excludes `node_modules`,
       `dist`, local e2e artifacts, and logs while preserving lockfiles.
 - [ ] **Dependency vulnerability scan**: Go module and Yarn dependency scan has
@@ -1093,8 +1099,10 @@ specific automated row above.
 - [ ] **No storage class cluster**: first scan stalls on PVC Pending; verify
       Degraded, alert, runbook, and UI all name storage rather than generic
       "scan failed".
-- [ ] **Console upgrade operator**: restart/upgrade console while plugin chunks
+- [~] **Console upgrade operator**: restart/upgrade console while plugin chunks
       change; verify route still loads and stale chunk failures recover.
+      Retry on a failed `import()` is unit-covered (`watchChunk`); live
+      recovery after a console/plugin roll still needs a cluster run.
 - [ ] **Security reviewer**: try crafted suite labels, rule descriptions,
       check-result names, CSV formula strings, and path-looking values.
 - [ ] **Scale operator**: seed 1k/10k check results and 8 profiles; watch

@@ -68,6 +68,9 @@ double casts are rejected outright.
 - `'—'` is the rendered placeholder for an absent or unscoreable value, and it
   is distinct from an error state. It is a UI string, not prose: the em-dash
   ban does not reach it.
+- Victory charts live in `OverviewCharts.tsx` and load after the Overview
+  cards paint. Results, Remediations, and Profiles are async chunks. A failed
+  chunk GET must show Retry (`ChunkError`), not a blank tab.
 - A score that cannot be computed renders as no score. Never `NaN`, never
   `Infinity`: a `NaN` compares false against every threshold and paints the
   badge green.

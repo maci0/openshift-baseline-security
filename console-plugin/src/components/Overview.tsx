@@ -6,12 +6,6 @@ import {
   useAccessReview,
 } from '@openshift-console/dynamic-plugin-sdk';
 import {
-  Chart,
-  ChartArea,
-  ChartAxis,
-  ChartDonut,
-} from '@patternfly/react-charts/victory';
-import {
   Alert,
   Button,
   Card,
@@ -57,7 +51,7 @@ import {
   suiteFilterKey,
 } from '../models';
 import { isValidCron } from '../cron';
-import { formatChartDate, formatCount, safeLocale } from '../dates';
+import { formatCount, safeLocale } from '../dates';
 import { errorMessage } from '../errors';
 import { resultsHref } from '../links';
 import { resourceVersionTest, schedulePatch } from '../patches';
@@ -75,9 +69,18 @@ import {
 } from '../waivers';
 import BaselineNotConfigured from './BaselineNotConfigured';
 import { regionFocusProps } from './DisabledTip';
+import { ChunkError } from './ChunkError';
+import { useChunk } from './chunkLoad';
 import { useAutoDismiss } from './feedback';
-import { isFiniteNumber } from '../parse';
+import { historyContentKey, toTrendData } from './overviewTrend';
 import { useWaiverExpiryClock } from './useWaiverExpiryClock';
+
+// Start the charts chunk as soon as this module evaluates (default tab), so
+// Victory download overlaps first paint of the score cards instead of waiting
+// for the donut slot to render.
+const loadOverviewCharts = () =>
+  import(/* webpackChunkName: "overview-charts" */ './OverviewCharts');
+void loadOverviewCharts();
 
 // Stable empty list so optional status arrays do not allocate each render.
 const EMPTY_NAMES: readonly string[] = [];
@@ -319,232 +322,6 @@ const CountRow: React.FC<{
   return row;
 };
 
-// Compact score sparkline for a profile card from its history (>=2 points).
-// History snapshots to Victory {x: Date, y: score} points.
-// Drop points with an unparseable time or non-finite score: a single bad
-// snapshot otherwise makes Victory's time-scale domain NaN and silently blanks
-// the whole chart (hand-edited / partial status can carry missing scores).
-const toTrendData = (history?: ScoreSnapshot[]) =>
-  (history ?? [])
-    .map((h) => ({ x: new Date(h.time), y: h.score }))
-    .filter(
-      (p) => !Number.isNaN(p.x.getTime()) && isFiniteNumber(p.y),
-    );
-
-// Content key for history rings: status-only CR updates reallocate the array
-// with the same points; identity deps would rebuild Victory Date/path data on
-// every reconcile even when the trend did not change (max 30 snapshots).
-const historyContentKey = (history?: ScoreSnapshot[]): string => {
-  if (!history?.length) {
-    return '';
-  }
-  let key = '';
-  for (let i = 0; i < history.length; i++) {
-    const h = history[i];
-    if (i > 0) {
-      key += '\x01';
-    }
-    key += `${h.time ?? ''}\0${h.score ?? ''}`;
-  }
-  return key;
-};
-
-// Memoized composition donut: CCR list-watch identity changes re-render Overview
-// without changing score/totals. Victory re-layout of the donut is expensive
-// relative to a shallow prop check when counts are content-stable.
-type DonutSegment = {
-  label: string;
-  value: number;
-  color: string;
-  filter: string;
-};
-const CompositionDonut = React.memo<{
-  score: number | null | undefined;
-  totalChecks: number;
-  donutData: { x: string; y: number }[];
-  donutColors: string[];
-  segments: readonly DonutSegment[];
-  locale: string | undefined;
-}>(({ score, totalChecks, donutData, donutColors, segments, locale }) => {
-  const { t } = useTranslation('plugin__baseline-security-console-plugin');
-  if (totalChecks === 0) {
-    return (
-      <ChartDonut
-        ariaTitle={t('Compliance score')}
-        ariaDesc={t('No check results yet. Score is unavailable until a scan completes.')}
-        // Static: score composition is status data, not a motion cue (WCAG 2.3.3).
-        animate={false}
-        data={[{ x: t('No results'), y: 1 }]}
-        colorScale={[DONUT_GREY]}
-        // Always "—" here: with zero evaluated checks the score is 0/0 and
-        // meaningless, and the ariaDesc already says it is unavailable. A stale
-        // non-null status.score must not paint a number over a "No results" ring.
-        title="—"
-        subTitle={t('of 100')}
-        height={200}
-        width={300}
-        constrainToVisibleArea
-      />
-    );
-  }
-  return (
-    // Wrap on narrow viewports so the legend is not clipped beside a fixed-width donut.
-    <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-      <ChartDonut
-        ariaTitle={t('Check results')}
-        ariaDesc={t('Compliance score {{score}} of 100. Composition of compliance check results.', {
-          score: score != null ? formatCount(score, locale) : t('unavailable'),
-        })}
-        animate={false}
-        constrainToVisibleArea
-        data={donutData}
-        colorScale={donutColors}
-        labels={({ datum }) =>
-          t('{{label}}: {{value}}', {
-            label: datum.x,
-            value: formatCount(Number(datum.y), locale),
-          })
-        }
-        title={score != null ? formatCount(score, locale) : '—'}
-        subTitle={t('of 100')}
-        height={200}
-        width={200}
-        padding={{ top: 10, bottom: 10, left: 10, right: 10 }}
-      />
-      {/* HTML legend: Victory's built-in legend clips long labels and
-          caps at a fixed width; a plain list wraps and never truncates. */}
-      <ul style={{ listStyle: 'none', margin: 0, padding: 0, minWidth: 0 }}>
-        {segments.map((s) => {
-          const num = formatCount(s.value, locale);
-          const text = t('{{label}} ({{num}})', { label: s.label, num });
-          return (
-            <li
-              key={s.label}
-              style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 0' }}
-            >
-              <span
-                aria-hidden
-                style={{
-                  width: 12,
-                  height: 12,
-                  flex: '0 0 auto',
-                  borderRadius: 2,
-                  backgroundColor: s.color,
-                }}
-              />
-              {/* Same deep-link as profile CountRow so the primary
-                  score card drills into Results on click/tap (touch
-                  devices cannot hover Victory slices). */}
-              <a
-                href={resultsHref(s.filter)}
-                aria-label={t('{{label}}: {{value}}', { label: s.label, value: num })}
-              >
-                {text}
-              </a>
-            </li>
-          );
-        })}
-      </ul>
-    </div>
-  );
-});
-CompositionDonut.displayName = 'CompositionDonut';
-
-// Memoized overall trend chart: same CCR-churn stability as MiniTrend.
-const OverallTrendChart = React.memo<{
-  historyChartData: { x: Date; y: number }[];
-  historyModeMismatch: boolean;
-  locale: string | undefined;
-}>(({ historyChartData, historyModeMismatch, locale }) => {
-  const { t } = useTranslation('plugin__baseline-security-console-plugin');
-  return (
-    <Card>
-      <CardTitle>{t('Score trend')}</CardTitle>
-      <CardBody style={{ height: historyModeMismatch ? 260 : 230 }}>
-        {historyModeMismatch && (
-          <HelperText style={{ marginBottom: 'var(--pf-t--global--spacer--sm)' }}>
-            <HelperTextItem variant="warning">
-              {t(
-                'Scoring mode changed since some history points were recorded. Older points may not be comparable; the next completed scan starts a fresh trend under the new mode.',
-              )}
-            </HelperTextItem>
-          </HelperText>
-        )}
-        <Chart
-          ariaTitle={t('Score trend')}
-          ariaDesc={t('Score moved from {{from}} to {{to}} over {{scans}} scans.', {
-            from: formatCount(historyChartData[0].y, locale),
-            to: formatCount(historyChartData[historyChartData.length - 1].y, locale),
-            scans: formatCount(historyChartData.length, locale),
-          })}
-          // Static trend: motion does not add meaning and can delay reading (WCAG 2.3.3).
-          animate={false}
-          height={200}
-          width={300}
-          // right: the last date tick is centered on the final point at the
-          // plot edge, so it needs half a label of room or it clips at the card
-          // edge (the SVG scales to the card width, magnifying the overflow).
-          padding={{ top: 10, bottom: 40, left: 40, right: 45 }}
-          domain={{ y: [0, 100] }}
-          // Time scale so ticks are spaced by date (a few, deduplicated),
-          // not one categorical tick per snapshot with repeated labels.
-          scale={{ x: 'time', y: 'linear' }}
-        >
-          <ChartAxis
-            tickFormat={(x: Date) => formatChartDate(x, locale)}
-            fixLabelOverlap
-          />
-          <ChartAxis dependentAxis tickFormat={(y: number) => formatCount(y, locale)} />
-          <ChartArea data={historyChartData} />
-        </Chart>
-      </CardBody>
-    </Card>
-  );
-});
-OverallTrendChart.displayName = 'OverallTrendChart';
-
-// Memoized: CCR watch churn re-renders Overview without touching history.
-const MiniTrend = React.memo<{ history?: ScoreSnapshot[] }>(({ history }) => {
-  const { t, i18n } = useTranslation('plugin__baseline-security-console-plugin');
-  // Content-stable: status CR updates reallocate history with the same points.
-  const histKey = historyContentKey(history);
-  const chartData = React.useMemo(
-    () => toTrendData(history),
-    // history is read when histKey changes (same points => skip Date rebuild).
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- content key
-    [histKey],
-  );
-  if (chartData.length < 2) {
-    return null;
-  }
-  const first = chartData[0].y;
-  const last = chartData[chartData.length - 1].y;
-  return (
-    // marginTop:auto bottom-aligns the sparkline within a flex-column CardBody,
-    // so charts line up across cards whose stat-row counts differ (a card with
-    // an extra Inconsistent/Waived row would otherwise sit its chart lower).
-    <div style={{ height: 40, marginTop: 'auto', paddingTop: 'var(--pf-t--global--spacer--sm)' }}>
-      <Chart
-        ariaTitle={t('Score trend')}
-        ariaDesc={t('Score moved from {{from}} to {{to}} over {{scans}} scans.', {
-          from: formatCount(first, i18n.language),
-          to: formatCount(last, i18n.language),
-          scans: formatCount(chartData.length, i18n.language),
-        })}
-        animate={false}
-        height={40}
-        padding={{ top: 4, bottom: 4, left: 0, right: 0 }}
-        minDomain={{ y: 0 }}
-        maxDomain={{ y: 100 }}
-        scale={{ x: 'time', y: 'linear' }}
-      >
-        <ChartArea data={chartData} />
-      </Chart>
-    </div>
-  );
-});
-MiniTrend.displayName = 'MiniTrend';
-
 // Static row metadata (icons once at module load). Labels are i18n source keys.
 const PROFILE_COUNT_ROWS: readonly {
   k: keyof ResultCounts;
@@ -611,6 +388,8 @@ const Overview: React.FC<{
   const { t, i18n } = useTranslation('plugin__baseline-security-console-plugin');
   // One BCP 47 tag for all score/count formatting (same path as report / dates).
   const locale = safeLocale(i18n.language);
+  const [chartAttempt, setChartAttempt] = React.useState(0);
+  const charts = useChunk(loadOverviewCharts, chartAttempt);
 
   // SeverityWeighted per-profile scores need to scan check results. Group owned
   // results by filter key once here instead of letting each profile card's
@@ -828,6 +607,8 @@ const Overview: React.FC<{
     coLabel = t('Installed');
   }
   const score = baseline.status?.score;
+  // PascalCase so TSX treats Charts.MiniTrend as a component, not an HTML tag.
+  const Charts = charts.status === 'ready' ? charts.module : null;
 
   const expiring = expiringWaivers(baseline.spec.waivers, 2 * WEEK_MS);
   // Prefer status.diffBaseScanTime (set once a prior completed scan exists for
@@ -875,7 +656,13 @@ const Overview: React.FC<{
         </CardHeader>
         <CardBody style={{ display: 'flex', flexDirection: 'column' }}>
           <ProfileCounts counts={counts} filterKey={filterKey} />
-          <MiniTrend history={history} />
+          {Charts ? (
+            <Charts.MiniTrend history={history} />
+          ) : charts.status === 'loading' ? (
+            // Reserve the sparkline slot so cards stay bottom-aligned while
+            // the charts chunk is in flight (same 40px as MiniTrend).
+            <div style={{ height: 40, marginTop: 'auto' }} />
+          ) : null}
         </CardBody>
       </Card>
     );
@@ -986,14 +773,20 @@ const Overview: React.FC<{
               justifyContent: 'center',
             }}
           >
-            <CompositionDonut
-              score={score}
-              totalChecks={totalChecks}
-              donutData={donutData}
-              donutColors={donutColors}
-              segments={segments}
-              locale={locale}
-            />
+            {charts.status === 'failed' ? (
+              <ChunkError onRetry={() => setChartAttempt((n) => n + 1)} />
+            ) : Charts === null ? (
+              <Skeleton height="180px" screenreaderText={t('Loading compliance data')} />
+            ) : (
+              <Charts.CompositionDonut
+                score={score}
+                totalChecks={totalChecks}
+                donutData={donutData}
+                donutColors={donutColors}
+                segments={segments}
+                locale={locale}
+              />
+            )}
           </CardBody>
         </Card>
         <Card>
@@ -1051,13 +844,28 @@ const Overview: React.FC<{
             </DescriptionList>
           </CardBody>
         </Card>
-        {historyChartData.length > 1 && (
-          <OverallTrendChart
-            historyChartData={historyChartData}
-            historyModeMismatch={historyModeMismatch}
-            locale={locale}
-          />
-        )}
+        {historyChartData.length > 1 &&
+          (charts.status === 'failed' ? (
+            <Card>
+              <CardTitle>{t('Score trend')}</CardTitle>
+              <CardBody>
+                <ChunkError onRetry={() => setChartAttempt((n) => n + 1)} />
+              </CardBody>
+            </Card>
+          ) : Charts === null ? (
+            <Card>
+              <CardTitle>{t('Score trend')}</CardTitle>
+              <CardBody>
+                <Skeleton height="200px" screenreaderText={t('Loading compliance data')} />
+              </CardBody>
+            </Card>
+          ) : (
+            <Charts.OverallTrendChart
+              historyChartData={historyChartData}
+              historyModeMismatch={historyModeMismatch}
+              locale={locale}
+            />
+          ))}
         <Card>
           <CardTitle>{t('Recent changes')}</CardTitle>
           <CardBody>
