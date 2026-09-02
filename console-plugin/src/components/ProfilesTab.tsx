@@ -77,6 +77,7 @@ import {
   cleanRuleSelection,
   consoleRule,
   ExistingTailoredProfile,
+  tailoredEffectiveCounts,
   tailoredProfileManifest,
   tailoredProfileSpecMatches,
   toggledProfiles,
@@ -321,9 +322,15 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
   // option set.
   const catalogWatchError =
     errorMessage(profilesError) ?? errorMessage(rulesError);
-  // Effective rule set the tailored profile scans: base minus disabled plus
-  // enabled. tpDisable is always a subset of baseRules (reset on base change).
-  const effectiveCount = baseRules.length - tpDisable.length + tpEnable.length;
+  // Remaining base rules after disable, plus extras not already in the base.
+  // Disable names that are not in the current base (edit of a stale CR, or a
+  // content bump) must not pull N below the real remainder; extras stay out of
+  // N so "Scans N of M base rules, plus P added" never reports N > M.
+  const { remainingBase, extraEnabled } = tailoredEffectiveCounts(
+    baseRules,
+    tpDisable,
+    tpEnable,
+  );
   const tpNameRef = React.useRef<HTMLInputElement>(null);
   const createButtonRef = React.useRef<HTMLButtonElement>(null);
   // Track create sessions so Cancel/close can restore focus to the trigger (WCAG 2.4.3).
@@ -907,19 +914,19 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
           {baseRules.length > 0 && (
             <HelperText style={{ marginTop: 'var(--pf-t--global--spacer--md)' }}>
               <HelperTextItem icon={<InfoCircleIcon />}>
-                {tpEnable.length > 0
+                {extraEnabled > 0
                   ? t('Scans {{effective}} of {{base}} base rules, plus {{added}} added.', {
-                      effective: effectiveCount,
+                      effective: remainingBase,
                       base: baseRules.length,
-                      added: tpEnable.length,
-                      formattedEffective: formatCount(effectiveCount, i18n.language),
+                      added: extraEnabled,
+                      formattedEffective: formatCount(remainingBase, i18n.language),
                       formattedBase: formatCount(baseRules.length, i18n.language),
-                      formattedAdded: formatCount(tpEnable.length, i18n.language),
+                      formattedAdded: formatCount(extraEnabled, i18n.language),
                     })
                   : t('Scans {{effective}} of {{base}} base rules.', {
-                      effective: effectiveCount,
+                      effective: remainingBase,
                       base: baseRules.length,
-                      formattedEffective: formatCount(effectiveCount, i18n.language),
+                      formattedEffective: formatCount(remainingBase, i18n.language),
                       formattedBase: formatCount(baseRules.length, i18n.language),
                     })}
               </HelperTextItem>

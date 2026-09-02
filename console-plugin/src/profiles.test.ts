@@ -2,6 +2,7 @@ import { isValidK8sName, isValidTailoredProfileName } from './names';
 import {
   cleanRuleSelection,
   consoleRule,
+  tailoredEffectiveCounts,
   tailoredProfileManifest,
   tailoredProfileSpecMatches,
   toggledProfiles,
@@ -32,6 +33,53 @@ describe('cleanRuleSelection', () => {
 describe('consoleRule', () => {
   it('writes the shared rationale so create and update payloads match', () => {
     expect(consoleRule('r1')).toEqual({ name: 'r1', rationale: 'set via console' });
+  });
+});
+
+describe('tailoredEffectiveCounts', () => {
+  const base = ['a', 'b', 'c', 'd'];
+
+  it('counts remaining base rules only; extras stay out of N so N cannot exceed M', () => {
+    expect(tailoredEffectiveCounts(base, [], [])).toEqual({ remainingBase: 4, extraEnabled: 0 });
+    expect(tailoredEffectiveCounts(base, ['b'], [])).toEqual({ remainingBase: 3, extraEnabled: 0 });
+    // The editor copy is "Scans N of M base rules, plus P added": N is remaining
+    // base (4), not 4+2, so enabling extras never reports "Scans 6 of 4".
+    expect(tailoredEffectiveCounts(base, [], ['x', 'y'])).toEqual({
+      remainingBase: 4,
+      extraEnabled: 2,
+    });
+    expect(tailoredEffectiveCounts(base, ['a', 'c'], ['x'])).toEqual({
+      remainingBase: 2,
+      extraEnabled: 1,
+    });
+  });
+
+  it('ignores disable names that are not in the current base', () => {
+    // Edit of a stale TailoredProfile, or a content bump, can list disable
+    // rules the current base no longer ships. Those must not drag N negative.
+    expect(tailoredEffectiveCounts(base, ['gone', 'a', 'gone'], [])).toEqual({
+      remainingBase: 3,
+      extraEnabled: 0,
+    });
+    expect(tailoredEffectiveCounts(['a'], ['x', 'y', 'z'], [])).toEqual({
+      remainingBase: 1,
+      extraEnabled: 0,
+    });
+  });
+
+  it('does not count enable rules that are already in the base as extras', () => {
+    expect(tailoredEffectiveCounts(base, [], ['a', 'x', 'a'])).toEqual({
+      remainingBase: 4,
+      extraEnabled: 1,
+    });
+  });
+
+  it('ignores empty names and unique-ifies both lists', () => {
+    expect(tailoredEffectiveCounts(['a', 'a', ''], ['', 'a', 'a'], ['', 'x', 'x'])).toEqual({
+      remainingBase: 0,
+      extraEnabled: 1,
+    });
+    expect(tailoredEffectiveCounts([], [], [])).toEqual({ remainingBase: 0, extraEnabled: 0 });
   });
 });
 

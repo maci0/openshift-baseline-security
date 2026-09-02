@@ -63,6 +63,11 @@ depend on those tags.
   `ClusterBaseline/cluster`. Known true/false spellings (true/false, 1/0,
   yes/no, on/off, and the same aliases as before) are unchanged; unset still
   creates the default CR.
+- Console: the tailored-profile editor's "Scans N of M base rules" readout
+  counted extra enabled rules inside N, so enabling extras on a 100-rule base
+  could read as "Scans 105 of 100 base rules, plus 5 added." N is now the
+  remaining base rules; extras stay in the plus-added clause. Disable rules
+  that are not in the current base no longer drag N below the real remainder.
 
 ### Docs
 

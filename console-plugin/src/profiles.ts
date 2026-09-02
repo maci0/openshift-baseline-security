@@ -17,6 +17,51 @@ export interface RuleSelection {
   enable: string[];
 }
 
+// Live "Scans N of M base rules, plus P added" readout. N is remaining base
+// rules after disable (never includes extras, so N cannot exceed M). P is
+// enable rules that are not already in the base. Disable names absent from
+// the current base (stale after a content bump, or loaded from a prior base)
+// do not reduce N.
+export interface TailoredEffectiveCounts {
+  remainingBase: number;
+  extraEnabled: number;
+}
+
+export const tailoredEffectiveCounts = (
+  baseRules: readonly string[],
+  disableRules: readonly string[],
+  enableRules: readonly string[],
+): TailoredEffectiveCounts => {
+  const baseSet = new Set<string>();
+  for (const r of baseRules) {
+    if (r) {
+      baseSet.add(r);
+    }
+  }
+  const disableSet = new Set<string>();
+  for (const r of disableRules) {
+    if (r) {
+      disableSet.add(r);
+    }
+  }
+  let remainingBase = 0;
+  for (const r of baseSet) {
+    if (!disableSet.has(r)) {
+      remainingBase++;
+    }
+  }
+  const seenEnable = new Set<string>();
+  let extraEnabled = 0;
+  for (const r of enableRules) {
+    if (!r || seenEnable.has(r) || baseSet.has(r)) {
+      continue;
+    }
+    seenEnable.add(r);
+    extraEnabled++;
+  }
+  return { remainingBase, extraEnabled };
+};
+
 // TailoredProfile manifest written on create; mirrors apiVersion/kind of
 // compliance.openshift.io/v1alpha1 and the fields admission accepts.
 export interface TailoredProfileManifest {

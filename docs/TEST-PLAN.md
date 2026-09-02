@@ -285,6 +285,10 @@ per-node annotation) when nodes disagree.
       `baseline-tp-…` stays a valid label value (63-char budget).
 - [x] **Metrics label `tp:<name>`**: publishMetrics emits tailored series
       (`TestPublishMetrics` asserts `tp:custom` pass/fail labels).
+- [x] **Editor "Scans N of M" readout**: N is remaining base rules after
+      disable, not N+extras; extras are the plus-added clause; disable names
+      absent from the current base do not reduce N (jest
+      `tailoredEffectiveCounts`).
 
 ## D. Operator install lifecycle
 
