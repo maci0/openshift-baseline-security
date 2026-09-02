@@ -136,6 +136,26 @@ export const ProfileGVK: K8sGroupVersionKind = {
 
 export const ClusterBaselineModel = model(ClusterBaselineGVK, 'clusterbaselines', false);
 
+// Singleton name enforced by CRD CEL (operator default_cr.go creates this).
+export const CLUSTER_BASELINE_NAME = 'cluster';
+
+// Manifest the operator default-creates when no ClusterBaseline exists
+// (operator/cmd/default_cr.go). The empty-state Create action writes the same
+// object so a stuck first-run can recover without YAML.
+export type DefaultClusterBaselineManifest = {
+  apiVersion: string;
+  kind: string;
+  metadata: { name: typeof CLUSTER_BASELINE_NAME };
+  spec: { profiles: ProfileKey[] };
+};
+
+export const defaultClusterBaselineManifest = (): DefaultClusterBaselineManifest => ({
+  apiVersion: `${ClusterBaselineGVK.group}/${ClusterBaselineGVK.version}`,
+  kind: ClusterBaselineGVK.kind,
+  metadata: { name: CLUSTER_BASELINE_NAME },
+  spec: { profiles: ['cis'] },
+});
+
 // RBAC gate shared by every editing surface: all tabs patch the same singleton
 // ClusterBaseline. Derived from the GVK/model so a group or plural rename
 // cannot desynchronize one tab's permission check from the others.
@@ -143,6 +163,11 @@ export const clusterBaselinePatchAccess = {
   group: ClusterBaselineGVK.group,
   resource: ClusterBaselineModel.plural,
   verb: 'patch',
+} as const;
+export const clusterBaselineCreateAccess = {
+  group: ClusterBaselineGVK.group,
+  resource: ClusterBaselineModel.plural,
+  verb: 'create',
 } as const;
 export const ComplianceScanModel = model(ComplianceScanGVK, 'compliancescans', true);
 export const ComplianceRemediationModel = model(ComplianceRemediationGVK, 'complianceremediations', true);
@@ -323,9 +348,10 @@ export type ClusterBaseline = {
 const SUITE_LABEL = 'compliance.openshift.io/suite';
 
 // True when no built-in and no tailored profile is selected: the operator prunes
-// all bindings and scans never run, so every tab shows the "Scanning is
-// disabled" dead-end. Single source so the three tabs cannot drift on the
-// definition; tolerates a partial CR (missing spec fields) at runtime.
+// all bindings and scans never run, so Overview, Results, Remediations, and
+// Profiles show the "Scanning is disabled" dead-end. Single source so the tabs
+// cannot drift on the definition; tolerates a partial CR (missing spec fields)
+// at runtime.
 export const scanningDisabled = (baseline?: Pick<ClusterBaseline, 'spec'>): boolean =>
   (baseline?.spec.profiles?.length ?? 0) === 0 &&
   (baseline?.spec.tailoredProfiles?.length ?? 0) === 0;

@@ -299,10 +299,16 @@ Extension points (exact SDK types):
 
 Behaviors that write to the cluster:
 
+- **Create default baseline**: when no ClusterBaseline exists, the empty
+  state can `k8sCreate` `ClusterBaseline/cluster` with `spec.profiles: [cis]`
+  (same object the operator default-creates). Gated on create RBAC. AlreadyExists
+  is treated as success (race with the operator).
 - **Rescan now**: set annotation `compliance.openshift.io/rescan` on each
   owned ComplianceScan to a fresh token (e.g. timestamp). The value must
   change on every click so a re-rescan is observed when the key already
-  exists (empty string alone is not enough).
+  exists (empty string alone is not enough). When no owned scans exist, the
+  disabled reason distinguishes no baseline, no selected profiles, and
+  profiles selected but scans not created yet.
 - **Profile toggle**: patch `ClusterBaseline.spec.profiles`.
 - **Schedule edit**: patch `ClusterBaseline.spec.schedule` (5-field cron).
 - **Waivers**: add/remove entries on `ClusterBaseline.spec.waivers`.

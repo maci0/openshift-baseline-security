@@ -736,7 +736,9 @@ const ResultsTab: React.FC<{
                 <a href="/baseline-security/profiles">{t('Go to Profiles')}</a>
               </>
             ) : (
-              t('Results appear after a scan completes. Use Rescan now above to start a scan.')
+              t(
+                'Results appear after a scan completes. The first scan starts automatically; use Rescan now above to run one sooner.',
+              )
             )}
           </EmptyStateBody>
         </EmptyState>

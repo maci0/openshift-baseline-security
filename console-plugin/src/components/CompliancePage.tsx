@@ -21,12 +21,14 @@ import { DownloadIcon } from '@patternfly/react-icons';
 import {
   ClusterBaseline,
   ClusterBaselineGVK,
+  CLUSTER_BASELINE_NAME,
   COMPLIANCE_NAMESPACE,
   ComplianceCheckResult,
   ComplianceCheckResultGVK,
   ComplianceScanGVK,
   ComplianceScanModel,
   ownedSuiteSelector,
+  scanningDisabled,
 } from '../models';
 import { formatCount } from '../dates';
 import { downloadBlob } from '../download';
@@ -63,9 +65,9 @@ const CompliancePage: React.FC = () => {
     groupVersionKind: ClusterBaselineGVK,
     isList: true,
   });
-  // CRD requires metadata.name == "cluster"; prefer that over list order.
+  // CRD requires metadata.name == CLUSTER_BASELINE_NAME; prefer that over list order.
   const baseline =
-    baselines?.find((b) => b.metadata.name === 'cluster') ?? baselines?.[0];
+    baselines?.find((b) => b.metadata.name === CLUSTER_BASELINE_NAME) ?? baselines?.[0];
   const profiles = baseline?.spec.profiles;
   const tailored = baseline?.spec.tailoredProfiles;
   // Content keys: status-only CR updates reallocate spec arrays with the same
@@ -126,12 +128,22 @@ const CompliancePage: React.FC = () => {
   const ownedScans = scans ?? EMPTY_SCANS;
   const ownedResults = checkResults ?? EMPTY_RESULTS;
 
+  const noOwnedScansReason = (): string => {
+    if (!baseline) {
+      return t('Baseline not configured');
+    }
+    if (scanningDisabled(baseline)) {
+      return t('No owned scans to rescan yet. Enable a profile first.');
+    }
+    return t('No owned scans yet. The first scan starts once profiles are bound.');
+  };
+
   const rescan = async () => {
     if (rescanningRef.current) return;
     // Button is disabled when there are no scans; still refuse a no-op path so a
     // race (scans unmounted mid-click) does not look like a successful rescan.
     if (!ownedScans.length) {
-      setRescanError(t('No owned scans to rescan yet. Enable a profile first.'));
+      setRescanError(noOwnedScansReason());
       return;
     }
     rescanningRef.current = true;
@@ -241,7 +253,7 @@ const CompliancePage: React.FC = () => {
     } else if (!canRescan) {
       rescanDisabledReason = t('You do not have permission to rescan.');
     } else if (!ownedScans.length) {
-      rescanDisabledReason = t('No owned scans to rescan yet. Enable a profile first.');
+      rescanDisabledReason = noOwnedScansReason();
     }
   }
 

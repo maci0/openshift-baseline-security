@@ -68,6 +68,7 @@ import {
   TAILORED_PROFILE_MAX_ITEMS,
   TailoredProfileModel,
   TailoredProfileResource,
+  scanningDisabled,
 } from '../models';
 import { formatCount } from '../dates';
 import { errorMessage, isAlreadyExists } from '../errors';
@@ -706,6 +707,17 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
           ref on it is dropped. restoreFocus targets this sentinel when a modal
           trigger unmounts on success, recovering focus to the tab top. */}
       <div ref={regionRef} tabIndex={-1} />
+      {scanningDisabled(baseline) && (
+        <Alert
+          variant="info"
+          isInline
+          isLiveRegion
+          title={t('Scanning is disabled')}
+          style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}
+        >
+          {t('No profiles are selected. Enable a profile to resume scanning.')}
+        </Alert>
+      )}
       {catalogWatchError && (
         <Alert
           variant="danger"

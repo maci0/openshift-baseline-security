@@ -674,7 +674,7 @@ const RemediationsTab: React.FC<{
                 ) : (
                   <>
                     {t(
-                      'The Compliance Operator generates remediations for failing checks that can be auto-fixed. None are available yet; rescan after new failures appear.',
+                      'The Compliance Operator generates remediations only for failing checks that can be auto-fixed. None are available for the current results.',
                     )}{' '}
                     <a href="/baseline-security/results">{t('Review check results')}</a>
                     {' · '}

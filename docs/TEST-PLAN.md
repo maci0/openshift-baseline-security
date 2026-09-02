@@ -362,8 +362,15 @@ per-node annotation) when nodes disagree.
 - [x] **errorMessage** normalizes string / Error / `{message}` watch errors
       (jest `errorMessage`).
 - [ ] **No ClusterBaseline yet**: Overview item shows "Not scanned", page shows
-      empty/onboarding state, no crash (Playwright + jest on
-      `ClusterScoreItem` loaded/empty branch).
+      empty/onboarding state (operator-creates copy + Create default baseline
+      when create RBAC allows), no crash (Playwright + jest on
+      `ClusterScoreItem` loaded/empty branch; jest `defaultClusterBaselineManifest`).
+- [x] **defaultClusterBaselineManifest** matches operator default CR name/profile
+      (jest `defaultClusterBaselineManifest`).
+- [ ] **Rescan disabled reasons**: no baseline vs no profiles vs profiles
+      selected but scans not created yet (tooltip copy; component or e2e).
+- [ ] **Next scan while scanning disabled**: Overview Details shows "—" labeled
+      Scanning is disabled, not a leftover timestamp.
 - [ ] **Results CSV export UI path**: exports only filtered rows, attaches a
       temporary download link, removes it after click, revokes the object URL
       asynchronously (jsdom component test).
@@ -1169,6 +1176,8 @@ Cases where the UI is "working" but trains admins to do the wrong thing.
 - [ ] **Next scan "—" with InvalidSchedule**: user is not told "scans stopped"
       if last-good cron is still firing; copy should say schedule invalid /
       using last good, not "no schedule".
+- [ ] **Next scan timestamp after last profile disabled**: Overview must not
+      keep showing a future time that cannot fire (scanning-disabled "—").
 - [ ] **Rescan succeeds, score unchanged for hours**: UI does not imply rescan
       failed; optional "last rescan requested at" is future work; at least no
       false error toast.

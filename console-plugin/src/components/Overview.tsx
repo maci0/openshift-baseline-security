@@ -930,10 +930,19 @@ const Overview: React.FC<{
           })}
           style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}
         >
-          {/* Unfiltered Results: newlyFailed tracks raw FAIL (including checks
-              that are currently WAIVED for score), so a FAIL-only chip would
-              hide waived regressions the alert is counting. */}
-          <a href="/baseline-security/results">{t('Review failing checks')}</a>
+          {/* Named checks, not a FAIL-only Results chip: newlyFailed tracks
+              raw FAIL (including checks currently WAIVED for score), so a
+              FAIL filter would hide waived regressions this alert counts. */}
+          {newlyFailedItems.length > 0 ? (
+            newlyFailedItems.map((c, i) => (
+              <React.Fragment key={c.name}>
+                {i > 0 && ', '}
+                <a href={c.href}>{c.title}</a>
+              </React.Fragment>
+            ))
+          ) : (
+            <a href="/baseline-security/results">{t('Review check results')}</a>
+          )}
           {fixed.length > 0 && (
             <>
               {' '}
@@ -1005,7 +1014,9 @@ const Overview: React.FC<{
               <DescriptionListGroup>
                 <DescriptionListTerm>{t('Next scan')}</DescriptionListTerm>
                 <DescriptionListDescription>
-                  {baseline.status?.nextScanTime ? (
+                  {scanningDisabled(baseline) ? (
+                    <span aria-label={t('Scanning is disabled')}>—</span>
+                  ) : baseline.status?.nextScanTime ? (
                     <Timestamp timestamp={baseline.status.nextScanTime} />
                   ) : (
                     <span aria-label={t('n/a')}>—</span>
@@ -1062,7 +1073,7 @@ const Overview: React.FC<{
                 <EmptyStateBody>
                   {hasPriorScan
                     ? t('Fail and fix deltas will appear here after the next completed scan.')
-                    : t('Run a scan, then rescan later to see newly failing and fixed checks.')}
+                    : t('Recent changes appear after two completed scans.')}
                 </EmptyStateBody>
               </EmptyState>
             ) : (

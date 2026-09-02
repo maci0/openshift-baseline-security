@@ -7,6 +7,9 @@ import {
   ownedSuiteLabels,
   ownedSuiteSelector,
   scanningDisabled,
+  CLUSTER_BASELINE_NAME,
+  ClusterBaselineGVK,
+  defaultClusterBaselineManifest,
   PROFILE_INFO,
   PROFILE_KEYS,
   PROFILE_MAX_ITEMS,
@@ -259,7 +262,7 @@ describe('profileTitle', () => {
   });
 });
 
-// Single source for the "Scanning is disabled" dead-end shown by all three tabs;
+// Single source for the "Scanning is disabled" dead-end shown on every tab;
 // a drift here would make one tab render controls while another claims disabled.
 describe('scanningDisabled', () => {
   const cb = (spec: Partial<ClusterBaseline['spec']>): ClusterBaseline => ({
@@ -276,5 +279,15 @@ describe('scanningDisabled', () => {
     expect(scanningDisabled(cb({ profiles: ['cis'] }))).toBeFalsy();
     expect(scanningDisabled(cb({ profiles: [], tailoredProfiles: ['tp-custom'] }))).toBeFalsy();
     expect(scanningDisabled(cb({ profiles: ['cis'], tailoredProfiles: ['tp-custom'] }))).toBeFalsy();
+  });
+});
+
+describe('defaultClusterBaselineManifest', () => {
+  it('matches the operator default CR (cluster + cis)', () => {
+    const m = defaultClusterBaselineManifest();
+    expect(m.metadata.name).toBe(CLUSTER_BASELINE_NAME);
+    expect(m.kind).toBe(ClusterBaselineGVK.kind);
+    expect(m.apiVersion).toBe(`${ClusterBaselineGVK.group}/${ClusterBaselineGVK.version}`);
+    expect(m.spec.profiles).toEqual(['cis']);
   });
 });

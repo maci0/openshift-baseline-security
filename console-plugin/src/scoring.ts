@@ -1,6 +1,7 @@
 // Pass/fail and severity-weighted score math (lockstep with operator scoring).
 import {
   ClusterBaseline,
+  CLUSTER_BASELINE_NAME,
   ComplianceCheckResult,
   isOwnedByBaseline,
   ResultCounts,
@@ -40,7 +41,7 @@ export const historyScoringModeMismatch = (
 // return its score, or null when there is none / it has not scored yet. Shared
 // by the cluster Overview detail item.
 export const clusterScore = (baselines?: ClusterBaseline[]): number | null => {
-  const b = baselines?.find((x) => x.metadata.name === 'cluster') ?? baselines?.[0];
+  const b = baselines?.find((x) => x.metadata.name === CLUSTER_BASELINE_NAME) ?? baselines?.[0];
   return b?.status?.score ?? null;
 };
 

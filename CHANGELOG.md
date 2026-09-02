@@ -51,6 +51,10 @@ depend on those tags.
   ComplianceCheckResult lists (500 per call), so multi-profile scans with
   thousands of results no longer pin full objects in the informer or a
   single unbounded List response.
+- Console: Profiles shows the same "Scanning is disabled" banner as the other
+  tabs when no profile is selected.
+- Console: Remediations empty copy no longer tells admins to rescan after new
+  failures when failing checks may already exist without auto-fixes.
 
 ### Fixed
 
@@ -68,6 +72,19 @@ depend on those tags.
   could read as "Scans 105 of 100 base rules, plus 5 added." N is now the
   remaining base rules; extras stay in the plus-added clause. Disable rules
   that are not in the current base no longer drag N below the real remainder.
+- Console: with a profile selected but no scans yet, Rescan now told admins
+  to enable a profile. The tooltip now says the first scan starts once
+  profiles are bound.
+- Console: Overview Details still showed a next-scan time after scanning was
+  turned off, so it looked like a scan was still scheduled.
+- Console: the missing-ClusterBaseline empty state sent admins to OperatorHub
+  even though the plugin is already running. It now says the operator creates
+  `ClusterBaseline/cluster` and offers Create default baseline when the user
+  can create the CR.
+- Console: Results with no rows told first-time admins to click Rescan now
+  (often still disabled) instead of waiting for the automatic first scan.
+- Console: the newly-failing Overview alert linked to the unfiltered Results
+  table. It now lists the named checks.
 
 ### Docs
 
