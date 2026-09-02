@@ -16,11 +16,17 @@ import (
 	baselinev1alpha1 "github.com/maci0/baseline-security-operator/api/v1alpha1"
 )
 
-func TestCheckScanStorageDegradedOnPendingPVC(t *testing.T) {
+func pvcScheme(t *testing.T) *runtime.Scheme {
+	t.Helper()
 	scheme := runtime.NewScheme()
 	if err := clientgoscheme.AddToScheme(scheme); err != nil {
 		t.Fatal(err)
 	}
+	return scheme
+}
+
+func TestCheckScanStorageDegradedOnPendingPVC(t *testing.T) {
+	scheme := pvcScheme(t)
 	stale := &corev1.PersistentVolumeClaim{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:              "ocp4-cis",
@@ -85,10 +91,7 @@ func TestCheckScanStorageDegradedOnPendingPVC(t *testing.T) {
 // unsorted message would rewrite the condition every reconcile, spinning a
 // status-write/requeue loop.
 func TestCheckScanStoragePendingMessageSorted(t *testing.T) {
-	scheme := runtime.NewScheme()
-	if err := clientgoscheme.AddToScheme(scheme); err != nil {
-		t.Fatal(err)
-	}
+	scheme := pvcScheme(t)
 	old := metav1.Time{Time: time.Now().Add(-5 * time.Minute)}
 	// Two owned Pending PVCs; added in reverse of sorted order.
 	node := &corev1.PersistentVolumeClaim{
@@ -116,10 +119,7 @@ func TestCheckScanStoragePendingMessageSorted(t *testing.T) {
 }
 
 func TestCheckScanStorageEmptyNamespace(t *testing.T) {
-	scheme := runtime.NewScheme()
-	if err := clientgoscheme.AddToScheme(scheme); err != nil {
-		t.Fatal(err)
-	}
+	scheme := pvcScheme(t)
 	r := &ClusterBaselineReconciler{
 		Client: fake.NewClientBuilder().WithScheme(scheme).Build(),
 		Scheme: scheme,
@@ -137,10 +137,7 @@ func TestCheckScanStorageEmptyNamespace(t *testing.T) {
 }
 
 func TestCheckScanStorageTailoredPVC(t *testing.T) {
-	scheme := runtime.NewScheme()
-	if err := clientgoscheme.AddToScheme(scheme); err != nil {
-		t.Fatal(err)
-	}
+	scheme := pvcScheme(t)
 	// A tailored scan PVC is named after the TailoredProfile; a Pending one
 	// must flag ScanStorageReady=False.
 	pvc := &corev1.PersistentVolumeClaim{

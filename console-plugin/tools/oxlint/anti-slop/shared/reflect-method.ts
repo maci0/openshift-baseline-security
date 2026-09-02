@@ -1,6 +1,6 @@
 import type { ESTree, Scope, SourceCode, Variable } from "@oxlint/plugins";
 
-function resolveVariable(
+export function resolveVariable(
   sourceCode: SourceCode,
   identifier: ESTree.IdentifierReference,
 ): Variable | null {

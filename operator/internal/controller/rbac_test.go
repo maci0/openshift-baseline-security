@@ -15,58 +15,63 @@ import (
 // get/update/patch (resourceNames=compliance-operator); create unscoped;
 // list/watch unused (Get by name only).
 func TestSubscriptionRBACAllowsUpdate(t *testing.T) {
-	text := mustReadRoleYAML(t)
-	if !strings.Contains(text, "subscriptions") {
-		t.Fatal("role.yaml has no subscriptions resource entry")
-	}
-	if !roleHasResourceVerb(text, "subscriptions", "create") {
-		t.Fatal("subscriptions RBAC missing create")
-	}
-	for _, verb := range []string{"get", "update", "patch"} {
-		if !roleHasResourceVerb(text, "subscriptions", verb) {
-			t.Fatalf("subscriptions RBAC missing verb %q", verb)
-		}
-	}
-	// Name-scope must pin the CO Subscription so a compromised SA cannot
-	// rewrite arbitrary Subscriptions cluster-wide.
-	if !strings.Contains(text, "compliance-operator") {
-		t.Fatal("subscriptions RBAC missing resourceNames compliance-operator")
-	}
+	assertRoleResourceUpdate(t, mustReadRoleYAML(t), "subscriptions")
 }
 
 // TestOperatorGroupRBACAllowsUpdate guards ensureComplianceOperatorGroup, which
 // patches targetNamespaces on an existing empty OperatorGroup.
 func TestOperatorGroupRBACAllowsUpdate(t *testing.T) {
-	text := mustReadRoleYAML(t)
-	if !strings.Contains(text, "operatorgroups") {
-		t.Fatal("role.yaml has no operatorgroups resource entry")
+	assertRoleResourceUpdate(t, mustReadRoleYAML(t), "operatorgroups")
+}
+
+func assertRoleResourceUpdate(t *testing.T, text, resource string) {
+	t.Helper()
+	if !strings.Contains(text, resource) {
+		t.Fatalf("role.yaml has no %s resource entry", resource)
 	}
-	if !roleHasResourceVerb(text, "operatorgroups", "create") {
-		t.Fatal("operatorgroups RBAC missing create")
+	if !roleHasResourceVerb(text, resource, "create") {
+		t.Fatalf("%s RBAC missing create", resource)
 	}
 	for _, verb := range []string{"get", "update", "patch"} {
-		if !roleHasResourceVerb(text, "operatorgroups", verb) {
-			t.Fatalf("operatorgroups RBAC missing verb %q", verb)
+		if !roleHasResourceVerb(text, resource, verb) {
+			t.Fatalf("%s RBAC missing verb %q", resource, verb)
 		}
 	}
+	// Name-scope must pin the CO object so a compromised SA cannot rewrite
+	// arbitrary Subscriptions / OperatorGroups cluster-wide.
 	if !strings.Contains(text, "compliance-operator") {
-		t.Fatal("operatorgroups RBAC missing resourceNames compliance-operator")
+		t.Fatalf("%s RBAC missing resourceNames compliance-operator", resource)
 	}
 }
 
-func mustReadRoleYAML(t *testing.T) string {
+func mustReadRepoFile(t *testing.T, rel ...string) string {
 	t.Helper()
 	_, thisFile, _, ok := runtime.Caller(0)
 	if !ok {
 		t.Fatal("runtime.Caller failed")
 	}
-	// internal/controller -> operator/config/rbac/role.yaml
-	rolePath := filepath.Join(filepath.Dir(thisFile), "..", "..", "config", "rbac", "role.yaml")
-	raw, err := os.ReadFile(rolePath)
+	path := filepath.Join(append([]string{filepath.Dir(thisFile)}, rel...)...)
+	raw, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("read role.yaml: %v", err)
+		t.Fatalf("read %s: %v", filepath.Base(path), err)
 	}
 	return string(raw)
+}
+
+func mustReadRoleYAML(t *testing.T) string {
+	t.Helper()
+	return mustReadRepoFile(t, "..", "..", "config", "rbac", "role.yaml")
+}
+
+func mustReadUserRolesYAML(t *testing.T) string {
+	t.Helper()
+	return mustReadRepoFile(t, "..", "..", "config", "rbac", "user_roles.yaml")
+}
+
+func mustReadCSV(t *testing.T) string {
+	t.Helper()
+	return mustReadRepoFile(t, "..", "..", "bundle", "manifests",
+		"baseline-security-operator.clusterserviceversion.yaml")
 }
 
 // roleHasResourceVerb is true when role.yaml lists verb as a YAML list item
@@ -93,69 +98,28 @@ func rbacVerbListed(block, verb string) bool {
 // TestCSVOperatorGroupRBACAllowsUpdate keeps the OLM CSV permissions in sync
 // with role.yaml for OperatorGroup targetNamespaces repair.
 func TestCSVOperatorGroupRBACAllowsUpdate(t *testing.T) {
-	_, thisFile, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller failed")
-	}
-	csvPath := filepath.Join(filepath.Dir(thisFile), "..", "..", "bundle", "manifests",
-		"baseline-security-operator.clusterserviceversion.yaml")
-	raw, err := os.ReadFile(csvPath)
-	if err != nil {
-		t.Fatalf("read CSV: %v", err)
-	}
-	text := string(raw)
-	idx := strings.Index(text, "resources: [operatorgroups]")
-	if idx < 0 {
-		t.Fatal("CSV has no operatorgroups permission entry")
-	}
-	// Create is unscoped; get/update/patch are on the resourceNames block.
-	// Scan the full CSV so either form is accepted.
-	if !csvVerbsInclude(text, "update") || !csvVerbsInclude(text, "patch") {
-		t.Fatalf("CSV operatorgroups rules missing update/patch")
-	}
-	if !strings.Contains(text, "resourceNames: [compliance-operator]") {
-		t.Fatal("CSV operatorgroups missing resourceNames compliance-operator")
-	}
+	assertCSVResourceUpdate(t, mustReadCSV(t), "operatorgroups")
 }
 
 // TestCSVSubscriptionRBACAllowsUpdate keeps the OLM CSV permissions in sync
 // with role.yaml for the catalog-source sync path.
 func TestCSVSubscriptionRBACAllowsUpdate(t *testing.T) {
-	_, thisFile, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller failed")
-	}
-	csvPath := filepath.Join(filepath.Dir(thisFile), "..", "..", "bundle", "manifests",
-		"baseline-security-operator.clusterserviceversion.yaml")
-	raw, err := os.ReadFile(csvPath)
-	if err != nil {
-		t.Fatalf("read CSV: %v", err)
-	}
-	text := string(raw)
-	idx := strings.Index(text, "resources: [subscriptions]")
-	if idx < 0 {
-		t.Fatal("CSV has no subscriptions permission entry")
-	}
-	if !csvVerbsInclude(text, "update") || !csvVerbsInclude(text, "patch") {
-		t.Fatalf("CSV subscriptions rules missing update/patch")
-	}
-	if !strings.Contains(text, "resourceNames: [compliance-operator]") {
-		t.Fatal("CSV subscriptions missing resourceNames compliance-operator")
-	}
+	assertCSVResourceUpdate(t, mustReadCSV(t), "subscriptions")
 }
 
-func mustReadUserRolesYAML(t *testing.T) string {
+func assertCSVResourceUpdate(t *testing.T, text, resource string) {
 	t.Helper()
-	_, thisFile, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller failed")
+	if !strings.Contains(text, "resources: ["+resource+"]") {
+		t.Fatalf("CSV has no %s permission entry", resource)
 	}
-	path := filepath.Join(filepath.Dir(thisFile), "..", "..", "config", "rbac", "user_roles.yaml")
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read user_roles.yaml: %v", err)
+	// Create is unscoped; get/update/patch are on the resourceNames block.
+	// Scan the full CSV so either form is accepted.
+	if !csvVerbsInclude(text, "update") || !csvVerbsInclude(text, "patch") {
+		t.Fatalf("CSV %s rules missing update/patch", resource)
 	}
-	return string(raw)
+	if !strings.Contains(text, "resourceNames: [compliance-operator]") {
+		t.Fatalf("CSV %s missing resourceNames compliance-operator", resource)
+	}
 }
 
 // clusterRoleDoc returns the YAML document whose metadata.name is name.
@@ -170,15 +134,21 @@ func clusterRoleDoc(rolesYAML, name string) string {
 	return ""
 }
 
+func mustUserRoleDoc(t *testing.T, name string) string {
+	t.Helper()
+	doc := clusterRoleDoc(mustReadUserRolesYAML(t), name)
+	if doc == "" {
+		t.Fatalf("user_roles.yaml missing %s", name)
+	}
+	return doc
+}
+
 // TestViewerRoleCoversConsoleReads pins the aggregated viewer ClusterRole to
 // every compliance.openshift.io kind the console watches on the Profiles tab
 // (profiles, tailoredprofiles, rules) in addition to results/scans/suites.
 // Omitting tailoredprofiles or rules 403s those watches for view-only users.
 func TestViewerRoleCoversConsoleReads(t *testing.T) {
-	doc := clusterRoleDoc(mustReadUserRolesYAML(t), "baseline-security-viewer")
-	if doc == "" {
-		t.Fatal("user_roles.yaml missing baseline-security-viewer")
-	}
+	doc := mustUserRoleDoc(t, "baseline-security-viewer")
 	if !strings.Contains(doc, "resources: [clusterbaselines]") {
 		t.Fatal("viewer role missing clusterbaselines")
 	}
@@ -196,7 +166,7 @@ func TestViewerRoleCoversConsoleReads(t *testing.T) {
 		}
 	}
 	for _, verb := range []string{"create", "update", "patch", "delete"} {
-		if rbacVerbListed(doc, verb) || csvVerbsInclude(doc, verb) {
+		if roleDocHasVerb(doc, verb) {
 			t.Fatalf("viewer role must stay read-only, found verb %q", verb)
 		}
 	}
@@ -206,10 +176,7 @@ func TestViewerRoleCoversConsoleReads(t *testing.T) {
 // tailoredprofiles so a user with the aggregated admin role can use the
 // console authoring flow (k8sCreate / k8sUpdate) without cluster-admin.
 func TestAdminRoleAllowsTailoredProfileAuthoring(t *testing.T) {
-	doc := clusterRoleDoc(mustReadUserRolesYAML(t), "baseline-security-admin")
-	if doc == "" {
-		t.Fatal("user_roles.yaml missing baseline-security-admin")
-	}
+	doc := mustUserRoleDoc(t, "baseline-security-admin")
 	idx := strings.Index(doc, "resources: [tailoredprofiles]")
 	if idx < 0 {
 		t.Fatal("admin role missing tailoredprofiles")
@@ -246,10 +213,7 @@ func csvVerbsInclude(block, verb string) bool {
 // TestViewerRoleDeniesWrites is the deny side of the human RBAC matrix:
 // baseline-security-viewer must not grant create/update/patch/delete.
 func TestViewerRoleDeniesWrites(t *testing.T) {
-	doc := clusterRoleDoc(mustReadUserRolesYAML(t), "baseline-security-viewer")
-	if doc == "" {
-		t.Fatal("user_roles.yaml missing baseline-security-viewer")
-	}
+	doc := mustUserRoleDoc(t, "baseline-security-viewer")
 	for _, verb := range []string{"create", "update", "patch", "delete"} {
 		if roleDocHasVerb(doc, verb) {
 			t.Fatalf("viewer ClusterRole must not grant %q", verb)
@@ -262,10 +226,7 @@ func TestViewerRoleDeniesWrites(t *testing.T) {
 // RoleBinding to admin in openshift-compliance patch ComplianceRemediations
 // (node reboots) without cluster-scoped ClusterBaseline access.
 func TestAdminRoleNotAggregatedToAdmin(t *testing.T) {
-	doc := clusterRoleDoc(mustReadUserRolesYAML(t), "baseline-security-admin")
-	if doc == "" {
-		t.Fatal("user_roles.yaml missing baseline-security-admin")
-	}
+	doc := mustUserRoleDoc(t, "baseline-security-admin")
 	if strings.Contains(doc, "aggregate-to-admin") {
 		t.Fatal("baseline-security-admin must not aggregate onto the built-in admin ClusterRole")
 	}
@@ -275,10 +236,7 @@ func TestAdminRoleNotAggregatedToAdmin(t *testing.T) {
 // is limited to the singleton name so a second object cannot be mutated if
 // admission is bypassed. get/list/watch stay unscoped (list ignores resourceNames).
 func TestAdminClusterBaselineWritesAreNameScoped(t *testing.T) {
-	doc := clusterRoleDoc(mustReadUserRolesYAML(t), "baseline-security-admin")
-	if doc == "" {
-		t.Fatal("user_roles.yaml missing baseline-security-admin")
-	}
+	doc := mustUserRoleDoc(t, "baseline-security-admin")
 	if !strings.Contains(doc, "resourceNames: [cluster]") {
 		t.Fatal("admin ClusterBaseline writes must set resourceNames: [cluster]")
 	}
@@ -290,10 +248,7 @@ func TestAdminClusterBaselineWritesAreNameScoped(t *testing.T) {
 // TestAdminRoleIncludesViewerReads: binding only baseline-security-admin must
 // still list check results (admin is a superset of viewer reads).
 func TestAdminRoleIncludesViewerReads(t *testing.T) {
-	doc := clusterRoleDoc(mustReadUserRolesYAML(t), "baseline-security-admin")
-	if doc == "" {
-		t.Fatal("user_roles.yaml missing baseline-security-admin")
-	}
+	doc := mustUserRoleDoc(t, "baseline-security-admin")
 	for _, res := range []string{
 		"clusterbaselines", "compliancecheckresults", "compliancescans",
 		"compliancesuites", "complianceremediations", "profiles", "tailoredprofiles",

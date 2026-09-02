@@ -309,11 +309,8 @@ func TestMetricsTLSOptsMinVersion(t *testing.T) {
 	}
 }
 
-// Concurrent handshakes share one self-signed identity and never return nil/err
-// under the empty-dir fallback path (GetCertificate is on the TLS hot path).
-func TestMetricsCertProviderConcurrentSelfSigned(t *testing.T) {
-	p := &metricsCertProvider{certDir: t.TempDir()}
-	const n = 32
+func concurrentCertificates(t *testing.T, p *metricsCertProvider, n int) []*tls.Certificate {
+	t.Helper()
 	var wg sync.WaitGroup
 	certs := make([]*tls.Certificate, n)
 	errs := make([]error, n)
@@ -325,17 +322,29 @@ func TestMetricsCertProviderConcurrentSelfSigned(t *testing.T) {
 		}()
 	}
 	wg.Wait()
-	var first *tls.Certificate
 	for i := 0; i < n; i++ {
 		if errs[i] != nil || certs[i] == nil {
 			t.Fatalf("goroutine %d: cert=%v err=%v", i, certs[i], errs[i])
 		}
-		if first == nil {
-			first = certs[i]
-		} else if certs[i] != first {
-			t.Fatal("concurrent first load produced multiple self-signed identities")
+	}
+	return certs
+}
+
+func requireSameCertificate(t *testing.T, certs []*tls.Certificate, msg string) {
+	t.Helper()
+	for i := 1; i < len(certs); i++ {
+		if certs[i] != certs[0] {
+			t.Fatal(msg)
 		}
 	}
+}
+
+// Concurrent handshakes share one self-signed identity and never return nil/err
+// under the empty-dir fallback path (GetCertificate is on the TLS hot path).
+func TestMetricsCertProviderConcurrentSelfSigned(t *testing.T) {
+	p := &metricsCertProvider{certDir: t.TempDir()}
+	requireSameCertificate(t, concurrentCertificates(t, p, 32),
+		"concurrent first load produced multiple self-signed identities")
 }
 
 // Concurrent loads of the same on-disk pair share one cached certificate pointer.
@@ -343,29 +352,8 @@ func TestMetricsCertProviderConcurrentLoad(t *testing.T) {
 	dir := t.TempDir()
 	writeTestPair(t, dir)
 	p := &metricsCertProvider{certDir: dir}
-	const n = 32
-	var wg sync.WaitGroup
-	certs := make([]*tls.Certificate, n)
-	errs := make([]error, n)
-	wg.Add(n)
-	for i := 0; i < n; i++ {
-		go func() {
-			defer wg.Done()
-			certs[i], errs[i] = p.GetCertificate(nil)
-		}()
-	}
-	wg.Wait()
-	var first *tls.Certificate
-	for i := 0; i < n; i++ {
-		if errs[i] != nil || certs[i] == nil {
-			t.Fatalf("goroutine %d: cert=%v err=%v", i, certs[i], errs[i])
-		}
-		if first == nil {
-			first = certs[i]
-		} else if certs[i] != first {
-			t.Fatal("concurrent load produced multiple certificate pointers for one fingerprint")
-		}
-	}
+	requireSameCertificate(t, concurrentCertificates(t, p, 32),
+		"concurrent load produced multiple certificate pointers for one fingerprint")
 }
 
 // A failed under-lock re-read must not install a stale outer parse over a cert
