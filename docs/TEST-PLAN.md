@@ -520,8 +520,9 @@ an accepted risk neither inflates nor tanks the score.
       does not clear a valid previous LastScanTime.
 - [ ] **Score history with multiple suites completing out of order**: newest
       endTimestamp wins; multi-suite fixture.
-- [ ] **Huge result set** (thousands of checks): aggregate int math doesn't
-      overflow; VirtualizedTable remains usable.
+- [x] **Huge result set** (thousands of checks): aggregate int math doesn't
+      overflow (`FuzzScore`); CCR List is paged (`TestAggregateStatusPagesCheckResults`);
+      VirtualizedTable remains usable.
 - [ ] **Huge untrusted descriptions/instructions**: Results modal remains
       responsive; text is not interpreted as HTML; CSV stays browser-safe.
 - [ ] **Unicode / RTL / emoji in rule titles**: filter, CSV, and modal do not
@@ -932,7 +933,7 @@ These are product contracts, not just "hope it's fast".
 | Surface | Budget (proposal) | How to test |
 |---|---|---|
 | Reconcile happy path (fake client, 1k check results) | < 200ms CPU | Go benchmark / unit timer |
-| Reconcile 10k check results | < 2s CPU; no O(n²) label maps | unit with generated list |
+| Reconcile 10k check results | < 2s CPU; no O(n²) label maps; List Limit=500 | unit with generated list; paging in `TestAggregateStatusPagesCheckResults` |
 | Console Results first paint with 5k rows | interactive filters < 100ms after load | Playwright performance marks or manual |
 | CSV export 5k rows | < 3s in Chromium; no tab freeze dialog | Playwright |
 | History ring | max 30 points; status JSON stays small | unit size assert |

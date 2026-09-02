@@ -173,7 +173,9 @@ Responsibilities:
    deletion via finalizer, or when `spec.console.managementState` is Removed).
 4. **Status aggregation**: list `ComplianceCheckResult`s labeled with
    `compliance.openshift.io/suite=baseline-<profile>` (or
-   `baseline-tp-<name>` for tailored bindings). Foreign CO suites are
+   `baseline-tp-<name>` for tailored bindings), paged (500 per call) so
+   a multi-profile cluster cannot pin every result in one List.
+   Foreign CO suites are
    ignored. Aggregate into `ClusterBaseline.status`: per-profile (and
    tailored) pass/fail/manual/info/error/inconsistent/waived counts, a
    0-100 score (default flat pass/(pass+fail); optional
@@ -187,7 +189,9 @@ Responsibilities:
    `ScanConfigured`, `ScanStorageReady`, `ConsolePluginReady`; owned
    Pending PVCs set `ScanStorageReady` False and roll up to `Degraded`
    with reason `ScanStorageNotReady`). A lazy dynamic informer watches
-   compliance CRs once their CRDs exist (event-driven reconcile); a
+   compliance CRs as metadata only (namespace + suite label; full
+   CheckResult bodies are not cached) once their CRDs exist
+   (event-driven reconcile); a
    poll requeue remains as fallback (1m steady, 15s while Progressing
    or a remediation batch is Applying; also shortens toward the soonest
    active waiver `expiresAt`, floored at 1s) until watches are up or if

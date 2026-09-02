@@ -3,10 +3,11 @@
 // plugin deploy, and MachineConfigPool-paused remediation batching.
 //
 // Compliance Operator CRDs may be absent at startup. SetupWithManager registers
-// a lazy dynamic informer for suite/scan/remediation/check-result events once
-// those CRDs exist; Reconcile still requeues as a fallback (1m steady, 15s while
-// Progressing or a remediation batch is Applying; also shortens toward the
-// soonest active waiver expiresAt, floored at 1s).
+// a lazy metadata-only informer for suite/scan/remediation/check-result events
+// once those CRDs exist; Reconcile still requeues as a fallback (1m steady, 15s
+// while Progressing or a remediation batch is Applying; also shortens toward the
+// soonest active waiver expiresAt, floored at 1s). Score aggregation live-lists
+// CheckResults in pages of 500.
 //
 // Files are split by concern (same package, no import cycles):
 //   - clusterbaseline_controller.go: Reconcile loop, reconcileOwned, SetupWithManager

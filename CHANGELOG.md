@@ -47,6 +47,10 @@ depend on those tags.
 - Support: ClusterBaseline must-gather dumps omit waiver `requestedBy` and
   `approvedBy`, and drop `kubectl.kubernetes.io/last-applied-configuration` so
   those names are not copied into a support archive.
+- Operator: watch compliance CRs as metadata only, and page
+  ComplianceCheckResult lists (500 per call), so multi-profile scans with
+  thousands of results no longer pin full objects in the informer or a
+  single unbounded List response.
 
 ### Fixed
 

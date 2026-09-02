@@ -454,22 +454,35 @@ func (r *ClusterBaselineReconciler) SetupWithManager(mgr ctrl.Manager) error {
 // (suite selector) but would still force a full CCR list walk every time. Missing
 // suite labels still enqueue (suites themselves, partial objects, deletes).
 //
-// Dynamic informers deliver *unstructured.Unstructured; read the suite label
-// without GetLabels() (full map copy per event) so foreign-suite storms stay cheap.
+// Watches are metadata-only (*metav1.PartialObjectMetadata). Read the suite
+// label off the typed Labels map (no GetLabels() copy) so foreign-suite storms
+// stay cheap. Tests and any leftover full-object event still work.
 func enqueueSingleton(_ context.Context, obj client.Object) []reconcile.Request {
 	if obj.GetNamespace() != complianceNamespace {
 		return nil
 	}
-	var suite string
-	if u, ok := obj.(*unstructured.Unstructured); ok {
-		suite = unstructuredLabel(u.Object, suiteLabel)
-	} else if labels := obj.GetLabels(); labels != nil {
-		suite = labels[suiteLabel]
-	}
-	if suite != "" && !strings.HasPrefix(suite, "baseline-") {
+	if suite := objectSuiteLabel(obj); suite != "" && !strings.HasPrefix(suite, "baseline-") {
 		return nil
 	}
 	return []reconcile.Request{{NamespacedName: types.NamespacedName{Name: clusterBaselineName}}}
+}
+
+// objectSuiteLabel reads the CO suite label without copying the whole label map.
+func objectSuiteLabel(obj client.Object) string {
+	switch o := obj.(type) {
+	case *metav1.PartialObjectMetadata:
+		if o.Labels == nil {
+			return ""
+		}
+		return o.Labels[suiteLabel]
+	case *unstructured.Unstructured:
+		return unstructuredLabel(o.Object, suiteLabel)
+	default:
+		if labels := obj.GetLabels(); labels != nil {
+			return labels[suiteLabel]
+		}
+		return ""
+	}
 }
 
 // lazyComplianceWatch adds informers for the compliance CRs once their CRDs
@@ -497,7 +510,12 @@ func (l *lazyComplianceWatch) Start(ctx context.Context) error {
 				still = append(still, gvk)
 				continue
 			}
-			obj := &unstructured.Unstructured{}
+			// Metadata only: the handler needs namespace + suite label. Full CCR
+			// bodies (description, instructions) would sit in the informer unused
+			// because aggregateStatus live-lists with a suite selector
+			// (unstructured bypasses the cache). Multi-profile clusters hold
+			// many thousands of CCRs.
+			obj := &metav1.PartialObjectMetadata{}
 			obj.SetGroupVersionKind(gvk)
 			src := source.Kind(l.cache, client.Object(obj),
 				handler.EnqueueRequestsFromMapFunc(enqueueSingleton))

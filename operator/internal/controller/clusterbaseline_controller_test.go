@@ -128,6 +128,19 @@ func TestEnqueueSingleton(t *testing.T) {
 	if got := enqueueSingleton(context.Background(), obj); len(got) != 0 {
 		t.Fatalf("foreign namespace enqueued singleton: %+v", got)
 	}
+
+	// Metadata-only watch events (PartialObjectMetadata) must follow the same
+	// suite filter: owned enqueues, foreign is dropped, no GetLabels copy path.
+	meta := &metav1.PartialObjectMetadata{}
+	meta.SetNamespace(complianceNamespace)
+	meta.SetLabels(map[string]string{suiteLabel: "baseline-cis"})
+	if got := enqueueSingleton(context.Background(), meta); len(got) != 1 || got[0].Name != "cluster" {
+		t.Fatalf("owned metadata suite enqueued = %+v, want Name=cluster", got)
+	}
+	meta.SetLabels(map[string]string{suiteLabel: "someone-elses-suite"})
+	if got := enqueueSingleton(context.Background(), meta); len(got) != 0 {
+		t.Fatalf("foreign metadata suite enqueued singleton: %+v", got)
+	}
 }
 
 func TestPoolFromRemediation(t *testing.T) {
@@ -1924,6 +1937,76 @@ func TestAggregateStatus(t *testing.T) {
 	p := cb.Status.Profiles[0]
 	if p.Pass != 2 || p.Fail != 1 || p.Manual != 1 || p.Error != 1 || p.Inconsistent != 1 || p.NotApplicable != 1 {
 		t.Fatalf("profile counts = %+v", p)
+	}
+}
+
+// TestAggregateStatusPagesCheckResults: a multi-page CCR List must tally every
+// page. Fake client ignores Limit/Continue, so an interceptor splits the set
+// and requires Limit=checkResultListPageSize on each call.
+func TestAggregateStatusPagesCheckResults(t *testing.T) {
+	scheme := testScheme(t)
+	page1 := []*unstructured.Unstructured{
+		checkResult("a", "baseline-cis", "PASS"),
+		checkResult("b", "baseline-cis", "FAIL"),
+	}
+	page2 := []*unstructured.Unstructured{
+		checkResult("c", "baseline-cis", "PASS"),
+	}
+	const page2Token = "page2"
+	lists := 0
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).
+			WithInterceptorFuncs(interceptor.Funcs{
+				List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+					gvk := list.GetObjectKind().GroupVersionKind()
+					if gvk.Group != checkResultGVK.Group || gvk.Kind != checkResultGVK.Kind+"List" {
+						return c.List(ctx, list, opts...)
+					}
+					lo := &client.ListOptions{}
+					lo.ApplyOptions(opts)
+					if lo.Limit != checkResultListPageSize {
+						return fmt.Errorf("CCR List Limit = %d, want %d", lo.Limit, checkResultListPageSize)
+					}
+					ul, ok := list.(*unstructured.UnstructuredList)
+					if !ok {
+						return fmt.Errorf("CCR List type = %T, want *unstructured.UnstructuredList", list)
+					}
+					var src []*unstructured.Unstructured
+					switch lo.Continue {
+					case "":
+						src = page1
+						ul.SetContinue(page2Token)
+					case page2Token:
+						src = page2
+						ul.SetContinue("")
+					default:
+						return fmt.Errorf("unexpected continue %q", lo.Continue)
+					}
+					lists++
+					ul.Items = make([]unstructured.Unstructured, len(src))
+					for i, it := range src {
+						ul.Items[i] = *it.DeepCopy()
+					}
+					return nil
+				},
+			}).Build(),
+		Scheme: scheme,
+	}
+	cb := &baselinev1alpha1.ClusterBaseline{
+		Spec: baselinev1alpha1.ClusterBaselineSpec{Profiles: []baselinev1alpha1.ProfileKey{"cis"}},
+	}
+	if err := r.aggregateStatus(context.Background(), cb); err != nil {
+		t.Fatal(err)
+	}
+	if lists != 2 {
+		t.Fatalf("CCR List calls = %d, want 2 pages", lists)
+	}
+	if cb.Status.Score == nil || *cb.Status.Score != 66 {
+		t.Fatalf("score = %v, want 66 (2 PASS / 1 FAIL across pages)", cb.Status.Score)
+	}
+	p := cb.Status.Profiles[0]
+	if p.Pass != 2 || p.Fail != 1 {
+		t.Fatalf("profile counts = %+v, want pass=2 fail=1", p)
 	}
 }
 

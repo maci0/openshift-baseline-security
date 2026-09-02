@@ -207,18 +207,26 @@ when OLM v1 dependency placement is reliable.
 ## ADR-012: Lazy dynamic informer with poll fallback
 
 **Decision:** Watch compliance GVKs once CRDs exist (lazy RESTMapper probe +
-dynamic source mapping every event to the singleton reconcile). Keep a
+dynamic source mapping every event to the singleton reconcile). The watches
+use `PartialObjectMetadata`: the handler only needs namespace and the suite
+label, and caching full CheckResult/Scan/Remediation bodies would pin
+hundreds of MB on multi-profile clusters. Aggregation still live-lists
+CheckResults (unstructured client, server-side suite selector) in pages of
+500 so a single List cannot timeout or hold the whole set. Keep a
 requeue as a fallback: 1m steady, 15s while Progressing or batch Applying, and
 shorten toward the soonest active waiver `expiresAt` (floored at 1s; see
 ADR-005) so accepted-risk expiry is not stuck behind a full minute when watches
 lag or are not yet up.
 
 **Alternatives:** Poll only; fail manager start if CRDs are absent; import CO
-typed clients and static watches.
+typed clients and static watches; cache full unstructured objects for a
+cached List.
 
 **Tradeoff:** Event-driven when CO is present; still works during install or if
 CRDs disappear. Dual paths mean a short lag is still possible when watches are
-down; MaxConcurrentReconciles stays 1 so status writes stay simple.
+down; MaxConcurrentReconciles stays 1 so status writes stay simple. Metadata
+watches trade a second live List (already required: unstructured bypasses the
+cache) for bounded informer RSS.
 
 **Status:** Keep.
 
