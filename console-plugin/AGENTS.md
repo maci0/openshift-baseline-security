@@ -18,7 +18,7 @@ Node 22 exactly, pinned by `.nvmrc` to the same patch as the digest-pinned
 
 ```sh
 yarn lint          # eslint ./src ./e2e webpack.config.ts (type-aware except webpack)
-yarn lint:oxlint   # oxlint: @rikalabs/oxlint-standards strict + local anti-slop
+yarn lint:oxlint   # oxlint: @rikalabs/oxlint-standards strict + test-jest preset, perf, react plugin, local anti-slop
 yarn typecheck     # tsc --noEmit
 yarn test          # jest
 yarn ci            # the four above plus the production webpack build
@@ -33,7 +33,8 @@ a local oxlint plugin (its own `package.json` marks that subtree ESM); it is
 excluded from linting itself via `ignorePatterns`.
 
 `tsconfig.json` runs `strict` plus `noFallthroughCasesInSwitch`,
-`noImplicitOverride`, and `noUnusedLocals`. Do not loosen a flag to make an
+`noImplicitOverride`, `noImplicitReturns`, `noUnusedLocals`,
+`noUnusedParameters`, and `isolatedModules`. Do not loosen a flag to make an
 error go away.
 
 ## Module layout

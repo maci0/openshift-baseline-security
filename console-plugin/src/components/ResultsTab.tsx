@@ -915,6 +915,7 @@ const ResultsTab: React.FC<{
                             const style = statusStyle(s.status);
                             // Index in the key: hostile data could repeat a node name.
                             return (
+                              // oxlint-disable-next-line react/no-array-index-key -- node names can repeat
                               <Tr key={`${s.node}-${i}`}>
                                 <Td dir="auto">{s.node}</Td>
                                 <Td>

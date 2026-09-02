@@ -10,6 +10,14 @@ linters:
     - copyloopvar
     - noctx
     - bodyclose
+    - unused
+    - bidichk
+    - gocheckcompilerdirectives
+    - usestdlibvars
+    - goprintffuncname
+    - nosprintfhostport
+    - gomoddirectives
+    - promlinter
   settings:
     staticcheck:
       checks: ["all", "-ST1000"]
@@ -17,6 +25,12 @@ linters:
       # Every suppression must name its rule and say why; unused directives fail.
       require-explanation: true
       require-specific: true
+  exclusions:
+    warn-unused: true
+issues:
+  # Default is 50/3, which can hide a real defect behind a cap.
+  max-issues-per-linter: 0
+  max-same-issues: 0
 formatters:
   enable:
     - gofmt

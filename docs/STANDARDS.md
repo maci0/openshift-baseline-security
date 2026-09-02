@@ -33,8 +33,10 @@ Enforcement is mechanical, not prose:
 
 **Here**: `operator/.golangci.yml` (staticcheck settings plus nolintlint,
 misspell, unconvert, unparam, nilerr, errorlint, copyloopvar, noctx,
-bodyclose + gofmt/goimports), `make lint`, CI drift check for
-generated files.
+bodyclose, unused, bidichk, gocheckcompilerdirectives, usestdlibvars,
+goprintffuncname, nosprintfhostport, gomoddirectives, promlinter +
+gofmt/goimports; issue caps disabled so nothing is truncated),
+`make lint`, CI drift check for generated files.
 
 ## API design conventions
 

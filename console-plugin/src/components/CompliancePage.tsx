@@ -94,6 +94,9 @@ const CompliancePage: React.FC = () => {
   const [rescanning, setRescanning] = React.useState(false);
   // Sync guard: React state alone cannot block a second click before re-render.
   const rescanningRef = React.useRef(false);
+  // Monotonic token so a second click still mutates the annotation (CO watches
+  // changes) even when both clicks land in the same millisecond.
+  const rescanSeq = React.useRef(0);
   const [rescanError, setRescanError] = React.useState<string | null>(null);
   const [rescanStarted, setRescanStarted] = React.useState(false);
   // Success (popup-blocked download) is info; failure must be danger so it is
@@ -145,7 +148,8 @@ const CompliancePage: React.FC = () => {
     setRescanError(null);
     setRescanStarted(false);
     // Unique value so a second click still mutates the annotation (CO watches changes).
-    const token = String(Date.now());
+    rescanSeq.current += 1;
+    const token = String(rescanSeq.current);
     // allSettled never rejects; rejections land in the results array.
     try {
       const results = await Promise.allSettled(
@@ -262,6 +266,8 @@ const CompliancePage: React.FC = () => {
       checkResultsLoaded,
       checkResultsError,
     }),
+    // Watch payloads are replaced on update, not mutated in place.
+    // eslint-disable-next-line react-hooks/preserve-manual-memoization -- watch objects are replaced
     [baseline, loaded, baselineError, ownedResults, checkResultsLoaded, checkResultsError],
   );
 

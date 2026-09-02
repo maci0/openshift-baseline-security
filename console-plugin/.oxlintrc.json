@@ -3,6 +3,10 @@
 	"options": {
 		"typeAware": true
 	},
+	"plugins": ["typescript", "unicorn", "oxc", "react", "vitest", "jsdoc", "jest"],
+	"categories": {
+		"perf": "error"
+	},
 	"extends": [
 		"./node_modules/@rikalabs/oxlint-standards/presets/strict-tests-jest.json"
 	],
