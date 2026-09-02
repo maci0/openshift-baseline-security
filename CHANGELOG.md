@@ -42,6 +42,11 @@ depend on those tags.
 
 ## [Unreleased]
 
+### Docs
+
+- Threat model: add `docs/THREAT_MODEL.md` (entry points, trust boundaries,
+  ranked threats, mitigations mapped to code) and link it from SECURITY.md.
+
 ## [0.5.15] - 2026-08-26
 
 ### Security

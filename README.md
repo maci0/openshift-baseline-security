@@ -100,6 +100,7 @@ Describes `main`; install from published OLM tags for only the released surface.
   `operator/` and `console-plugin/` each carry their own
 - `CHANGELOG.md`: consumer-facing release notes and migration notes
 - `SECURITY.md`: supported versions and vulnerability reporting
+- `docs/THREAT_MODEL.md`: attack surface, trust boundaries, ranked threats
 - `docs/SPEC.md`: design specification (read this first)
 - `docs/DESIGN-DECISIONS.md`: ADR-style product design tradeoffs
 - `docs/PATTERNS.md`: OpenShift addon patterns this repo follows

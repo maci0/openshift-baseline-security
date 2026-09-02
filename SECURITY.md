@@ -26,6 +26,11 @@ Please do **not** open a public GitHub issue for security-sensitive reports.
 3. Fixed releases will note the issue under **### Security** in
    [CHANGELOG.md](CHANGELOG.md) (with a CVE ID when one is assigned).
 
+## Threat model
+
+Entry points, trust boundaries, ranked threats, and mitigations mapped to
+code: [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md).
+
 ## Scope
 
 In scope: the operator, console plugin, OLM bundle manifests, and metrics
