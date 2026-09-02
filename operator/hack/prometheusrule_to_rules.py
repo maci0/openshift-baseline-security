@@ -46,8 +46,10 @@ def main() -> int:
         return 2
     src, dst = Path(sys.argv[1]), Path(sys.argv[2])
     try:
-        body = extract_groups(src.read_text())
-        dst.write_text(body)
+        # encoding= so LC_ALL=C (Makefile) does not decode as ASCII.
+        # write_bytes keeps LF on platforms whose text mode would emit CRLF.
+        body = extract_groups(src.read_text(encoding="utf-8"))
+        dst.write_bytes(body.encode("utf-8"))
     except (OSError, ValueError) as e:
         print(e, file=sys.stderr)
         return 1

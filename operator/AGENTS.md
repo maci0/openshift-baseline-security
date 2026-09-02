@@ -13,6 +13,8 @@ make govulncheck
 make bundle        # every verify-* target, then operator-sdk bundle validate
 ```
 
+GNU Make 3.82+ is required (`.SHELLFLAGS` pipefail). macOS `/usr/bin/make` is 3.81; use Homebrew `gmake`.
+
 `make test` and `make build` must not mutate the tree: `fmt-check` checks, it
 does not rewrite. Run `make fmt` yourself.
 

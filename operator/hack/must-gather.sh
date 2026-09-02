@@ -12,16 +12,21 @@ set -euo pipefail
 redact_clusterbaseline_dump() {
   local f="$1"
   [ -s "$f" ] || return 0
-  # GNU sed (OpenShift support hosts). kubectl YAML emits each mapping key on
-  # its own line; last-applied-configuration is typically one quoted line.
+  # kubectl YAML emits each mapping key on its own line;
+  # last-applied-configuration is typically one quoted line.
   # The JSON substitutions catch a folded annotation value that survives the
-  # key-line delete.
-  sed -E -i \
+  # key-line delete. Rewrite via a temp file: GNU sed -i is not accepted by
+  # BSD sed (macOS), which treats the next argument as a required backup suffix.
+  local tmp
+  tmp="$(mktemp)"
+  sed -E \
     -e '/kubectl\.kubernetes\.io\/last-applied-configuration:/d' \
     -e '/^[[:space:]]+(requestedBy|approvedBy):/d' \
     -e 's/"requestedBy":"[^"]*"[[:space:]]*,?[[:space:]]*//g' \
     -e 's/"approvedBy":"[^"]*"[[:space:]]*,?[[:space:]]*//g' \
-    "$f"
+    "$f" > "$tmp" || { rm -f -- "$tmp"; return 1; }
+  cat "$tmp" > "$f" || { rm -f -- "$tmp"; return 1; }
+  rm -f -- "$tmp"
 }
 
 # Offline check that attribution does not survive a typical kubectl YAML dump.

@@ -29,6 +29,11 @@ export GOSUMDB := sum.golang.org
 # Fail recipes on pipe errors; use bash for pipefail portability.
 SHELL := /usr/bin/env bash
 .SHELLFLAGS := -eo pipefail -c
+# .SHELLFLAGS needs GNU Make 3.82+. macOS /usr/bin/make is 3.81 and ignores
+# the assignment, so recipes would run without -e / pipefail.
+ifeq ($(shell echo "$(MAKE_VERSION)" | awk -F. '{ if ($$1 < 4 && ($$1 < 3 || $$2 < 82)) print "old" }'),old)
+$(error GNU Make 3.82+ is required; this is $(MAKE_VERSION). On macOS use Homebrew gmake)
+endif
 
 # Drop incomplete targets if a recipe fails (avoids half-written catalog/ artifacts).
 .DELETE_ON_ERROR:

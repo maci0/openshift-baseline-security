@@ -64,6 +64,8 @@ depend on those tags.
 
 ### Fixed
 
+- Support: must-gather waiver redaction runs with BSD sed, so a dump collected
+  on macOS still strips `requestedBy`/`approvedBy`.
 - Aggregated `baseline-security-viewer` can list TailoredProfiles and Rules
   (the Profiles tab watches both; a view-only user previously got a catalog
   watch error). `baseline-security-admin` can create and update

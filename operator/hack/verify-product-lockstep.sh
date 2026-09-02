@@ -58,8 +58,8 @@ elif [[ "$go_keys" != "$ts_keys" ]]; then
 fi
 
 # Default scan schedule.
-go_sched=$(grep -E 'DefaultScanSchedule\s*=\s*"' "$API" | head -1 | sed -E 's/.*"([^"]+)".*/\1/' || true)
-ts_sched=$(grep -E "DEFAULT_SCAN_SCHEDULE\s*=" "$MODELS" | head -1 | sed -E "s/.*'([^']+)'.*/\1/" || true)
+go_sched=$(grep -E 'DefaultScanSchedule[[:space:]]*=[[:space:]]*"' "$API" | head -1 | sed -E 's/.*"([^"]+)".*/\1/' || true)
+ts_sched=$(grep -E "DEFAULT_SCAN_SCHEDULE[[:space:]]*=" "$MODELS" | head -1 | sed -E "s/.*'([^']+)'.*/\1/" || true)
 if [[ -z "$go_sched" || -z "$ts_sched" ]]; then
   die "could not read DefaultScanSchedule / DEFAULT_SCAN_SCHEDULE"
 elif [[ "$go_sched" != "$ts_sched" ]]; then
@@ -68,32 +68,32 @@ fi
 
 # CRD MaxItems vs console client caps.
 go_prof_max=$(grep -E 'MaxItems=8([^0-9]|$)' "$API" | head -1 || true)
-ts_prof_max=$(grep -E 'PROFILE_MAX_ITEMS\s*=\s*8([^0-9]|$)' "$MODELS" | head -1 || true)
+ts_prof_max=$(grep -E 'PROFILE_MAX_ITEMS[[:space:]]*=[[:space:]]*8([^0-9]|$)' "$MODELS" | head -1 || true)
 if [[ -z "$go_prof_max" || -z "$ts_prof_max" ]]; then
   die "Profiles MaxItems=8 / PROFILE_MAX_ITEMS=8 lockstep missing"
 fi
 
 go_tp_max=$(grep -E 'MaxItems=32([^0-9]|$)' "$API" | head -1 || true)
-ts_tp_max=$(grep -E 'TAILORED_PROFILE_MAX_ITEMS\s*=\s*32([^0-9]|$)' "$MODELS" | head -1 || true)
+ts_tp_max=$(grep -E 'TAILORED_PROFILE_MAX_ITEMS[[:space:]]*=[[:space:]]*32([^0-9]|$)' "$MODELS" | head -1 || true)
 if [[ -z "$go_tp_max" || -z "$ts_tp_max" ]]; then
   die "TailoredProfiles MaxItems=32 / TAILORED_PROFILE_MAX_ITEMS=32 lockstep missing"
 fi
 
 go_w_max=$(grep -E 'MaxItems=256([^0-9]|$)' "$API" | head -1 || true)
-ts_w_max=$(grep -E 'WAIVER_MAX_ITEMS\s*=\s*256([^0-9]|$)' "$MODELS" | head -1 || true)
+ts_w_max=$(grep -E 'WAIVER_MAX_ITEMS[[:space:]]*=[[:space:]]*256([^0-9]|$)' "$MODELS" | head -1 || true)
 if [[ -z "$go_w_max" || -z "$ts_w_max" ]]; then
   die "Waivers MaxItems=256 / WAIVER_MAX_ITEMS=256 lockstep missing"
 fi
 
 # History ring cap.
-go_hist=$(grep -E 'HistoryMax\s*=\s*30([^0-9]|$)' "$API" | head -1 || true)
+go_hist=$(grep -E 'HistoryMax[[:space:]]*=[[:space:]]*30([^0-9]|$)' "$API" | head -1 || true)
 if [[ -z "$go_hist" ]]; then
   die "HistoryMax = 30 missing from API (CRD MaxItems=30)"
 fi
 
 # Scan-diff failure-name list cap (ADR-013). API constant must match every
 # MaxItems=4096 on newlyFailed/fixed/previousFailures/diffBaseFailures.
-go_fail_max=$(grep -E 'FailureListMax\s*=\s*4096([^0-9]|$)' "$API" | head -1 || true)
+go_fail_max=$(grep -E 'FailureListMax[[:space:]]*=[[:space:]]*4096([^0-9]|$)' "$API" | head -1 || true)
 if [[ -z "$go_fail_max" ]]; then
   die "FailureListMax = 4096 missing from API (CRD MaxItems=4096)"
 fi
@@ -106,21 +106,21 @@ fi
 for pair in 'High:10' 'Medium:5' 'Low:2' 'Other:1'; do
   name=${pair%%:*}
   val=${pair##*:}
-  if ! grep -qE "severityWeight${name}\\s+int64\\s*=\\s*${val}([^0-9]|$)" "$SCORE"; then
+  if ! grep -qE "severityWeight${name}[[:space:]]+int64[[:space:]]*=[[:space:]]*${val}([^0-9]|$)" "$SCORE"; then
     die "operator severityWeight${name} != ${val}"
   fi
 done
 for pair in 'HIGH:10' 'MEDIUM:5' 'LOW:2' 'OTHER:1'; do
   name=${pair%%:*}
   val=${pair##*:}
-  if ! grep -qE "SEVERITY_WEIGHT_${name}\\s*=\\s*${val}([^0-9]|$)" "$SCORING_TS"; then
+  if ! grep -qE "SEVERITY_WEIGHT_${name}[[:space:]]*=[[:space:]]*${val}([^0-9]|$)" "$SCORING_TS"; then
     die "console SEVERITY_WEIGHT_${name} != ${val}"
   fi
 done
 
 # History scoring-mode annotation key.
-go_ann=$(grep -E 'historyScoringModeAnn\s*=' "$SCORE" | head -1 | sed -E 's/.*"([^"]+)".*/\1/' || true)
-ts_ann=$(grep -E 'HISTORY_SCORING_MODE_ANN\s*=' "$SCORING_TS" | head -1 | sed -E "s/.*'([^']+)'.*/\1/" || true)
+go_ann=$(grep -E 'historyScoringModeAnn[[:space:]]*=' "$SCORE" | head -1 | sed -E 's/.*"([^"]+)".*/\1/' || true)
+ts_ann=$(grep -E 'HISTORY_SCORING_MODE_ANN[[:space:]]*=' "$SCORING_TS" | head -1 | sed -E "s/.*'([^']+)'.*/\1/" || true)
 if [[ -z "$go_ann" || -z "$ts_ann" ]]; then
   die "could not read history scoring-mode annotation key"
 elif [[ "$go_ann" != "$ts_ann" ]]; then
@@ -128,16 +128,16 @@ elif [[ "$go_ann" != "$ts_ann" ]]; then
 fi
 
 # Batch apply annotation + cap.
-go_batch_ann=$(grep -E 'batchApplyAnnotation\s*=' "$BATCH" | head -1 | sed -E 's/.*"([^"]+)".*/\1/' || true)
-ts_batch_ann=$(grep -E 'BATCH_APPLY_ANNOTATION\s*=' "$PATCHES" | head -1 | sed -E "s/.*'([^']+)'.*/\1/" || true)
+go_batch_ann=$(grep -E 'batchApplyAnnotation[[:space:]]*=' "$BATCH" | head -1 | sed -E 's/.*"([^"]+)".*/\1/' || true)
+ts_batch_ann=$(grep -E 'BATCH_APPLY_ANNOTATION[[:space:]]*=' "$PATCHES" | head -1 | sed -E "s/.*'([^']+)'.*/\1/" || true)
 if [[ -z "$go_batch_ann" || -z "$ts_batch_ann" ]]; then
   die "could not read batch-apply annotation key"
 elif [[ "$go_batch_ann" != "$ts_batch_ann" ]]; then
   die "batchApplyAnnotation ($go_batch_ann) != BATCH_APPLY_ANNOTATION ($ts_batch_ann)"
 fi
 
-go_batch_max=$(grep -E 'batchMaxRemediations\s*=' "$BATCH" | head -1 | sed -E 's/.*=\s*([0-9]+).*/\1/' || true)
-ts_batch_max=$(grep -E 'batchApplyMaxNames\s*=' "$PATCHES" | head -1 | sed -E 's/.*=\s*([0-9]+).*/\1/' || true)
+go_batch_max=$(grep -E 'batchMaxRemediations[[:space:]]*=' "$BATCH" | head -1 | sed -E 's/.*=[[:space:]]*([0-9]+).*/\1/' || true)
+ts_batch_max=$(grep -E 'batchApplyMaxNames[[:space:]]*=' "$PATCHES" | head -1 | sed -E 's/.*=[[:space:]]*([0-9]+).*/\1/' || true)
 if [[ -z "$go_batch_max" || -z "$ts_batch_max" ]]; then
   die "could not read batch max remediations"
 elif [[ "$go_batch_max" != "$ts_batch_max" ]]; then
