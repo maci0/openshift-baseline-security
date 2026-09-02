@@ -671,7 +671,9 @@ an accepted risk neither inflates nor tanks the score.
 - [x] **Default creation opt-out**:
       `BASELINE_SECURITY_SKIP_DEFAULT_CR=true` (and 1/yes/on) is truthy;
       false/0/no/off/unset are falsy; unknown values error so start fails
-      (`TestParseEnvBool`, `FuzzParseEnvBool`).
+      (`TestParseEnvBool`, `FuzzParseEnvBool`). Values carrying a NUL are out
+      of scope: execve cannot put one in the environment, so the fuzz target
+      skips them rather than asserting a parse result.
 - [x] **Manager CLI usage**: leftover positional args are rejected
       (`TestUnexpectedArgsError`); `--help` lists process env vars
       (`TestPrintUsageIncludesEnv`).

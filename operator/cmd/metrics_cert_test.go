@@ -263,6 +263,11 @@ func FuzzParseEnvBool(f *testing.F) {
 		if len(v) > 256 {
 			v = v[:256]
 		}
+		// execve rejects a NUL inside an environment value, so no such value
+		// can reach parseEnvBool; t.Setenv would fail before the call itself.
+		if strings.ContainsRune(v, 0) {
+			t.Skip("NUL cannot appear in an environment value")
+		}
 		t.Setenv("BASELINE_SECURITY_SKIP_DEFAULT_CR", v)
 		got, err := parseEnvBool("BASELINE_SECURITY_SKIP_DEFAULT_CR")
 		switch strings.ToLower(strings.TrimSpace(v)) {
