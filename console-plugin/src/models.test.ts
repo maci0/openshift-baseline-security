@@ -1,5 +1,7 @@
 import {
   checkProfileLabel,
+  CLUSTER_BASELINE_NAME,
+  clusterBaselinePatchAccess,
   ClusterBaseline,
   isOwnedByBaseline,
   isProfileKey,
@@ -35,6 +37,15 @@ describe('profile key lockstep', () => {
       expect(info.title.length).toBeGreaterThan(0);
       expect(info.description.length).toBeGreaterThan(0);
     }
+  });
+});
+
+describe('clusterBaselinePatchAccess', () => {
+  it('SAR is object-level on the singleton', () => {
+    expect(CLUSTER_BASELINE_NAME).toBe('cluster');
+    expect(clusterBaselinePatchAccess.name).toBe(CLUSTER_BASELINE_NAME);
+    expect(clusterBaselinePatchAccess.verb).toBe('patch');
+    expect(clusterBaselinePatchAccess.resource).toBe('clusterbaselines');
   });
 });
 

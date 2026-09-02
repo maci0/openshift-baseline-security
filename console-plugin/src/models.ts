@@ -137,6 +137,8 @@ export const ProfileGVK: K8sGroupVersionKind = {
 export const ClusterBaselineModel = model(ClusterBaselineGVK, 'clusterbaselines', false);
 
 // Singleton name enforced by CRD CEL (operator default_cr.go creates this).
+// Shared by the SAR gate and any client that must address the singleton
+// without repeating the string.
 export const CLUSTER_BASELINE_NAME = 'cluster';
 
 // Manifest the operator default-creates when no ClusterBaseline exists
@@ -158,11 +160,13 @@ export const defaultClusterBaselineManifest = (): DefaultClusterBaselineManifest
 
 // RBAC gate shared by every editing surface: all tabs patch the same singleton
 // ClusterBaseline. Derived from the GVK/model so a group or plural rename
-// cannot desynchronize one tab's permission check from the others.
+// cannot desynchronize one tab's permission check from the others. `name`
+// makes the SubjectAccessReview object-level (the singleton), not collection.
 export const clusterBaselinePatchAccess = {
   group: ClusterBaselineGVK.group,
   resource: ClusterBaselineModel.plural,
   verb: 'patch',
+  name: CLUSTER_BASELINE_NAME,
 } as const;
 export const clusterBaselineCreateAccess = {
   group: ClusterBaselineGVK.group,

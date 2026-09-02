@@ -1,7 +1,7 @@
 // Pass/fail and severity-weighted score math (lockstep with operator scoring).
 import {
-  ClusterBaseline,
   CLUSTER_BASELINE_NAME,
+  ClusterBaseline,
   ComplianceCheckResult,
   isOwnedByBaseline,
   ResultCounts,
@@ -37,11 +37,12 @@ export const historyScoringModeMismatch = (
   return stamped !== effectiveScoringMode(baseline);
 };
 
-// Pick the singleton ClusterBaseline (named "cluster", else the first) and
-// return its score, or null when there is none / it has not scored yet. Shared
-// by the cluster Overview detail item.
+// Score of the singleton ClusterBaseline (metadata.name == "cluster"), or
+// null when it is absent / has not scored yet. Ignores any other name so a
+// list watch cannot surface a foreign object's score. Shared by the cluster
+// Overview detail item.
 export const clusterScore = (baselines?: ClusterBaseline[]): number | null => {
-  const b = baselines?.find((x) => x.metadata.name === CLUSTER_BASELINE_NAME) ?? baselines?.[0];
+  const b = baselines?.find((x) => x.metadata.name === CLUSTER_BASELINE_NAME);
   return b?.status?.score ?? null;
 };
 

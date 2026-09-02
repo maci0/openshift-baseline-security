@@ -19,9 +19,9 @@ import {
 } from '@patternfly/react-core';
 import { DownloadIcon } from '@patternfly/react-icons';
 import {
+  CLUSTER_BASELINE_NAME,
   ClusterBaseline,
   ClusterBaselineGVK,
-  CLUSTER_BASELINE_NAME,
   COMPLIANCE_NAMESPACE,
   ComplianceCheckResult,
   ComplianceCheckResultGVK,
@@ -64,9 +64,9 @@ const CompliancePage: React.FC = () => {
     groupVersionKind: ClusterBaselineGVK,
     isList: true,
   });
-  // CRD requires metadata.name == CLUSTER_BASELINE_NAME; prefer that over list order.
-  const baseline =
-    baselines?.find((b) => b.metadata.name === CLUSTER_BASELINE_NAME) ?? baselines?.[0];
+  // CRD requires metadata.name == "cluster". Do not fall back to list order:
+  // a foreign-named object must not drive patches or suite-scoped watches.
+  const baseline = baselines?.find((b) => b.metadata.name === CLUSTER_BASELINE_NAME);
   const profiles = baseline?.spec.profiles;
   const tailored = baseline?.spec.tailoredProfiles;
   // Content keys: status-only CR updates reallocate spec arrays with the same

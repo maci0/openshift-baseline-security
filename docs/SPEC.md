@@ -365,12 +365,15 @@ and Red Hat-updated.
   No secrets access, no node access, no exec.
 - Plugin: no service account of consequence (nginx serves static files);
   every API call is the user's own token via the console proxy.
-- Aggregated ClusterRoles shipped for humans:
+- ClusterRoles shipped for humans:
   `baseline-security-viewer` (read ClusterBaseline plus Compliance Operator
   check results, scans, suites, remediations, Profiles, TailoredProfiles,
-  and Rules; bound via the cluster-reader aggregation label) and
-  `baseline-security-admin` (edit ClusterBaseline, annotate scans, patch
-  remediations, and create/update TailoredProfiles).
+  and Rules; aggregated onto `view` and `cluster-reader`) and
+  `baseline-security-admin` (viewer reads plus edit ClusterBaseline/cluster,
+  annotate scans, patch remediations, and create/update TailoredProfiles).
+  Admin is **not** aggregated onto the built-in `admin` ClusterRole: bind
+  it explicitly, or use cluster-admin. A RoleBinding to `admin` in
+  `openshift-compliance` must not grant node-reboot writes.
 - Remediation apply is the only dangerous write in the system and is
   confirmation-gated and RBAC-gated (user token + admin role + modal).
 - Plugin loads no external sources, so the console default CSP applies

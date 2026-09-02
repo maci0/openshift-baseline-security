@@ -1,8 +1,14 @@
-# Human-facing roles, aggregated into the built-in view/admin roles so
-# console users get sensible access without extra bindings.
-# Viewer lists every kind the console watches (including TailoredProfiles
-# and Rules on the Profiles tab). Admin adds the writes: ClusterBaseline
-# patch, scan rescan, remediation apply, TailoredProfile create/update.
+# Human-facing ClusterRoles. Viewer aggregates into the built-in view and
+# cluster-reader roles so console users can see results without extra
+# bindings. Viewer lists every kind the console watches (including
+# TailoredProfiles and Rules on the Profiles tab). Admin is not aggregated
+# onto the built-in admin ClusterRole: a RoleBinding to admin in
+# openshift-compliance would otherwise grant namespaced patch on
+# ComplianceRemediations (node reboots) without cluster-scoped
+# ClusterBaseline access. Bind baseline-security-admin explicitly, or use
+# cluster-admin (which already includes these verbs). Admin adds the writes:
+# ClusterBaseline patch, scan rescan, remediation apply, TailoredProfile
+# create/update.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -29,15 +35,29 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   name: baseline-security-admin
-  labels:
-    rbac.authorization.k8s.io/aggregate-to-admin: "true"
 rules:
+  # Read: superset of baseline-security-viewer so a ClusterRoleBinding to
+  # this role alone is enough to use the console, not only to write.
   - apiGroups: [baselinesecurity.openshift.io]
     resources: [clusterbaselines]
-    verbs: [get, list, watch, update, patch]
+    verbs: [get, list, watch]
+  - apiGroups: [compliance.openshift.io]
+    resources:
+      - compliancecheckresults
+      - compliancescans
+      - compliancesuites
+      - complianceremediations
+      - profiles
+      - tailoredprofiles
+      - rules
+    verbs: [get, list, watch]
+  - apiGroups: [baselinesecurity.openshift.io]
+    resources: [clusterbaselines]
+    resourceNames: [cluster]
+    verbs: [update, patch]
   - apiGroups: [compliance.openshift.io]
     resources: [compliancescans]
-    verbs: [get, list, watch, patch]
+    verbs: [patch]
   - apiGroups: [compliance.openshift.io]
     resources: [complianceremediations]
     verbs: [get, list, watch, update, patch]

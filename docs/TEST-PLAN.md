@@ -445,8 +445,9 @@ an accepted risk neither inflates nor tanks the score.
       waived series in `TestPublishMetrics`).
 - [ ] **Waive every FAIL** → score 100 (pass/(pass+0)); **waive all results** →
       pass+fail==0 → score nil. Add explicit unit boundary cases.
-- [ ] **Waiver for a non-owned / stale result name**: harmless, never affects the
-      score (only owned suites are tallied); add a negative unit case.
+- [x] **Waiver for a non-owned / stale result name**: harmless, never affects the
+      score (only owned suites are tallied)
+      (`TestAggregateStatusWaiverIgnoresForeignSuite`).
 - [ ] **Duplicate waiver name** rejected by `+listType=map`+`listMapKey=name`
       admission; **RBAC read-only user** cannot see the enabled Waive button.
 - [ ] **Cross-profile rule**: a rule scanned by both cis and pci-dss has distinct
@@ -743,8 +744,12 @@ stale Available or eternal Progressing.
       redhat-operators; install still succeeds when the catalog is mirrored.
 - [ ] **Proxy / trusted CA**: operator and plugin pods honor cluster proxy
       where required (CO content pulls); plugin itself is static nginx.
-- [ ] **Cluster-admin vs namespace admin**: baseline is cluster-scoped; namespace
+- [x] **Cluster-admin vs namespace admin**: baseline is cluster-scoped; namespace
       admin without clusterbaseline RBAC cannot toggle profiles.
+      `baseline-security-admin` is not aggregated onto `admin`
+      (`TestAdminRoleNotAggregatedToAdmin`); ClusterBaseline writes are
+      name-scoped to `cluster` (`TestAdminClusterBaselineWritesAreNameScoped`);
+      viewer has no write verbs (`TestViewerRoleDeniesWrites`).
 - [ ] **Compliance Operator upgrade under us**: CSV rolls vN → vN+1; we keep
       Ready on newest Succeeded; no dual-binding storm.
 - [ ] **Hand-edited ScanSetting**: controller reasserts owned fields
@@ -838,8 +843,9 @@ stale Available or eternal Progressing.
       vendor chunk size warning, are documented with a revisit trigger.
 - [ ] **Disconnected docs**: catalog source override, mirrored images, and
       digest-pinned `RELATED_IMAGE_CONSOLE_PLUGIN` are documented and tested.
-- [ ] **RBAC docs**: viewer/admin roles describe exactly which console actions
-      are enabled or disabled.
+- [x] **RBAC docs**: viewer/admin roles describe exactly which console actions
+      are enabled or disabled (`docs/SPEC.md` §6, `user_roles.yaml` comments,
+      `TestAdminRoleIncludesViewerReads`).
 - [ ] **Release notes regression map**: every shipped bugfix references the
       test-plan bullet and automated test that prevents recurrence.
 

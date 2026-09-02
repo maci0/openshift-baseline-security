@@ -242,3 +242,97 @@ func csvVerbsInclude(block, verb string) bool {
 	}
 	return false
 }
+
+func mustReadUserRolesYAML(t *testing.T) string {
+	t.Helper()
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller failed")
+	}
+	path := filepath.Join(filepath.Dir(thisFile), "..", "..", "config", "rbac", "user_roles.yaml")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read user_roles.yaml: %v", err)
+	}
+	return string(raw)
+}
+
+// userRoleDoc returns the YAML document whose metadata.name matches, or "".
+func userRoleDoc(userRolesYAML, name string) string {
+	for _, doc := range strings.Split(userRolesYAML, "\n---\n") {
+		if strings.Contains(doc, "name: "+name+"\n") || strings.HasSuffix(doc, "name: "+name) {
+			return doc
+		}
+	}
+	return ""
+}
+
+// TestViewerRoleDeniesWrites is the deny side of the human RBAC matrix:
+// baseline-security-viewer must not grant create/update/patch/delete.
+func TestViewerRoleDeniesWrites(t *testing.T) {
+	doc := userRoleDoc(mustReadUserRolesYAML(t), "baseline-security-viewer")
+	if doc == "" {
+		t.Fatal("user_roles.yaml missing baseline-security-viewer")
+	}
+	for _, verb := range []string{"create", "update", "patch", "delete"} {
+		if roleDocHasVerb(doc, verb) {
+			t.Fatalf("viewer ClusterRole must not grant %q", verb)
+		}
+	}
+}
+
+// TestAdminRoleNotAggregatedToAdmin pins the namespace-admin confused-deputy
+// fix: aggregating remediations onto the built-in admin ClusterRole would let a
+// RoleBinding to admin in openshift-compliance patch ComplianceRemediations
+// (node reboots) without cluster-scoped ClusterBaseline access.
+func TestAdminRoleNotAggregatedToAdmin(t *testing.T) {
+	doc := userRoleDoc(mustReadUserRolesYAML(t), "baseline-security-admin")
+	if doc == "" {
+		t.Fatal("user_roles.yaml missing baseline-security-admin")
+	}
+	if strings.Contains(doc, "aggregate-to-admin") {
+		t.Fatal("baseline-security-admin must not aggregate onto the built-in admin ClusterRole")
+	}
+}
+
+// TestAdminClusterBaselineWritesAreNameScoped: update/patch on clusterbaselines
+// is limited to the singleton name so a second object cannot be mutated if
+// admission is bypassed. get/list/watch stay unscoped (list ignores resourceNames).
+func TestAdminClusterBaselineWritesAreNameScoped(t *testing.T) {
+	doc := userRoleDoc(mustReadUserRolesYAML(t), "baseline-security-admin")
+	if doc == "" {
+		t.Fatal("user_roles.yaml missing baseline-security-admin")
+	}
+	if !strings.Contains(doc, "resourceNames: [cluster]") {
+		t.Fatal("admin ClusterBaseline writes must set resourceNames: [cluster]")
+	}
+	if !roleDocHasVerb(doc, "update") || !roleDocHasVerb(doc, "patch") {
+		t.Fatal("admin ClusterRole missing update/patch")
+	}
+}
+
+// TestAdminRoleIncludesViewerReads: binding only baseline-security-admin must
+// still list check results (admin is a superset of viewer reads).
+func TestAdminRoleIncludesViewerReads(t *testing.T) {
+	doc := userRoleDoc(mustReadUserRolesYAML(t), "baseline-security-admin")
+	if doc == "" {
+		t.Fatal("user_roles.yaml missing baseline-security-admin")
+	}
+	for _, res := range []string{
+		"clusterbaselines", "compliancecheckresults", "compliancescans",
+		"compliancesuites", "complianceremediations", "profiles", "tailoredprofiles",
+	} {
+		if !strings.Contains(doc, res) {
+			t.Fatalf("admin ClusterRole missing read resource %q", res)
+		}
+	}
+	if !roleDocHasVerb(doc, "get") || !roleDocHasVerb(doc, "list") || !roleDocHasVerb(doc, "watch") {
+		t.Fatal("admin ClusterRole missing get/list/watch")
+	}
+}
+
+// roleDocHasVerb is true when a ClusterRole YAML document lists verb either as
+// a YAML item ("- patch") or an inline flow list ("verbs: [get, patch]").
+func roleDocHasVerb(doc, verb string) bool {
+	return rbacVerbListed(doc, verb) || csvVerbsInclude(doc, verb)
+}

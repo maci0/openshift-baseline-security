@@ -616,8 +616,8 @@ describe('clusterScore', () => {
   it('prefers the singleton named "cluster"', () => {
     expect(clusterScore([cb('other', 10), cb('cluster', 95)])).toBe(95);
   });
-  it('falls back to the first when none is named "cluster"', () => {
-    expect(clusterScore([cb('a', 42), cb('b', 7)])).toBe(42);
+  it('ignores objects not named "cluster"', () => {
+    expect(clusterScore([cb('a', 42), cb('b', 7)])).toBeNull();
   });
   it('returns null when the baseline exists but has not scored', () => {
     expect(clusterScore([cb('cluster')])).toBeNull();
@@ -625,7 +625,7 @@ describe('clusterScore', () => {
   it('treats a zero score as a value, not absent', () => {
     expect(clusterScore([cb('cluster', 0)])).toBe(0);
   });
-  // Baseline list shape is untrusted API data; prefer "cluster", else first.
+  // Baseline list shape is untrusted API data; only the singleton counts.
   it('fuzz: never throws; null or a number', () => {
     for (let i = 0; i < 500; i++) {
       const list: ClusterBaseline[] = Array.from({ length: i % 5 }, (_, j) =>

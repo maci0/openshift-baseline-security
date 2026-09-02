@@ -99,6 +99,12 @@ depend on those tags.
 
 ### Security
 
+- `baseline-security-admin` is no longer aggregated onto the built-in
+  `admin` ClusterRole. A RoleBinding to `admin` in `openshift-compliance`
+  no longer grants namespaced patch on ComplianceRemediations (node
+  reboots) or ComplianceScans. Bind `baseline-security-admin` explicitly,
+  or use cluster-admin. ClusterBaseline writes on that role are
+  name-scoped to `cluster`.
 - Console: CSV export strips Unicode format characters (zero-width, BIDI, BOM)
   before formula-prefix hardening, so a hidden `=` in a check title cannot
   reach a spreadsheet as a live formula.

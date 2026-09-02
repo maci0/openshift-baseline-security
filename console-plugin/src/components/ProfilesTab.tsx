@@ -7,6 +7,7 @@ import {
   k8sUpdate,
   useAccessReview,
   useK8sWatchResource,
+  WatchK8sResource,
 } from '@openshift-console/dynamic-plugin-sdk';
 import {
   Alert,
@@ -254,6 +255,34 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
     verb: 'create',
     namespace: COMPLIANCE_NAMESPACE,
   });
+  // Profile/Rule catalog is only for TailoredProfile authoring. Viewers lack
+  // those verbs; listing them would 403 the Profiles tab. Skip until SAR
+  // resolves so the watch does not flash a denial for readers.
+  const authoring = canAuthor && !canAuthorLoading;
+  const profileCatalogWatch = React.useMemo(
+    (): WatchK8sResource | null =>
+      authoring
+        ? {
+            groupVersionKind: ProfileGVK,
+            isList: true,
+            namespaced: true,
+            namespace: COMPLIANCE_NAMESPACE,
+          }
+        : null,
+    [authoring],
+  );
+  const ruleCatalogWatch = React.useMemo(
+    (): WatchK8sResource | null =>
+      authoring
+        ? {
+            groupVersionKind: RuleGVK,
+            isList: true,
+            namespaced: true,
+            namespace: COMPLIANCE_NAMESPACE,
+          }
+        : null,
+    [authoring],
+  );
   const [creating, setCreating] = React.useState(false);
   // The existing TailoredProfile being edited (fetched object, for the update),
   // or null when the form is in create mode. Reuses the create modal.
@@ -275,12 +304,8 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
   const [enableExpanded, setEnableExpanded] = React.useState(false);
 
   // Compliance Operator Profiles: the base-profile options and their rule lists.
-  const [profiles, , profilesError] = useK8sWatchResource<ComplianceProfile[]>({
-    groupVersionKind: ProfileGVK,
-    isList: true,
-    namespaced: true,
-    namespace: COMPLIANCE_NAMESPACE,
-  });
+  const [profiles, , profilesError] =
+    useK8sWatchResource<ComplianceProfile[]>(profileCatalogWatch);
   // Base-profile names, sorted, deduped. Fallback to ocp4-cis so the form is
   // usable before the watch resolves (or if Profiles are not readable); a read
   // failure itself is surfaced via catalogWatchError instead of shrinking the
@@ -304,12 +329,8 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
 
   // Full Rule catalog: candidates for enableRules are the rules NOT already in
   // the base profile (those are active anyway). Large list; typeahead-filtered.
-  const [allRules, , rulesError] = useK8sWatchResource<ComplianceRule[]>({
-    groupVersionKind: RuleGVK,
-    isList: true,
-    namespaced: true,
-    namespace: COMPLIANCE_NAMESPACE,
-  });
+  const [allRules, , rulesError] =
+    useK8sWatchResource<ComplianceRule[]>(ruleCatalogWatch);
   const enableCandidates = React.useMemo(() => {
     const inBase = new Set(baseRules);
     const names = (Array.isArray(allRules) ? allRules : [])

@@ -147,6 +147,13 @@ Compliance score deep-linked on the cluster Overview Details card:
 - Cluster access to an OLM catalog carrying `compliance-operator`
   (`redhat-operators` by default)
 
+Read-only console users inherit `baseline-security-viewer` through the
+built-in `view` and `cluster-reader` ClusterRoles. Writes (profile toggle,
+waivers, remediations, TailoredProfiles) need `cluster-admin` or a
+ClusterRoleBinding to `baseline-security-admin`. That admin role is not
+aggregated onto namespaced `admin`, so a project admin of
+`openshift-compliance` cannot apply remediations.
+
 ## Install (OLM)
 
 ### From the published catalog (recommended)

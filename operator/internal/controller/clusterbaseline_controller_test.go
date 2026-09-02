@@ -2440,6 +2440,36 @@ func TestAggregateStatusWaivers(t *testing.T) {
 	}
 }
 
+// TestAggregateStatusWaiverIgnoresForeignSuite: a waiver name that matches a
+// FAIL outside this baseline's suites must not enter the Waived bucket or
+// change the owned score (suite selector is the tenancy boundary).
+func TestAggregateStatusWaiverIgnoresForeignSuite(t *testing.T) {
+	scheme := testScheme(t)
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(
+			checkResult("owned-fail", "baseline-cis", "FAIL"),
+			checkResult("owned-pass", "baseline-cis", "PASS"),
+			checkResult("foreign-fail", "someone-elses-suite", "FAIL"),
+		).Build(),
+		Scheme: scheme,
+	}
+	cb := &baselinev1alpha1.ClusterBaseline{
+		Spec: baselinev1alpha1.ClusterBaselineSpec{
+			Profiles: []baselinev1alpha1.ProfileKey{"cis"},
+			Waivers:  []baselinev1alpha1.WaiverEntry{{Name: "foreign-fail"}},
+		},
+	}
+	if err := r.aggregateStatus(context.Background(), cb); err != nil {
+		t.Fatal(err)
+	}
+	if cb.Status.Score == nil || *cb.Status.Score != 50 {
+		t.Fatalf("score = %v, want 50 (foreign FAIL excluded)", cb.Status.Score)
+	}
+	if p := cb.Status.Profiles[0]; p.Pass != 1 || p.Fail != 1 || p.Waived != 0 {
+		t.Fatalf("counts = %+v, want pass=1 fail=1 waived=0", p)
+	}
+}
+
 // TestAggregateStatusAllFailsWaived: when every FAIL is waived and there is no
 // PASS, score is nil (no countable mass), not a false 0 or 100.
 func TestAggregateStatusAllFailsWaived(t *testing.T) {
