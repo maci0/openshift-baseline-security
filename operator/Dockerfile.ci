@@ -27,7 +27,7 @@ FROM registry.ci.openshift.org/ocp/4.22:base-rhel9
 # BuildKit special-case ARG: must be declared in this stage too or layer
 # timestamps are not clamped (release Dockerfile already does this).
 ARG SOURCE_DATE_EPOCH=0
-ARG VERSION=0.5.15
+ARG VERSION=0.6.0
 COPY --from=build --chown=65532:65532 --chmod=0755 /tmp/manager /usr/bin/manager
 COPY --chmod=0644 LICENSE /licenses/LICENSE
 LABEL org.opencontainers.image.title="Baseline Security Operator"

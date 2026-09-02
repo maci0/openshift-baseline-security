@@ -1,6 +1,6 @@
 # Threat model
 
-Last reviewed: 2026-09-02 (against `main` at 0.5.15 plus unreleased tree).
+Last reviewed: 2026-09-02 (against `main` at 0.6.0).
 Owner and review cadence are organizational; this file does not name either.
 
 This is the CISO-facing map of what can be attacked, what it costs, and what

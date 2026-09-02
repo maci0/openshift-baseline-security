@@ -42,26 +42,19 @@ depend on those tags.
 
 ## [Unreleased]
 
-### Fixed
-
-- OperatorHub lists the package as Basic Install. The CSV advertised Seamless
-  Upgrades even though 0.x bundles have no `replaces` graph, so OLM cannot
-  upgrade between versions.
-- Console: repeated Export HTML report clicks no longer pin extra blob URLs
-  (and their report documents) in the browser until the tab is closed.
-- Console: the score scale "100" is formatted with the console locale, so
-  native-digit locales (ar-SA, fa, ...) no longer mix Latin 100 with a
-  localized score.
-- Console: exported HTML reports take the console language for dates and
-  counts, set RTL from the locale when document dir is unset, and isolate
-  bidirectional check and waiver text so it cannot reverse surrounding
-  punctuation.
-- Operator and console: INCONSISTENT per-node status tokens fold ASCII
-  case only. A sharp s (`paß`) or Turkish dotless i (`faıl`) in a
-  Compliance Operator annotation no longer maps to PASS or FAIL.
+## [0.6.0] - 2026-09-02
 
 ### Changed
 
+- Operator builds against controller-runtime 0.24.1 and the Kubernetes 0.36.4
+  client libraries (was 0.23.3 / 0.35.1). `PodSpec.workloadRef` is tombstoned
+  upstream in 1.36, so the console plugin pod no longer clears that field, and
+  the API group registers through apimachinery's SchemeBuilder because
+  controller-runtime deprecated its own. No CRD schema change.
+- Console plugin builds with eslint 10.9.1, webpack 5.110.1, and
+  `@patternfly/react-icons` 6.6.1. i18next and react-i18next stay on 25.x and
+  16.x: react-i18next is a no-fallback singleton shared with the console, and
+  OpenShift 4.22 provides 16.5.x.
 - Operator, plugin, bundle, and catalog images ship the Apache-2.0 license at
   `/licenses/LICENSE` and OCI source, license, and version labels.
 - OperatorHub CSV links include the project License.
@@ -100,15 +93,23 @@ depend on those tags.
   Remediations, and Profiles load when those tabs are opened. A Retry alert
   is shown if a chunk fails to load.
 
-### Security
-
-- Console: `yarn install` no longer runs package lifecycle scripts
-  (`enableScripts: false`, image `YARN_ENABLE_SCRIPTS=false`). A compromised
-  transitive with a `postinstall` cannot execute during local/CI install or
-  the plugin image build.
-
 ### Fixed
 
+- OperatorHub lists the package as Basic Install. The CSV advertised Seamless
+  Upgrades even though 0.x bundles have no `replaces` graph, so OLM cannot
+  upgrade between versions.
+- Console: repeated Export HTML report clicks no longer pin extra blob URLs
+  (and their report documents) in the browser until the tab is closed.
+- Console: the score scale "100" is formatted with the console locale, so
+  native-digit locales (ar-SA, fa, ...) no longer mix Latin 100 with a
+  localized score.
+- Console: exported HTML reports take the console language for dates and
+  counts, set RTL from the locale when document dir is unset, and isolate
+  bidirectional check and waiver text so it cannot reverse surrounding
+  punctuation.
+- Operator and console: INCONSISTENT per-node status tokens fold ASCII
+  case only. A sharp s (`paß`) or Turkish dotless i (`faıl`) in a
+  Compliance Operator annotation no longer maps to PASS or FAIL.
 - Support: must-gather waiver redaction runs with BSD sed, so a dump collected
   on macOS still strips `requestedBy`/`approvedBy`.
 - Operator CI image runtime stage now honors `SOURCE_DATE_EPOCH` (it was only
@@ -171,6 +172,10 @@ depend on those tags.
 
 ### Security
 
+- Console: `yarn install` no longer runs package lifecycle scripts
+  (`enableScripts: false`, image `YARN_ENABLE_SCRIPTS=false`). A compromised
+  transitive with a `postinstall` cannot execute during local/CI install or
+  the plugin image build.
 - `baseline-security-admin` is no longer aggregated onto the built-in
   `admin` ClusterRole. A RoleBinding to `admin` in `openshift-compliance`
   no longer grants namespaced patch on ComplianceRemediations (node
@@ -185,9 +190,6 @@ depend on those tags.
   printable report.
 - Console plugin nginx no longer includes the UBI extra conf directories,
   which can start a plaintext listener beside TLS port 9443.
-
-### Security
-
 - Operator binary is linked as a PIE (`-buildmode=pie`) in the Makefile and
   both Dockerfiles.
 
@@ -783,7 +785,8 @@ Initial packaged release.
   Remediations, Profiles).
 - OLM bundle + file-based catalog; string-enum spec; OpenShift-style conditions.
 
-[Unreleased]: https://github.com/maci0/openshift-baseline-security/compare/v0.5.15...HEAD
+[Unreleased]: https://github.com/maci0/openshift-baseline-security/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/maci0/openshift-baseline-security/compare/v0.5.15...v0.6.0
 [0.5.15]: https://github.com/maci0/openshift-baseline-security/compare/v0.5.14...v0.5.15
 [0.5.14]: https://github.com/maci0/openshift-baseline-security/compare/v0.5.13...v0.5.14
 [0.5.13]: https://github.com/maci0/openshift-baseline-security/compare/v0.5.12...v0.5.13

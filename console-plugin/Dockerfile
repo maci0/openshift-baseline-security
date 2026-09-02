@@ -33,7 +33,7 @@ RUN --network=none yarn build
 # ubi9/nginx-120
 FROM registry.access.redhat.com/ubi9/nginx-120@sha256:75970114ae16df650158245bfc81968e88704d23d98d986684152f3837d4bddf
 ARG SOURCE_DATE_EPOCH=0
-ARG VERSION=0.5.15
+ARG VERSION=0.6.0
 # Runtime UID owns static assets and nginx.conf (read-only rootfs still applies
 # in the Deployment; ownership matches USER so the process can open its files).
 # --chmod: host umask must not change the shipped layer digest (dirs stay traversable).
