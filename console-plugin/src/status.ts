@@ -5,6 +5,63 @@ import { isString } from './parse';
 
 export type NodeStatus = { node: string; status: string };
 
+// Status after operator-parity collapse: SKIP -> NOT-APPLICABLE, benign
+// INCONSISTENT -> PASS/NOT-APPLICABLE, unknown/empty -> ERROR. Never SKIP
+// (folded) and never WAIVED (that mapping is resultFilterStatus).
+export type EffectiveStatus =
+  | 'PASS'
+  | 'FAIL'
+  | 'ERROR'
+  | 'INFO'
+  | 'MANUAL'
+  | 'INCONSISTENT'
+  | 'NOT-APPLICABLE';
+
+// Results chip / CSV / table status: effective status plus synthetic WAIVED
+// for an active-waiver FAIL. Raw CheckStatus.SKIP is not a chip (it would
+// never match a row after collapse).
+export type ResultFilterStatus = EffectiveStatus | 'WAIVED';
+
+// Results Status filter chips and resultsHref('…') keys. Order is the table
+// facet order. SKIP is omitted on purpose (folded into NOT-APPLICABLE);
+// WAIVED is included so a waived FAIL is not stuck looking like FAIL or N/A.
+export const RESULT_FILTER_STATUSES: readonly ResultFilterStatus[] = [
+  'PASS',
+  'FAIL',
+  'WAIVED',
+  'MANUAL',
+  'ERROR',
+  'INFO',
+  'INCONSISTENT',
+  'NOT-APPLICABLE',
+];
+
+// Localized title for a ResultFilterStatus (and leftover SKIP, which shares
+// the N/A label). Filter ids stay English; only the visible title is i18n.
+export const statusDisplayTitle = (status: string, t: (k: string) => string): string => {
+  switch (status) {
+    case 'PASS':
+      return t('Pass');
+    case 'FAIL':
+      return t('Fail');
+    case 'ERROR':
+      return t('Error');
+    case 'MANUAL':
+      return t('Manual');
+    case 'INFO':
+      return t('Info');
+    case 'INCONSISTENT':
+      return t('Inconsistent');
+    case 'SKIP':
+    case 'NOT-APPLICABLE':
+      return t('Not applicable');
+    case 'WAIVED':
+      return t('Waived');
+    default:
+      return status;
+  }
+};
+
 // CO annotations on INCONSISTENT results. Lockstep with operator
 // inconsistentSourceAnn / mostCommonStatusAnn.
 const inconsistentSourceAnn = 'compliance.openshift.io/inconsistent-source';
@@ -13,7 +70,7 @@ const mostCommonStatusAnn = 'compliance.openshift.io/most-common-status';
 // Recognized CO result statuses that effectiveStatus passes through unchanged.
 // SKIP folds to NOT-APPLICABLE and INCONSISTENT collapses separately; anything
 // else non-empty folds to ERROR (the operator tally's default bucket).
-const KNOWN_EFFECTIVE_STATUSES = new Set([
+const KNOWN_EFFECTIVE_STATUSES: ReadonlySet<string> = new Set([
   'PASS',
   'FAIL',
   'ERROR',
@@ -21,6 +78,11 @@ const KNOWN_EFFECTIVE_STATUSES = new Set([
   'MANUAL',
   'NOT-APPLICABLE',
 ]);
+
+type PassthroughStatus = Exclude<EffectiveStatus, 'INCONSISTENT'>;
+
+const isPassthroughStatus = (s: string): s is PassthroughStatus =>
+  KNOWN_EFFECTIVE_STATUSES.has(s);
 
 // Uppercase a CO status token without allocating when the value is already a
 // common uppercase enum (PASS/FAIL/…) or has no ASCII lowercase letters.
@@ -99,7 +161,7 @@ export const inconsistentSources = (
 // over multi-thousand rows when a few are INCONSISTENT.
 export const effectiveStatus = (
   r: { status: string; metadata?: { annotations?: Record<string, string> } },
-): string => {
+): EffectiveStatus => {
   // Non-string / empty status matches the operator tally (unknown/empty -> ERROR
   // so a CCR is never silently dropped from ResultCounts). CRs are not runtime
   // type-checked; a missing field must not yield a blank filter chip or a
@@ -116,7 +178,7 @@ export const effectiveStatus = (
     // same bucket the operator tally uses, so the row stays visible under the
     // Error filter and matches the Overview donut instead of showing a bogus
     // label that matches no status filter chip.
-    return KNOWN_EFFECTIVE_STATUSES.has(r.status) ? r.status : 'ERROR';
+    return isPassthroughStatus(r.status) ? r.status : 'ERROR';
   }
   // One annotations object read for both CO keys (filter/CSV/score hot path).
   const ann = r.metadata?.annotations;
@@ -190,7 +252,7 @@ export const effectiveStatus = (
 export const resultFilterStatus = (
   r: { status: string; metadata?: { name?: string; annotations?: Record<string, string> } },
   waivers?: Waiver[] | ReadonlySet<string>,
-): string => {
+): ResultFilterStatus => {
   const eff = effectiveStatus(r);
   if (eff !== 'FAIL' || !waivers) {
     return eff;

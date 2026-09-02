@@ -73,7 +73,13 @@ import {
   severityDisplayTitle,
 } from '../results';
 import { checkSeverity } from '../scoring';
-import { effectiveStatus, inconsistentSources, resultFilterStatus } from '../status';
+import {
+  effectiveStatus,
+  inconsistentSources,
+  RESULT_FILTER_STATUSES,
+  resultFilterStatus,
+  statusDisplayTitle,
+} from '../status';
 import {
   dateInputEndOfDayIso,
   formatCount,
@@ -94,7 +100,7 @@ import { useWaiverExpiryClock } from './useWaiverExpiryClock';
 
 // Color + icon per status so state is not color-only. The index signature
 // keeps arbitrary runtime tokens readable while required keys fail typecheck
-// if a CheckStatus member is missing.
+// if a CheckStatus member or WAIVED (the synthetic filter status) is missing.
 interface StatusVisual {
   color: React.ComponentProps<typeof Label>['color'];
   icon: React.ReactElement;
@@ -110,6 +116,7 @@ interface StatusVisualMap {
   INCONSISTENT: StatusVisual;
   SKIP: StatusVisual;
   'NOT-APPLICABLE': StatusVisual;
+  WAIVED: StatusVisual;
 }
 
 const statusLabel: StatusVisualMap = {
@@ -122,10 +129,12 @@ const statusLabel: StatusVisualMap = {
   INCONSISTENT: { color: 'purple', icon: <ExclamationTriangleIcon /> },
   SKIP: { color: 'grey', icon: <MinusCircleIcon /> },
   'NOT-APPLICABLE': { color: 'grey', icon: <MinusCircleIcon /> },
+  // Teal matches the Overview composition donut so a waived FAIL is not
+  // painted the same grey as N/A (WAIVED is a filter status, not a CO token).
+  WAIVED: { color: 'teal', icon: <MinusCircleIcon /> },
 };
 
-// Style for a row-filter status. WAIVED (not a CheckStatus key) and any unknown
-// status fall through to the grey/minus default.
+// Style for a row-filter status. Unknown tokens fall through to grey/minus.
 const statusStyle = (status: string) =>
   statusLabel[status] ?? { color: 'grey' as const, icon: <MinusCircleIcon /> };
 
@@ -153,32 +162,6 @@ const chipFilter =
     const v = getValue(r);
     return sel.length === 1 ? v === sel[0] : sel.includes(v);
   };
-
-// Filter ids and CR status values stay English enums; only the visible title is
-// localized so chips, labels, and deep-links keep matching.
-const statusDisplayTitle = (status: string, t: (k: string) => string): string => {
-  switch (status) {
-    case 'PASS':
-      return t('Pass');
-    case 'FAIL':
-      return t('Fail');
-    case 'ERROR':
-      return t('Error');
-    case 'MANUAL':
-      return t('Manual');
-    case 'INFO':
-      return t('Info');
-    case 'INCONSISTENT':
-      return t('Inconsistent');
-    case 'SKIP':
-    case 'NOT-APPLICABLE':
-      return t('Not applicable');
-    case 'WAIVED':
-      return t('Waived');
-    default:
-      return status;
-  }
-};
 
 const ResultsTab: React.FC<{
   baseline?: ClusterBaseline;
@@ -646,18 +629,7 @@ const ResultsTab: React.FC<{
         type: 'result-status',
         reducer: rowFilterStatus,
         filter: chipFilter(rowFilterStatus),
-        // SKIP is folded into NOT-APPLICABLE by effectiveStatus (operator
-        // ResultCounts.notApplicable); a separate SKIP chip would never match.
-        items: [
-          'PASS',
-          'FAIL',
-          'WAIVED',
-          'MANUAL',
-          'ERROR',
-          'INFO',
-          'INCONSISTENT',
-          'NOT-APPLICABLE',
-        ].map((s) => ({
+        items: RESULT_FILTER_STATUSES.map((s) => ({
           id: s,
           title: statusDisplayTitle(s, t),
         })),

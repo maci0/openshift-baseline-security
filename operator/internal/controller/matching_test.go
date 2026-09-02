@@ -704,8 +704,10 @@ func TestProfileNames(t *testing.T) {
 	if baselinev1alpha1.DefaultScanSchedule != "0 1 * * *" {
 		t.Fatalf("DefaultScanSchedule = %q, want CRD schedule default", baselinev1alpha1.DefaultScanSchedule)
 	}
+	// Catalog source has no CRD default (OKD auto-detect). The constant is the
+	// OCP detection preference / neither-found fallback, not a schema default.
 	if baselinev1alpha1.DefaultComplianceCatalogSource != "redhat-operators" {
-		t.Fatalf("DefaultComplianceCatalogSource = %q, want CRD catalog default", baselinev1alpha1.DefaultComplianceCatalogSource)
+		t.Fatalf("DefaultComplianceCatalogSource = %q, want redhat-operators", baselinev1alpha1.DefaultComplianceCatalogSource)
 	}
 	if baselinev1alpha1.RemediationBatchPhaseApplying != "Applying" {
 		t.Fatalf("RemediationBatchPhaseApplying = %q", baselinev1alpha1.RemediationBatchPhaseApplying)

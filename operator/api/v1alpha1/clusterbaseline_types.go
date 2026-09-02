@@ -36,9 +36,11 @@ const FailureListMax = 4096
 // and the console DEFAULT_SCAN_SCHEDULE constant.
 const DefaultScanSchedule = "0 1 * * *"
 
-// DefaultComplianceCatalogSource is used when ClusterBaselineSpec.complianceCatalogSource
-// is empty or whitespace-only. Keep in lockstep with the kubebuilder default on
-// ComplianceCatalogSource.
+// DefaultComplianceCatalogSource is the OCP catalog auto-detect prefers, and the
+// fallback when neither redhat-operators nor community-operators is found. It is
+// not a CRD default: an omitted spec.complianceCatalogSource must stay empty so
+// OKD can select community-operators (a schema default would persist
+// redhat-operators and break zero-config CO install there).
 const DefaultComplianceCatalogSource = "redhat-operators"
 
 // CommunityCatalogSource carries the Compliance Operator on OKD, which has no

@@ -1,6 +1,11 @@
 import { ComplianceCheckResult } from './models';
 import { isString } from './parse';
-import { effectiveStatus, inconsistentSources } from './status';
+import {
+  effectiveStatus,
+  inconsistentSources,
+  RESULT_FILTER_STATUSES,
+  statusDisplayTitle,
+} from './status';
 import { randomString } from './testing/fuzz';
 
 describe('inconsistentSources', () => {
@@ -232,5 +237,37 @@ describe('effectiveStatus', () => {
       }
     }
     expect(wrong).toBeUndefined();
+  });
+});
+
+describe('RESULT_FILTER_STATUSES / statusDisplayTitle', () => {
+  it('is the Results chip set: WAIVED in, SKIP out', () => {
+    expect([...RESULT_FILTER_STATUSES]).toEqual([
+      'PASS',
+      'FAIL',
+      'WAIVED',
+      'MANUAL',
+      'ERROR',
+      'INFO',
+      'INCONSISTENT',
+      'NOT-APPLICABLE',
+    ]);
+    expect(RESULT_FILTER_STATUSES).not.toContain('SKIP');
+    expect(new Set(RESULT_FILTER_STATUSES).size).toBe(RESULT_FILTER_STATUSES.length);
+  });
+
+  it('effectiveStatus never returns SKIP or WAIVED', () => {
+    expect(effectiveStatus({ status: 'SKIP' })).toBe('NOT-APPLICABLE');
+    expect(effectiveStatus({ status: 'WAIVED' })).toBe('ERROR');
+    expect(effectiveStatus({ status: 'PASS' })).toBe('PASS');
+  });
+
+  it('statusDisplayTitle localizes known tokens; SKIP shares N/A', () => {
+    const t = (k: string): string => k;
+    expect(statusDisplayTitle('PASS', t)).toBe('Pass');
+    expect(statusDisplayTitle('WAIVED', t)).toBe('Waived');
+    expect(statusDisplayTitle('SKIP', t)).toBe('Not applicable');
+    expect(statusDisplayTitle('NOT-APPLICABLE', t)).toBe('Not applicable');
+    expect(statusDisplayTitle('FUTURE-STATE', t)).toBe('FUTURE-STATE');
   });
 });

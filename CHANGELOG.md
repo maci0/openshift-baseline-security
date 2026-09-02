@@ -85,6 +85,9 @@ depend on those tags.
   (often still disabled) instead of waiting for the automatic first scan.
 - Console: the newly-failing Overview alert linked to the unfiltered Results
   table. It now lists the named checks.
+- Console: waived checks on the Results table used the same grey label as
+  not-applicable rows (WAIVED had no status style of its own). They now use
+  a teal label, matching the Overview composition donut.
 
 ### Docs
 
