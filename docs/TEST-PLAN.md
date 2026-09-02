@@ -374,6 +374,9 @@ per-node annotation) when nodes disagree.
 - [ ] **Results CSV export UI path**: exports only filtered rows, attaches a
       temporary download link, removes it after click, revokes the object URL
       asynchronously (jsdom component test).
+- [x] **HTML report blob URL**: `openBlobInTab` revokes immediately when the
+      popup is blocked or `window.open` throws, after the load-grace timeout
+      when the tab opens, and dispose is idempotent (jest `openBlobInTab`).
 - [ ] **RBAC read-only user**: profile toggles + apply + rescan disabled
       (`useAccessReview` false path); assert disabled state in Playwright.
 - [ ] **List error / RBAC denied on ClusterBaseline**: Overview item falls back

@@ -31,7 +31,7 @@ import {
   scanningDisabled,
 } from '../models';
 import { formatCount } from '../dates';
-import { downloadBlob } from '../download';
+import { downloadBlob, openBlobInTab } from '../download';
 import { errorMessage } from '../errors';
 import { rescanPatch } from '../patches';
 import { withDisabledTip } from './DisabledTip';
@@ -111,6 +111,10 @@ const CompliancePage: React.FC = () => {
     message: string;
     variant: 'info' | 'danger';
   } | null>(null);
+  const [exporting, setExporting] = React.useState(false);
+  // Sync guard: React state alone cannot block a second click before re-render,
+  // and each click would otherwise pin another HTML-report blob URL for 60s.
+  const exportingRef = React.useRef(false);
   // Auto-dismiss non-error banners so rescan/export feedback does not stick.
   useAutoDismiss(rescanStarted, !!rescanError, () => setRescanStarted(false));
   useAutoDismiss(exportNotice, exportNotice?.variant === 'danger', () => setExportNotice(null));
@@ -197,6 +201,60 @@ const CompliancePage: React.FC = () => {
     }
   };
 
+  const exportReport = async () => {
+    if (exportingRef.current || !baseline) return;
+    exportingRef.current = true;
+    setExporting(true);
+    setExportNotice(null);
+    try {
+      let buildReportHtml: typeof import('../report').buildReportHtml;
+      try {
+        ({ buildReportHtml } = await import(
+          /* webpackChunkName: "report" */ '../report'
+        ));
+      } catch {
+        setExportNotice({
+          variant: 'danger',
+          message: t('Failed to load the report exporter.'),
+        });
+        return;
+      }
+      try {
+        const html = buildReportHtml(
+          baseline,
+          ownedResults,
+          new Date(),
+          t,
+          i18n.language,
+        );
+        const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+        // Prefer a blob URL over document.write: no blank-window document
+        // mutation, and opener is dropped when available. openBlobInTab
+        // revokes on every path (blocked popup, throw, grace timeout).
+        const tab = openBlobInTab(blob);
+        if (!tab.opened) {
+          // Popup blockers should not turn export into a silent no-op.
+          downloadBlob(blob, 'compliance-report.html');
+          setExportNotice({
+            variant: 'info',
+            message: t(
+              'Report downloaded as compliance-report.html (popup was blocked).',
+            ),
+          });
+        }
+      } catch (e) {
+        // DOM / serialization failures must not leave a blank click.
+        setExportNotice({
+          variant: 'danger',
+          message: errorMessage(e) ?? t('Failed to export compliance report.'),
+        });
+      }
+    } finally {
+      exportingRef.current = false;
+      setExporting(false);
+    }
+  };
+
   // One watch of ComplianceCheckResults for the whole page tree: Export report,
   // Overview (recent changes / weighted scores), and Results share it instead of
   // each tab opening a parallel list watch of the same large CR set.
@@ -227,12 +285,14 @@ const CompliancePage: React.FC = () => {
     [t],
   );
 
-  const exportDisabled = !checkResultsLoaded || !!checkResultsError;
-  const exportDisabledReason = checkResultsError
-    ? t('Export is unavailable while check results fail to load.')
-    : !checkResultsLoaded
-      ? t('Waiting for check results to load.')
-      : undefined;
+  const exportDisabled = !checkResultsLoaded || !!checkResultsError || exporting;
+  const exportDisabledReason = exporting
+    ? undefined
+    : checkResultsError
+      ? t('Export is unavailable while check results fail to load.')
+      : !checkResultsLoaded
+        ? t('Waiting for check results to load.')
+        : undefined;
 
   const rescanDisabled =
     rescanning ||
@@ -280,72 +340,9 @@ const CompliancePage: React.FC = () => {
                     variant="secondary"
                     icon={<DownloadIcon />}
                     isDisabled={exportDisabled}
+                    isLoading={exporting}
                     onClick={() => {
-                      setExportNotice(null);
-                      void (async () => {
-                        let buildReportHtml: typeof import('../report').buildReportHtml;
-                        try {
-                          ({ buildReportHtml } = await import(
-                            /* webpackChunkName: "report" */ '../report'
-                          ));
-                        } catch {
-                          setExportNotice({
-                            variant: 'danger',
-                            message: t('Failed to load the report exporter.'),
-                          });
-                          return;
-                        }
-                        try {
-                          const html = buildReportHtml(
-                            baseline,
-                            ownedResults,
-                            new Date(),
-                            t,
-                            i18n.language,
-                          );
-                          const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
-                          // Prefer a blob URL over document.write: no blank-window
-                          // document mutation, and opener is dropped when available.
-                          // Revoke on every path: a throw after createObjectURL
-                          // must not leak the blob URL for the session.
-                          const url = URL.createObjectURL(blob);
-                          try {
-                            // Do NOT pass noopener/noreferrer in the feature string:
-                            // per the HTML spec that forces window.open to return null
-                            // even when the tab opens, which would make the block below
-                            // always take the "popup was blocked" path (false notice +
-                            // redundant download + early blob revoke). Open plainly so a
-                            // real block is the only null, then drop opener manually (the
-                            // report is our own static, script-free, CSP-locked HTML).
-                            const w = window.open(url, '_blank');
-                            if (w) {
-                              w.opener = null;
-                              // Keep the blob alive long enough for the tab to load.
-                              window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
-                            } else {
-                              URL.revokeObjectURL(url);
-                              // Popup blockers should not turn export into a silent no-op.
-                              downloadBlob(blob, 'compliance-report.html');
-                              setExportNotice({
-                                variant: 'info',
-                                message: t(
-                                  'Report downloaded as compliance-report.html (popup was blocked).',
-                                ),
-                              });
-                            }
-                          } catch (openErr) {
-                            URL.revokeObjectURL(url);
-                            throw openErr;
-                          }
-                        } catch (e) {
-                          // DOM / serialization failures must not leave a blank click.
-                          setExportNotice({
-                            variant: 'danger',
-                            message:
-                              errorMessage(e) ?? t('Failed to export compliance report.'),
-                          });
-                        }
-                      })();
+                      void exportReport();
                     }}
                   >
                     {t('Export HTML report')}

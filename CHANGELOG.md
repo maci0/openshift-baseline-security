@@ -47,6 +47,8 @@ depend on those tags.
 - OperatorHub lists the package as Basic Install. The CSV advertised Seamless
   Upgrades even though 0.x bundles have no `replaces` graph, so OLM cannot
   upgrade between versions.
+- Console: repeated Export HTML report clicks no longer pin extra blob URLs
+  (and their report documents) in the browser until the tab is closed.
 - Console: the score scale "100" is formatted with the console locale, so
   native-digit locales (ar-SA, fa, ...) no longer mix Latin 100 with a
   localized score.
