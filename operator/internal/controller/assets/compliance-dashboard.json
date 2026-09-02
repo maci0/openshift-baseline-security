@@ -30,9 +30,9 @@
           "span": 4,
           "format": "none",
           "valueName": "current",
-          "thresholds": "60,80",
+          "thresholds": "60,90",
           "colorValue": true,
-          "colors": ["#d64456", "#f0ab00", "#3e8635"],
+          "colors": ["#c9190b", "#f0ab00", "#3e8635"],
           "targets": [
             { "expr": "max((baseline_security_compliance_score >= 0) and on(instance) topk(1, baseline_security_status_observed_timestamp_seconds))", "refId": "A" }
           ]
@@ -47,7 +47,7 @@
           "valueName": "current",
           "thresholds": "0.5,0.5",
           "colorValue": true,
-          "colors": ["#3e8635", "#d64456", "#d64456"],
+          "colors": ["#3e8635", "#c9190b", "#c9190b"],
           "targets": [
             { "expr": "max(baseline_security_condition{type=\"Degraded\"} and on(instance) topk(1, baseline_security_status_observed_timestamp_seconds))", "refId": "A" }
           ]
@@ -62,7 +62,7 @@
           "valueName": "current",
           "thresholds": "0.5,0.5",
           "colorValue": true,
-          "colors": ["#3e8635", "#f0ab00", "#d64456"],
+          "colors": ["#3e8635", "#f0ab00", "#c9190b"],
           "targets": [
             { "expr": "max(baseline_security_remediation_batch_active and on(instance) topk(1, baseline_security_status_observed_timestamp_seconds))", "refId": "A" }
           ]
@@ -77,7 +77,7 @@
           "valueName": "current",
           "thresholds": "600,1200",
           "colorValue": true,
-          "colors": ["#3e8635", "#f0ab00", "#d64456"],
+          "colors": ["#3e8635", "#f0ab00", "#c9190b"],
           "targets": [
             { "expr": "(max(baseline_security_remediation_batch_active and on(instance) topk(1, baseline_security_status_observed_timestamp_seconds)) == 1) * (time() - max((baseline_security_remediation_batch_started_timestamp_seconds > 0) and on(instance) topk(1, baseline_security_status_observed_timestamp_seconds))) or vector(0)", "refId": "A" }
           ]
@@ -189,7 +189,7 @@
           "valueName": "current",
           "thresholds": "0.5,1",
           "colorValue": true,
-          "colors": ["#3e8635", "#f0ab00", "#d64456"],
+          "colors": ["#3e8635", "#f0ab00", "#c9190b"],
           "targets": [
             { "expr": "sum(baseline_security_checks{status=\"error\"} and on(instance) topk(1, baseline_security_status_observed_timestamp_seconds)) or vector(0)", "refId": "A" }
           ]
@@ -204,7 +204,7 @@
           "valueName": "current",
           "thresholds": "0.5,1",
           "colorValue": true,
-          "colors": ["#3e8635", "#f0ab00", "#d64456"],
+          "colors": ["#3e8635", "#f0ab00", "#c9190b"],
           "targets": [
             { "expr": "sum(baseline_security_checks{status=\"inconsistent\"} and on(instance) topk(1, baseline_security_status_observed_timestamp_seconds)) or vector(0)", "refId": "A" }
           ]

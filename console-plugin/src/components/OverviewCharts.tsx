@@ -7,6 +7,7 @@ import {
   ChartArea,
   ChartAxis,
   ChartDonut,
+  ChartLabel,
 } from '@patternfly/react-charts/victory';
 import {
   Card,
@@ -18,11 +19,34 @@ import {
 import { ScoreSnapshot } from '../models';
 import { formatChartDate, formatCount } from '../dates';
 import { resultsHref } from '../links';
+import { scoreColor } from '../scoring';
 import { historyContentKey, toTrendData } from './overviewTrend';
 
 // Empty-ring fill only. Segment colors live on Overview (the legend is HTML
 // next to this chart, not a Victory colorScale built here).
 const DONUT_GREY = 'var(--pf-t--global--icon--color--disabled)';
+
+// Center title uses the same 60/90 text-status token as ClusterScoreItem.
+// ChartDonut cloneElement-overwrites style; merge fill onto the title slot
+// (index 0) and leave the subtitle slot alone.
+type DonutScoreTitleProps = React.ComponentProps<typeof ChartLabel> & {
+  score: number | null | undefined;
+};
+
+const DonutScoreTitle: React.FC<DonutScoreTitleProps> = ({ score, style, ...rest }) => {
+  const fill = score == null ? undefined : scoreColor(score);
+  if (fill === undefined) {
+    return <ChartLabel {...rest} style={style} />;
+  }
+  if (Array.isArray(style)) {
+    const head = style[0];
+    const titled = head ? { ...head, fill } : { fill };
+    return <ChartLabel {...rest} style={[titled, ...style.slice(1)]} />;
+  }
+  const titled = style ? { ...style, fill } : { fill };
+  return <ChartLabel {...rest} style={titled} />;
+};
+DonutScoreTitle.displayName = 'DonutScoreTitle';
 
 type DonutSegment = {
   label: string;
@@ -57,6 +81,7 @@ export const CompositionDonut = React.memo<{
         // non-null status.score must not paint a number over a "No results" ring.
         title="—"
         subTitle={t('of 100')}
+        titleComponent={<DonutScoreTitle score={null} />}
         height={200}
         width={300}
         constrainToVisibleArea
@@ -65,7 +90,14 @@ export const CompositionDonut = React.memo<{
   }
   return (
     // Wrap on narrow viewports so the legend is not clipped beside a fixed-width donut.
-    <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 'var(--pf-t--global--spacer--md)',
+        flexWrap: 'wrap',
+      }}
+    >
       <ChartDonut
         ariaTitle={t('Check results')}
         ariaDesc={t('Compliance score {{score}} of 100. Composition of compliance check results.', {
@@ -83,6 +115,7 @@ export const CompositionDonut = React.memo<{
         }
         title={score != null ? formatCount(score, locale) : '—'}
         subTitle={t('of 100')}
+        titleComponent={<DonutScoreTitle score={score} />}
         height={200}
         width={200}
         padding={{ top: 10, bottom: 10, left: 10, right: 10 }}
@@ -96,7 +129,12 @@ export const CompositionDonut = React.memo<{
           return (
             <li
               key={s.label}
-              style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 0' }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 'var(--pf-t--global--spacer--sm)',
+                padding: '2px 0',
+              }}
             >
               <span
                 aria-hidden

@@ -472,7 +472,10 @@ an accepted risk neither inflates nor tanks the score.
 - [x] **clusterScore singleton selection** prefers `metadata.name == cluster`
       (jest `clusterScore`).
 - [x] **scoreColor thresholds**: >=90 success, >=60 warning, else danger
-      (jest `scoreColor`).
+      (jest `scoreColor` / `scoreStatus`).
+- [x] **HTML report score band**: 59 danger, 88 warning, 90 success, unscored
+      muted (jest `paints a failing score danger`; `uses PatternFly status
+      colors`).
 - [ ] **ClusterScoreItem render branches**: loading/error → "—"; scored →
       colored link; not-scanned → "Not scanned" (component unit test).
 - [ ] **Extra ClusterBaselines in the list**: still prefers `cluster` name.
@@ -1120,6 +1123,9 @@ Beyond existing fuzz targets, properties that should always hold:
 - [x] **Bidirectional text in check titles**: Results modal and table titles
       use `dir=auto`; HTML report wraps untrusted cells in `dir=auto` (jest
       `isolates untrusted check titles`). CSV column tokens stay English.
+- [x] **HTML report chrome is PatternFly-aligned**: system-ui stack, status
+      hexes, no generic `#ccc`/`#666` table dump (jest `uses PatternFly status
+      colors`).
 - [x] **Score scale digits follow locale**: `of 100` / `n / 100` interpolate
       `formatCount(100)` (jest `formatCount` ar-SA; report `ar-SA` native
       digits and `dir=rtl`).

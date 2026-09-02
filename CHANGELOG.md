@@ -62,6 +62,12 @@ depend on those tags.
 - Operator, plugin, bundle, and catalog images ship the Apache-2.0 license at
   `/licenses/LICENSE` and OCI source, license, and version labels.
 - OperatorHub CSV links include the project License.
+- Console: exported HTML compliance reports use PatternFly type scale and the
+  same 60/90 score colors as Overview, so a printed report is not a generic
+  table dump.
+- Observe dashboard: the compliance score singlestat uses the same 60/90
+  color bands as the console (PatternFly danger red, not a generic Grafana
+  red). Alert threshold ComplianceScoreLow stays at 80.
 - Operator and plugin image COPY steps pin file modes so a host umask cannot
   change the published layer digest.
 - Console plugin image install skips package lifecycle scripts and Playwright

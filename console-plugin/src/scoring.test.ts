@@ -1,5 +1,5 @@
 import { ClusterBaseline, ComplianceCheckResult, ResultCounts } from './models';
-import { HISTORY_SCORING_MODE_ANN, aggregateCounts, checkSeverity, clusterScore, effectiveScoringMode, flatProfileScore, historyScoringModeMismatch, profileScore, scoreColor, scoreLabelColor, severityWeight } from './scoring';
+import { HISTORY_SCORING_MODE_ANN, aggregateCounts, checkSeverity, clusterScore, effectiveScoringMode, flatProfileScore, historyScoringModeMismatch, profileScore, scoreColor, scoreLabelColor, scoreStatus, severityWeight } from './scoring';
 import { isFiniteNumber } from './parse';
 
 // Runtime pins for fuzz sweeps: totals must be real numbers and mode checks
@@ -7,6 +7,21 @@ import { isFiniteNumber } from './parse';
 const isNum = (v: unknown): v is number => typeof v === 'number';
 const isBool = (v: unknown): v is boolean => typeof v === 'boolean';
 import { fuzzRand, randomString } from './testing/fuzz';
+
+describe('scoreStatus', () => {
+  it.each([
+    [undefined, 'danger'],
+    [0, 'danger'],
+    [59, 'danger'],
+    [60, 'warning'],
+    [89, 'warning'],
+    [90, 'success'],
+    [100, 'success'],
+    [Number.NaN, 'danger'],
+  ])('score %p -> %s', (score, status) => {
+    expect(scoreStatus(score)).toBe(status);
+  });
+});
 
 describe('scoreColor', () => {
   it.each([

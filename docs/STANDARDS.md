@@ -110,6 +110,9 @@ intended namespaces and watch scope.
 `plugin__baseline-security-console-plugin` for user-visible strings
 including Results table column titles. Spacing uses PatternFly global
 CSS tokens (`--pf-t--global--spacer--*`) rather than custom stylesheets.
+The printable HTML report cannot load PatternFly CSS (standalone document,
+CSP `style-src 'unsafe-inline'` only), so it inlines the light-theme hex
+values for text, borders, and 60/90 score status.
 
 ## Commit / PR workflow
 

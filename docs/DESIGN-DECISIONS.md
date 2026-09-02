@@ -315,8 +315,10 @@ surface.
 ## ADR-017: UI score color bands vs ComplianceScoreLow threshold
 
 **Decision:** Console badges use danger below 60, warning mid-band, success at
-or above 90. Prometheus `ComplianceScoreLow` fires when score is below **80**
-for 30m (excluding the -1 "no score" sentinel; see ADR-018).
+or above 90. The Overview donut title, HTML report score, and Observe
+dashboard score singlestat use the same bands. Prometheus `ComplianceScoreLow`
+fires when score is below **80** for 30m (excluding the -1 "no score"
+sentinel; see ADR-018).
 
 **Alternatives:** One shared threshold for UI and alerts; alert at 60 or 90.
 

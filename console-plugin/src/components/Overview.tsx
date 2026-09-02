@@ -264,7 +264,15 @@ const ScheduleEditor: React.FC<{ baseline: ClusterBaseline }> = ({ baseline }) =
             : t('Enter a 5-field cron schedule.')}
         </HelperTextItem>
       </HelperText>
-      {err && <Alert variant="danger" isInline isLiveRegion title={err} style={{ marginTop: 4 }} />}
+      {err && (
+        <Alert
+          variant="danger"
+          isInline
+          isLiveRegion
+          title={err}
+          style={{ marginTop: 'var(--pf-t--global--spacer--xs)' }}
+        />
+      )}
     </>
   );
 };

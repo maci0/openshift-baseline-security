@@ -8,7 +8,7 @@ import {
   profileTitle,
 } from './models';
 import { checkTitle, severityDisplayTitle } from './results';
-import { aggregateCounts, checkSeverity } from './scoring';
+import { aggregateCounts, checkSeverity, scoreStatus } from './scoring';
 import { effectiveStatus } from './status';
 import {
   formatCount,
@@ -55,6 +55,33 @@ export interface ReportVars {
 // Optional translator for report chrome. When omitted, English source keys are
 // used with simple {{var}} interpolation so unit tests need no i18n harness.
 export type ReportTranslate = (key: string, options?: ReportVars) => string;
+
+// Printable chrome: PatternFly 6 light-theme values inlined because the report
+// is a standalone document (CSP: no external CSS). Text status hexes are the
+// 4.5:1 tokens (same 60/90 bands as scoreColor). system-ui first so CJK/Arabic/
+// Cyrillic glyphs resolve to platform fonts. Brand bar is OpenShift/PatternFly
+// danger red (docs/SPEC.md mermaid already uses this hex).
+const REPORT_CSS =
+  ':root{color-scheme:light}' +
+  'body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans","Helvetica Neue",Arial,sans-serif;font-size:14px;line-height:1.5;margin:2rem;color:#151515;background:#fff;border-block-start:4px solid #c9190b;padding-block-start:1.5rem}' +
+  'h1{font-size:1.5rem;font-weight:700;line-height:1.3;margin:0}' +
+  'h2{font-size:1.125rem;font-weight:700;line-height:1.3;margin:1.5rem 0 0.5rem}' +
+  '.muted{color:#4d4d4d;font-size:0.875rem;margin:0.25rem 0 0}' +
+  '.score{font-size:1.75rem;font-weight:700;line-height:1.2;font-variant-numeric:tabular-nums;margin:0.75rem 0 0}' +
+  '.score-danger{color:#b1380b}' +
+  '.score-warning{color:#795600}' +
+  '.score-success{color:#1e4f18}' +
+  '.score-none{color:#4d4d4d;font-size:1.125rem}' +
+  'table{border-collapse:collapse;margin:0.5rem 0 0;width:100%}' +
+  'th,td{border-block-end:1px solid #c7c7c7;padding:0.5rem 0.75rem;text-align:start;overflow-wrap:anywhere;unicode-bidi:isolate}' +
+  'th{background:#f2f2f2;font-weight:700}' +
+  '.sev-high{color:#b1380b;font-weight:700}' +
+  '.sev-medium{color:#795600}' +
+  '@media print{body{margin:1cm;border-block-start-width:2px}}';
+
+// Known-only class: never interpolate untrusted CCR severity into markup.
+const severityClass = (severity: string): string =>
+  severity === 'high' ? ' class="sev-high"' : severity === 'medium' ? ' class="sev-medium"' : '';
 
 const defaultReportTranslate: ReportTranslate = (key, options) => {
   if (!options) {
@@ -123,14 +150,16 @@ export const buildReportHtml = (
     totals.notApplicable;
   // Match the donut: with zero evaluated checks a non-null status.score is stale
   // (0/0) and the UI shows "—", so the report must not print a number over it.
-  const score =
-    totalChecks > 0 && st.score != null
-      ? t('{{score}} / {{max}}', {
-          score: fmt(Number(st.score)),
-          max: 100,
-          formattedMax: maxText,
-        })
-      : t('Not scanned');
+  const scored = totalChecks > 0 && st.score != null;
+  const score = scored
+    ? t('{{score}} / {{max}}', {
+        score: fmt(Number(st.score)),
+        max: 100,
+        formattedMax: maxText,
+      })
+    : t('Not scanned');
+  // Same 60/90 bands as Overview. Unscored reports stay muted, not danger.
+  const scoreClass = scored ? `score score-${scoreStatus(Number(st.score))}` : 'score score-none';
   const profileRows = [
     ...(st.profiles ?? []).map((p) => ({ name: t(profileTitle(p.key ?? '')), c: p })),
     ...(st.tailoredProfiles ?? []).map((p) => ({
@@ -171,12 +200,13 @@ export const buildReportHtml = (
     ) {
       continue;
     }
+    const severity = checkSeverity(r);
     failingParts.push(
       `<tr><td>${autoDir(name)}</td><td>${autoDir(checkTitle(r))}</td>` +
         // checkProfileLabel returns i18n source titles for built-ins; t() leaves
         // tailored names and the empty em dash unchanged when no key exists.
         `<td>${autoDir(t(checkProfileLabel(labels)))}</td>` +
-        `<td>${esc(severityDisplayTitle(checkSeverity(r), t))}</td></tr>`,
+        `<td${severityClass(severity)}>${esc(severityDisplayTitle(severity, t))}</td></tr>`,
     );
   }
   const failingRows = failingParts.join('');
@@ -199,29 +229,26 @@ export const buildReportHtml = (
   const waiverCount = activeWaivers.length;
   // CSP: no scripts (report is static HTML). style-src unsafe-inline covers the
   // embedded chrome CSS only; all untrusted text is HTML-escaped above.
-  // system-ui first so CJK/Arabic/Cyrillic glyphs resolve to platform fonts.
   return `<!doctype html><html lang="${esc(htmlLang)}" dir="${htmlDir}"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"><meta name="referrer" content="no-referrer"><title>${esc(t('Compliance report'))}</title>
-<style>:root{color-scheme:light}body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans","Helvetica Neue",Arial,sans-serif;margin:2rem;color:#151515;background:#fff}h1{margin-bottom:0}
-table{border-collapse:collapse;margin:1rem 0;width:100%}th,td{border:1px solid #ccc;padding:4px 8px;text-align:start;overflow-wrap:anywhere;unicode-bidi:isolate}
-.muted{color:#666}</style></head><body>
+<style>${REPORT_CSS}</style></head><body>
 <h1>${esc(t('Compliance report'))}</h1>
 <p class="muted">${esc(t('Generated {{when}} • last scan {{lastScan}}', {
     when: whenText,
     lastScan: lastScanText,
   }))}</p>
-<h2>${esc(t('Score: {{score}}', { score }))}</h2>
-<h3>${esc(t('Profiles'))}</h3>
+<p class="${scoreClass}">${esc(t('Score: {{score}}', { score }))}</p>
+<h2>${esc(t('Profiles'))}</h2>
 <table><thead><tr><th>${esc(t('Profile'))}</th><th>${esc(t('Pass'))}</th><th>${esc(t('Fail'))}</th><th>${esc(t('Manual'))}</th><th>${esc(t('Info'))}</th><th>${esc(t('Inconsistent'))}</th><th>${esc(t('Error'))}</th><th>${esc(t('Waived'))}</th><th>${esc(t('Not applicable'))}</th></tr></thead>
 <tbody>${profileRows || emptyProfiles}</tbody></table>
-<h3>${esc(t('Failing checks'))}</h3>
+<h2>${esc(t('Failing checks'))}</h2>
 <table><thead><tr><th>${esc(t('Check'))}</th><th>${esc(t('Title'))}</th><th>${esc(t('Profile'))}</th><th>${esc(t('Severity'))}</th></tr></thead>
 <tbody>${failingRows || emptyFailing}</tbody></table>
-<h3>${esc(
+<h2>${esc(
     t('Active waivers ({{count}})', {
       count: waiverCount,
       formattedCount: fmt(waiverCount),
     }),
-  )}</h3>
+  )}</h2>
 <table><thead><tr><th>${esc(t('Check'))}</th><th>${esc(t('Reason'))}</th><th>${esc(t('Requested by'))}</th><th>${esc(t('Approved by'))}</th><th>${esc(t('Expires'))}</th><th>${esc(t('Review by'))}</th></tr></thead>
 <tbody>${waiverRows || emptyWaivers}</tbody></table>
 </body></html>`;

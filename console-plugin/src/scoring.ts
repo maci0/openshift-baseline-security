@@ -93,12 +93,25 @@ export const aggregateCounts = (...groups: ResultCounts[]): ResultCounts => {
 };
 
 // Score badge thresholds (danger below, warning mid, success at/above success).
-// Shared by scoreColor (CSS vars) and scoreLabelColor (PatternFly Label) so the
-// 60/90 bands cannot drift between the cluster Overview detail item and profile
-// cards. Intentionally distinct from ComplianceScoreLow (Prometheus <80): UI
-// color is more granular; paging stays less noisy (ADR-017).
+// Shared by scoreStatus (and through it scoreColor CSS vars and
+// scoreLabelColor PatternFly Labels) so the 60/90 bands cannot drift between
+// the cluster Overview detail item, profile cards, donut title, HTML report,
+// and Observe dashboard. Intentionally distinct from ComplianceScoreLow
+// (Prometheus <80): UI color is more granular; paging stays less noisy
+// (ADR-017).
 const SCORE_DANGER_BELOW = 60;
 const SCORE_SUCCESS_AT = 90;
+
+export type ScoreStatus = 'danger' | 'warning' | 'success';
+
+// Band for a 0-100 score. NaN / missing paint danger (same as a failing score):
+// a NaN comparison is false and must not fall through as success.
+export const scoreStatus = (score?: number): ScoreStatus =>
+  score == null || Number.isNaN(score) || score < SCORE_DANGER_BELOW
+    ? 'danger'
+    : score < SCORE_SUCCESS_AT
+      ? 'warning'
+      : 'success';
 
 // PatternFly semantic status color token for a 0-100 score. Uses the text (not
 // icon) status tokens: this tints the score number itself, so it must meet the
@@ -106,20 +119,17 @@ const SCORE_SUCCESS_AT = 90;
 // icon tokens are only 3:1 (graphics) and can be hard to read as text, worst on
 // the warning band over a light console background.
 export const scoreColor = (score?: number): string =>
-  score == null || Number.isNaN(score) || score < SCORE_DANGER_BELOW
-    ? 'var(--pf-t--global--text--color--status--danger--default)'
-    : score < SCORE_SUCCESS_AT
-      ? 'var(--pf-t--global--text--color--status--warning--default)'
-      : 'var(--pf-t--global--text--color--status--success--default)';
+  `var(--pf-t--global--text--color--status--${scoreStatus(score)}--default)`;
+
+const SCORE_LABEL_COLOR = {
+  danger: 'red',
+  warning: 'orange',
+  success: 'green',
+} as const;
 
 // PatternFly Label color for a profile score (same bands as scoreColor).
-// Mirror scoreColor's NaN / threshold order so the two cannot diverge.
 export const scoreLabelColor = (score: number): 'green' | 'orange' | 'red' =>
-  Number.isNaN(score) || score < SCORE_DANGER_BELOW
-    ? 'red'
-    : score < SCORE_SUCCESS_AT
-      ? 'orange'
-      : 'green';
+  SCORE_LABEL_COLOR[scoreStatus(score)];
 // SeverityWeighted product weights (ADR-022). Named table; must stay equal to
 // operator severityWeightHigh/Medium/Low/Other (verify-product-lockstep).
 const SEVERITY_WEIGHT_HIGH = 10;

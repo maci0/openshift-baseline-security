@@ -208,6 +208,8 @@ describe('buildReportHtml data correctness', () => {
     );
     expect(html).toContain('Not scanned');
     expect(html).not.toContain('42 / 100');
+    expect(html).toContain('class="score score-none"');
+    expect(html).not.toContain('class="score score-danger"');
   });
 
   it('uses the passed locale for native digits, html lang, and RTL dir', () => {
@@ -267,6 +269,32 @@ describe('buildReportHtml data correctness', () => {
       NOW,
     );
     expect(html).toContain('88 / 100');
+    expect(html).toContain('class="score score-warning"');
+  });
+
+  it('paints a failing score danger and a passing score success', () => {
+    const low = buildReportHtml(
+      withStatus({
+        score: 59,
+        profiles: [
+          { key: 'cis', pass: 1, fail: 1, manual: 0, info: 0, error: 0, inconsistent: 0, waived: 0, notApplicable: 0 },
+        ],
+      }),
+      [],
+      NOW,
+    );
+    expect(low).toContain('class="score score-danger"');
+    const high = buildReportHtml(
+      withStatus({
+        score: 90,
+        profiles: [
+          { key: 'cis', pass: 1, fail: 0, manual: 0, info: 0, error: 0, inconsistent: 0, waived: 0, notApplicable: 0 },
+        ],
+      }),
+      [],
+      NOW,
+    );
+    expect(high).toContain('class="score score-success"');
   });
 });
 describe('buildReportHtml', () => {
@@ -312,6 +340,16 @@ describe('buildReportHtml', () => {
     expect(html).toContain('94 / 100');
     expect(html).toContain('CIS');
     expect(html).toContain('212');
+  });
+  it('uses PatternFly status colors and the 60/90 score band', () => {
+    expect(html).toContain('class="score score-success"');
+    expect(html).toContain('class="sev-high"');
+    expect(html).toContain('font-family:system-ui');
+    expect(html).toContain('#c9190b');
+    expect(html).toContain('#b1380b');
+    expect(html).toContain('#1e4f18');
+    expect(html).not.toContain('#ccc');
+    expect(html).not.toContain('#666');
   });
   it('escapes untrusted waiver text (no raw script tag)', () => {
     expect(html).toContain('&lt;script&gt;');
