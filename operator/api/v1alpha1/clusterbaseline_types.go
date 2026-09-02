@@ -159,11 +159,14 @@ type ClusterBaselineSpec struct {
 	// Each entry names a ComplianceCheckResult (stable across rescans). Only a
 	// current FAIL with a non-expired waiver is remapped to the Waived bucket and
 	// dropped from the pass/fail denominator; a waived check that later PASSes is
-	// scored as PASS again. Capped so a hostile list cannot bloat the CR.
+	// scored as PASS again. Names are unique: listType=map is a merge key, not
+	// uniqueness admission, so CEL rejects a second entry for the same check.
+	// Capped so a hostile list cannot bloat the CR.
 	// +optional
 	// +listType=map
 	// +listMapKey=name
 	// +kubebuilder:validation:MaxItems=256
+	// +kubebuilder:validation:XValidation:rule="self.all(x, self.exists_one(y, y.name == x.name))",message="waiver names must be unique"
 	Waivers []WaiverEntry `json:"waivers,omitempty"`
 }
 

@@ -434,7 +434,9 @@ an accepted risk neither inflates nor tanks the score.
 - [x] **Live waiver round-trip**: waive a real FAIL → Waived bucket +1, fail -1,
       remove → reverts; built-in and tailored buckets both summed
       (`TestWaiverExcludesCheck`, e2e).
-- [x] **JSON-patch helpers**: add-array when absent vs append when present;
+- [x] **JSON-patch helpers**: add-array when absent vs append when present
+      (append tests the current list so a stale retry cannot duplicate);
+      already-present name replaces rather than appending a second row;
       remove test-guards the name by index (jest `addWaiverPatch`,
       `removeWaiverPatch`, `isWaived`, incl. fuzz).
 - [x] **Date-only expiry is last instant of the local calendar day**, including
@@ -452,8 +454,11 @@ an accepted risk neither inflates nor tanks the score.
 - [x] **Waiver for a non-owned / stale result name**: harmless, never affects the
       score (only owned suites are tallied)
       (`TestAggregateStatusWaiverIgnoresForeignSuite`).
-- [ ] **Duplicate waiver name** rejected by `+listType=map`+`listMapKey=name`
-      admission; **RBAC read-only user** cannot see the enabled Waive button.
+- [x] **Duplicate waiver name**: console replace-on-same-name plus list-test
+      before append (jest `addWaiverPatch`); CRD CEL
+      `self.all(x, self.exists_one(y, y.name == x.name))` rejects a second
+      row at admission (`listType=map` is a merge key, not uniqueness).
+- [ ] **RBAC read-only user** cannot see the enabled Waive button.
 - [ ] **Cross-profile rule**: a rule scanned by both cis and pci-dss has distinct
       result names; waiving one does not waive the other (document the by-name
       contract; add an assertion).

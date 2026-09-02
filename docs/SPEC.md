@@ -313,7 +313,8 @@ Behaviors that write to the cluster:
   profiles selected but scans not created yet.
 - **Profile toggle**: patch `ClusterBaseline.spec.profiles`.
 - **Schedule edit**: patch `ClusterBaseline.spec.schedule` (5-field cron).
-- **Waivers**: add/remove entries on `ClusterBaseline.spec.waivers`.
+- **Waivers**: add/replace/remove entries on `ClusterBaseline.spec.waivers`
+  (names unique; a second add for the same check replaces).
 - **TailoredProfile authoring**: create/patch TailoredProfiles in
   `openshift-compliance`, then bind via `spec.tailoredProfiles`.
 - **Remediation apply**: patch `ComplianceRemediation.spec.apply`, behind a

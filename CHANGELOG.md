@@ -103,6 +103,10 @@ depend on those tags.
   partial collection now exits 1 so scripts notice an incomplete archive.
 - Operator: invalid process flags (listen address, cert dir, leftover
   arguments) exit 2; `--help` writes usage to stdout, including env vars.
+- Console: a second Waive of the same check could add a duplicate
+  `spec.waivers` entry when the first patch had already landed.
+- ClusterBaseline: two `spec.waivers` entries with the same check name
+  were admitted (`listType=map` is a merge key, not uniqueness).
 - Aggregated `baseline-security-viewer` can list TailoredProfiles and Rules
   (the Profiles tab watches both; a view-only user previously got a catalog
   watch error). `baseline-security-admin` can create and update

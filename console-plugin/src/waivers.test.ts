@@ -383,11 +383,24 @@ describe('waivers', () => {
       { op: 'add', path: '/spec/waivers', value: [{ name: 'chk', reason: 'risk' }] },
     ]);
     // Empty array still exists after the last remove: must append with "/-".
+    // Test the current list so a retry that still sees [] cannot also append.
     expect(addWaiverPatch([], { name: 'chk' })).toEqual([
+      { op: 'test', path: '/spec/waivers', value: [] },
       { op: 'add', path: '/spec/waivers/-', value: { name: 'chk' } },
     ]);
-    expect(addWaiverPatch([{ name: 'other' }], { name: 'chk' })).toEqual([
+    const current = [{ name: 'other' }];
+    expect(addWaiverPatch(current, { name: 'chk' })).toEqual([
+      { op: 'test', path: '/spec/waivers', value: current },
       { op: 'add', path: '/spec/waivers/-', value: { name: 'chk' } },
+    ]);
+  });
+  it('addWaiverPatch does not append a second row when the name is already present', () => {
+    const afterFirst = [{ name: 'chk', reason: 'risk' }];
+    const again = addWaiverPatch(afterFirst, { name: 'chk', reason: 'risk' });
+    expect(again.some((op) => op.op === 'add' && op.path === '/spec/waivers/-')).toBeFalsy();
+    expect(again).toEqual([
+      { op: 'test', path: '/spec/waivers/0/name', value: 'chk' },
+      { op: 'replace', path: '/spec/waivers/0', value: { name: 'chk', reason: 'risk' } },
     ]);
   });
   it('addWaiverPatch carries governance fields, dropping empty ones', () => {

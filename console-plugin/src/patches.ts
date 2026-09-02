@@ -164,9 +164,12 @@ export const WAIVER_ATTRIBUTION_MAX_LEN = 253;
 
 // JSON patch adding a waiver for a check. When the array is absent, create it;
 // when it exists (including empty after the last remove), append with "/-".
-// If the name is already waived, replace that entry (updates reason, avoids
-// duplicate list-map keys from a double-click race). Empty or invalid names
-// (not DNS-1123) yield no ops so CRD admission is not the first failure mode.
+// Append tests the current list so a retry against a stale snapshot 409s
+// instead of adding a second row (CRD listType=map is a merge key, not
+// uniqueness admission). If the name is already waived, replace that entry
+// (updates reason, avoids duplicate list-map keys from a double-click race).
+// Empty or invalid names (not DNS-1123) yield no ops so CRD admission is not
+// the first failure mode.
 export const addWaiverPatch = (waivers: Waiver[] | undefined | null, entry: Waiver): PatchOp[] => {
   const name = entry.name;
   // Trim optional text fields once: whitespace-only is empty; MaxLength is on
@@ -207,7 +210,13 @@ export const addWaiverPatch = (waivers: Waiver[] | undefined | null, entry: Waiv
     if (waivers.length >= WAIVER_MAX_ITEMS) {
       return [];
     }
-    return [{ op: 'add', path: '/spec/waivers/-', value: clean }];
+    // Same list-test as tailoredProfileBindingPatch: two Waive clicks that both
+    // saw the pre-add list cannot both append. The test 409s; the caller re-reads
+    // and the replace path above then updates in place.
+    return [
+      { op: 'test', path: '/spec/waivers', value: waivers },
+      { op: 'add', path: '/spec/waivers/-', value: clean },
+    ];
   }
   return [{ op: 'add', path: '/spec/waivers', value: [clean] }];
 };
