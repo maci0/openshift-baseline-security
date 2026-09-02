@@ -92,6 +92,12 @@ depend on those tags.
 - Operator: RESTMapper failures other than missing CRDs while starting
   compliance watches are logged, so a mapper or RBAC problem is visible
   instead of only the 1m poll.
+- Console: a date-only waiver expiry on a DST fall-back that repeats 23:00
+  (for example America/Sao_Paulo 2019-02-16) stays active through the selected
+  local day instead of ending an hour early.
+- Console: `expiresAt`/`reviewBy` values with hour 24, minute 60, or second 60
+  are rejected in the waive form, matching apiserver RFC3339 admission, instead
+  of a patch that then 422s.
 - Aggregated `baseline-security-viewer` can list TailoredProfiles and Rules
   (the Profiles tab watches both; a view-only user previously got a catalog
   watch error). `baseline-security-admin` can create and update

@@ -437,6 +437,10 @@ an accepted risk neither inflates nor tanks the score.
 - [x] **JSON-patch helpers**: add-array when absent vs append when present;
       remove test-guards the name by index (jest `addWaiverPatch`,
       `removeWaiverPatch`, `isWaived`, incl. fuzz).
+- [x] **Date-only expiry is last instant of the local calendar day**, including
+      DST fall-back that repeats 23:00 (`expiresAtMs` / `dateInputEndOfDayIso`
+      in `dates.test.ts`); RFC3339 hour 24 / min 60 / leap-second 60 fail
+      closed in `addWaiverPatch`.
 - [x] **Waive UI gated + present**: modal offers Waive on FAIL checks (score-
       affecting only) and Remove for any already-waived name; enabled only with
       `clusterbaselines:patch` (Playwright asserts enabled for kubeadmin;
@@ -733,10 +737,13 @@ stale Available or eternal Progressing.
       (`TestEnsureScanConfigCreatesAndPrunes`).
 - [x] History ring cap 30, no aliasing after truncate
       (`TestAppendHistoryRing`, `FuzzAppendHistoryRing`).
-- [ ] **DST / timezone**: container runs UTC; cron `0 1 * * *` means 01:00 UTC
-      not admin local; document and assert NextScanTime offset.
-- [ ] **Leap second / clock skew**: endTimestamp in the future is ignored or
-      handled without panicking; does not pin LastScanTime forever in the future.
+- [x] **DST / timezone**: cron is evaluated in UTC (CO ScanSettings fire on the
+      container clock). `TestNextScanTime` pins FixedZone UTC-5 plus
+      America/New_York spring-forward (2026-03-08) and fall-back (2026-11-01)
+      so NextScanTime stays 01:00 UTC, not a local-zone-shifted hour.
+- [x] **Leap second / clock skew**: far-future and pre-epoch endTimestamps are
+      rejected; fractional seconds truncate to whole seconds so LastScanTime
+      cannot pin ahead or duplicate history (`TestParseScanEndTimestamp`).
 - [ ] **Two suites complete in the same second**: one history point, score is
       the pooled value after both are visible.
 - [ ] **Rescan annotation storm**: double-click Rescan with unique tokens;

@@ -283,6 +283,31 @@ describe('dateInputEndOfDayIso', () => {
     expect(parsed.getMilliseconds()).toBe(999);
   });
 
+  // 1ms before the next local midnight, so a DST fall-back that repeats 23:00
+  // (America/Sao_Paulo 2019-02-16) uses the later 23:59, not setHours' first one.
+  it.each(['2026-07-12', '2019-02-16', '2017-10-15', '2024-02-29', '2026-03-08', '2026-11-01'])(
+    'end of %s is 1ms before the next local calendar day',
+    (value) => {
+      const ms = expiresAtMs(value);
+      expect(Number.isNaN(ms)).toBeFalsy();
+      const year = Number(value.slice(0, 4));
+      const month = Number(value.slice(5, 7));
+      const day = Number(value.slice(8, 10));
+      const nextMidnight = new Date(0);
+      nextMidnight.setFullYear(year, month - 1, day + 1);
+      nextMidnight.setHours(0, 0, 0, 0);
+      expect(ms).toBe(nextMidnight.getTime() - 1);
+      const end = new Date(ms);
+      expect(end.getFullYear()).toBe(year);
+      expect(end.getMonth()).toBe(month - 1);
+      expect(end.getDate()).toBe(day);
+      const next = new Date(ms + 1);
+      expect(
+        next.getFullYear() !== year || next.getMonth() !== month - 1 || next.getDate() !== day,
+      ).toBeTruthy();
+    },
+  );
+
   it.each(['', '2026-02-30', '2026-13-01', 'not-a-date'])('rejects invalid input %p', (value) => {
     expect(dateInputEndOfDayIso(value)).toBeUndefined();
   });

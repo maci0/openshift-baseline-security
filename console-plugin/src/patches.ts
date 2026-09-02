@@ -135,6 +135,15 @@ const isParseableTime = (s: string): boolean => {
   const year = Number(m[1]);
   const month = Number(m[2]);
   const day = Number(m[3]);
+  const hour = Number(m[4]);
+  const minute = Number(m[5]);
+  const second = Number(m[6]);
+  // Go RFC3339 (metav1.Time) rejects hour 24 / minute 60 / leap-second 60.
+  // Date.parse accepts T24:00:00Z as next-day midnight, which would 422 at
+  // admission after the UI claimed the waiver saved.
+  if (hour > 23 || minute > 59 || second > 59) {
+    return false;
+  }
   // UTC calendar check so 2026-02-31 cannot pass via Date overflow.
   const cal = new Date(Date.UTC(year, month - 1, day));
   if (

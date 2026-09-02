@@ -498,6 +498,17 @@ describe('waivers', () => {
     expect(addWaiverPatch(undefined, { name: 'chk', expiresAt: '2026-02-31T00:00:00Z' })).toEqual(
       [],
     );
+    // Date.parse accepts T24:00:00Z as next-day midnight; Go RFC3339 (metav1.Time)
+    // rejects hour 24, so this must fail closed here instead of 422 at admission.
+    expect(addWaiverPatch(undefined, { name: 'chk', expiresAt: '2026-01-01T24:00:00Z' })).toEqual(
+      [],
+    );
+    expect(addWaiverPatch(undefined, { name: 'chk', expiresAt: '2026-01-01T23:60:00Z' })).toEqual(
+      [],
+    );
+    expect(addWaiverPatch(undefined, { name: 'chk', expiresAt: '2026-01-01T23:59:60Z' })).toEqual(
+      [],
+    );
     expect(
       addWaiverPatch(undefined, { name: 'chk', expiresAt: '2027-01-01T00:00:00Z' }),
     ).toEqual([

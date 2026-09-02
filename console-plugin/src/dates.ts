@@ -18,7 +18,10 @@ const localDateOnlyRe = /^(\d{4})-(\d{2})-(\d{2})$/;
 // Parse YYYY-MM-DD as a local calendar day. Rejects invalid calendar dates
 // (e.g. 2026-02-31). Shared by end-of-day deadlines and display formatting so
 // timezone edge cases live in one place. `new Date('YYYY-MM-DD')` is UTC midnight
-// and must not be used for calendar dates.
+// and must not be used for calendar dates. Noon (not midnight) so a valid day
+// whose local 00:00 is skipped by a spring-forward (America/Sao_Paulo 2017-10-15,
+// America/Santiago 2022-09-11) is not rejected. setFullYear, not `new Date(y,m,d)`,
+// so years 0000-0099 stay those years rather than 1900-1999.
 const parseLocalDateOnly = (value: string): Date | null => {
   const match = localDateOnlyRe.exec(value);
   if (!match) return null;
@@ -27,7 +30,7 @@ const parseLocalDateOnly = (value: string): Date | null => {
   const day = Number(match[3]);
   const d = new Date(0);
   d.setFullYear(year, month - 1, day);
-  d.setHours(0, 0, 0, 0);
+  d.setHours(12, 0, 0, 0);
   if (d.getFullYear() !== year || d.getMonth() !== month - 1 || d.getDate() !== day) {
     return null;
   }
@@ -38,11 +41,15 @@ const parseLocalDateOnly = (value: string): Date | null => {
 // day is still active), or null when unparseable/invalid. Shared by the ISO
 // writer (dateInputEndOfDayIso) and the ms reader (expiresAtMs) so a stored
 // expiry and its comparison can never disagree about the day boundary.
+// 1ms before the next local midnight, not setHours(23,59,59,999): on a fall-back
+// that repeats 23:00 (America/Sao_Paulo 2019-02-16) setHours lands on the first
+// 23:59 and would expire the waiver an hour before the calendar day ends.
 const endOfLocalDay = (value: string): Date | null => {
   const d = parseLocalDateOnly(value);
   if (!d) return null;
-  d.setHours(23, 59, 59, 999);
-  return d;
+  d.setDate(d.getDate() + 1);
+  d.setHours(0, 0, 0, 0);
+  return new Date(d.getTime() - 1);
 };
 
 // A date-only deadline remains active through the selected local calendar day.

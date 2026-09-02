@@ -115,6 +115,27 @@ func TestNextScanTime(t *testing.T) {
 	if got == nil || !got.Time.Equal(want) {
 		t.Fatalf("local-zone now next = %v, want UTC %v", got, want)
 	}
+	// US spring-forward 2026-03-08 02:00→03:00 Eastern (07:00 UTC). A local-zone
+	// cron would skip or double-fire that hour; UTC daily 01:00 is unchanged.
+	eastern, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Fatalf("LoadLocation America/New_York: %v", err)
+	}
+	// 06:30 UTC is 01:30 EST, still before the jump; next 01:00 UTC is 09 Mar.
+	spring := time.Date(2026, 3, 8, 6, 30, 0, 0, time.UTC).In(eastern)
+	springNext := nextScanTime("0 1 * * *", spring)
+	springWant := time.Date(2026, 3, 9, 1, 0, 0, 0, time.UTC)
+	if springNext == nil || !springNext.Time.Equal(springWant) {
+		t.Fatalf("spring-forward next = %v, want UTC %v", springNext, springWant)
+	}
+	// US fall-back 2026-11-01 02:00→01:00 Eastern (06:00 UTC). Next 01:00 UTC
+	// after 05:30 UTC (01:30 EDT, in the repeated hour) is still 02 Nov 01:00 UTC.
+	fall := time.Date(2026, 11, 1, 5, 30, 0, 0, time.UTC).In(eastern)
+	fallNext := nextScanTime("0 1 * * *", fall)
+	fallWant := time.Date(2026, 11, 2, 1, 0, 0, 0, time.UTC)
+	if fallNext == nil || !fallNext.Time.Equal(fallWant) {
+		t.Fatalf("fall-back next = %v, want UTC %v", fallNext, fallWant)
+	}
 }
 
 func TestScanIntervalSeconds(t *testing.T) {
