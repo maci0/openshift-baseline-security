@@ -32,3 +32,7 @@ id_ed25519*
 .idea/
 # Not required by the webpack build stage (nginx.conf is copied in the final stage).
 Dockerfile
+Makefile
+.oxlintrc.json
+tools/
+src/testing/

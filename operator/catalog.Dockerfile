@@ -7,10 +7,12 @@ ENTRYPOINT ["/bin/opm"]
 CMD ["serve", "/configs", "--cache-dir=/tmp/cache"]
 # Own configs as the runtime UID so a base-image USER drift to root cannot leave
 # root-owned FBC that 1001 cannot read after we drop privileges.
-COPY --chown=1001:1001 catalog /configs
+# --chmod: host umask must not change the shipped layer digest (dirs stay traversable).
+COPY --chown=1001:1001 --chmod=0755 catalog /configs
 # Pin non-root before cache generation so /tmp/cache is always owned by 1001
 # (do not rely on the base image USER for the RUN that writes the cache).
 USER 1001
 # Precompute the cache; opm's runtime integrity check crash-loops without it.
-RUN ["/bin/opm", "serve", "/configs", "--cache-dir=/tmp/cache", "--cache-only"]
+# --network=none: cache is local FBC only; do not pull the bundle image at build.
+RUN --network=none ["/bin/opm", "serve", "/configs", "--cache-dir=/tmp/cache", "--cache-only"]
 LABEL operators.operatorframework.io.index.configs.v1=/configs

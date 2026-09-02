@@ -28,7 +28,7 @@ export GOSUMDB := sum.golang.org
 
 # Fail recipes on pipe errors; use bash for pipefail portability.
 SHELL := /usr/bin/env bash
-.SHELLFLAGS := -eo pipefail -c
+.SHELLFLAGS := -euo pipefail -c
 # .SHELLFLAGS needs GNU Make 3.82+. macOS /usr/bin/make is 3.81 and ignores
 # the assignment, so recipes would run without -e / pipefail.
 ifeq ($(shell echo "$(MAKE_VERSION)" | awk -F. '{ if ($$1 < 4 && ($$1 < 3 || $$2 < 82)) print "old" }'),old)
@@ -85,7 +85,7 @@ endef
 # Escape dots so grep treats VERSION as a literal (0.4.0 must not match 0x4y0).
 VERSION_RE := $(subst .,\.,$(VERSION))
 GO_VERSION_RE := $(subst .,\.,$(GO_VERSION))
-# Go minor (1.26 from 1.26.5) for the CI builder image tag (golang-1.26-...).
+# Go minor (1.26 from 1.26.6) for the CI builder image tag (golang-1.26-...).
 GO_MINOR := $(basename $(GO_VERSION))
 
 .PHONY: all
@@ -213,9 +213,9 @@ GOVULNCHECK_VERSION ?= v1.6.0
 govulncheck:
 	go run golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION) ./...
 
-# Keep in lockstep with operator/Dockerfile RUN go build flags (reproducible, stripped).
+# Keep in lockstep with operator/Dockerfile RUN go build flags (reproducible, stripped, PIE).
 # -buildid= clears the GNU build-id note so local and image binaries can match bit-for-bit.
-GO_BUILD_FLAGS ?= -trimpath -buildvcs=false -mod=readonly
+GO_BUILD_FLAGS ?= -trimpath -buildvcs=false -mod=readonly -buildmode=pie
 GO_LDFLAGS ?= -s -w -buildid=
 
 # Codegen first as prerequisites (safe to run generate||manifests under -j).
@@ -225,7 +225,7 @@ GO_LDFLAGS ?= -s -w -buildid=
 build: generate manifests
 	$(MAKE) --no-print-directory fmt-check
 	$(MAKE) --no-print-directory vet
-	# Match the image build: static, trimpath, no VCS stamp, stripped, lockfile readonly.
+	# Match the image build: static, trimpath, no VCS stamp, stripped, PIE, lockfile readonly.
 	CGO_ENABLED=0 go build $(GO_BUILD_FLAGS) -ldflags="$(GO_LDFLAGS)" -o bin/manager ./cmd
 	# Fail if the linker wrote nothing (partial failure / empty artifact).
 	@test -s bin/manager || { echo "bin/manager missing or empty after go build" >&2; exit 1; }
@@ -360,8 +360,28 @@ verify-versions:
 		|| { echo ".ci-operator.yaml build_root tag must be golang-$(GO_MINOR)- (matches go.mod)"; fail=1; }; \
 	grep -qE 'USER 65532:65532' Dockerfile.ci \
 		|| { echo "Dockerfile.ci must run as USER 65532:65532 (parity with the release Dockerfile; CI variant is never built in GHA so lint it here)"; fail=1; }; \
-	grep -qE -- '-trimpath -buildvcs=false -mod=readonly' Dockerfile.ci \
+	grep -qE -- '-trimpath -buildvcs=false -mod=readonly -buildmode=pie' Dockerfile \
+		|| { echo "release Dockerfile go build flags must include -trimpath -buildvcs=false -mod=readonly -buildmode=pie"; fail=1; }; \
+	grep -qE -- '-trimpath -buildvcs=false -mod=readonly -buildmode=pie' Dockerfile.ci \
 		|| { echo "Dockerfile.ci go build flags must match the release Dockerfile (reproducibility parity)"; fail=1; }; \
+	grep -qE -- '-trimpath -buildvcs=false -mod=readonly -buildmode=pie' Makefile \
+		|| { echo "Makefile GO_BUILD_FLAGS must match the image go build flags (trimpath, no VCS, readonly, PIE)"; fail=1; }; \
+	test "$$(grep -c '^ARG SOURCE_DATE_EPOCH' Dockerfile)" -eq 2 \
+		|| { echo "release Dockerfile must declare ARG SOURCE_DATE_EPOCH in both stages (BuildKit clamps timestamps per stage)"; fail=1; }; \
+	test "$$(grep -c '^ARG SOURCE_DATE_EPOCH' Dockerfile.ci)" -eq 2 \
+		|| { echo "Dockerfile.ci must declare ARG SOURCE_DATE_EPOCH in both stages (parity with the release Dockerfile)"; fail=1; }; \
+	test "$$(grep -c '^ARG SOURCE_DATE_EPOCH' ../console-plugin/Dockerfile)" -eq 2 \
+		|| { echo "console-plugin Dockerfile must declare ARG SOURCE_DATE_EPOCH in both stages (BuildKit clamps timestamps per stage)"; fail=1; }; \
+	grep -qE -- '--chmod=0755.*/usr/bin/manager' Dockerfile \
+		|| { echo "release Dockerfile must COPY the manager with --chmod=0755 so host umask cannot change the image digest"; fail=1; }; \
+	grep -qE -- '--chmod=0755.*/usr/bin/manager' Dockerfile.ci \
+		|| { echo "Dockerfile.ci must COPY the manager with --chmod=0755 (parity with the release Dockerfile)"; fail=1; }; \
+	grep -qE 'YARN_ENABLE_SCRIPTS=false' ../console-plugin/Dockerfile \
+		|| { echo "console-plugin Dockerfile must set YARN_ENABLE_SCRIPTS=false so yarn install cannot run registry lifecycle scripts"; fail=1; }; \
+	grep -qE 'PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1' ../console-plugin/Dockerfile \
+		|| { echo "console-plugin Dockerfile must skip Playwright browser download during yarn install"; fail=1; }; \
+	grep -qE '^RUN --network=none' catalog.Dockerfile \
+		|| { echo "catalog.Dockerfile opm cache RUN must use --network=none (local FBC only)"; fail=1; }; \
 	nvm=$$(tr -d '[:space:]' < ../console-plugin/.nvmrc); \
 	grep -qE "Node in this digest is $${nvm}" ../console-plugin/Dockerfile \
 		|| { echo "console-plugin Dockerfile must document Node $${nvm} (matches .nvmrc); image/node would drift"; fail=1; }; \

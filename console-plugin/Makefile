@@ -3,8 +3,14 @@
 IMG ?= quay.io/openshift-baseline-security/baseline-security-console-plugin:latest
 SOURCE_DATE_EPOCH ?= 0
 export SOURCE_DATE_EPOCH
+export TZ := UTC
+export LC_ALL := C
 export DOCKER_BUILDKIT := 1
 DOCKER_BUILD_FLAGS ?= --pull --provenance=false --sbom=false --build-arg SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH)
+
+SHELL := /usr/bin/env bash
+.SHELLFLAGS := -euo pipefail -c
+.DELETE_ON_ERROR:
 
 .PHONY: docker-build docker-push
 

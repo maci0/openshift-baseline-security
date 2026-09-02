@@ -13,17 +13,17 @@ ENV TZ=UTC LC_ALL=C SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH} GOSUMDB=sum.golang.or
 WORKDIR /opt/app-root/src
 COPY go.mod go.sum ./
 # Prefetch pinned toolchain + modules while network is available; verify sums.
-# go version forces the go1.26.5 toolchain into this layer for --network=none build.
+# go version forces the go1.26.6 toolchain into this layer for --network=none build.
 RUN go version && go mod download && go mod verify
 COPY api/ api/
 COPY cmd/ cmd/
 COPY internal/ internal/
 # Network off after module download so the compile cannot pull new content.
-# Flags match Makefile GO_BUILD_FLAGS / GO_LDFLAGS (trimpath, no VCS, stripped, empty build-id, readonly).
+# Flags match Makefile GO_BUILD_FLAGS / GO_LDFLAGS (trimpath, no VCS, stripped, empty build-id, PIE, readonly).
 ENV GOPROXY=off
 # --network=none: compile cannot reach the network even if GOPROXY is overridden.
 # test -s: refuse an empty binary (matches Makefile build; partial linker failure).
-RUN --network=none CGO_ENABLED=0 go build -trimpath -buildvcs=false -mod=readonly -ldflags="-s -w -buildid=" -o /tmp/manager ./cmd \
+RUN --network=none CGO_ENABLED=0 go build -trimpath -buildvcs=false -mod=readonly -buildmode=pie -ldflags="-s -w -buildid=" -o /tmp/manager ./cmd \
 	&& test -s /tmp/manager
 
 # ubi9/ubi-micro
@@ -31,6 +31,7 @@ FROM registry.access.redhat.com/ubi9/ubi-micro@sha256:35de56a9413112f1474e392ebc
 ARG SOURCE_DATE_EPOCH=0
 # Own the binary as the runtime UID (non-root cannot rewrite a root-owned path
 # under a read-only rootfs anyway; keeps ownership consistent with USER).
-COPY --from=build --chown=65532:65532 /tmp/manager /usr/bin/manager
+# --chmod: host umask must not change the shipped layer digest.
+COPY --from=build --chown=65532:65532 --chmod=0755 /tmp/manager /usr/bin/manager
 USER 65532:65532
 ENTRYPOINT ["/usr/bin/manager"]

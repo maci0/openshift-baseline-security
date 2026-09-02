@@ -44,6 +44,10 @@ depend on those tags.
 
 ### Changed
 
+- Operator and plugin image COPY steps pin file modes so a host umask cannot
+  change the published layer digest.
+- Console plugin image install skips package lifecycle scripts and Playwright
+  browser download, so the webpack layer cannot fetch unpinned binaries.
 - Support: ClusterBaseline must-gather dumps omit waiver `requestedBy` and
   `approvedBy`, and drop `kubectl.kubernetes.io/last-applied-configuration` so
   those names are not copied into a support archive.
@@ -66,6 +70,8 @@ depend on those tags.
 
 - Support: must-gather waiver redaction runs with BSD sed, so a dump collected
   on macOS still strips `requestedBy`/`approvedBy`.
+- Operator CI image runtime stage now honors `SOURCE_DATE_EPOCH` (it was only
+  set on the builder), so CI and release image timestamps can match.
 - Aggregated `baseline-security-viewer` can list TailoredProfiles and Rules
   (the Profiles tab watches both; a view-only user previously got a catalog
   watch error). `baseline-security-admin` can create and update
@@ -113,6 +119,11 @@ depend on those tags.
   printable report.
 - Console plugin nginx no longer includes the UBI extra conf directories,
   which can start a plaintext listener beside TLS port 9443.
+
+### Security
+
+- Operator binary is linked as a PIE (`-buildmode=pie`) in the Makefile and
+  both Dockerfiles.
 
 ### Docs
 

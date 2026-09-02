@@ -7,7 +7,9 @@ USER root
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 # Hermetic locale/time; fixed epoch for minifiers that honor SOURCE_DATE_EPOCH.
 # No global Yarn cache: install must use only this layer's node_modules + lockfile.
-ENV TZ=UTC LC_ALL=C SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH} YARN_ENABLE_GLOBAL_CACHE=false
+# YARN_ENABLE_SCRIPTS=false: do not run registry package lifecycle scripts.
+# PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: @playwright/test must not fetch browsers.
+ENV TZ=UTC LC_ALL=C SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH} YARN_ENABLE_GLOBAL_CACHE=false PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 YARN_ENABLE_SCRIPTS=false
 # Base image has no corepack; pin so the build does not pull floating latest from npm.
 # --ignore-scripts: do not run package lifecycle scripts from the registry during bootstrap.
 # --no-audit/--no-fund: install only corepack (no registry metadata side traffic).
@@ -33,8 +35,9 @@ FROM registry.access.redhat.com/ubi9/nginx-120@sha256:2f3271f0fafbe12cc80843b94d
 ARG SOURCE_DATE_EPOCH=0
 # Runtime UID owns static assets and nginx.conf (read-only rootfs still applies
 # in the Deployment; ownership matches USER so the process can open its files).
-COPY --from=build --chown=1001:1001 /usr/src/app/dist /opt/app-root/src
-COPY --chown=1001:1001 nginx.conf /etc/nginx/nginx.conf
+# --chmod: host umask must not change the shipped layer digest (dirs stay traversable).
+COPY --from=build --chown=1001:1001 --chmod=0755 /usr/src/app/dist /opt/app-root/src
+COPY --chown=1001:1001 --chmod=0644 nginx.conf /etc/nginx/nginx.conf
 USER 1001
 # Document the only listen port (TLS; no plaintext 8080).
 EXPOSE 9443

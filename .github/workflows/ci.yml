@@ -61,6 +61,10 @@ jobs:
   console-plugin:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    env:
+      # Image and CI unit jobs never launch browsers; skip Playwright's
+      # postinstall fetch so install cannot pull unpinned browser binaries.
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
     defaults:
       run:
         working-directory: console-plugin

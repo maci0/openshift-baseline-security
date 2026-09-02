@@ -10,5 +10,6 @@ LABEL operators.operatorframework.io.bundle.channels.v1=alpha
 LABEL operators.operatorframework.io.bundle.channel.default.v1=alpha
 LABEL com.redhat.openshift.versions="=v4.22"
 
-COPY bundle/manifests /manifests/
-COPY bundle/metadata /metadata/
+# --chmod: host umask must not change the shipped layer digest (dirs stay traversable).
+COPY --chmod=0755 bundle/manifests /manifests/
+COPY --chmod=0755 bundle/metadata /metadata/
