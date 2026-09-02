@@ -62,9 +62,9 @@ func TestNormalizedScheduleTable(t *testing.T) {
 		{"* * * * * *", false},
 	}
 	for _, c := range cases {
-		_, err := normalizedSchedule(c.in)
+		_, _, err := normalizeAndParseSchedule(c.in)
 		if (err == nil) != c.ok {
-			t.Errorf("normalizedSchedule(%q): ok=%v, want %v (err=%v)", c.in, err == nil, c.ok, err)
+			t.Errorf("normalizeAndParseSchedule(%q): ok=%v, want %v (err=%v)", c.in, err == nil, c.ok, err)
 		}
 	}
 }
@@ -97,7 +97,7 @@ func TestNextScanTime(t *testing.T) {
 		t.Fatalf("degenerate schedule should yield nil, got %v", got.Time)
 	}
 	// Empty / whitespace-only fall back to the default daily schedule so a
-	// blank CR field does not Degrade (matches normalizedSchedule).
+	// blank CR field does not Degrade (matches normalizeAndParseSchedule).
 	for _, empty := range []string{"", "   ", "\t"} {
 		got := nextScanTime(empty, now)
 		if got == nil || !got.Time.Equal(want) {

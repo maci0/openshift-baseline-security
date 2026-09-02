@@ -2,7 +2,7 @@
 import * as React from 'react';
 
 // One value so tabs cannot drift on dismiss cadence.
-export const SUCCESS_DISMISS_MS = 8000;
+const SUCCESS_DISMISS_MS = 8000;
 
 // Auto-clear transient feedback after SUCCESS_DISMISS_MS. `active` gates on the
 // banner being present; `blocked` holds dismissal while a related error must

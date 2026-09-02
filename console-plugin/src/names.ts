@@ -11,4 +11,4 @@ export const isValidK8sName = (name: string): boolean =>
 // label "baseline-tp-<name>" stays a valid Kubernetes label value (63 chars).
 // Matches ClusterBaselineSpec.tailoredProfiles items MaxLength.
 export const isValidTailoredProfileName = (name: string): boolean =>
-  name.length > 0 && name.length <= 51 && dns1123Subdomain.test(name);
+  name.length <= 51 && isValidK8sName(name);

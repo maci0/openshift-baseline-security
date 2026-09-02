@@ -14,7 +14,7 @@ export interface PatchOp {
 
 // Matches operator batchApplyAnnotation / batchMaxRemediations so the console
 // and reconciler cannot drift on key or size.
-export const BATCH_APPLY_ANNOTATION = 'baselinesecurity.openshift.io/batch-apply';
+const BATCH_APPLY_ANNOTATION = 'baselinesecurity.openshift.io/batch-apply';
 export const batchApplyMaxNames = 256;
 
 // True when the batch-apply annotation names at least one remediation.

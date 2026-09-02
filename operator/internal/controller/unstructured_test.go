@@ -56,7 +56,10 @@ func FuzzUnstructuredMetadataReads(f *testing.F) {
 		// Never panic on any shape.
 		gotName := unstructuredName(obj)
 		gotLabel := unstructuredLabel(obj, "compliance.openshift.io/suite")
-		gotAnn := unstructuredAnnotation(obj, "a")
+		gotAnn := ""
+		if m := unstructuredMeta(obj); m != nil {
+			gotAnn = stringMapValue(m["annotations"], "a")
+		}
 		gotMissing := unstructuredLabel(obj, "does-not-exist")
 		if gotMissing != "" {
 			t.Fatalf("missing label returned %q", gotMissing)

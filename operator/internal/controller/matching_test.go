@@ -1221,7 +1221,7 @@ func FuzzNormalizedSchedule(f *testing.F) {
 		f.Add(seed)
 	}
 	f.Fuzz(func(t *testing.T, schedule string) {
-		got, err := normalizedSchedule(schedule)
+		got, _, err := normalizeAndParseSchedule(schedule)
 		if strings.TrimSpace(schedule) == "" {
 			if err != nil {
 				t.Fatalf("empty schedule err: %v", err)

@@ -46,11 +46,6 @@ func normalizeAndParseSchedule(schedule string) (string, cron.Schedule, error) {
 	return schedule, sched, nil
 }
 
-func normalizedSchedule(schedule string) (string, error) {
-	s, _, err := normalizeAndParseSchedule(schedule)
-	return s, err
-}
-
 // nextScanTime computes the next cron fire after now, or nil on an invalid
 // schedule. An empty schedule normalizes to defaultScanSchedule, so it still
 // yields a next-fire time.

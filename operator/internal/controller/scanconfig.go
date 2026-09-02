@@ -27,7 +27,7 @@ func (r *ClusterBaselineReconciler) ensureScanConfig(ctx context.Context, cb *ba
 	// Validate schedule first, but still reconcile ScanSetting fields other than
 	// schedule and all bindings so a bad cron does not freeze profile/tp or
 	// auto-apply changes. Invalid schedule is reported as Degraded at the end.
-	schedule, schedErr := normalizedSchedule(cb.Spec.Schedule)
+	schedule, _, schedErr := normalizeAndParseSchedule(cb.Spec.Schedule)
 	// A syntactically-valid cron that never fires (an impossible calendar date
 	// like Feb 30 / April 31) parses cleanly but would silently never scan AND,
 	// because its scan interval is 0, suppress the ComplianceScanStale alert.

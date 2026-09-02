@@ -97,8 +97,8 @@ export const aggregateCounts = (...groups: ResultCounts[]): ResultCounts => {
 // 60/90 bands cannot drift between the cluster Overview detail item and profile
 // cards. Intentionally distinct from ComplianceScoreLow (Prometheus <80): UI
 // color is more granular; paging stays less noisy (ADR-017).
-export const SCORE_DANGER_BELOW = 60;
-export const SCORE_SUCCESS_AT = 90;
+const SCORE_DANGER_BELOW = 60;
+const SCORE_SUCCESS_AT = 90;
 
 // PatternFly semantic status color token for a 0-100 score. Uses the text (not
 // icon) status tokens: this tints the score number itself, so it must meet the

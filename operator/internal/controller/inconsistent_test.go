@@ -39,7 +39,8 @@ func FuzzEffectiveInconsistentStatus(f *testing.F) {
 			t.Fatalf("unexpected status %q for src=%q mc=%q", got, src, mostCommon)
 		}
 		// FAIL or ERROR anywhere in the gathered states must fail closed.
-		states := inconsistentStates(u)
+		states := map[string]bool{}
+		visitInconsistentStates(u, func(st string) { states[st] = true })
 		if (states["FAIL"] || states["ERROR"]) && got != "INCONSISTENT" {
 			t.Fatalf("FAIL/ERROR must stay INCONSISTENT, got %q (states=%v)", got, states)
 		}

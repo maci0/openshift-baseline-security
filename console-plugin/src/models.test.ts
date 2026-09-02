@@ -6,10 +6,8 @@ import {
   isOwnedByBaseline,
   isProfileKey,
   nodePoolFromScanName,
-  ownedSuiteLabels,
   ownedSuiteSelector,
   scanningDisabled,
-  CLUSTER_BASELINE_NAME,
   ClusterBaselineGVK,
   defaultClusterBaselineManifest,
   PROFILE_INFO,
@@ -141,16 +139,6 @@ describe('tailored suite ownership', () => {
     expect(suiteFilterKey(undefined)).toBeUndefined();
   });
 
-  it('ownedSuiteLabels builds baseline-* and baseline-tp-* values for watches', () => {
-    expect(ownedSuiteLabels(['cis', 'stig'], ['custom'])).toEqual([
-      'baseline-cis',
-      'baseline-stig',
-      'baseline-tp-custom',
-    ]);
-    expect(ownedSuiteLabels(undefined, undefined)).toEqual([]);
-    expect(ownedSuiteLabels([''], [''])).toEqual([]);
-  });
-
   it('nodePoolFromScanName uses the last -node- segment', () => {
     expect(nodePoolFromScanName('ocp4-cis-node-worker')).toBe('worker');
     expect(nodePoolFromScanName('custom-node-profile-node-master')).toBe('master');
@@ -160,6 +148,15 @@ describe('tailored suite ownership', () => {
   });
 
   it('ownedSuiteSelector wraps labels for CO list watches (or undefined when empty)', () => {
+    expect(ownedSuiteSelector(['cis', 'stig'], ['custom'])).toEqual({
+      matchExpressions: [
+        {
+          key: 'compliance.openshift.io/suite',
+          operator: 'In',
+          values: ['baseline-cis', 'baseline-stig', 'baseline-tp-custom'],
+        },
+      ],
+    });
     expect(ownedSuiteSelector(['cis'], ['custom'])).toEqual({
       matchExpressions: [
         {

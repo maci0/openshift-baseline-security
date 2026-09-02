@@ -51,16 +51,6 @@ func unstructuredLabel(obj map[string]any, key string) string {
 	return stringMapValue(meta["labels"], key)
 }
 
-// unstructuredAnnotation reads one metadata annotation without GetAnnotations()
-// full-map copy (same cost concern as GetLabels).
-func unstructuredAnnotation(obj map[string]any, key string) string {
-	meta := unstructuredMeta(obj)
-	if meta == nil {
-		return ""
-	}
-	return stringMapValue(meta["annotations"], key)
-}
-
 // unstructuredName returns metadata.name without NestedString path walks.
 func unstructuredName(obj map[string]any) string {
 	meta := unstructuredMeta(obj)

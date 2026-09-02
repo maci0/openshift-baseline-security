@@ -56,21 +56,9 @@ func effectiveInconsistentStatus(item *unstructured.Unstructured) string {
 	}
 }
 
-// inconsistentStates returns the set of per-node states of an INCONSISTENT check,
-// gathered from the inconsistent-source annotation and most-common-status.
-// Untrusted cluster data: tolerant of malformed values, never panics.
-// Used by unit tests; aggregateStatus uses effectiveInconsistentStatus (flags).
-func inconsistentStates(item *unstructured.Unstructured) map[string]bool {
-	states := map[string]bool{}
-	visitInconsistentStates(item, func(st string) {
-		states[st] = true
-	})
-	return states
-}
-
 // visitInconsistentStates walks CO inconsistent annotations and calls fn with
 // each uppercased state token. One metadata walk for both annotation keys
-// (avoids dual unstructuredAnnotation meta lookups on multi-INCONSISTENT
+// (avoids dual annotation meta lookups on multi-INCONSISTENT
 // reconciles). Comma walk avoids strings.Split on multi-node pools.
 func visitInconsistentStates(item *unstructured.Unstructured, fn func(string)) {
 	meta := unstructuredMeta(item.Object)

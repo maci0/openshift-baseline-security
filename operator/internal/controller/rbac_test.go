@@ -243,20 +243,10 @@ func csvVerbsInclude(block, verb string) bool {
 	return false
 }
 
-// userRoleDoc returns the YAML document whose metadata.name matches, or "".
-func userRoleDoc(userRolesYAML, name string) string {
-	for _, doc := range strings.Split(userRolesYAML, "\n---\n") {
-		if strings.Contains(doc, "name: "+name+"\n") || strings.HasSuffix(doc, "name: "+name) {
-			return doc
-		}
-	}
-	return ""
-}
-
 // TestViewerRoleDeniesWrites is the deny side of the human RBAC matrix:
 // baseline-security-viewer must not grant create/update/patch/delete.
 func TestViewerRoleDeniesWrites(t *testing.T) {
-	doc := userRoleDoc(mustReadUserRolesYAML(t), "baseline-security-viewer")
+	doc := clusterRoleDoc(mustReadUserRolesYAML(t), "baseline-security-viewer")
 	if doc == "" {
 		t.Fatal("user_roles.yaml missing baseline-security-viewer")
 	}
@@ -272,7 +262,7 @@ func TestViewerRoleDeniesWrites(t *testing.T) {
 // RoleBinding to admin in openshift-compliance patch ComplianceRemediations
 // (node reboots) without cluster-scoped ClusterBaseline access.
 func TestAdminRoleNotAggregatedToAdmin(t *testing.T) {
-	doc := userRoleDoc(mustReadUserRolesYAML(t), "baseline-security-admin")
+	doc := clusterRoleDoc(mustReadUserRolesYAML(t), "baseline-security-admin")
 	if doc == "" {
 		t.Fatal("user_roles.yaml missing baseline-security-admin")
 	}
@@ -285,7 +275,7 @@ func TestAdminRoleNotAggregatedToAdmin(t *testing.T) {
 // is limited to the singleton name so a second object cannot be mutated if
 // admission is bypassed. get/list/watch stay unscoped (list ignores resourceNames).
 func TestAdminClusterBaselineWritesAreNameScoped(t *testing.T) {
-	doc := userRoleDoc(mustReadUserRolesYAML(t), "baseline-security-admin")
+	doc := clusterRoleDoc(mustReadUserRolesYAML(t), "baseline-security-admin")
 	if doc == "" {
 		t.Fatal("user_roles.yaml missing baseline-security-admin")
 	}
@@ -300,7 +290,7 @@ func TestAdminClusterBaselineWritesAreNameScoped(t *testing.T) {
 // TestAdminRoleIncludesViewerReads: binding only baseline-security-admin must
 // still list check results (admin is a superset of viewer reads).
 func TestAdminRoleIncludesViewerReads(t *testing.T) {
-	doc := userRoleDoc(mustReadUserRolesYAML(t), "baseline-security-admin")
+	doc := clusterRoleDoc(mustReadUserRolesYAML(t), "baseline-security-admin")
 	if doc == "" {
 		t.Fatal("user_roles.yaml missing baseline-security-admin")
 	}

@@ -119,7 +119,7 @@ const model = (gvk: K8sGroupVersionKind, plural: string, namespaced: boolean): K
   namespaced,
 });
 
-export const TailoredProfileGVK: K8sGroupVersionKind = {
+const TailoredProfileGVK: K8sGroupVersionKind = {
   group: 'compliance.openshift.io',
   version: 'v1alpha1',
   kind: 'TailoredProfile',
@@ -407,7 +407,7 @@ export const suiteFilterKeyTitle = (key: string): string =>
  * Suite label values this baseline owns ("baseline-<key>", "baseline-tp-<name>").
  * Used as a label selector so list watches do not pull foreign CO objects.
  */
-export const ownedSuiteLabels = (
+const ownedSuiteLabels = (
   profiles: readonly string[] | undefined,
   tailoredProfiles: readonly string[] | undefined,
 ): string[] => {
