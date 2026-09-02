@@ -874,6 +874,7 @@ const ResultsTab: React.FC<{
                 (() => {
                   const { sources, mostCommon } = inconsistentSources(selectedLive);
                   const pool = nodeScanPool(selectedLive);
+                  const mostCommonStyle = mostCommon ? statusStyle(mostCommon) : null;
                   // A real PASS-vs-FAIL split needs review; a PASS/NOT-APPLICABLE
                   // split just means the rule applies to only some nodes.
                   const genuineConflict = effectiveStatus(selectedLive) === 'INCONSISTENT';
@@ -907,37 +908,34 @@ const ResultsTab: React.FC<{
                         </Thead>
                         <Tbody>
                           {sources.map((s, i) => {
-                            // Uppercase for label/title tables (CO is usually already
-                            // uppercased; normalize so hostile/odd data still maps).
-                            // Plain string: both consumers fall back on unknown tokens,
-                            // so no cast that could launder hostile annotation data.
-                            const st = s.status.toUpperCase();
-                            const style = statusStyle(st);
+                            // Tokens are already ASCII-uppercased by
+                            // inconsistentSources. Do not call toUpperCase:
+                            // "paß" would become "PASS" and disagree with
+                            // effectiveStatus / the operator.
+                            const style = statusStyle(s.status);
                             // Index in the key: hostile data could repeat a node name.
                             return (
                               <Tr key={`${s.node}-${i}`}>
                                 <Td dir="auto">{s.node}</Td>
                                 <Td>
                                   <Label isCompact color={style.color} icon={style.icon}>
-                                    {s.status ? statusDisplayTitle(st, t) : '—'}
+                                    {s.status ? statusDisplayTitle(s.status, t) : '—'}
                                   </Label>
                                 </Td>
                               </Tr>
                             );
                           })}
-                          {mostCommon && (
+                          {mostCommon && mostCommonStyle && (
                             <Tr>
                               <Td>{t('all other nodes')}</Td>
                               <Td>
-                                {(() => {
-                                  const up = mostCommon.toUpperCase();
-                                  const style = statusStyle(up);
-                                  return (
-                                    <Label isCompact color={style.color} icon={style.icon}>
-                                      {statusDisplayTitle(up, t)}
-                                    </Label>
-                                  );
-                                })()}
+                                <Label
+                                  isCompact
+                                  color={mostCommonStyle.color}
+                                  icon={mostCommonStyle.icon}
+                                >
+                                  {statusDisplayTitle(mostCommon, t)}
+                                </Label>
                               </Td>
                             </Tr>
                           )}

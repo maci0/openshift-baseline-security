@@ -537,6 +537,11 @@ an accepted risk neither inflates nor tanks the score.
       `resultsCsv`).
 - [x] **Unpaired surrogates in filter URLs** do not throw (jest `resultsHref`
       fuzz).
+- [x] **INCONSISTENT status tokens stay ASCII**: `pass` folds to PASS;
+      `paß` / `faıl` do not (jest `effectiveStatus`; operator
+      `TestEffectiveInconsistentStatus`).
+- [x] **Download filename cap** does not split a surrogate pair (jest
+      `downloadBlob`).
 - [x] **History sparkline input** drops unparseable times and non-finite
       scores (jest `toTrendData`); content key is stable across reallocations
       (jest `historyContentKey`).

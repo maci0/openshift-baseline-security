@@ -4,14 +4,23 @@
 // Leading dots become underscores (no hidden-file names). Cap length so a huge
 // CR-derived name cannot create an oversized Content-Disposition path.
 const safeDownloadName = (filename: string): string => {
-  const cleaned = filename
+  let cleaned = filename
     // Path separators, C0/C1 controls, and format characters (BIDI, zero-width,
     // BOM, word joiner) that can spoof extensions or hide path segments.
     .replace(/[/\\:\p{Cc}\p{Cf}]/gu, '_')
     .replace(/\.\./g, '_')
     .replace(/^\.+/, '_')
-    .trim()
-    .slice(0, 200);
+    .trim();
+  if (cleaned.length > 200) {
+    cleaned = cleaned.slice(0, 200);
+    const last = cleaned.charCodeAt(199);
+    // High surrogate with no room for its pair: drop it so a.download is
+    // well-formed UTF-16 (199 'a's + 👍 is 201 units; a 200-unit slice
+    // would leave an unpaired surrogate).
+    if (last >= 0xd800 && last <= 0xdbff) {
+      cleaned = cleaned.slice(0, 199);
+    }
+  }
   return cleaned || 'download';
 };
 

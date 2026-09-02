@@ -175,6 +175,21 @@ describe('downloadBlob', () => {
     }
   });
 
+  it('does not split a surrogate pair at the 200-unit cap', () => {
+    const dom = installDom();
+    try {
+      // 199 ASCII + 👍 (2 UTF-16 units) = 201; a naive slice(0, 200) leaves
+      // an unpaired high surrogate.
+      downloadBlob(new Blob(['x']), `${'a'.repeat(199)}👍`);
+      const d = dom.anchor.download;
+      expect(d.length).toBeLessThanOrEqual(200);
+      expect(d).toBe('a'.repeat(199));
+      expect(d).not.toMatch(/[\uD800-\uDFFF]/);
+    } finally {
+      dom.restore();
+    }
+  });
+
   it('revokes the object URL even when click throws', () => {
     const dom = installDom();
     dom.anchor.click.mockImplementation(() => {
@@ -200,6 +215,7 @@ describe('downloadBlob', () => {
       'safe\u202Eexe.csv',
       'a\u200E\u2066b.csv',
       'a'.repeat(300),
+      `${'a'.repeat(199)}👍`,
       'report\0.csv',
       'ok.csv',
     ];

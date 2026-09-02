@@ -62,6 +62,36 @@ describe('inconsistentSources', () => {
     ]);
     expect(mostCommon).toBe('NOT-APPLICABLE');
   });
+  // String#toUpperCase maps "paß"→"PASS" and "faıl"→"FAIL"; ASCII fold must not.
+  it('does not fold Unicode letters into PASS/FAIL', () => {
+    const sharpS = 'n0:pa\u00DF';
+    const dotlessI = 'n1:fa\u0131l';
+    const { sources } = inconsistentSources(
+      withAnn({
+        'compliance.openshift.io/inconsistent-source': `${sharpS},${dotlessI}`,
+      }),
+    );
+    expect(sources).toEqual([
+      { node: 'n0', status: 'PA\u00DF' },
+      { node: 'n1', status: 'FA\u0131L' },
+    ]);
+    expect(
+      effectiveStatus(
+        withAnn({
+          'compliance.openshift.io/inconsistent-source': sharpS,
+          'compliance.openshift.io/most-common-status': 'NOT-APPLICABLE',
+        }),
+      ),
+    ).toBe('INCONSISTENT');
+    expect(
+      effectiveStatus(
+        withAnn({
+          'compliance.openshift.io/inconsistent-source': dotlessI,
+          'compliance.openshift.io/most-common-status': 'PASS',
+        }),
+      ),
+    ).toBe('INCONSISTENT');
+  });
   it('fuzz: never throws for arbitrary annotation strings', () => {
     for (let i = 0; i < 1000; i++) {
       const { sources, mostCommon } = inconsistentSources(

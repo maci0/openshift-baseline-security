@@ -1856,6 +1856,9 @@ func TestEffectiveInconsistentStatus(t *testing.T) {
 		{"empty-annotations", "", "", "INCONSISTENT"},
 		// CO may emit mixed case / padded tokens; collapse is case-insensitive.
 		{"case-and-space", " n0 : pass ", " not-applicable ", "PASS"},
+		// Unicode letters must not fold into PASS/FAIL (sharp s, dotless i).
+		{"sharp-s-is-not-pass", "n0:pa\u00DF", "NOT-APPLICABLE", "INCONSISTENT"},
+		{"dotless-i-is-not-fail", "n0:fa\u0131l", "PASS", "INCONSISTENT"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

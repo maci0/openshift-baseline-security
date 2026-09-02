@@ -20,6 +20,8 @@ func FuzzEffectiveInconsistentStatus(f *testing.F) {
 		{"", ""},
 		{"n0:PASS,n1:FAIL", "PASS"},
 		{" n0 : pass ", " not-applicable "},
+		{"n0:pa\u00DF", "NOT-APPLICABLE"},
+		{"n0:fa\u0131l", "PASS"},
 	} {
 		f.Add(seed.src, seed.mc)
 	}

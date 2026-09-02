@@ -114,12 +114,12 @@ func effectiveCheckStatus(item *unstructured.Unstructured) string {
 	states := map[string]bool{}
 	for _, s := range strings.Split(ann["compliance.openshift.io/inconsistent-source"], ",") {
 		if i := strings.IndexByte(s, ':'); i >= 0 {
-			if st := strings.ToUpper(strings.TrimSpace(s[i+1:])); st != "" {
+			if st := asciiUpperStatus(strings.TrimSpace(s[i+1:])); st != "" {
 				states[st] = true
 			}
 		}
 	}
-	if mc := strings.ToUpper(strings.TrimSpace(ann["compliance.openshift.io/most-common-status"])); mc != "" {
+	if mc := asciiUpperStatus(strings.TrimSpace(ann["compliance.openshift.io/most-common-status"])); mc != "" {
 		states[mc] = true
 	}
 	switch {
@@ -132,6 +132,23 @@ func effectiveCheckStatus(item *unstructured.Unstructured) string {
 	default:
 		return "INCONSISTENT"
 	}
+}
+
+// asciiUpperStatus matches operator upperStatusToken: ASCII a-z only, so a
+// sharp s or dotless i in a CO annotation cannot fold into PASS/FAIL.
+func asciiUpperStatus(s string) string {
+	for i := 0; i < len(s); i++ {
+		if s[i] >= 'a' && s[i] <= 'z' {
+			b := []byte(s)
+			for j, d := range b {
+				if d >= 'a' && d <= 'z' {
+					b[j] = d - 'a' + 'A'
+				}
+			}
+			return string(b)
+		}
+	}
+	return s
 }
 
 // newClient builds a controller-runtime client from the ambient kubeconfig with

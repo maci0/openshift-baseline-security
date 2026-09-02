@@ -86,8 +86,11 @@ const isPassthroughStatus = (s: string): s is PassthroughStatus =>
 
 // Uppercase a CO status token without allocating when the value is already a
 // common uppercase enum (PASS/FAIL/…) or has no ASCII lowercase letters.
-// Lockstep with operator upperStatusToken: multi-node INCONSISTENT annotations
-// call this per node on Results filter / CSV / score paths.
+// ASCII only (lockstep with operator upperStatusToken): String#toUpperCase
+// maps "paß" to "PASS" and "faıl" (dotless i) to "FAIL", so a hostile
+// annotation would collapse as a real status. Protocol tokens must not
+// absorb non-ASCII letters. Multi-node INCONSISTENT annotations call this
+// per node on Results filter / CSV / score paths.
 const upperStatusToken = (s: string): string => {
   if (!s) {
     return '';
@@ -109,7 +112,12 @@ const upperStatusToken = (s: string): string => {
   for (let i = 0; i < s.length; i++) {
     const c = s.charCodeAt(i);
     if (c >= 97 && c <= 122) {
-      return s.toUpperCase();
+      let out = s.slice(0, i);
+      for (let j = i; j < s.length; j++) {
+        const d = s.charCodeAt(j);
+        out += d >= 97 && d <= 122 ? String.fromCharCode(d - 32) : s[j];
+      }
+      return out;
     }
   }
   return s;

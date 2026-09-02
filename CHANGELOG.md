@@ -56,6 +56,9 @@ depend on those tags.
   counts, set RTL from the locale when document dir is unset, and isolate
   bidirectional check and waiver text so it cannot reverse surrounding
   punctuation.
+- Operator and console: INCONSISTENT per-node status tokens fold ASCII
+  case only. A sharp s (`paß`) or Turkish dotless i (`faıl`) in a
+  Compliance Operator annotation no longer maps to PASS or FAIL.
 
 ### Changed
 
