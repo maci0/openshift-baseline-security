@@ -1427,10 +1427,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@oxlint/plugins@npm:1.79.0":
-  version: 1.79.0
-  resolution: "@oxlint/plugins@npm:1.79.0"
-  checksum: 10c0/ecd7a7a5c1b4acf7a8671a3e08acf317a843c445030880726c13509669cabe8d689a90a89f2c8c1f3a800e3a603f446b2f90bd2bb34854feaf76ccdece21c558
+"@oxlint/plugins@npm:1.81.0":
+  version: 1.81.0
+  resolution: "@oxlint/plugins@npm:1.81.0"
+  checksum: 10c0/afe420c693f2db7719624744f24464fd7c4892177d873007eb01d7414208f6cdfb9df55d2df44bd95e84ed23acd5b188ae27ae2ebdfef6d5f4a1277bb436eab3
   languageName: node
   linkType: hard
 
@@ -2965,7 +2965,7 @@ __metadata:
   dependencies:
     "@openshift-console/dynamic-plugin-sdk": "npm:4.22.0"
     "@openshift-console/dynamic-plugin-sdk-webpack": "npm:4.22.0"
-    "@oxlint/plugins": "npm:1.79.0"
+    "@oxlint/plugins": "npm:1.81.0"
     "@patternfly/react-charts": "npm:^8.6.0"
     "@patternfly/react-core": "npm:^6.4.3"
     "@patternfly/react-icons": "npm:^6.6.1"
