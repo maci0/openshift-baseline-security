@@ -1,4 +1,4 @@
-FROM quay.io/operator-framework/opm@sha256:e5a6220603fb4504d58c6e3e488386b817e3695c906a62ee0370b5faedc3799a
+FROM quay.io/operator-framework/opm@sha256:b32d3891616662620da08d7f0ec42c2e69fa2de43427dc975d35b12f7a969a0f
 # BuildKit special-case ARG: clamps image/layer timestamps when passed by the client.
 ARG SOURCE_DATE_EPOCH=0
 ARG VERSION=0.6.1
