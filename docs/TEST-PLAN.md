@@ -691,6 +691,9 @@ an accepted risk neither inflates nor tanks the score.
       (`TestEnsureConsolePlugin`).
 - [x] **Available=False past grace** becomes Unavailable even with some ready
       pods (`TestDeploymentAvailableFalsePastGrace`).
+- [x] **Grace windows read the injected clock**: a clock reading before the
+      transition reports neither Unavailable nor past-grace, and one past the
+      grace reports both (`TestPluginGraceUsesSuppliedClock`).
 - [x] **ConsoleMissing is not Progressing** (no 15s poll storm)
       (`TestConditionProgressing`).
 - [x] **CRDsMissing is not Progressing** (Manual install without CO settles)

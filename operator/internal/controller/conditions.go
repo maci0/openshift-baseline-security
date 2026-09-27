@@ -124,8 +124,10 @@ func conditionProgressing(c *metav1.Condition) bool {
 }
 
 // setRollupConditions sets Available, Progressing, and Degraded from the
-// detail conditions (ClusterOperator-style rollups).
-func setRollupConditions(cb *baselinev1alpha1.ClusterBaseline) {
+// detail conditions (ClusterOperator-style rollups). now is the reconciler's
+// clock reading, so the install-stall grace is measured on the same clock as
+// the rest of the reconcile.
+func setRollupConditions(cb *baselinev1alpha1.ClusterBaseline, now time.Time) {
 	co := meta.FindStatusCondition(cb.Status.Conditions, "ComplianceOperatorReady")
 	scan := meta.FindStatusCondition(cb.Status.Conditions, "ScanConfigured")
 	plugin := meta.FindStatusCondition(cb.Status.Conditions, "ConsolePluginReady")
@@ -140,7 +142,7 @@ func setRollupConditions(cb *baselinev1alpha1.ClusterBaseline) {
 	coStuck := co != nil && co.Status == metav1.ConditionFalse &&
 		(co.Reason == "Installing" || co.Reason == "CSVNotReady") &&
 		!co.LastTransitionTime.IsZero() &&
-		time.Since(co.LastTransitionTime.Time) > coInstallGrace
+		now.Sub(co.LastTransitionTime.Time) > coInstallGrace
 	progressing := (conditionProgressing(co) && !coStuck) ||
 		conditionProgressing(scan) || conditionProgressing(plugin)
 

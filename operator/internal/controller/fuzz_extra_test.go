@@ -3,6 +3,7 @@ package controller
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -547,7 +548,7 @@ func FuzzSetRollupConditions(f *testing.F) {
 		setCond(cb, "ScanConfigured", metav1.ConditionFalse, scanReason, scanMsg)
 		setCond(cb, "ConsolePluginReady", metav1.ConditionFalse, pluginReason, pluginMsg)
 		setCond(cb, "ScanStorageReady", metav1.ConditionTrue, "AsExpected", "")
-		setRollupConditions(cb)
+		setRollupConditions(cb, time.Now())
 
 		for _, typ := range []string{"Available", "Progressing", "Degraded"} {
 			c := meta.FindStatusCondition(cb.Status.Conditions, typ)

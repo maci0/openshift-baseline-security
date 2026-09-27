@@ -47,12 +47,14 @@ func deploymentAvailable(dep *appsv1.Deployment) bool {
 
 // deploymentAvailableFalsePastGrace is true when Available has been False longer
 // than pluginUnavailableGrace (distinct from zero-ready; ready pods may exist).
-func deploymentAvailableFalsePastGrace(dep *appsv1.Deployment) bool {
+// now is the reconciler's clock reading so the grace is measured against the
+// same time source as the rest of the reconcile decision.
+func deploymentAvailableFalsePastGrace(dep *appsv1.Deployment, now time.Time) bool {
 	c := availableCondition(dep)
 	if c == nil || c.Status != corev1.ConditionFalse {
 		return false
 	}
-	return !c.LastTransitionTime.IsZero() && time.Since(c.LastTransitionTime.Time) > pluginUnavailableGrace
+	return !c.LastTransitionTime.IsZero() && now.Sub(c.LastTransitionTime.Time) > pluginUnavailableGrace
 }
 
 // pluginUnavailableGrace is how long the plugin Deployment may be unavailable
@@ -62,8 +64,10 @@ const pluginUnavailableGrace = 5 * time.Minute
 // pluginDeploymentUnavailable is true when the Deployment has been continuously
 // below pluginReadyMin ready replicas longer than pluginUnavailableGrace.
 // Prefer the Available condition's LastTransitionTime so a brief ReadyReplicas
-// dip on an old Deployment is not treated as a permanent failure.
-func pluginDeploymentUnavailable(dep *appsv1.Deployment) bool {
+// dip on an old Deployment is not treated as a permanent failure. now is the
+// reconciler's clock reading, so the grace is measured against the same time
+// source as the rest of the reconcile decision.
+func pluginDeploymentUnavailable(dep *appsv1.Deployment, now time.Time) bool {
 	if dep.Status.ReadyReplicas >= pluginReadyMin {
 		return false
 	}
@@ -71,9 +75,9 @@ func pluginDeploymentUnavailable(dep *appsv1.Deployment) bool {
 	// pods is pathological; still time-box from the last transition so we do not
 	// Progress forever. No condition yet (brand-new object): use creation time.
 	if c := availableCondition(dep); c != nil && !c.LastTransitionTime.IsZero() {
-		return time.Since(c.LastTransitionTime.Time) > pluginUnavailableGrace
+		return now.Sub(c.LastTransitionTime.Time) > pluginUnavailableGrace
 	}
-	return !dep.CreationTimestamp.IsZero() && time.Since(dep.CreationTimestamp.Time) > pluginUnavailableGrace
+	return !dep.CreationTimestamp.IsZero() && now.Sub(dep.CreationTimestamp.Time) > pluginUnavailableGrace
 }
 
 // applyPluginContainer sets the plugin container, volume mounts, and volumes on the pod spec.

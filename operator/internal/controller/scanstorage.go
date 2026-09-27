@@ -38,14 +38,15 @@ func (r *ClusterBaselineReconciler) checkScanStorage(ctx context.Context, cb *ba
 		names[name] = true
 	}
 	var pending []string
+	now := r.now()
 	for _, pvc := range pvcs.Items {
 		owned := matchesAnyProfile(pvc.Name, names)
-		// Require a real CreationTimestamp: a zero time makes time.Since huge and
+		// Require a real CreationTimestamp: a zero time makes the age huge and
 		// would false-Degrade brand-new objects in some test/API edge paths.
 		if owned &&
 			pvc.Status.Phase == corev1.ClaimPending &&
 			!pvc.CreationTimestamp.IsZero() &&
-			time.Since(pvc.CreationTimestamp.Time) > scanStoragePendingGrace {
+			now.Sub(pvc.CreationTimestamp.Time) > scanStoragePendingGrace {
 			pending = append(pending, pvc.Name)
 		}
 	}

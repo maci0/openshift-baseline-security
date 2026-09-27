@@ -384,7 +384,7 @@ func (r *ClusterBaselineReconciler) ensureConsolePlugin(ctx context.Context, cb 
 		reason, msg := "WaitingForPods",
 			fmt.Sprintf("Deployment %s/%s has %d ready replicas (want >= %d of %d)",
 				pluginNS, pluginName, dep.Status.ReadyReplicas, pluginReadyMin, replicas)
-		if pluginDeploymentUnavailable(dep) {
+		if pluginDeploymentUnavailable(dep, r.now()) {
 			reason = "Unavailable"
 			// Minutes from pluginUnavailableGrace so the message cannot drift.
 			msg = fmt.Sprintf("Deployment %s/%s has no ready pods for >%dm",
@@ -400,7 +400,7 @@ func (r *ClusterBaselineReconciler) ensureConsolePlugin(ctx context.Context, cb 
 			fmt.Sprintf("Deployment %s/%s ready pods present but Available is not True", pluginNS, pluginName)
 		// Ready pods with Available=False past grace (e.g. progress deadline)
 		// must not Progress forever.
-		if deploymentAvailableFalsePastGrace(dep) {
+		if deploymentAvailableFalsePastGrace(dep, r.now()) {
 			reason = "Unavailable"
 			msg = fmt.Sprintf("Deployment %s/%s Available=False for >%dm",
 				pluginNS, pluginName, int(pluginUnavailableGrace.Minutes()))

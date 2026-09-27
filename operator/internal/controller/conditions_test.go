@@ -17,6 +17,11 @@ import (
 	baselinev1alpha1 "github.com/maci0/baseline-security-operator/api/v1alpha1"
 )
 
+// Fixed clock for the rollup tests: setRollupConditions measures the CO
+// install-stall grace against it, so a fixed reading keeps those assertions
+// independent of when the suite runs.
+var rollupTestNow = time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
+
 func TestSetCondEmptyReasonDefaults(t *testing.T) {
 	cb := &baselinev1alpha1.ClusterBaseline{}
 	setCond(cb, "ScanStorageReady", metav1.ConditionFalse, "", "pending")
@@ -25,7 +30,7 @@ func TestSetCondEmptyReasonDefaults(t *testing.T) {
 		t.Fatalf("empty reason must become Unknown, got %+v", c)
 	}
 	// Rollup must use a fixed CamelCase reason, never the detail Reason.
-	setRollupConditions(cb)
+	setRollupConditions(cb, rollupTestNow)
 	d := meta.FindStatusCondition(cb.Status.Conditions, "Degraded")
 	if d == nil || d.Status != metav1.ConditionTrue || d.Reason != "ScanStorageNotReady" {
 		t.Fatalf("Degraded must be ScanStorageNotReady, got %+v", d)
@@ -199,7 +204,7 @@ func TestSetRollupConditions(t *testing.T) {
 	cb := &baselinev1alpha1.ClusterBaseline{}
 	cb.Generation = 3
 	setCond(cb, "ComplianceOperatorReady", metav1.ConditionFalse, "Installing", "waiting")
-	setRollupConditions(cb)
+	setRollupConditions(cb, rollupTestNow)
 	if c := meta.FindStatusCondition(cb.Status.Conditions, "Progressing"); c == nil || c.Status != metav1.ConditionTrue {
 		t.Fatalf("Progressing while installing: %+v", c)
 	}
@@ -208,7 +213,7 @@ func TestSetRollupConditions(t *testing.T) {
 	}
 
 	setCond(cb, "ComplianceOperatorReady", metav1.ConditionFalse, "CSVNotReady", "phase=Installing")
-	setRollupConditions(cb)
+	setRollupConditions(cb, rollupTestNow)
 	if c := meta.FindStatusCondition(cb.Status.Conditions, "Progressing"); c == nil || c.Status != metav1.ConditionTrue {
 		t.Fatalf("Progressing while CSVNotReady: %+v", c)
 	}
@@ -218,7 +223,7 @@ func TestSetRollupConditions(t *testing.T) {
 	// is progress, so this steady state must settle Progressing=False.
 	setCond(cb, "ComplianceOperatorReady", metav1.ConditionFalse, "NotInstalled", "manual")
 	setCond(cb, "ScanConfigured", metav1.ConditionFalse, "CRDsMissing", "no CRDs")
-	setRollupConditions(cb)
+	setRollupConditions(cb, rollupTestNow)
 	if c := meta.FindStatusCondition(cb.Status.Conditions, "Progressing"); c == nil || c.Status != metav1.ConditionFalse {
 		t.Fatalf("Progressing must be False for permanent NotInstalled: %+v", c)
 	}
@@ -232,7 +237,7 @@ func TestSetRollupConditions(t *testing.T) {
 	setCond(cb, "ComplianceOperatorReady", metav1.ConditionTrue, "CSVSucceeded", "")
 	setCond(cb, "ScanConfigured", metav1.ConditionTrue, "BindingsCreated", "")
 	setCond(cb, "ConsolePluginReady", metav1.ConditionTrue, "Deployed", "")
-	setRollupConditions(cb)
+	setRollupConditions(cb, rollupTestNow)
 	if c := meta.FindStatusCondition(cb.Status.Conditions, "Available"); c == nil || c.Status != metav1.ConditionTrue {
 		t.Fatalf("Available when ready: %+v", c)
 	}
@@ -248,7 +253,7 @@ func TestSetRollupConditions(t *testing.T) {
 
 	// Plugin still rolling out (pending reason) keeps Progressing True.
 	setCond(cb, "ConsolePluginReady", metav1.ConditionFalse, "WaitingForPods", "0/2 ready")
-	setRollupConditions(cb)
+	setRollupConditions(cb, rollupTestNow)
 	if c := meta.FindStatusCondition(cb.Status.Conditions, "Progressing"); c == nil || c.Status != metav1.ConditionTrue {
 		t.Fatalf("Progressing while plugin pending: %+v", c)
 	}
@@ -258,7 +263,7 @@ func TestSetRollupConditions(t *testing.T) {
 
 	// Plugin down past grace period rolls into Degraded.
 	setCond(cb, "ConsolePluginReady", metav1.ConditionFalse, "Unavailable", "no ready pods for >5m")
-	setRollupConditions(cb)
+	setRollupConditions(cb, rollupTestNow)
 	if c := meta.FindStatusCondition(cb.Status.Conditions, "Degraded"); c == nil || c.Status != metav1.ConditionTrue || c.Reason != "ConsolePluginUnavailable" {
 		t.Fatalf("Degraded for unavailable plugin: %+v", c)
 	}
@@ -267,25 +272,25 @@ func TestSetRollupConditions(t *testing.T) {
 	// (never copies a possibly hostile detail Reason).
 	setCond(cb, "ConsolePluginReady", metav1.ConditionTrue, "Deployed", "")
 	setCond(cb, "ScanStorageReady", metav1.ConditionFalse, "ScanStoragePending", "PVC pending")
-	setRollupConditions(cb)
+	setRollupConditions(cb, rollupTestNow)
 	if c := meta.FindStatusCondition(cb.Status.Conditions, "Degraded"); c == nil || c.Status != metav1.ConditionTrue || c.Reason != "ScanStorageNotReady" {
 		t.Fatalf("Degraded for pending storage: %+v", c)
 	}
 	// Hostile detail Reason must not land on Degraded (CRD Reason pattern).
 	setCond(cb, "ScanStorageReady", metav1.ConditionFalse, "not a valid reason!!!", "still pending")
-	setRollupConditions(cb)
+	setRollupConditions(cb, rollupTestNow)
 	if c := meta.FindStatusCondition(cb.Status.Conditions, "Degraded"); c == nil || c.Reason != "ScanStorageNotReady" {
 		t.Fatalf("Degraded must use fixed ScanStorageNotReady, got %+v", c)
 	}
 	setCond(cb, "ScanStorageReady", metav1.ConditionTrue, "AsExpected", "")
-	setRollupConditions(cb)
+	setRollupConditions(cb, rollupTestNow)
 	if c := meta.FindStatusCondition(cb.Status.Conditions, "Degraded"); c == nil || c.Status != metav1.ConditionFalse {
 		t.Fatalf("Degraded must clear: %+v", c)
 	}
 
 	// Invalid cron leaves Available=False and Degraded=True so operators notice.
 	setCond(cb, "ScanConfigured", metav1.ConditionFalse, "InvalidSchedule", "bad cron")
-	setRollupConditions(cb)
+	setRollupConditions(cb, rollupTestNow)
 	if c := meta.FindStatusCondition(cb.Status.Conditions, "Degraded"); c == nil || c.Status != metav1.ConditionTrue || c.Reason != "InvalidSchedule" {
 		t.Fatalf("Degraded for invalid schedule: %+v", c)
 	}
@@ -296,7 +301,7 @@ func TestSetRollupConditions(t *testing.T) {
 	// Terminal CSV failure is Degraded (not Progressing forever).
 	setCond(cb, "ScanConfigured", metav1.ConditionTrue, "BindingsCreated", "")
 	setCond(cb, "ComplianceOperatorReady", metav1.ConditionFalse, "CSVFailed", "phase=Failed")
-	setRollupConditions(cb)
+	setRollupConditions(cb, rollupTestNow)
 	if c := meta.FindStatusCondition(cb.Status.Conditions, "Degraded"); c == nil || c.Status != metav1.ConditionTrue || c.Reason != "CSVFailed" {
 		t.Fatalf("Degraded for CSVFailed: %+v", c)
 	}
@@ -314,7 +319,7 @@ func TestStuckInstallDegrades(t *testing.T) {
 
 	// Fresh install: Progressing, not Degraded.
 	setCond(cb, "ComplianceOperatorReady", metav1.ConditionFalse, "Installing", "installing")
-	setRollupConditions(cb)
+	setRollupConditions(cb, rollupTestNow)
 	if c := meta.FindStatusCondition(cb.Status.Conditions, "Progressing"); c == nil || c.Status != metav1.ConditionTrue {
 		t.Fatalf("fresh install must Progress: %+v", c)
 	}
@@ -324,8 +329,8 @@ func TestStuckInstallDegrades(t *testing.T) {
 
 	// Backdate the CO condition past the grace window.
 	co := meta.FindStatusCondition(cb.Status.Conditions, "ComplianceOperatorReady")
-	co.LastTransitionTime = metav1.NewTime(time.Now().Add(-coInstallGrace - time.Minute))
-	setRollupConditions(cb)
+	co.LastTransitionTime = metav1.NewTime(rollupTestNow.Add(-coInstallGrace - time.Minute))
+	setRollupConditions(cb, rollupTestNow)
 	if c := meta.FindStatusCondition(cb.Status.Conditions, "Degraded"); c == nil || c.Status != metav1.ConditionTrue || c.Reason != "InstallStalled" {
 		t.Fatalf("stuck install must Degrade/InstallStalled: %+v", c)
 	}
@@ -335,7 +340,7 @@ func TestStuckInstallDegrades(t *testing.T) {
 
 	// Empty detail message still yields a usable Degraded message (no trailing junk).
 	co.Message = ""
-	setRollupConditions(cb)
+	setRollupConditions(cb, rollupTestNow)
 	if c := meta.FindStatusCondition(cb.Status.Conditions, "Degraded"); c == nil || c.Message == "" ||
 		c.Message[len(c.Message)-1] == ' ' || c.Message[len(c.Message)-1] == ':' {
 		t.Fatalf("InstallStalled message should use reason fallback, got %q", c)
