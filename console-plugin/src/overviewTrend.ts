@@ -11,23 +11,32 @@ import { isFiniteNumber } from './parse';
 // the whole chart (hand-edited / partial status can carry missing scores).
 export const toTrendData = (history?: ScoreSnapshot[]): { x: Date; y: number }[] =>
   (history ?? [])
-    .map((h) => ({ x: new Date(h.time), y: h.score }))
+    // status.history is cluster-supplied and not runtime type-checked, so a
+    // hand-edited null or non-string entry must be dropped, not throw and blank
+    // the Overview page.
+    .map((h) => ({ x: new Date(h?.time), y: h?.score }))
     .filter((p) => !Number.isNaN(p.x.getTime()) && isFiniteNumber(p.y));
 
 // Content key for history rings: status-only CR updates reallocate the array
 // with the same points; identity deps would rebuild Victory Date/path data on
 // every reconcile even when the trend did not change (max 30 snapshots).
+//
+// Every field is length-prefixed so the encoding is injective. The key is a
+// React memo dependency, so two different histories that produced the same key
+// would leave the trend chart painting one series over another; time and score
+// are cluster-supplied strings that may themselves carry \0 or \x01, which a
+// bare separator would let a hand-edited status forge. JSON.stringify is not an
+// escape either: it maps NaN and null to the same "null".
 export const historyContentKey = (history?: ScoreSnapshot[]): string => {
   if (!history?.length) {
     return '';
   }
-  let key = '';
+  let key = `${history.length}\x01`;
   for (let i = 0; i < history.length; i++) {
     const h = history[i];
-    if (i > 0) {
-      key += '\x01';
-    }
-    key += `${h.time ?? ''}\0${h.score ?? ''}`;
+    const time = String(h?.time ?? '');
+    const score = String(h?.score ?? '');
+    key += `${time.length}:${time}\x01${score.length}:${score}\x01`;
   }
   return key;
 };

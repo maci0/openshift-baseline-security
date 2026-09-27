@@ -198,6 +198,11 @@ depend on those tags.
 
 ### Fixed
 
+- Console plugin, Overview trend chart: a `status.history` entry that was `null`
+  rather than a snapshot threw while the history was read, blanking the page
+  instead of drawing the ring. Two different history rings also produced the
+  same chart content key whenever a timestamp carried the separator bytes, so
+  the chart kept painting the previous series after the status changed.
 - `console-plugin/.env` (live-console Playwright run): a key other than the four
   the runner reads, a duplicate key, a line that is not `KEY=value`, or an
   unterminated quote was dropped without a word, so a misspelled `CONSOLE_URL`

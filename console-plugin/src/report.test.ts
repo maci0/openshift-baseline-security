@@ -1,6 +1,6 @@
 import { buildReportHtml } from './report';
 import { ClusterBaseline, ComplianceCheckResult, Waiver } from './models';
-import { randomString } from './testing/fuzz';
+import { mulberry32, randomString } from './testing/fuzz';
 import { isString } from './parse';
 
 // buildReportHtml renders a self-contained HTML report from ClusterBaseline
@@ -38,15 +38,9 @@ const XSS = [
 // Tag-open markers that must never appear literally in the output.
 const FORBIDDEN = ['<script', '<img', '<svg', '<iframe', '<object', '<marquee', '<b>'];
 
-// Deterministic PRNG (mulberry32) so failures reproduce without a fixed corpus
-// file and CI stays stable (no Math.random).
-const rng = (seed: number) => () => {
-  seed |= 0;
-  seed = (seed + 0x6d2b79f5) | 0;
-  let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
-  t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-};
+// Deterministic PRNG (mulberry32, shared in src/testing/fuzz.ts) so failures
+// reproduce without a fixed corpus file and CI stays stable (no Math.random).
+const rng = mulberry32;
 
 const pick = (rand: () => number): string => XSS[Math.floor(rand() * XSS.length)];
 
