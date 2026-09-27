@@ -1046,6 +1046,201 @@ func FuzzClampFailureList(f *testing.F) {
 	})
 }
 
+// FuzzClampSetList: the shared core behind clampStringList (dropEmpty, profile
+// names, batch pools/remediations) and clampFailureList (keep empty). Profile,
+// pool, and remediation names are read off CR status and off a RemediationPlan
+// written by an admin, so corrupt or migrated etcd can supply duplicates and
+// over-length entries. Asserts the CRD set-list invariants: no duplicates after
+// truncation, every entry within nameMax runes, no empties when dropEmpty, and
+// at most maxItems entries. Compared against an independent reference so a
+// change in clamp order (clamp must precede dedupe) is a failure, not a new
+// expectation.
+func FuzzClampSetList(f *testing.F) {
+	f.Add("chk-a,chk-b,chk-a", objectRefFieldMaxLen, 8, true)
+	f.Add("", 0, 0, true)
+	f.Add(",,", objectRefFieldMaxLen, 4, true)
+	f.Add("a,,b,", 8, 0, false)
+	f.Add(strings.Repeat("x,", 64), 4, 3, true)
+	f.Add(strings.Repeat("a", objectRefFieldMaxLen)+"X,"+strings.Repeat("a", objectRefFieldMaxLen)+"Y",
+		objectRefFieldMaxLen, 8, true)
+	f.Fuzz(func(t *testing.T, csv string, nameMax, maxItems int, dropEmpty bool) {
+		if len(csv) > 8192 {
+			csv = csv[:8192]
+		}
+		// Bound the knobs so a fuzzed maxItems cannot ask for a huge allocation.
+		nameMax %= objectRefFieldMaxLen*2 + 1
+		nameMax -= objectRefFieldMaxLen
+		maxItems %= failureListMax + 8
+		maxItems -= 4
+		in := splitCSV(csv)
+		got := clampSetList(in, nameMax, maxItems, dropEmpty)
+
+		// Reference: truncate by rune count, drop empties when asked, keep the
+		// first occurrence, then trim. Written against the spec, not the helpers.
+		var want []string
+		seen := map[string]struct{}{}
+		for _, s := range in {
+			var t2 string
+			if nameMax <= 0 {
+				t2 = ""
+			} else if r := []rune(s); len(r) > nameMax {
+				t2 = string(r[:nameMax])
+			} else {
+				t2 = s
+			}
+			if t2 == "" && dropEmpty {
+				continue
+			}
+			if _, dup := seen[t2]; dup {
+				continue
+			}
+			seen[t2] = struct{}{}
+			want = append(want, t2)
+		}
+		if maxItems > 0 && len(want) > maxItems {
+			want = want[:maxItems]
+		}
+		if dropEmpty && len(want) == 0 {
+			want = nil
+		}
+		if !slices.Equal(got, want) {
+			t.Fatalf("clampSetList(%d items, nameMax=%d, maxItems=%d, dropEmpty=%v) = %v, want %v",
+				len(in), nameMax, maxItems, dropEmpty, got, want)
+		}
+		if len(in) == 0 && got != nil {
+			t.Fatalf("clampSetList on empty input returned %v, want nil", got)
+		}
+		// Admission invariants, checked directly rather than through want.
+		out := map[string]struct{}{}
+		for i, s := range got {
+			if _, dup := out[s]; dup {
+				t.Fatalf("set-list duplicate %q at %d in %v", s, i, got)
+			}
+			out[s] = struct{}{}
+			if dropEmpty && s == "" {
+				t.Fatalf("empty entry at %d survived dropEmpty: %v", i, got)
+			}
+			if nameMax > 0 && len([]rune(s)) > nameMax {
+				t.Fatalf("entry %d has %d runes, over nameMax %d", i, len([]rune(s)), nameMax)
+			}
+		}
+		if maxItems > 0 && len(got) > maxItems {
+			t.Fatalf("len %d over maxItems %d", len(got), maxItems)
+		}
+		// The output must be a fresh slice: writing through the input afterwards
+		// must not change what the caller got back.
+		if len(in) > 0 && len(got) > 0 {
+			in[0] = "clamp-set-list-alias-sentinel"
+			if got[0] == "clamp-set-list-alias-sentinel" {
+				t.Fatal("clampSetList aliased the input backing array")
+			}
+		}
+	})
+}
+
+// FuzzSortedDiff: the two-pointer fast path syncFailureDiff takes when both
+// failure-name lists are ascending, which is what production always passes. Its
+// index walks (equal runs, the a-only remainder, the b-only skip) are hand
+// written, and FuzzSyncFailureDiff reaches only the map-based notIn branch
+// because splitCSV preserves fuzzer byte order. Inputs are sorted here, keeping
+// duplicates, so both the sorted fast path and the empty-b unique-copy are
+// exercised. The result must equal the set difference sortedDiff documents.
+func FuzzSortedDiff(f *testing.F) {
+	f.Add("a,b,c", "b,d")
+	f.Add("", "")
+	f.Add("a,a,b", "b,b,c")
+	f.Add("x,y", "")
+	f.Add("", "x,y")
+	f.Add("a", "a")
+	f.Add("b,a,b,a", "a,b")
+	f.Fuzz(func(t *testing.T, aCSV, bCSV string) {
+		if len(aCSV) > 4096 {
+			aCSV = aCSV[:4096]
+		}
+		if len(bCSV) > 4096 {
+			bCSV = bCSV[:4096]
+		}
+		a, b := splitCSV(aCSV), splitCSV(bCSV)
+		slices.Sort(a)
+		slices.Sort(b)
+		got := sortedDiff(a, b)
+		if len(a) == 0 && got != nil {
+			t.Fatalf("sortedDiff on empty a returned %v, want nil", got)
+		}
+		inB := make(map[string]struct{}, len(b))
+		for _, x := range b {
+			inB[x] = struct{}{}
+		}
+		var want []string
+		seen := map[string]struct{}{}
+		for _, x := range a {
+			if _, in := inB[x]; in {
+				continue
+			}
+			if _, dup := seen[x]; dup {
+				continue
+			}
+			seen[x] = struct{}{}
+			want = append(want, x)
+		}
+		if !slices.Equal(got, want) {
+			t.Fatalf("sortedDiff(%v, %v) = %v, want %v", a, b, got, want)
+		}
+		// The membership and ordering contract, independent of the reference:
+		// every result member is in a, absent from b, and the list is ascending.
+		out := make(map[string]struct{}, len(got))
+		for i, x := range got {
+			if _, dup := out[x]; dup {
+				t.Fatalf("duplicate %q in %v", x, got)
+			}
+			out[x] = struct{}{}
+			if _, ok := inB[x]; ok {
+				t.Fatalf("result %q is in b", x)
+			}
+			found := false
+			for _, y := range a {
+				if y == x {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Fatalf("result %q not in a", x)
+			}
+			if i > 0 && got[i-1] > x {
+				t.Fatalf("unsorted result %v", got)
+			}
+		}
+		// The reverse direction is the fixed side of the same diff, and it is the
+		// one that runs when b is the larger list, so its remainder walk matters.
+		revWant := setDiff(b, a)
+		if rev := sortedDiff(b, a); !slices.Equal(rev, revWant) {
+			t.Fatalf("sortedDiff(%v, %v) = %v, want %v", b, a, rev, revWant)
+		}
+	})
+}
+
+// setDiff returns the sorted unique members of from that are absent from exclude.
+func setDiff(from, exclude []string) []string {
+	ex := make(map[string]struct{}, len(exclude))
+	for _, x := range exclude {
+		ex[x] = struct{}{}
+	}
+	var out []string
+	seen := map[string]struct{}{}
+	for _, x := range from {
+		if _, in := ex[x]; in {
+			continue
+		}
+		if _, dup := seen[x]; dup {
+			continue
+		}
+		seen[x] = struct{}{}
+		out = append(out, x)
+	}
+	return out
+}
+
 // FuzzNormalizedSchedule: spec.schedule is untrusted CR text. Must never panic;
 // empty uses the default five-field cron; descriptors and non-5-field forms fail.
 func FuzzNormalizedSchedule(f *testing.F) {
