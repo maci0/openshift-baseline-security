@@ -71,6 +71,9 @@ Review the following:
   must be one the script checks. A dead grep, a missing file, or a pair the
   script omits is the finding: quote the script line, then correct the
   document that claims the check runs.
+- Findable pattern: `make -C operator verify-product-lockstep` is the runnable
+  oracle (a dead grep or a missing file fails it); a green run still leaves the
+  unchecked-pair half to reading the script against ADR-024.
 - `make -C operator test-alerts` (needs docker) is the oracle for (6)'s alert
   half.
 
@@ -78,7 +81,8 @@ Review the following:
 - Every `[x]` row in `docs/TEST-PLAN.md` names a test. The test must still
   exist under the path the plan's header section gives (`operator/internal/controller/*_test.go`,
   `operator/cmd/*_test.go`, `operator/hack/*_test.go`,
-  `console-plugin/src/*.test.ts`, `operator/test/e2e/`, `console-plugin/e2e/`).
+  `console-plugin/src/*.test.ts`, `console-plugin/src/components/*.test.ts`,
+  `operator/test/e2e/`, `console-plugin/e2e/`).
 - Renamed, deleted, or moved tests leave the row claiming coverage nothing
   provides. Mark it `[ ]` or repoint it, in the same change.
 
@@ -92,9 +96,12 @@ Review the following:
 - Each record in `docs/DESIGN-DECISIONS.md` carries a `*Recorded: <date>*`
   line (the file's own rule) and a `**Status:**` line.
 - A record the code has since contradicted is corrected in place, the way the
-  file's own header prescribes: fix the sentence, keep the record. Writing the
-  reversing ADR is `specs-review` territory, so report the needed
-  supersession instead of drafting one.
+  file's own header prescribes: fix the sentence, keep the record. A *reversed*
+  decision needs a new ADR, which the file's own header puts in this file
+  (`Supersedes ADR-NNN`, with the old record retitled `Superseded by ADR-MMM`):
+  draft it only when a `specs-review` prompt is in the set to own ADR content,
+  otherwise correct the drifted record in place and state the supersession the
+  next pass owes.
 - Findable pattern: `rg -n 'Recorded:|Status:' docs/DESIGN-DECISIONS.md` is the
   oracle for the record shape; for a drifted decision, take a constant or key
   the record names and read its definition in the Go or TypeScript source it
