@@ -374,28 +374,70 @@ func (r *ClusterBaselineReconciler) findComplianceOperatorCSV(ctx context.Contex
 // page is folded in and dropped. Ties go to the incumbent, so the winner does
 // not depend on how the pages were split. Only the winners are DeepCopied, and
 // only when one actually replaces the incumbent.
+//
+// A CSV carries the whole install spec plus the alm-examples annotation, so a
+// DeepCopy is a copy of a large object. Copying the leader on every improvement
+// (the shape the loop had) made the copy count equal the number of ascending
+// compliance-operator CSVs, and the apiserver returns a name-sorted page, which
+// is ascending by version: the common order copied every one. The page is walked
+// for its best index per tier and copied at most once per tier when it actually
+// beats the incumbent, the same shape pickComplianceOperatorCSV uses.
+//
+// Each candidate's version is parsed once and the held leader's once, rather
+// than re-parsing both on every comparison: complianceCSVVersion allocates a
+// parts slice and a Split result per call, and the old comparison ran both
+// sides per item.
 func foldComplianceOperatorCSVs(
 	ctx context.Context,
 	items []unstructured.Unstructured,
 	bestSucceeded, bestOther *unstructured.Unstructured,
 ) (*unstructured.Unstructured, *unstructured.Unstructured) {
+	// Leader per tier. idx is the page-local index of the current leader, or -1
+	// while the leader is still the incumbent carried in from an earlier page
+	// (whose name and parsed version seed the comparison). A leader found on
+	// this page is copied once, at the end, not on every improvement.
+	type leader struct {
+		idx    int
+		name   string
+		ver    complianceVersion
+		parsed bool
+	}
+	seed := func(held *unstructured.Unstructured) leader {
+		if held == nil {
+			return leader{idx: -1}
+		}
+		ver, parsed := complianceCSVVersion(held.GetName())
+		return leader{idx: -1, name: held.GetName(), ver: ver, parsed: parsed}
+	}
+	succeeded, other := seed(bestSucceeded), seed(bestOther)
+	hasLeader := func(l leader) bool { return l.idx >= 0 || l.name != "" }
+
 	for i := range items {
 		csv := &items[i]
 		if !strings.HasPrefix(csv.GetName(), csvNamePrefix) {
 			continue
 		}
+		ver, parsed := complianceCSVVersion(csv.GetName())
 		phase := csvPhase(ctx, csv)
+		// Replaces only on > 0, so an equal version keeps the leader: the
+		// winner must not depend on how the apiserver split the walk.
 		if phase == "Succeeded" {
-			if bestSucceeded == nil ||
-				compareComplianceCSVVersion(csv.GetName(), bestSucceeded.GetName()) > 0 {
-				bestSucceeded = csv.DeepCopy()
+			if !hasLeader(succeeded) ||
+				compareCSVVersionParsed(csv.GetName(), ver, parsed, succeeded.name, succeeded.ver, succeeded.parsed) > 0 {
+				succeeded = leader{idx: i, name: csv.GetName(), ver: ver, parsed: parsed}
 			}
 			continue
 		}
-		if bestOther == nil ||
-			compareComplianceCSVVersion(csv.GetName(), bestOther.GetName()) > 0 {
-			bestOther = csv.DeepCopy()
+		if !hasLeader(other) ||
+			compareCSVVersionParsed(csv.GetName(), ver, parsed, other.name, other.ver, other.parsed) > 0 {
+			other = leader{idx: i, name: csv.GetName(), ver: ver, parsed: parsed}
 		}
+	}
+	if succeeded.idx >= 0 {
+		bestSucceeded = items[succeeded.idx].DeepCopy()
+	}
+	if other.idx >= 0 {
+		bestOther = items[other.idx].DeepCopy()
 	}
 	return bestSucceeded, bestOther
 }

@@ -295,6 +295,25 @@ depend on those tags.
   `Usage:` line now names the script by basename rather than by a `hack/`
   path, and the operator's `--help` prints flags as `--long` to match the
   README, the CSV args, and the usage errors, which already spell them so.
+
+- The cluster-wide ClusterServiceVersion fallback that finds an externally
+  installed Compliance Operator no longer deep-copies every candidate it beats.
+  A CSV carries the whole install spec plus the `alm-examples` annotation, and
+  the apiserver returns a name-sorted page, which is ascending by version, so
+  the old fold copied every CSV on the page instead of the one it kept. The
+  page is now scanned for each tier's winner and copied once; a 200-CSV page
+  drops from 366 KB and 2992 allocations to 17.8 KB and 422 (9x faster,
+  measured). Each candidate's version is also parsed once instead of both
+  sides being re-parsed on every comparison. The CSV selected is unchanged:
+  the winner still does not depend on how the apiserver split the walk.
+
+- The console plugin's Overview no longer re-derives the expiring-soon waiver
+  list on every render. `expiringWaivers` parses an `expiresAt` per waiver (up
+  to 256), and the CCR list watch re-renders Overview on every check-result
+  event without touching the waiver list. The derivation is now memoized on
+  the same waiver content key and expiry clock the page already computes, so a
+  waiver entering or leaving the two-week window still updates the alert.
+
 - The console plugin now gzips its assets at level 9 instead of level 5. Every
   file it serves is content-hashed and marked immutable for a year, so the
   bytes are compressed once at image build and each browser pays the cost at

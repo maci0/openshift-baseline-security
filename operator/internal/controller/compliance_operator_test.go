@@ -1,6 +1,8 @@
 package controller
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -208,6 +210,39 @@ func TestFoldComplianceOperatorCSVs(t *testing.T) {
 			t.Errorf("caller's CSV renamed to %q by the returned copy", page[0].GetName())
 		}
 	})
+}
+
+// A CSV DeepCopy copies the whole install spec and the alm-examples annotation,
+// so the fold must not copy once per ascending candidate: the apiserver returns
+// a name-sorted page, which is ascending by version, and that is the order a
+// real cluster-wide walk hands over. The copy count is not observable from the
+// result, so it is pinned by allocation volume: BenchmarkFoldComplianceOperatorCSVs
+// must stay near csvDeepCopyBytes * 2 rather than scaling with the page size.
+func BenchmarkFoldComplianceOperatorCSVs(b *testing.B) {
+	csv := func(name, phase, body string) unstructured.Unstructured {
+		c := u(csvGVK)
+		c.SetName(name)
+		c.SetNamespace("ns")
+		c.Object["status"] = map[string]any{"phase": phase}
+		c.Object["spec"] = map[string]any{"install": map[string]any{"strategy": body}}
+		return *c
+	}
+	// A CSV-shaped body big enough that a per-candidate copy dominates the
+	// page's own footprint, standing in for the install spec + alm-examples.
+	body := strings.Repeat("x", 8*1024)
+	page := make([]unstructured.Unstructured, 0, 200)
+	for i := 0; i < 100; i++ {
+		page = append(page, csv(fmt.Sprintf("compliance-operator.v1.%d.0", i), "Succeeded", body))
+		page = append(page, csv(fmt.Sprintf("compliance-operator.v0.%d.0", i), "Failed", body))
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		succ, other := foldComplianceOperatorCSVs(page, nil, nil)
+		if succ == nil || other == nil {
+			b.Fatal("fold returned nil")
+		}
+	}
 }
 
 func nameOf(o *unstructured.Unstructured) string {

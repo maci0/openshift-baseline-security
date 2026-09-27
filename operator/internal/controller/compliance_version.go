@@ -14,10 +14,20 @@ type complianceVersion struct {
 func compareComplianceCSVVersion(a, b string) int {
 	av, aok := complianceCSVVersion(a)
 	bv, bok := complianceCSVVersion(b)
+	return compareCSVVersionParsed(a, av, aok, b, bv, bok)
+}
+
+// compareCSVVersionParsed is compareComplianceCSVVersion over already-parsed
+// versions. A loop that walks many candidates parses each one once and reuses
+// the result; complianceCSVVersion allocates a parts slice and a Split result
+// per call, so comparing by name parsed both sides on every step.
+func compareCSVVersionParsed(
+	a string, av complianceVersion, aok bool, b string, bv complianceVersion, bok bool,
+) int {
 	switch {
 	case aok && bok:
-		if cmp := compareComplianceVersions(av, bv); cmp != 0 {
-			return cmp
+		if c := compareComplianceVersions(av, bv); c != 0 {
+			return c
 		}
 		return strings.Compare(a, b)
 	case aok:

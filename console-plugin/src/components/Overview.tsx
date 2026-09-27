@@ -655,6 +655,20 @@ const Overview: React.FC<{
       { label: t('Not applicable'), value: totals.notApplicable, color: DONUT_GREY, filter: 'NOT-APPLICABLE' },
     ].filter((s) => s.value > 0);
   }, [totals, t]);
+
+  // expiringWaivers parses an expiresAt per waiver (up to 256), so a bare call
+  // re-did that on every render, including the CCR-watch churn that re-renders
+  // Overview without touching the waiver list. waiversKey is the content key
+  // useWaiverExpiryClock above already derived from the same name and expiry of
+  // every entry, and waiverClock advances when time passes, so an expiry that
+  // enters or leaves the two-week window still re-derives. Above the early
+  // returns below, which would otherwise skip the hook entirely.
+  const expiring = React.useMemo(
+    () => expiringWaivers(waivers, 2 * WEEK_MS),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- content key + clock
+    [waiversKey, waiverClock],
+  );
+
   if (!loaded) {
     return <LoadingCards cardMinWidth="300px" skeletonHeight="180px" />;
   }
@@ -697,7 +711,6 @@ const Overview: React.FC<{
   // PascalCase so TSX treats Charts.MiniTrend as a component, not an HTML tag.
   const Charts = charts.status === 'ready' ? charts.module : null;
 
-  const expiring = expiringWaivers(baseline.spec.waivers, 2 * WEEK_MS);
   // Prefer status.diffBaseScanTime (set once a prior completed scan exists for
   // regression diff). History length alone is wrong when the first scan had no
   // countable score (history stays short) but a second scan already compared.
