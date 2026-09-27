@@ -101,34 +101,32 @@ func (r *ClusterBaselineReconciler) setMCPPaused(ctx context.Context, pool strin
 				return fmt.Errorf("setting MachineConfigPool %q paused=true: %w", pool, err)
 			}
 		} else {
+			// Every arm that reaches the write below unpauses; only the marker
+			// bookkeeping differs, so the SetNestedField is shared by both.
 			if owner == "" {
 				// Legacy active batches did not mark ownership. Preserve a marker from a
 				// newer batch if one somehow overlaps the upgrade window.
 				if marker != "" || !current {
 					return nil
 				}
-				if err := unstructured.SetNestedField(mcp.Object, false, "spec", "paused"); err != nil {
-					return fmt.Errorf("setting MachineConfigPool %q paused=false: %w", pool, err)
+			} else if marker != owner {
+				// Resume skipped: another batch owns the pause, or an
+				// admin marker is present without our owner. Silent here
+				// makes stuck-paused MCPs look like the operator never tried.
+				if marker != "" || current {
+					log.FromContext(ctx).Info("skipping MachineConfigPool resume; pause not owned by this batch",
+						"pool", pool, "owner", owner, "marker", marker, "paused", current)
 				}
+				return nil
 			} else {
-				if marker != owner {
-					// Resume skipped: another batch owns the pause, or an
-					// admin marker is present without our owner. Silent here
-					// makes stuck-paused MCPs look like the operator never tried.
-					if marker != "" || current {
-						log.FromContext(ctx).Info("skipping MachineConfigPool resume; pause not owned by this batch",
-							"pool", pool, "owner", owner, "marker", marker, "paused", current)
-					}
-					return nil
-				}
 				delete(annotations, batchPauseOwnerAnnotation)
 				if len(annotations) == 0 {
 					annotations = nil
 				}
 				mcp.SetAnnotations(annotations)
-				if err := unstructured.SetNestedField(mcp.Object, false, "spec", "paused"); err != nil {
-					return fmt.Errorf("setting MachineConfigPool %q paused=false: %w", pool, err)
-				}
+			}
+			if err := unstructured.SetNestedField(mcp.Object, false, "spec", "paused"); err != nil {
+				return fmt.Errorf("setting MachineConfigPool %q paused=false: %w", pool, err)
 			}
 		}
 
