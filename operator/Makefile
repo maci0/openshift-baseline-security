@@ -150,6 +150,16 @@ mod-verify:
 	go mod download
 	go mod verify
 
+# go.mod must state what the code actually imports. A direct import left marked
+# `// indirect` (or a requirement nothing imports) means the manifest no longer
+# describes the build, and nothing else in the gate notices: the build reads
+# go.mod, not the markers. `-diff` reports and exits non-zero without writing,
+# so a dirty worktree is never rewritten. Recovery is `go mod tidy`.
+.PHONY: mod-tidy-check
+mod-tidy-check:
+	@GOFLAGS=-mod=mod go mod tidy -diff \
+		|| { echo "go.mod/go.sum drifted from the imports; run: go mod tidy" >&2; exit 1; }
+
 .PHONY: vet
 vet:
 	go vet ./...
@@ -272,6 +282,7 @@ govulncheck:
 .PHONY: ci
 ci:
 	$(MAKE) --no-print-directory test
+	$(MAKE) --no-print-directory mod-tidy-check
 	$(MAKE) --no-print-directory test-race
 	$(MAKE) --no-print-directory build
 	$(MAKE) --no-print-directory lint

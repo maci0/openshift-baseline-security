@@ -44,6 +44,10 @@ jobs:
       # by action digest and ruff by the Makefile, so neither floats.
       - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
       - run: make test
+      # go.mod must match the imports: a direct dependency still marked
+      # `// indirect`, or a requirement nothing imports, is manifest drift the
+      # build cannot see on its own.
+      - run: make mod-tidy-check
       # A data race fails no assertion in a plain `go test`; only the nightly
       # fuzz job ran the detector, so a race could merge and surface as a
       # production crash. Same command, now per PR.
