@@ -34,6 +34,7 @@ help:
 	@echo "  yarn start         webpack-dev-server on :9001"
 	@echo "  yarn test-e2e      Playwright (needs CONSOLE_URL; see .env.example)"
 	@echo "                    plus a one-time: yarn playwright install chromium"
+	@echo "  yarn licenses      regenerate dist/THIRD-PARTY-NOTICES.txt (also a build step)"
 	@echo "Image:"
 	@echo "  make docker-build docker-push IMG=... [VERSION=x.y.z]"
 

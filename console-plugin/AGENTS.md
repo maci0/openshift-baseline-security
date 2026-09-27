@@ -27,6 +27,14 @@ yarn ci            # the four above plus the production webpack build
 One file: `yarn test src/scoring.test.ts`. Watch: `yarn test:watch`.
 `make help` lists the same commands.
 
+`yarn licenses` is a build step, not a report: it walks the installed
+`node_modules` closure, writes `dist/THIRD-PARTY-NOTICES.txt`, and exits
+non-zero on a package whose license is missing, unrecognised, or copyleft, or
+that ships no license text. It runs after webpack in `yarn build` (webpack's
+`output.clean` wipes `dist/`) and the Dockerfile copies the result to
+`/licenses/`. Adding a dependency means adding it to `PERMISSIVE_SPDX` in
+`tools/attribution/spdx.ts` with the reason, never silencing the failure.
+
 Both linters are required and neither subsumes the other: oxlint carries the
 type-aware anti-slop rules eslint has no port of. `tools/oxlint/anti-slop/` is
 a local oxlint plugin (its own `package.json` marks that subtree ESM); it is

@@ -34,5 +34,10 @@ id_ed25519*
 Dockerfile
 Makefile
 .oxlintrc.json
-tools/
+tools/*
+# ...except the attribution generator: `yarn build` runs it to emit
+# dist/THIRD-PARTY-NOTICES.txt, so the build stage needs its sources.
+# (`tools/*` rather than `tools/`: a negated child cannot re-include a file
+# whose parent directory the ignore list already excluded.)
+!tools/attribution/
 src/testing/
