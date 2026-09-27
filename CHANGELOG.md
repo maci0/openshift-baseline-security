@@ -131,6 +131,17 @@ depend on those tags.
   now logs at Info on the recovery. Only the transition into a failure was
   logged, so a cleared alert had no default-level breadcrumb to pair with the
   failure line.
+- `operator/hack/must-gather.sh` dropped the `requestedBy` and `approvedBy`
+  key lines but not the value text under them. The CRD caps those fields by
+  length only, so a value containing a newline is dumped by kubectl as a
+  literal or folded block and the name landed on the continuation lines, in the
+  support archive, unredacted. A dropped attribution key now takes its
+  block-scalar continuation with it; waiver name and reason are still kept.
+- Console: the waiver "Requested by" and "Approved by" fields autofilled from
+  the browser profile, so a personal name could be written into the
+  cluster-scoped ClusterBaseline (and every report exported from it) without
+  being typed. Autofill is off on both fields; the attribution is entered
+  deliberately.
 - Operator logs: a detail condition that changed `reason` while staying False
   (for example scan storage moving from `ScanStoragePending` to a different
   failure) was never logged. The transition guard compared against the

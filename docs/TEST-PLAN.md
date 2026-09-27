@@ -923,8 +923,9 @@ stale Available or eternal Progressing.
 - [ ] **Alert runbooks**: `ComplianceScoreLow` and `ComplianceChecksFailing`
       annotations point admins to concrete console/CLI steps.
 - [x] **Must-gather attribution redaction**: ClusterBaseline dump drops
-      `requestedBy`/`approvedBy` and `last-applied-configuration`
-      (`hack/must-gather.sh --self-test`).
+      `requestedBy`/`approvedBy` (including a value dumped as a multi-line
+      block, whose continuation lines would otherwise survive) and
+      `last-applied-configuration` (`hack/must-gather.sh --self-test`).
 - [x] **Must-gather CLI usage**: `--help`/`-h` print usage on stdout and
       exit 0; unknown flags and extra args exit 2 (`TestMustGatherHelp`,
       `TestMustGatherUnknownOption`, `TestMustGatherExtraArgs`).

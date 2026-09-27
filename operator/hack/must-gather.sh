@@ -13,19 +13,35 @@ set -euo pipefail
 redact_clusterbaseline_dump() {
   local f="$1"
   [ -s "$f" ] || return 0
-  # kubectl YAML emits each mapping key on its own line;
-  # last-applied-configuration is typically one quoted line.
-  # The JSON substitutions catch a folded annotation value that survives the
-  # key-line delete. Rewrite via a temp file: GNU sed -i is not accepted by
-  # BSD sed (macOS), which treats the next argument as a required backup suffix.
+  # kubectl emits each mapping key on its own line, and a value containing a
+  # newline (allowed: the CRD caps length only) as a literal/folded block, with
+  # the text on the following more-indented lines. Deleting the key line alone
+  # would leave that text in the dump, so a dropped key also swallows its
+  # continuation. last-applied-configuration is a single JSON blob per key, so
+  # its continuation is kept and the JSON substitutions redact it instead.
+  # Rewrite via a temp file: GNU sed -i is not accepted by BSD sed (macOS),
+  # which treats the next argument as a required backup suffix.
   local tmp
   tmp="$(mktemp)"
-  sed -E \
-    -e '/kubectl\.kubernetes\.io\/last-applied-configuration:/d' \
-    -e '/^[[:space:]]+(requestedBy|approvedBy):/d' \
-    -e 's/"requestedBy":"[^"]*"[[:space:]]*,?[[:space:]]*//g' \
-    -e 's/"approvedBy":"[^"]*"[[:space:]]*,?[[:space:]]*//g' \
-    "$f" > "$tmp" || { rm -f -- "$tmp"; return 1; }
+  awk '
+    function indent(s) { match(s, /^[ \t]*/); return RLENGTH }
+    # -1 is "not dropping": an uninitialized variable compares as 0 and would
+    # swallow the first indented line of the dump.
+    BEGIN { dropping = -1 }
+    {
+      if (dropping >= 0) {
+        # Blank lines inside a block scalar belong to it; a line at or left of
+        # the key indent is the next sibling and must be kept.
+        if ($0 ~ /^[ \t]*$/) next
+        if (indent($0) > dropping) next
+        dropping = -1
+      }
+      if ($0 ~ /^[ \t]*(requestedBy|approvedBy):/) { dropping = indent($0); next }
+      if ($0 ~ /kubectl\.kubernetes\.io\/last-applied-configuration:/) next
+      gsub(/"(requestedBy|approvedBy)"[ \t]*:[ \t]*"[^"]*"[ \t]*,?[ \t]*/, "", $0)
+      print
+    }
+  ' "$f" > "$tmp" || { rm -f -- "$tmp"; return 1; }
   cat "$tmp" > "$f" || { rm -f -- "$tmp"; return 1; }
   rm -f -- "$tmp"
 }
@@ -82,6 +98,11 @@ spec:
       expiresAt: "2099-01-01T00:00:00Z"
 EOF
     redact_clusterbaseline_dump "$out"
+    head -n 1 "$out" | grep -q '^apiVersion:' || {
+      echo "FAIL: first line of the dump was rewritten" >&2
+      cat "$out" >&2
+      exit 1
+    }
     if grep -q 'requestedBy' "$out"; then
       echo "FAIL: requestedBy still present" >&2
       cat "$out" >&2
@@ -140,6 +161,44 @@ EOF
     grep -q '"name":"x"' "$folded" || {
       echo "FAIL: folded JSON name dropped" >&2
       cat "$folded" >&2
+      exit 1
+    }
+
+    # Multi-line attribution: the CRD caps length only, so kubectl emits a
+    # value with a newline as a literal block and the name lands on the
+    # continuation lines. Deleting the key line alone would keep it.
+    block="$work/block.yaml"
+    cat > "$block" <<'EOF'
+spec:
+  waivers:
+    - name: chk1
+      reason: accepted risk
+      requestedBy: |-
+        alice
+        ops
+      approvedBy: >-
+        bob
+        qa
+    - name: chk2
+      reason: still here
+      requestedBy: carol
+EOF
+    redact_clusterbaseline_dump "$block"
+    for identity in alice ops 'bob' qa carol requestedBy approvedBy; do
+      if grep -q "$identity" "$block"; then
+        echo "FAIL: block-scalar attribution survived: $identity" >&2
+        cat "$block" >&2
+        exit 1
+      fi
+    done
+    grep -q 'name: chk1' "$block" || {
+      echo "FAIL: block-scalar waiver name dropped" >&2
+      cat "$block" >&2
+      exit 1
+    }
+    grep -q 'reason: still here' "$block" || {
+      echo "FAIL: block-scalar sibling waiver dropped" >&2
+      cat "$block" >&2
       exit 1
     }
     echo "must-gather redaction self-test ok"

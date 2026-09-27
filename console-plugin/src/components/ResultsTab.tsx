@@ -1070,7 +1070,11 @@ const ResultsTab: React.FC<{
                                   value={waiveRequestedBy}
                                   onChange={waiveEdit(setWaiveRequestedBy)}
                                   maxLength={WAIVER_ATTRIBUTION_MAX_LEN}
-                                  autoComplete="name"
+                                  // Attribution takes a cluster username, not a
+                                  // personal one: browser name autofill would
+                                  // write the operator's own name into a
+                                  // cluster-scoped CR and every exported report.
+                                  autoComplete="off"
                                 />
                               </FormGroup>
                             </FlexItem>
@@ -1081,7 +1085,7 @@ const ResultsTab: React.FC<{
                                   value={waiveApprovedBy}
                                   onChange={waiveEdit(setWaiveApprovedBy)}
                                   maxLength={WAIVER_ATTRIBUTION_MAX_LEN}
-                                  autoComplete="name"
+                                  autoComplete="off"
                                 />
                               </FormGroup>
                             </FlexItem>
