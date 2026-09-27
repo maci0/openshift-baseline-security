@@ -17,7 +17,9 @@
 #
 # A path that does not exist is a failure, not a silent skip: every caller
 # passes a tree it has just produced or validated, so a missing one means the
-# build did not do what the caller believes it did.
+# build did not do what the caller believes it did. An argument that starts
+# with a dash is a bad invocation, not a path: no caller passes one, and
+# reading it as a path would report "no such path" for a typo'd flag.
 set -euo pipefail
 
 prog="$(basename "$0")"
@@ -35,10 +37,16 @@ case "${1:-}" in
 -h | --help)
   if [ "$#" -ne 1 ]; then
     echo "${prog}: --help takes no arguments" >&2
+    usage >&2
     exit 2
   fi
   usage
   exit 0
+  ;;
+-*)
+  echo "${prog}: unknown option: $1" >&2
+  usage >&2
+  exit 2
   ;;
 esac
 

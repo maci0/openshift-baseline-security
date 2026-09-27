@@ -238,7 +238,7 @@ func BenchmarkFoldComplianceOperatorCSVs(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		succ, other := foldComplianceOperatorCSVs(page, nil, nil)
+		succ, other := foldComplianceOperatorCSVs(b.Context(), page, nil, nil)
 		if succ == nil || other == nil {
 			b.Fatal("fold returned nil")
 		}

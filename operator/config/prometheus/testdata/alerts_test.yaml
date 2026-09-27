@@ -583,7 +583,7 @@ tests:
               severity: warning
             exp_annotations:
               summary: 'Console plugin is not ready while it is expected to be deployed'
-              description: 'spec.console.managementState is Managed but ConsolePluginReady has been False for over 1h, so Administration -> Compliance is missing or broken while scanning still works. Check the ConsolePluginReady reason: ImageMissing/ImageInvalid means RELATED_IMAGE_CONSOLE_PLUGIN is unset or malformed in the operator Deployment, ConsoleMissing means the console operator has not picked up the ConsolePlugin. Compliance scores are unaffected; read them with the CLI until the plugin is back. CLI: oc get clusterbaseline cluster -o jsonpath={range .status.conditions[?(@.type=="ConsolePluginReady")]}{.reason} {.message}{"\n"}{end}; oc -n openshift-compliance get consoleplugins'
+              description: 'spec.console.managementState is Managed but ConsolePluginReady has been False for over 1h, so Administration -> Compliance is missing or broken while scanning still works. Check the ConsolePluginReady reason: ImageMissing/ImageInvalid means RELATED_IMAGE_CONSOLE_PLUGIN is unset or malformed in the operator Deployment, ConsoleMissing means the console operator has not picked up the ConsolePlugin. Compliance scores are unaffected; read them with the CLI until the plugin is back. CLI: oc get clusterbaseline cluster -o jsonpath=''{range .status.conditions[?(@.type=="ConsolePluginReady")]}{.reason} {.message}{"\n"}{end}''; oc -n openshift-compliance get consoleplugins'
 
   # managementState=Removed is an admin decision, not an incident: the plugin
   # is absent on purpose and this alert must stay silent.
