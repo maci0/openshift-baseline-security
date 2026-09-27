@@ -176,6 +176,7 @@ STRIDE, tied to entry points. Not a generic checklist.
 | Information disclosure | `/metrics` with a stolen scraper token or overly broad `get` on `/metrics`. Healthz is unauthenticated but not Service-exposed. |
 | Denial of service | nginx `client_max_body_size 1k` and GET/HEAD only. Metrics bind validated (`validateListenAddr`). Empty metrics addr is restored to `:8443` rather than controller-runtime's `:8080`. |
 | Elevation | `--leader-elect=false` on a 2-replica Deployment races default-CR create (`main.go` logs a warning). |
+| Resource exhaustion | The manager informer cache is cluster-wide per type by default, so a typed read caches every object of that type in the cluster. Scoped to the read namespaces in `controller.ManagerCacheOptions()` (`internal/controller/managercache.go`): plugin Deployment/Service/PDB in `openshift-baseline-security`, scan-storage PVCs in `openshift-compliance`. RBAC still grants cluster-wide `list`/`watch` on those four types, which is the residual edge. |
 
 ### Build → runtime
 

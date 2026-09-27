@@ -50,6 +50,15 @@ depend on those tags.
   compliance CRDs absent, console plugin image unset) never set `Degraded`, so
   the operator previously reported healthy while producing no compliance score
   and no alert fired.
+- Operator memory grew with the cluster, not with what it reconciles. The
+  manager's informer cache is cluster-wide per type, and the first typed read
+  is what starts the informer, so the scan-storage PVC check cached every
+  PersistentVolumeClaim in the cluster and the console-plugin check cached
+  every Deployment, Service, and PodDisruptionBudget. The cache is now scoped
+  to the namespaces those reads actually use (`openshift-compliance` for scan
+  storage, `openshift-baseline-security` for the plugin). `ClusterBaseline` is
+  cluster-scoped and stays cache-wide; foreign Compliance Operator objects are
+  read as unstructured and already bypass the cache.
 - Operator and console plugin pods: neither declared a `preStop` hook, so a
   terminating pod kept its endpoint for the seconds between SIGTERM and
   endpoint removal, and a scrape or console request could still land on a

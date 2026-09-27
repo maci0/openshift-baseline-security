@@ -205,6 +205,12 @@ func main() {
 		// being SIGKILLed mid-shutdown. Reconciles are single atomic API calls that
 		// fail fast once the context is cancelled, so 20s is ample.
 		GracefulShutdownTimeout: ptr.To(20 * time.Second),
+		// Scope the informer cache to the namespaces the reconciler reads.
+		// ClusterBaseline is the only cluster-scoped cached type; the rest
+		// (plugin Deployment/Service/PDB, scan-storage PVCs) are namespaced, and
+		// an unscoped cache would hold every one of those objects in the cluster
+		// for the life of the process.
+		Cache: controller.ManagerCacheOptions(),
 		// Read ConfigMaps uncached (direct API). The operator only touches the one
 		// named console dashboard ConfigMap in openshift-config-managed and holds
 		// only named get/update on it, not the cluster-wide list/watch a cache
