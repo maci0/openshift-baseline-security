@@ -146,6 +146,37 @@ depend on those tags.
   two shipped decisions that had no record are captured: ADR-030 (no OLM
   `replaces` graph, CSV `capabilities: Basic Install`) and ADR-031 (waiver
   names unique at admission).
+- Operator, reconcile: several passes read the Compliance Operator objects they
+  need one object at a time, so a full pass cost dozens of live apiserver round
+  trips (one `Get` per selected ScanSettingBinding, on every pass, on every
+  replica). They now take one paged `List` and derive the
+  per-object decisions from it, and the cluster-wide CSV lookup (the fallback
+  used when the Compliance Operator is installed outside
+  `openshift-compliance`) is paged too, since a CSV carries its whole install
+  spec and `alm-examples`. Reconcile latency and apiserver QPS drop on clusters
+  with many profiles or check results; the objects written are unchanged, and
+  every read is still a live unstructured read rather than a cached one.
+- Console, Remediations: **Batch apply** and **Auto-apply** now need `patch`
+  on `complianceremediations` in `openshift-compliance` as well as `patch` on
+  the `ClusterBaseline`. Both controls write only the baseline (an annotation,
+  or `spec.remediation.apply`), and the operator then patches the
+  remediations, which rolls a node reboot, so a user granted the baseline patch
+  alone could spend a write the per-row Apply action already refused.
+  **Before:** a user with the baseline patch could batch apply and toggle
+  auto-apply. **After:** the same user sees both controls disabled, with the
+  reason on hover, and the toggle refuses rather than writing the baseline.
+  Grant `patch complianceremediations.compliance.openshift.io` in
+  `openshift-compliance` to restore the previous behavior. `cluster-admin` and
+  the built-in `admin` ClusterRole in that namespace already hold it; a custom
+  role that granted only the baseline patch does not.
+- Console, Profiles: authoring a tailored profile now needs `create` on
+  `tailoredprofiles` in `openshift-compliance`, and editing a profile bound to
+  a baseline needs `update` on the same resource, each on top of the
+  `ClusterBaseline` patch the controls already spent. **Before:** the baseline
+  patch alone gated Author and Edit. **After:** a user without those verbs
+  loses the Author button and the Edit control (the Unbind control beside Edit
+  still patches only the baseline and is unchanged). This closes a path where
+  a baseline-only patch created and rewrote objects the operator then consumed.
 
 ### Fixed
 
@@ -282,6 +313,12 @@ depend on those tags.
 - Console plugin: opening the check detail dialog on a list item that arrived
   without `metadata` threw during render and took down the whole Results tab,
   even though the row itself was written to survive such an item.
+- Console plugin: a failed GET of the async Overview charts chunk logged an
+  unhandled promise rejection in the browser console, because the eager
+  `import()` promise carried no rejection handler while the chart gate that
+  consumes it already caught and showed Retry. A stale cached console after a
+  plugin upgrade is the common way to hit it, and the unhandled rejection
+  obscured the Retry control for the same failure.
 
 ## [0.6.1] - 2026-09-02
 
