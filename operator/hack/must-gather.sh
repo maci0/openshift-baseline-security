@@ -691,7 +691,9 @@ mkdir -p -- "$OUT"
 # Owner-only: dumps include logs/events that may carry cluster-sensitive data.
 # Waiver requestedBy/approvedBy are stripped from clusterbaseline.yaml and the
 # scanner output from compliance.yaml below.
-chmod 700 -- "$OUT"
+# No `--` guard: BSD chmod (macOS) reads it as a filename. A flag-shaped OUT
+# was refused as an unknown option above.
+chmod 700 "$OUT"
 
 # Bound every API call. must-gather is run precisely when the cluster is
 # unhealthy, so a wedged apiserver (stuck webhook, slow etcd) would otherwise

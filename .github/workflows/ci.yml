@@ -169,9 +169,22 @@ jobs:
           # the plugin does not bundle it, and forcing the 4.3.9 fix would break
           # runtime compat with the 4.22 host. Not ours to bump; re-audit if the
           # SDK moves off immutable 3.x.
+          #
+          # --exclude react-router: same shape, and unmovable on the console 4.22
+          # line. The console provides react-router as a shared singleton
+          # (ConsoleRemotePlugin sets import: false, so no react-router code
+          # reaches dist/), the SDK declares its peer range as ~7.13.1, and the
+          # build asserts the installed version against that range: any bump
+          # fails `yarn build` with "Console provides shared module react-router
+          # ~7.13.1 but plugin uses version X". The advisories the audit reports
+          # for 7.13.x are RSC mode, SSR hydration, single-fetch and the
+          # __manifest server path, none of which a browser-only plugin can run,
+          # plus the host's own client router. Clearing them means the console
+          # moving react-router and the SDK peer range following it; re-audit
+          # when it reaches ~7.18.1 (4.23.0-prerelease.5).
           for attempt in 1 2 3; do
             set +e
-            out=$(yarn npm audit --all --recursive --exclude immutable 2>&1)
+            out=$(yarn npm audit --all --recursive --exclude immutable --exclude react-router 2>&1)
             rc=$?
             set -e
             printf '%s\n' "$out"

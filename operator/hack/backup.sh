@@ -88,7 +88,9 @@ fi
 # never leaves a half-written clusterbaseline.yaml that a later restore would
 # happily apply. The temp file is removed on every failure path below.
 mkdir -p -- "$OUT"
-chmod 700 -- "$OUT"
+# No `--` guard: BSD chmod (macOS) reads it as a filename, and a flag-shaped
+# OUT is refused above, so nothing here can be mistaken for an option.
+chmod 700 "$OUT"
 TMP="$OUT/.clusterbaseline.yaml.$$"
 cleanup() { rm -f -- "$TMP"; }
 trap cleanup EXIT
@@ -154,7 +156,7 @@ DIGEST="$(sha256_file "$TMP")"
 mv -- "$TMP" "$OUT/clusterbaseline.yaml"
 trap - EXIT
 
-chmod 600 -- "$OUT/clusterbaseline.yaml" "$OUT/MANIFEST"
+chmod 600 "$OUT/clusterbaseline.yaml" "$OUT/MANIFEST"
 
 echo "backup.sh: wrote $OUT (resourceVersion=$RESOURCE_VERSION, uid=$UID_VALUE, sha256=$DIGEST)"
 echo "backup.sh: copy this directory off-cluster now; it restores only via:"
