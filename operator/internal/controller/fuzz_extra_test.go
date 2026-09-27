@@ -83,7 +83,7 @@ func FuzzSetCond(f *testing.F) {
 		}
 		cb := &baselinev1alpha1.ClusterBaseline{}
 		cb.Generation = gen
-		setCond(cb, typ, metav1.ConditionFalse, reason, msg)
+		setCond(cb, rollupTestNow, typ, metav1.ConditionFalse, reason, msg)
 		c := meta.FindStatusCondition(cb.Status.Conditions, typ)
 		if c == nil {
 			t.Fatal("condition missing after setCond")
@@ -174,7 +174,7 @@ func FuzzSetComplianceOperatorReadyFromCSV(f *testing.F) {
 			_ = unstructured.SetNestedField(csv.Object, 42, "status", "phase")
 		}
 		cb := &baselinev1alpha1.ClusterBaseline{}
-		setComplianceOperatorReadyFromCSV(t.Context(), cb, csv)
+		setComplianceOperatorReadyFromCSV(t.Context(), cb, rollupTestNow, csv)
 		c := meta.FindStatusCondition(cb.Status.Conditions, "ComplianceOperatorReady")
 		if c == nil {
 			t.Fatal("ComplianceOperatorReady missing")
@@ -544,10 +544,10 @@ func FuzzSetRollupConditions(f *testing.F) {
 		cb := &baselinev1alpha1.ClusterBaseline{}
 		cb.Generation = 1
 		// Seed detail conditions as False so rollup logic exercises Degraded paths.
-		setCond(cb, "ComplianceOperatorReady", metav1.ConditionFalse, coReason, coMsg)
-		setCond(cb, "ScanConfigured", metav1.ConditionFalse, scanReason, scanMsg)
-		setCond(cb, "ConsolePluginReady", metav1.ConditionFalse, pluginReason, pluginMsg)
-		setCond(cb, "ScanStorageReady", metav1.ConditionTrue, "AsExpected", "")
+		setCond(cb, rollupTestNow, "ComplianceOperatorReady", metav1.ConditionFalse, coReason, coMsg)
+		setCond(cb, rollupTestNow, "ScanConfigured", metav1.ConditionFalse, scanReason, scanMsg)
+		setCond(cb, rollupTestNow, "ConsolePluginReady", metav1.ConditionFalse, pluginReason, pluginMsg)
+		setCond(cb, rollupTestNow, "ScanStorageReady", metav1.ConditionTrue, "AsExpected", "")
 		setRollupConditions(cb, time.Now())
 
 		for _, typ := range []string{"Available", "Progressing", "Degraded"} {

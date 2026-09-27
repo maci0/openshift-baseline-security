@@ -102,6 +102,13 @@ than guessing.
   (`clock.Sleep` via `l.sleep` / `DefaultClusterBaseline.sleep`), so
   a simulated run spends simulated time on it. `time.NewTimer` in a reconcile
   or Runnable loop makes a seeded replay depend on wall time.
+- A status condition's `LastTransitionTime` is stamped from the injected
+  clock, so it is passed in explicitly (`setCond`, `setCondFalseLogOnce`,
+  `setCondTrueLogRecovered`, `sanitizeStatusForUpdate`, and the free helpers
+  wrapping them). `meta.SetStatusCondition` stamps the wall clock, and the
+  install-stall and plugin-unavailable graces subtract that stamp from
+  `r.now()`: a wall-clock write makes a grace fire (or not) depending on when
+  the run started.
 - Fuzz any parser of cluster-supplied text (suite labels, scan names, CSV
   versions, timestamps). Commit corpus files under `testdata/fuzz/`; a crasher
   written during the fuzz CI job fails the run.

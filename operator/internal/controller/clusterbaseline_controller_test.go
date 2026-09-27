@@ -2984,7 +2984,7 @@ func TestRecordHistoryOversizedFailureSetNoPhantomRegressions(t *testing.T) {
 		t.Fatalf("previousFailures serializes to %d bytes, over the %d share", size, failureListShareBudget)
 	}
 	kept := len(cb.Status.PreviousFailures)
-	sanitizeStatusForUpdate(cb)
+	sanitizeStatusForUpdate(cb, rollupTestNow)
 	if got := len(cb.Status.PreviousFailures); got != kept {
 		t.Fatalf("the status write dropped %d of %d baseline entries; the next scan reads back a shorter base", kept-got, kept)
 	}
@@ -3862,7 +3862,7 @@ func TestSetComplianceOperatorReadyFromCSVPhaseShape(t *testing.T) {
 				}
 			}
 			cb := &baselinev1alpha1.ClusterBaseline{}
-			setComplianceOperatorReadyFromCSV(t.Context(), cb, csv)
+			setComplianceOperatorReadyFromCSV(t.Context(), cb, rollupTestNow, csv)
 			c := meta.FindStatusCondition(cb.Status.Conditions, "ComplianceOperatorReady")
 			if c == nil || c.Reason != tc.wantReason {
 				t.Fatalf("condition = %+v, want reason %q", c, tc.wantReason)
@@ -4004,19 +4004,19 @@ func TestConsoleTeardownToleratesMissingCRDs(t *testing.T) {
 func TestRequeueAfter(t *testing.T) {
 	now := time.Date(2026, 7, 12, 12, 0, 0, 0, time.UTC)
 	steady := &baselinev1alpha1.ClusterBaseline{}
-	setCond(steady, "Progressing", metav1.ConditionFalse, "AsExpected", "")
+	setCond(steady, rollupTestNow, "Progressing", metav1.ConditionFalse, "AsExpected", "")
 	if got := requeueAfterAt(steady, now); got != time.Minute {
 		t.Fatalf("steady = %v, want 1m", got)
 	}
 	installing := &baselinev1alpha1.ClusterBaseline{}
-	setCond(installing, "Progressing", metav1.ConditionTrue, "Reconciling", "installing")
+	setCond(installing, rollupTestNow, "Progressing", metav1.ConditionTrue, "Reconciling", "installing")
 	if got := requeueAfterAt(installing, now); got != 15*time.Second {
 		t.Fatalf("Progressing = %v, want 15s", got)
 	}
 	// In-flight batch must poll faster so cancel/grace/Applied are not stuck
 	// behind the 1m steady cadence when the informer is lagging.
 	batching := &baselinev1alpha1.ClusterBaseline{}
-	setCond(batching, "Progressing", metav1.ConditionFalse, "AsExpected", "")
+	setCond(batching, rollupTestNow, "Progressing", metav1.ConditionFalse, "AsExpected", "")
 	batching.Status.RemediationBatch = &baselinev1alpha1.RemediationBatchStatus{Phase: "Applying"}
 	if got := requeueAfterAt(batching, now); got != 15*time.Second {
 		t.Fatalf("batch Applying = %v, want 15s", got)
@@ -4046,7 +4046,7 @@ func TestNearestWaiverExpiry(t *testing.T) {
 	}
 	// Steady requeue shortens to the nearest active expiry (pinned clock: no
 	// wall-clock lag window that used to soft-pass under load).
-	setCond(cb, "Progressing", metav1.ConditionFalse, "AsExpected", "")
+	setCond(cb, rollupTestNow, "Progressing", metav1.ConditionFalse, "AsExpected", "")
 	const horizon = 45 * time.Second
 	far := metav1.NewTime(now.Add(horizon))
 	cb.Spec.Waivers = []baselinev1alpha1.WaiverEntry{{Name: "w", ExpiresAt: &far}}
@@ -4054,7 +4054,7 @@ func TestNearestWaiverExpiry(t *testing.T) {
 		t.Fatalf("steady+waiver expiry requeue = %v, want %v", got, horizon)
 	}
 	// Progressing stays at fast (15s) even when a waiver expires later than fast.
-	setCond(cb, "Progressing", metav1.ConditionTrue, "Reconciling", "installing")
+	setCond(cb, rollupTestNow, "Progressing", metav1.ConditionTrue, "Reconciling", "installing")
 	laterAt := metav1.NewTime(now.Add(45 * time.Second))
 	cb.Spec.Waivers = []baselinev1alpha1.WaiverEntry{{Name: "w", ExpiresAt: &laterAt}}
 	if got := requeueAfterAt(cb, now); got != 15*time.Second {
@@ -4062,7 +4062,7 @@ func TestNearestWaiverExpiry(t *testing.T) {
 	}
 	// Near-zero active expiry floors at 1s so clock skew cannot hot-loop.
 	near := metav1.NewTime(now.Add(50 * time.Millisecond))
-	setCond(cb, "Progressing", metav1.ConditionFalse, "AsExpected", "")
+	setCond(cb, rollupTestNow, "Progressing", metav1.ConditionFalse, "AsExpected", "")
 	cb.Spec.Waivers = []baselinev1alpha1.WaiverEntry{{Name: "w", ExpiresAt: &near}}
 	if got := requeueAfterAt(cb, now); got != time.Second {
 		t.Fatalf("near-expiry requeue = %v, want 1s floor", got)

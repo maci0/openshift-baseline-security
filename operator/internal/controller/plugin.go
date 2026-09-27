@@ -6,6 +6,7 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -136,7 +137,7 @@ func (r *ClusterBaselineReconciler) removeConsolePlugin(ctx context.Context, cb 
 	if err := r.deregisterConsolePlugin(ctx); err != nil {
 		return fmt.Errorf("deregistering console plugin: %w", err)
 	}
-	setCond(cb, "ConsolePluginReady", metav1.ConditionFalse, "Disabled", "")
+	setCond(cb, r.now(), "ConsolePluginReady", metav1.ConditionFalse, "Disabled", "")
 	return nil
 }
 
@@ -186,11 +187,11 @@ func (r *ClusterBaselineReconciler) ensureConsolePlugin(ctx context.Context, cb 
 		// Soft-fail: still reconcile scans/status; requeue will retry when env is fixed.
 		// Does not roll up to Degraded (scanning still works), so log on transition
 		// only: without this, a missing RELATED_IMAGE leaves only a CR condition.
-		logConsolePluginNotReady(ctx, cb, "ImageMissing", "RELATED_IMAGE_CONSOLE_PLUGIN not set")
+		logConsolePluginNotReady(ctx, cb, r.now(), "ImageMissing", "RELATED_IMAGE_CONSOLE_PLUGIN not set")
 		return nil
 	}
 	if !ValidRelatedImage(image) {
-		logConsolePluginNotReady(ctx, cb, "ImageInvalid",
+		logConsolePluginNotReady(ctx, cb, r.now(), "ImageInvalid",
 			"RELATED_IMAGE_CONSOLE_PLUGIN is not a valid container image reference")
 		return nil
 	}
@@ -359,7 +360,7 @@ func (r *ClusterBaselineReconciler) ensureConsolePlugin(ctx context.Context, cb 
 	}); err != nil {
 		if meta.IsNoMatchError(err) {
 			// Console capability disabled: no ConsolePlugin CRD on the cluster.
-			logConsolePluginNotReady(ctx, cb, "ConsoleMissing",
+			logConsolePluginNotReady(ctx, cb, r.now(), "ConsoleMissing",
 				"console CRDs not available (Console capability disabled)")
 			return nil
 		}
@@ -385,7 +386,7 @@ func (r *ClusterBaselineReconciler) ensureConsolePlugin(ctx context.Context, cb 
 	}); err != nil {
 		if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) {
 			// Soft-fail: still deploy plugin objects; registration retries later.
-			logConsolePluginNotReady(ctx, cb, "ConsoleMissing",
+			logConsolePluginNotReady(ctx, cb, r.now(), "ConsoleMissing",
 				"consoles.operator.openshift.io/cluster not available")
 			return nil
 		}
@@ -408,7 +409,7 @@ func (r *ClusterBaselineReconciler) ensureConsolePlugin(ctx context.Context, cb 
 		if !apierrors.IsNotFound(err) {
 			return fmt.Errorf("reading plugin Deployment %s/%s status: %w", pluginNS, pluginName, err)
 		}
-		logConsolePluginNotReady(ctx, cb, "WaitingForPods",
+		logConsolePluginNotReady(ctx, cb, r.now(), "WaitingForPods",
 			fmt.Sprintf("Deployment %s/%s not visible in the informer cache yet", pluginNS, pluginName))
 		return nil
 	}
@@ -424,7 +425,7 @@ func (r *ClusterBaselineReconciler) ensureConsolePlugin(ctx context.Context, cb 
 		}
 		// Transition-only Info so WaitingForPods / Unavailable appear in default
 		// logs without re-logging every requeue (matches ImageMissing path).
-		logConsolePluginNotReady(ctx, cb, reason, msg)
+		logConsolePluginNotReady(ctx, cb, r.now(), reason, msg)
 		return nil
 	}
 	if !deploymentAvailable(dep) {
@@ -437,10 +438,10 @@ func (r *ClusterBaselineReconciler) ensureConsolePlugin(ctx context.Context, cb 
 			msg = fmt.Sprintf("Deployment %s/%s Available=False for >%dm",
 				pluginNS, pluginName, graceMinutes(pluginUnavailableGrace))
 		}
-		logConsolePluginNotReady(ctx, cb, reason, msg)
+		logConsolePluginNotReady(ctx, cb, r.now(), reason, msg)
 		return nil
 	}
-	setCondTrueLogRecovered(ctx, cb, "ConsolePluginReady", "Deployed", "",
+	setCondTrueLogRecovered(ctx, cb, r.now(), "ConsolePluginReady", "Deployed", "",
 		"console plugin deployed and ready", "name", cb.Name, "namespace", pluginNS)
 	return nil
 }
@@ -448,7 +449,7 @@ func (r *ClusterBaselineReconciler) ensureConsolePlugin(ctx context.Context, cb 
 // logConsolePluginNotReady sets ConsolePluginReady=False and Info-logs only when
 // status or reason changes. Permanent soft-fails (ImageMissing/ImageInvalid) never
 // Degrade the rollup; transition logs are the only default-level operator signal.
-func logConsolePluginNotReady(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline, reason, msg string) {
-	setCondFalseLogOnce(ctx, cb, "ConsolePluginReady", reason, msg,
+func logConsolePluginNotReady(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline, now time.Time, reason, msg string) {
+	setCondFalseLogOnce(ctx, cb, now, "ConsolePluginReady", reason, msg,
 		"console plugin not ready", "name", cb.Name, "reason", reason, "message", msg)
 }

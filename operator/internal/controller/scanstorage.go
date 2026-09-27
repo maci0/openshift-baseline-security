@@ -66,11 +66,11 @@ func (r *ClusterBaselineReconciler) checkScanStorage(ctx context.Context, cb *ba
 		// the same way. State the fact (Pending) and both likely causes.
 		msg := fmt.Sprintf("PVC(s) %s in namespace %s Pending >%dm; ensure a StorageClass can provision them (a default StorageClass, and for WaitForFirstConsumer a schedulable consumer)",
 			strings.Join(pending, ", "), complianceNamespace, graceMinutes(scanStoragePendingGrace))
-		setCondFalseLogOnce(ctx, cb, "ScanStorageReady", "ScanStoragePending", msg,
+		setCondFalseLogOnce(ctx, cb, now, "ScanStorageReady", "ScanStoragePending", msg,
 			"scan storage PVCs pending", "namespace", complianceNamespace, "pvcs", pending, "name", cb.Name)
 		return nil
 	}
-	setCondTrueLogRecovered(ctx, cb, "ScanStorageReady", "AsExpected", "",
+	setCondTrueLogRecovered(ctx, cb, r.now(), "ScanStorageReady", "AsExpected", "",
 		"scan storage PVCs ready", "name", cb.Name)
 	return nil
 }

@@ -301,9 +301,12 @@ func (r *ClusterBaselineReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	if err := r.reconcileOwned(ctx, cb); err != nil {
 		// Persist a Degraded condition (best-effort) so a persistently failing
 		// reconcile is visible on the CR instead of leaving stale healthy status.
-		sanitizeStatusForUpdate(cb)
-		setRollupConditions(cb, r.now())
-		setCond(cb, "Degraded", metav1.ConditionTrue, "ReconcileError", err.Error())
+		// One clock reading for the whole error rollup, so the Degraded stamp and
+		// the graces the rollup measures share a single instant.
+		now := r.now()
+		sanitizeStatusForUpdate(cb, now)
+		setRollupConditions(cb, now)
+		setCond(cb, now, "Degraded", metav1.ConditionTrue, "ReconcileError", err.Error())
 		// Structured Error before return: controller-runtime also logs the error,
 		// but without the CR name or that Degraded was attempted.
 		logger.Error(err, "reconcile failed",
@@ -337,8 +340,9 @@ func (r *ClusterBaselineReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	// Publish metrics only after Status().Update succeeds so concurrent annotation
 	// patches (console waiver/schedule/batch) that conflict the status write cannot
 	// leave gauges ahead of the CR for a full requeue interval.
-	sanitizeStatusForUpdate(cb)
-	setRollupConditions(cb, r.now())
+	now := r.now()
+	sanitizeStatusForUpdate(cb, now)
+	setRollupConditions(cb, now)
 	// Snapshot BEFORE the status write: the real /status response resets the
 	// in-memory annotations to the stored values (metadata changes are ignored
 	// by the status subresource), so a post-update read would never differ from

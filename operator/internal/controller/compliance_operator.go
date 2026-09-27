@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -37,7 +38,7 @@ func (r *ClusterBaselineReconciler) ensureComplianceOperator(ctx context.Context
 	}
 	if meta.IsNoMatchError(getErr) {
 		cb.Status.ComplianceOperatorVersion = ""
-		setCond(cb, "ComplianceOperatorReady", metav1.ConditionFalse, "NotInstalled",
+		setCond(cb, r.now(), "ComplianceOperatorReady", metav1.ConditionFalse, "NotInstalled",
 			"OLM Subscription API not available")
 		return nil
 	}
@@ -50,13 +51,13 @@ func (r *ClusterBaselineReconciler) ensureComplianceOperator(ctx context.Context
 		return fmt.Errorf("finding compliance-operator CSV: %w", err)
 	}
 	if csv != nil {
-		setComplianceOperatorReadyFromCSV(ctx, cb, csv)
+		setComplianceOperatorReadyFromCSV(ctx, cb, r.now(), csv)
 		return nil
 	}
 
 	if cb.Spec.InstallComplianceOperator == baselinev1alpha1.InstallManual {
 		cb.Status.ComplianceOperatorVersion = ""
-		setCond(cb, "ComplianceOperatorReady", metav1.ConditionFalse, "NotInstalled",
+		setCond(cb, r.now(), "ComplianceOperatorReady", metav1.ConditionFalse, "NotInstalled",
 			"compliance-operator Subscription not found; install manually or set installComplianceOperator=Automatic")
 		return nil
 	}
@@ -98,7 +99,7 @@ func (r *ClusterBaselineReconciler) ensureComplianceOperator(ctx context.Context
 		log.FromContext(ctx).Info("compliance-operator Subscription created with an unverified catalog source",
 			"name", cb.Name, "source", createSource)
 	}
-	setCond(cb, "ComplianceOperatorReady", metav1.ConditionFalse, "Installing", "waiting for CSV")
+	setCond(cb, r.now(), "ComplianceOperatorReady", metav1.ConditionFalse, "Installing", "waiting for CSV")
 	return nil
 }
 
@@ -436,7 +437,7 @@ func (r *ClusterBaselineReconciler) setComplianceOperatorReady(ctx context.Conte
 	}
 	if csvName == "" {
 		cb.Status.ComplianceOperatorVersion = ""
-		setCond(cb, "ComplianceOperatorReady", metav1.ConditionFalse, "Installing", "installedCSV empty")
+		setCond(cb, r.now(), "ComplianceOperatorReady", metav1.ConditionFalse, "Installing", "installedCSV empty")
 		return nil
 	}
 
@@ -444,23 +445,23 @@ func (r *ClusterBaselineReconciler) setComplianceOperatorReady(ctx context.Conte
 	if err := r.Get(ctx, types.NamespacedName{Namespace: complianceNamespace, Name: csvName}, csv); err != nil {
 		if apierrors.IsNotFound(err) {
 			cb.Status.ComplianceOperatorVersion = ""
-			setCond(cb, "ComplianceOperatorReady", metav1.ConditionFalse, "Installing", "waiting for CSV "+csvName)
+			setCond(cb, r.now(), "ComplianceOperatorReady", metav1.ConditionFalse, "Installing", "waiting for CSV "+csvName)
 			return nil
 		}
 		return fmt.Errorf("getting CSV %s/%s: %w", complianceNamespace, csvName, err)
 	}
-	setComplianceOperatorReadyFromCSV(ctx, cb, csv)
+	setComplianceOperatorReadyFromCSV(ctx, cb, r.now(), csv)
 	return nil
 }
 
-func setComplianceOperatorReadyFromCSV(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline, csv *unstructured.Unstructured) {
+func setComplianceOperatorReadyFromCSV(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline, now time.Time, csv *unstructured.Unstructured) {
 	phase, _, err := unstructured.NestedString(csv.Object, "status", "phase")
 	if err != nil {
 		// Type-mismatched phase is not "unknown" (that reads as CO reporting an
 		// empty phase). Keep CSVNotReady so rollup still Progresses then
 		// InstallStalls; name the NestedString error so on-call sees the shape.
 		cb.Status.ComplianceOperatorVersion = ""
-		setCond(cb, "ComplianceOperatorReady", metav1.ConditionFalse, "CSVNotReady",
+		setCond(cb, now, "ComplianceOperatorReady", metav1.ConditionFalse, "CSVNotReady",
 			fmt.Sprintf("unreadable CSV status.phase: %s", err.Error()))
 		return
 	}
@@ -470,7 +471,7 @@ func setComplianceOperatorReadyFromCSV(ctx context.Context, cb *baselinev1alpha1
 	}
 	if phase == "Succeeded" {
 		cb.Status.ComplianceOperatorVersion = strings.TrimPrefix(csv.GetName(), csvNamePrefix)
-		setCondTrueLogRecovered(ctx, cb, "ComplianceOperatorReady", "CSVSucceeded", "",
+		setCondTrueLogRecovered(ctx, cb, now, "ComplianceOperatorReady", "CSVSucceeded", "",
 			"compliance-operator ready", "name", cb.Name,
 			"version", cb.Status.ComplianceOperatorVersion)
 		return
@@ -480,14 +481,14 @@ func setComplianceOperatorReadyFromCSV(ctx context.Context, cb *baselinev1alpha1
 	cb.Status.ComplianceOperatorVersion = ""
 	// Failed is terminal (not install progress); rollup marks Degraded.
 	if phase == "Failed" {
-		setCond(cb, "ComplianceOperatorReady", metav1.ConditionFalse, "CSVFailed", "phase=Failed")
+		setCond(cb, now, "ComplianceOperatorReady", metav1.ConditionFalse, "CSVFailed", "phase=Failed")
 		return
 	}
 	// %q, not concatenation: phase is a foreign ClusterServiceVersion status
 	// string, and the message lands in the CR (and the console that renders it).
 	// Raw newlines and ANSI escapes would survive condMessage, which caps
 	// length only, so quote it the way the unreadable-phase branch above does.
-	setCond(cb, "ComplianceOperatorReady", metav1.ConditionFalse, "CSVNotReady", fmt.Sprintf("phase=%q", phase))
+	setCond(cb, now, "ComplianceOperatorReady", metav1.ConditionFalse, "CSVNotReady", fmt.Sprintf("phase=%q", phase))
 }
 
 // setScanCRDsMissing marks ScanConfigured false when the compliance.openshift.io
@@ -496,8 +497,8 @@ func setComplianceOperatorReadyFromCSV(ctx context.Context, cb *baselinev1alpha1
 // transition: this does not roll up to Degraded, and Available=False may be
 // attributed to ComplianceOperatorReady first, so without this line the scan
 // CRD gap is only on the CR.
-func setScanCRDsMissing(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline) {
-	setCondFalseLogOnce(ctx, cb, "ScanConfigured", "CRDsMissing",
+func setScanCRDsMissing(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline, now time.Time) {
+	setCondFalseLogOnce(ctx, cb, now, "ScanConfigured", "CRDsMissing",
 		"compliance.openshift.io CRDs not installed",
 		"compliance CRDs not installed; scan config skipped",
 		"name", cb.Name)

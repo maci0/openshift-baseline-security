@@ -326,7 +326,7 @@ func TestSanitizeStatusForUpdate(t *testing.T) {
 		cb.Status.PreviousFailures = append(cb.Status.PreviousFailures, name)
 		cb.Status.DiffBaseFailures = append(cb.Status.DiffBaseFailures, name)
 	}
-	sanitizeStatusForUpdate(cb)
+	sanitizeStatusForUpdate(cb, rollupTestNow)
 	if got := len(cb.Status.ComplianceOperatorVersion); got != complianceOperatorVersionMax {
 		t.Fatalf("version length = %d, want %d (clamped to CRD MaxLength)", got, complianceOperatorVersionMax)
 	}
@@ -394,7 +394,7 @@ func TestSanitizeRemediationBatch(t *testing.T) {
 			},
 		},
 	}
-	sanitizeStatusForUpdate(cb)
+	sanitizeStatusForUpdate(cb, rollupTestNow)
 	b := cb.Status.RemediationBatch
 	if b == nil {
 		t.Fatal("batch must remain present after sanitize")
@@ -421,7 +421,7 @@ func TestSanitizeRemediationBatch(t *testing.T) {
 	}
 	// Empty batch pointer stays nil.
 	cb2 := &baselinev1alpha1.ClusterBaseline{}
-	sanitizeStatusForUpdate(cb2)
+	sanitizeStatusForUpdate(cb2, rollupTestNow)
 	if cb2.Status.RemediationBatch != nil {
 		t.Fatal("nil batch must stay nil")
 	}
@@ -503,7 +503,7 @@ func TestSanitizeStatusProfilesTailoredRelated(t *testing.T) {
 			NewlyFailed:      []string{longFail, "short"},
 		},
 	}
-	sanitizeStatusForUpdate(cb)
+	sanitizeStatusForUpdate(cb, rollupTestNow)
 
 	if got := len(cb.Status.Profiles); got != len(keys) {
 		t.Fatalf("profiles len = %d, want %d (known keys only, MaxItems)", got, len(keys))
@@ -1744,7 +1744,7 @@ func FuzzSanitizeStatusForUpdate(f *testing.F) {
 				RelatedObjects:   refs,
 			},
 		}
-		sanitizeStatusForUpdate(cb)
+		sanitizeStatusForUpdate(cb, rollupTestNow)
 
 		if cb.Status.Score == nil {
 			t.Fatal("non-nil score became nil")

@@ -81,7 +81,9 @@ const (
 // bounds with the top-level history ring. Failure-name lists share MaxItems=4096
 // and items:MaxLength=253. Profiles / tailoredProfiles / relatedObjects share
 // their CRD MaxItems, Enum, Pattern, and field MaxLength bounds.
-func sanitizeStatusForUpdate(cb *baselinev1alpha1.ClusterBaseline) {
+// now is the reconciler's clock reading, used to stamp a LastTransitionTime on
+// a condition that arrived without one; see sanitizeStatusConditions.
+func sanitizeStatusForUpdate(cb *baselinev1alpha1.ClusterBaseline, now time.Time) {
 	cb.Status.History = clampHistory(cb.Status.History, historyMax)
 	cb.Status.Score = clampScore(cb.Status.Score)
 	sanitizeStatusProfiles(cb)
@@ -109,13 +111,20 @@ func sanitizeStatusForUpdate(cb *baselinev1alpha1.ClusterBaseline) {
 	// Conditions carry required reason/status/type patterns. A single hostile
 	// hand-edited condition freezes Status().Update even when rollups rewrite
 	// Available/Progressing/Degraded, because the rest of the list is preserved.
-	sanitizeStatusConditions(cb)
+	sanitizeStatusConditions(cb, now)
 }
 
 // sanitizeStatusConditions clamps every status.conditions entry to the CRD
 // schema (reason pattern/minLength/maxLength, message maxLength, status Enum,
 // type pattern). Drops conditions that cannot be repaired (invalid type).
-func sanitizeStatusConditions(cb *baselinev1alpha1.ClusterBaseline) {
+//
+// now is the reconciler's clock reading: a hand-edited condition can arrive
+// with a zero LastTransitionTime, which fails OpenAPI date-time validation, so
+// one is stamped. It comes from the injected clock, not the wall, so the
+// install-stall and plugin-unavailable graces still measure simulated time. A
+// zero now (a caller that has no reading to give) falls back to the wall clock
+// because an unrepaired zero stamp would brick every later status update.
+func sanitizeStatusConditions(cb *baselinev1alpha1.ClusterBaseline, now time.Time) {
 	in := cb.Status.Conditions
 	if len(in) == 0 {
 		return
@@ -154,7 +163,10 @@ func sanitizeStatusConditions(cb *baselinev1alpha1.ClusterBaseline) {
 		}
 		if c.LastTransitionTime.IsZero() {
 			// Required date-time; zero fails OpenAPI format validation.
-			c.LastTransitionTime = metav1.Now()
+			if now.IsZero() {
+				now = time.Now()
+			}
+			c.LastTransitionTime = metav1.NewTime(now)
 		}
 		if c.ObservedGeneration < 0 {
 			c.ObservedGeneration = 0

@@ -218,13 +218,13 @@ func FuzzSanitizeStatusUntrustedText(f *testing.F) {
 		}
 		cb.Status.NewlyFailed = append(cb.Status.NewlyFailed, name, entry)
 
-		sanitizeStatusForUpdate(cb)
+		sanitizeStatusForUpdate(cb, rollupTestNow)
 		assertStatusAdmissible(t, cb)
 		// A second pass over a copy must be a no-op: the reconciler sanitizes on
 		// every write, so a clamp that is not a fixed point would either drop
 		// data on each reconcile or keep rewriting the same object.
 		again := cb.DeepCopy()
-		sanitizeStatusForUpdate(again)
+		sanitizeStatusForUpdate(again, rollupTestNow)
 		firstJSON, err := json.Marshal(cb.Status)
 		if err != nil {
 			t.Fatalf("marshal sanitized status: %v", err)

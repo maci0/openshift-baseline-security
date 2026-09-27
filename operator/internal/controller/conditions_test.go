@@ -24,7 +24,7 @@ var rollupTestNow = time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
 
 func TestSetCondEmptyReasonDefaults(t *testing.T) {
 	cb := &baselinev1alpha1.ClusterBaseline{}
-	setCond(cb, "ScanStorageReady", metav1.ConditionFalse, "", "pending")
+	setCond(cb, rollupTestNow, "ScanStorageReady", metav1.ConditionFalse, "", "pending")
 	c := meta.FindStatusCondition(cb.Status.Conditions, "ScanStorageReady")
 	if c == nil || c.Reason != "Unknown" {
 		t.Fatalf("empty reason must become Unknown, got %+v", c)
@@ -69,7 +69,7 @@ func TestSanitizeStatusConditionsSizeBudget(t *testing.T) {
 			Message: big, LastTransitionTime: now,
 		})
 	}
-	sanitizeStatusConditions(cb)
+	sanitizeStatusConditions(cb, rollupTestNow)
 	total := 0
 	for i := range cb.Status.Conditions {
 		b, err := json.Marshal(&cb.Status.Conditions[i])
@@ -98,7 +98,7 @@ func TestSanitizeStatusConditionsSizeBudget(t *testing.T) {
 			{Type: "Available", Status: metav1.ConditionTrue, Reason: "AsExpected", LastTransitionTime: now},
 		},
 	}}
-	sanitizeStatusConditions(small)
+	sanitizeStatusConditions(small, rollupTestNow)
 	if len(small.Status.Conditions) != 2 || small.Status.Conditions[0].Type != "Custom" {
 		t.Fatalf("small list churned: %+v", small.Status.Conditions)
 	}
@@ -149,7 +149,7 @@ func TestSanitizeStatusConditions(t *testing.T) {
 			},
 		},
 	}
-	sanitizeStatusForUpdate(cb)
+	sanitizeStatusForUpdate(cb, rollupTestNow)
 	if got := len(cb.Status.Conditions); got != 3 {
 		t.Fatalf("conditions len = %d, want 3 (invalid type dropped, dup collapsed)", got)
 	}
@@ -182,7 +182,7 @@ func TestSanitizeStatusConditions(t *testing.T) {
 func TestSetCond(t *testing.T) {
 	cb := &baselinev1alpha1.ClusterBaseline{}
 	cb.Generation = 7
-	setCond(cb, "Degraded", metav1.ConditionTrue, "ScanStoragePending", "msg")
+	setCond(cb, rollupTestNow, "Degraded", metav1.ConditionTrue, "ScanStoragePending", "msg")
 	c := meta.FindStatusCondition(cb.Status.Conditions, "Degraded")
 	if c == nil || c.Status != metav1.ConditionTrue || c.Reason != "ScanStoragePending" || c.Message != "msg" {
 		t.Fatalf("%+v", c)
@@ -190,7 +190,7 @@ func TestSetCond(t *testing.T) {
 	if c.ObservedGeneration != 7 {
 		t.Fatalf("ObservedGeneration = %d, want 7", c.ObservedGeneration)
 	}
-	setCond(cb, "Degraded", metav1.ConditionFalse, "AsExpected", "")
+	setCond(cb, rollupTestNow, "Degraded", metav1.ConditionFalse, "AsExpected", "")
 	c = meta.FindStatusCondition(cb.Status.Conditions, "Degraded")
 	if c == nil || c.Status != metav1.ConditionFalse || c.Reason != "AsExpected" {
 		t.Fatalf("%+v", c)
@@ -203,7 +203,7 @@ func TestSetCond(t *testing.T) {
 func TestSetRollupConditions(t *testing.T) {
 	cb := &baselinev1alpha1.ClusterBaseline{}
 	cb.Generation = 3
-	setCond(cb, "ComplianceOperatorReady", metav1.ConditionFalse, "Installing", "waiting")
+	setCond(cb, rollupTestNow, "ComplianceOperatorReady", metav1.ConditionFalse, "Installing", "waiting")
 	setRollupConditions(cb, rollupTestNow)
 	if c := meta.FindStatusCondition(cb.Status.Conditions, "Progressing"); c == nil || c.Status != metav1.ConditionTrue {
 		t.Fatalf("Progressing while installing: %+v", c)
@@ -212,7 +212,7 @@ func TestSetRollupConditions(t *testing.T) {
 		t.Fatalf("Available while installing: %+v", c)
 	}
 
-	setCond(cb, "ComplianceOperatorReady", metav1.ConditionFalse, "CSVNotReady", "phase=Installing")
+	setCond(cb, rollupTestNow, "ComplianceOperatorReady", metav1.ConditionFalse, "CSVNotReady", "phase=Installing")
 	setRollupConditions(cb, rollupTestNow)
 	if c := meta.FindStatusCondition(cb.Status.Conditions, "Progressing"); c == nil || c.Status != metav1.ConditionTrue {
 		t.Fatalf("Progressing while CSVNotReady: %+v", c)
@@ -221,8 +221,8 @@ func TestSetRollupConditions(t *testing.T) {
 	// Manual install, CO absent: the reasons production actually emits
 	// (ComplianceOperatorReady=NotInstalled, ScanConfigured=CRDsMissing). Neither
 	// is progress, so this steady state must settle Progressing=False.
-	setCond(cb, "ComplianceOperatorReady", metav1.ConditionFalse, "NotInstalled", "manual")
-	setCond(cb, "ScanConfigured", metav1.ConditionFalse, "CRDsMissing", "no CRDs")
+	setCond(cb, rollupTestNow, "ComplianceOperatorReady", metav1.ConditionFalse, "NotInstalled", "manual")
+	setCond(cb, rollupTestNow, "ScanConfigured", metav1.ConditionFalse, "CRDsMissing", "no CRDs")
 	setRollupConditions(cb, rollupTestNow)
 	if c := meta.FindStatusCondition(cb.Status.Conditions, "Progressing"); c == nil || c.Status != metav1.ConditionFalse {
 		t.Fatalf("Progressing must be False for permanent NotInstalled: %+v", c)
@@ -234,9 +234,9 @@ func TestSetRollupConditions(t *testing.T) {
 		t.Fatalf("Manual-not-installed steady state must not Degrade: %+v", c)
 	}
 
-	setCond(cb, "ComplianceOperatorReady", metav1.ConditionTrue, "CSVSucceeded", "")
-	setCond(cb, "ScanConfigured", metav1.ConditionTrue, "BindingsCreated", "")
-	setCond(cb, "ConsolePluginReady", metav1.ConditionTrue, "Deployed", "")
+	setCond(cb, rollupTestNow, "ComplianceOperatorReady", metav1.ConditionTrue, "CSVSucceeded", "")
+	setCond(cb, rollupTestNow, "ScanConfigured", metav1.ConditionTrue, "BindingsCreated", "")
+	setCond(cb, rollupTestNow, "ConsolePluginReady", metav1.ConditionTrue, "Deployed", "")
 	setRollupConditions(cb, rollupTestNow)
 	if c := meta.FindStatusCondition(cb.Status.Conditions, "Available"); c == nil || c.Status != metav1.ConditionTrue {
 		t.Fatalf("Available when ready: %+v", c)
@@ -252,7 +252,7 @@ func TestSetRollupConditions(t *testing.T) {
 	}
 
 	// Plugin still rolling out (pending reason) keeps Progressing True.
-	setCond(cb, "ConsolePluginReady", metav1.ConditionFalse, "WaitingForPods", "0/2 ready")
+	setCond(cb, rollupTestNow, "ConsolePluginReady", metav1.ConditionFalse, "WaitingForPods", "0/2 ready")
 	setRollupConditions(cb, rollupTestNow)
 	if c := meta.FindStatusCondition(cb.Status.Conditions, "Progressing"); c == nil || c.Status != metav1.ConditionTrue {
 		t.Fatalf("Progressing while plugin pending: %+v", c)
@@ -262,7 +262,7 @@ func TestSetRollupConditions(t *testing.T) {
 	}
 
 	// Plugin down past grace period rolls into Degraded.
-	setCond(cb, "ConsolePluginReady", metav1.ConditionFalse, "Unavailable", "no ready pods for >5m")
+	setCond(cb, rollupTestNow, "ConsolePluginReady", metav1.ConditionFalse, "Unavailable", "no ready pods for >5m")
 	setRollupConditions(cb, rollupTestNow)
 	if c := meta.FindStatusCondition(cb.Status.Conditions, "Degraded"); c == nil || c.Status != metav1.ConditionTrue || c.Reason != "ConsolePluginUnavailable" {
 		t.Fatalf("Degraded for unavailable plugin: %+v", c)
@@ -270,26 +270,26 @@ func TestSetRollupConditions(t *testing.T) {
 
 	// Pending scan storage rolls into Degraded with a fixed rollup reason
 	// (never copies a possibly hostile detail Reason).
-	setCond(cb, "ConsolePluginReady", metav1.ConditionTrue, "Deployed", "")
-	setCond(cb, "ScanStorageReady", metav1.ConditionFalse, "ScanStoragePending", "PVC pending")
+	setCond(cb, rollupTestNow, "ConsolePluginReady", metav1.ConditionTrue, "Deployed", "")
+	setCond(cb, rollupTestNow, "ScanStorageReady", metav1.ConditionFalse, "ScanStoragePending", "PVC pending")
 	setRollupConditions(cb, rollupTestNow)
 	if c := meta.FindStatusCondition(cb.Status.Conditions, "Degraded"); c == nil || c.Status != metav1.ConditionTrue || c.Reason != "ScanStorageNotReady" {
 		t.Fatalf("Degraded for pending storage: %+v", c)
 	}
 	// Hostile detail Reason must not land on Degraded (CRD Reason pattern).
-	setCond(cb, "ScanStorageReady", metav1.ConditionFalse, "not a valid reason!!!", "still pending")
+	setCond(cb, rollupTestNow, "ScanStorageReady", metav1.ConditionFalse, "not a valid reason!!!", "still pending")
 	setRollupConditions(cb, rollupTestNow)
 	if c := meta.FindStatusCondition(cb.Status.Conditions, "Degraded"); c == nil || c.Reason != "ScanStorageNotReady" {
 		t.Fatalf("Degraded must use fixed ScanStorageNotReady, got %+v", c)
 	}
-	setCond(cb, "ScanStorageReady", metav1.ConditionTrue, "AsExpected", "")
+	setCond(cb, rollupTestNow, "ScanStorageReady", metav1.ConditionTrue, "AsExpected", "")
 	setRollupConditions(cb, rollupTestNow)
 	if c := meta.FindStatusCondition(cb.Status.Conditions, "Degraded"); c == nil || c.Status != metav1.ConditionFalse {
 		t.Fatalf("Degraded must clear: %+v", c)
 	}
 
 	// Invalid cron leaves Available=False and Degraded=True so operators notice.
-	setCond(cb, "ScanConfigured", metav1.ConditionFalse, "InvalidSchedule", "bad cron")
+	setCond(cb, rollupTestNow, "ScanConfigured", metav1.ConditionFalse, "InvalidSchedule", "bad cron")
 	setRollupConditions(cb, rollupTestNow)
 	if c := meta.FindStatusCondition(cb.Status.Conditions, "Degraded"); c == nil || c.Status != metav1.ConditionTrue || c.Reason != "InvalidSchedule" {
 		t.Fatalf("Degraded for invalid schedule: %+v", c)
@@ -299,8 +299,8 @@ func TestSetRollupConditions(t *testing.T) {
 	}
 
 	// Terminal CSV failure is Degraded (not Progressing forever).
-	setCond(cb, "ScanConfigured", metav1.ConditionTrue, "BindingsCreated", "")
-	setCond(cb, "ComplianceOperatorReady", metav1.ConditionFalse, "CSVFailed", "phase=Failed")
+	setCond(cb, rollupTestNow, "ScanConfigured", metav1.ConditionTrue, "BindingsCreated", "")
+	setCond(cb, rollupTestNow, "ComplianceOperatorReady", metav1.ConditionFalse, "CSVFailed", "phase=Failed")
 	setRollupConditions(cb, rollupTestNow)
 	if c := meta.FindStatusCondition(cb.Status.Conditions, "Degraded"); c == nil || c.Status != metav1.ConditionTrue || c.Reason != "CSVFailed" {
 		t.Fatalf("Degraded for CSVFailed: %+v", c)
@@ -426,7 +426,7 @@ func TestSetRollupConditionsMatrix(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			cb := &baselinev1alpha1.ClusterBaseline{}
 			for _, d := range tc.details {
-				setCond(cb, d.typ, d.status, d.reason, "detail")
+				setCond(cb, rollupTestNow, d.typ, d.status, d.reason, "detail")
 			}
 			if tc.backdateCO {
 				co := meta.FindStatusCondition(cb.Status.Conditions, "ComplianceOperatorReady")
@@ -471,10 +471,10 @@ func TestSetRollupConditionsMatrix(t *testing.T) {
 // 15s hot-poll), while a fresh Installing still Progresses.
 func TestStuckInstallDegrades(t *testing.T) {
 	cb := &baselinev1alpha1.ClusterBaseline{}
-	setCond(cb, "ScanConfigured", metav1.ConditionTrue, "BindingsCreated", "")
+	setCond(cb, rollupTestNow, "ScanConfigured", metav1.ConditionTrue, "BindingsCreated", "")
 
 	// Fresh install: Progressing, not Degraded.
-	setCond(cb, "ComplianceOperatorReady", metav1.ConditionFalse, "Installing", "installing")
+	setCond(cb, rollupTestNow, "ComplianceOperatorReady", metav1.ConditionFalse, "Installing", "installing")
 	setRollupConditions(cb, rollupTestNow)
 	if c := meta.FindStatusCondition(cb.Status.Conditions, "Progressing"); c == nil || c.Status != metav1.ConditionTrue {
 		t.Fatalf("fresh install must Progress: %+v", c)
@@ -556,11 +556,11 @@ func TestCondTrue(t *testing.T) {
 	if condTrue(cb, "Available") {
 		t.Fatal("missing condition must be false")
 	}
-	setCond(cb, "Available", metav1.ConditionTrue, "AsExpected", "")
+	setCond(cb, rollupTestNow, "Available", metav1.ConditionTrue, "AsExpected", "")
 	if !condTrue(cb, "Available") {
 		t.Fatal("True Available must be true")
 	}
-	setCond(cb, "Available", metav1.ConditionFalse, "NotReady", "")
+	setCond(cb, rollupTestNow, "Available", metav1.ConditionFalse, "NotReady", "")
 	if condTrue(cb, "Available") {
 		t.Fatal("False Available must be false")
 	}
@@ -672,7 +672,7 @@ func TestSetCondCapsMessage(t *testing.T) {
 	// InvalidSchedule embeds the user schedule; a huge cron must not land
 	// unbounded on the condition (status admission / etcd size).
 	huge := strings.Repeat("0 ", 2000)
-	setCond(cb, "ScanConfigured", metav1.ConditionFalse, "InvalidSchedule",
+	setCond(cb, rollupTestNow, "ScanConfigured", metav1.ConditionFalse, "InvalidSchedule",
 		fmt.Sprintf("spec.schedule %q is not a valid standard cron schedule: bad", huge))
 	c := meta.FindStatusCondition(cb.Status.Conditions, "ScanConfigured")
 	if c == nil || len(c.Message) > 1024 {
@@ -723,7 +723,7 @@ func TestSetCondTrueLogRecovered(t *testing.T) {
 
 	cb := &baselinev1alpha1.ClusterBaseline{}
 	// Never False before: a first True write is not a recovery.
-	setCondTrueLogRecovered(ctx, cb, "ScanStorageReady", "AsExpected", "", "ready", "name", cb.Name)
+	setCondTrueLogRecovered(ctx, cb, rollupTestNow, "ScanStorageReady", "AsExpected", "", "ready", "name", cb.Name)
 	if buf.Len() != 0 {
 		t.Fatalf("first True write must not log a recovery: %s", buf.String())
 	}
@@ -733,16 +733,16 @@ func TestSetCondTrueLogRecovered(t *testing.T) {
 
 	// Failure, then recovery: the recovery logs.
 	buf.Reset()
-	setCondFalseLogOnce(ctx, cb, "ScanStorageReady", "ScanStoragePending", "PVC pending", "pending", "name", cb.Name)
+	setCondFalseLogOnce(ctx, cb, rollupTestNow, "ScanStorageReady", "ScanStoragePending", "PVC pending", "pending", "name", cb.Name)
 	buf.Reset()
-	setCondTrueLogRecovered(ctx, cb, "ScanStorageReady", "AsExpected", "", "ready", "name", cb.Name)
+	setCondTrueLogRecovered(ctx, cb, rollupTestNow, "ScanStorageReady", "AsExpected", "", "ready", "name", cb.Name)
 	if !strings.Contains(buf.String(), `"msg":"ready"`) {
 		t.Fatalf("recovery must log at Info: %s", buf.String())
 	}
 
 	// Steady True re-assert stays silent (the 1m requeue must not spam).
 	buf.Reset()
-	setCondTrueLogRecovered(ctx, cb, "ScanStorageReady", "AsExpected", "", "ready", "name", cb.Name)
+	setCondTrueLogRecovered(ctx, cb, rollupTestNow, "ScanStorageReady", "AsExpected", "", "ready", "name", cb.Name)
 	if buf.Len() != 0 {
 		t.Fatalf("steady True re-assert must stay silent: %s", buf.String())
 	}
@@ -751,17 +751,17 @@ func TestSetCondTrueLogRecovered(t *testing.T) {
 	// the transition guard reads a copy, not the entry SetStatusCondition
 	// overwrites in place.
 	buf.Reset()
-	setCondFalseLogOnce(ctx, cb, "ScanStorageReady", "ScanStoragePending", "PVC pending", "pending one", "name", cb.Name)
+	setCondFalseLogOnce(ctx, cb, rollupTestNow, "ScanStorageReady", "ScanStoragePending", "PVC pending", "pending one", "name", cb.Name)
 	if !strings.Contains(buf.String(), `"msg":"pending one"`) {
 		t.Fatalf("entering False must log: %s", buf.String())
 	}
 	buf.Reset()
-	setCondFalseLogOnce(ctx, cb, "ScanStorageReady", "ScanStoragePending", "PVC pending", "pending one", "name", cb.Name)
+	setCondFalseLogOnce(ctx, cb, rollupTestNow, "ScanStorageReady", "ScanStoragePending", "PVC pending", "pending one", "name", cb.Name)
 	if buf.Len() != 0 {
 		t.Fatalf("same False reason must stay silent: %s", buf.String())
 	}
 	buf.Reset()
-	setCondFalseLogOnce(ctx, cb, "ScanStorageReady", "ScanStorageMissing", "no class", "pending two", "name", cb.Name)
+	setCondFalseLogOnce(ctx, cb, rollupTestNow, "ScanStorageReady", "ScanStorageMissing", "no class", "pending two", "name", cb.Name)
 	if !strings.Contains(buf.String(), `"msg":"pending two"`) {
 		t.Fatalf("reason change while False must log: %s", buf.String())
 	}

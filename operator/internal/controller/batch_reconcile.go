@@ -42,7 +42,10 @@ func (r *ClusterBaselineReconciler) poolPausedBy(ctx context.Context, pool, owne
 	}
 	paused, _, err := unstructured.NestedBool(mcp.Object, "spec", "paused")
 	if err != nil || !paused {
-		return false, nil
+		// A spec.paused of the wrong type cannot be read as paused; treat it
+		// like false so the batch re-asserts the pause rather than assuming a
+		// pause it cannot confirm.
+		return false, nil //nolint:nilerr // wrong-typed spec.paused reads as not paused
 	}
 	return mcp.GetAnnotations()[batchPauseOwnerAnnotation] == owner, nil
 }

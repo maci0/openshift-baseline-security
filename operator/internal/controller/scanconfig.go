@@ -74,7 +74,7 @@ func (r *ClusterBaselineReconciler) ensureScanConfig(ctx context.Context, cb *ba
 	})
 	if err != nil {
 		if meta.IsNoMatchError(err) {
-			setScanCRDsMissing(ctx, cb)
+			setScanCRDsMissing(ctx, cb, r.now())
 			return nil
 		}
 		return fmt.Errorf("ensuring ScanSetting %s/%s: %w", complianceNamespace, scanSettingName, err)
@@ -90,7 +90,7 @@ func (r *ClusterBaselineReconciler) ensureScanConfig(ctx context.Context, cb *ba
 	bindings := uList(bindingGVK)
 	if err := r.List(ctx, bindings, client.InNamespace(complianceNamespace)); err != nil {
 		if meta.IsNoMatchError(err) {
-			setScanCRDsMissing(ctx, cb)
+			setScanCRDsMissing(ctx, cb, r.now())
 			return nil
 		}
 		return fmt.Errorf("listing ScanSettingBindings in %s: %w", complianceNamespace, err)
@@ -135,7 +135,7 @@ func (r *ClusterBaselineReconciler) ensureScanConfig(ctx context.Context, cb *ba
 	// never fires when nothing is scheduled, so it must not Degrade (and page)
 	// a baseline the user deliberately turned off.
 	if len(cb.Spec.Profiles) == 0 && len(cb.Spec.TailoredProfiles) == 0 {
-		setCondTrueLogRecovered(ctx, cb, "ScanConfigured", "ScanningDisabled",
+		setCondTrueLogRecovered(ctx, cb, r.now(), "ScanConfigured", "ScanningDisabled",
 			"No profiles selected; scanning is disabled.",
 			"scan configuration disabled; no profiles selected", "name", cb.Name)
 		return nil
@@ -145,7 +145,7 @@ func (r *ClusterBaselineReconciler) ensureScanConfig(ctx context.Context, cb *ba
 		// ScanSetting. The transition log names the bad cron so on-call is not left
 		// with only a generic Degraded reason until the 15m alert.
 		msg := fmt.Sprintf("spec.schedule %q is not a valid standard cron schedule: %s", cb.Spec.Schedule, schedErr)
-		setCondFalseLogOnce(ctx, cb, "ScanConfigured", "InvalidSchedule", msg,
+		setCondFalseLogOnce(ctx, cb, r.now(), "ScanConfigured", "InvalidSchedule", msg,
 			"invalid scan schedule; keeping last-good cron on ScanSetting",
 			"name", cb.Name, "schedule", cb.Spec.Schedule, "error", schedErr)
 		// A bad user-supplied cron is surfaced as InvalidSchedule/Degraded, not a
@@ -153,7 +153,7 @@ func (r *ClusterBaselineReconciler) ensureScanConfig(ctx context.Context, cb *ba
 		// on input that only an admin edit can fix.
 		return nil //nolint:nilerr // invalid schedule is a Degraded condition, not a retryable error
 	}
-	setCondTrueLogRecovered(ctx, cb, "ScanConfigured", "BindingsCreated", "",
+	setCondTrueLogRecovered(ctx, cb, r.now(), "ScanConfigured", "BindingsCreated", "",
 		"scan configuration valid; bindings in place", "name", cb.Name)
 	return nil
 }
@@ -206,7 +206,7 @@ func (r *ClusterBaselineReconciler) ensureScanBinding(
 		// instead of returning an error that spins controller-runtime backoff and
 		// short-circuits aggregation / CO-readiness for those cycles.
 		if meta.IsNoMatchError(err) {
-			setScanCRDsMissing(ctx, cb)
+			setScanCRDsMissing(ctx, cb, r.now())
 			return nil
 		}
 		return fmt.Errorf("ensuring ScanSettingBinding %s/%s: %w", complianceNamespace, name, err)

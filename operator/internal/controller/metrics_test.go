@@ -87,9 +87,9 @@ func TestPublishMetrics(t *testing.T) {
 		t.Fatalf("scan interval gauge = %v, want 3600", got)
 	}
 	// Condition gauges: True -> 1, False/absent -> 0.
-	setCond(cb, "Available", metav1.ConditionTrue, "AsExpected", "")
-	setCond(cb, "Progressing", metav1.ConditionFalse, "AsExpected", "")
-	setCond(cb, "Degraded", metav1.ConditionTrue, "InvalidSchedule", "bad cron")
+	setCond(cb, rollupTestNow, "Available", metav1.ConditionTrue, "AsExpected", "")
+	setCond(cb, rollupTestNow, "Progressing", metav1.ConditionFalse, "AsExpected", "")
+	setCond(cb, rollupTestNow, "Degraded", metav1.ConditionTrue, "InvalidSchedule", "bad cron")
 	publishMetrics(cb, metricsTestNow)
 	if got := testutil.ToFloat64(conditionStatus.WithLabelValues("Available")); got != 1 {
 		t.Fatalf("Available condition gauge = %v, want 1", got)
@@ -169,10 +169,10 @@ func TestPublishMetrics(t *testing.T) {
 func TestPublishMetricsDetailConditions(t *testing.T) {
 	resetMetrics(t)
 	cb := &baselinev1alpha1.ClusterBaseline{}
-	setCond(cb, "ComplianceOperatorReady", metav1.ConditionTrue, "CSVSucceeded", "")
-	setCond(cb, "ScanConfigured", metav1.ConditionTrue, "BindingsCreated", "")
-	setCond(cb, "ScanStorageReady", metav1.ConditionTrue, "AsExpected", "")
-	setCond(cb, "ConsolePluginReady", metav1.ConditionFalse, "ImageMissing", "RELATED_IMAGE unset")
+	setCond(cb, rollupTestNow, "ComplianceOperatorReady", metav1.ConditionTrue, "CSVSucceeded", "")
+	setCond(cb, rollupTestNow, "ScanConfigured", metav1.ConditionTrue, "BindingsCreated", "")
+	setCond(cb, rollupTestNow, "ScanStorageReady", metav1.ConditionTrue, "AsExpected", "")
+	setCond(cb, rollupTestNow, "ConsolePluginReady", metav1.ConditionFalse, "ImageMissing", "RELATED_IMAGE unset")
 	publishMetrics(cb, metricsTestNow)
 
 	if got := testutil.ToFloat64(conditionStatus.WithLabelValues("ComplianceOperatorReady")); got != 1 {
@@ -189,7 +189,7 @@ func TestPublishMetricsDetailConditions(t *testing.T) {
 		t.Fatalf("ConsolePluginReady ImageMissing = %v, want 0", got)
 	}
 
-	setCond(cb, "ConsolePluginReady", metav1.ConditionTrue, "Deployed", "")
+	setCond(cb, rollupTestNow, "ConsolePluginReady", metav1.ConditionTrue, "Deployed", "")
 	publishMetrics(cb, metricsTestNow)
 	if got := testutil.ToFloat64(conditionStatus.WithLabelValues("ConsolePluginReady")); got != 1 {
 		t.Fatalf("ConsolePluginReady Deployed = %v, want 1", got)
@@ -350,7 +350,7 @@ func TestClearPublishedMetrics(t *testing.T) {
 		{Key: "cis", ResultCounts: baselinev1alpha1.ResultCounts{Fail: 3}},
 	}
 	cb.Status.RemediationBatch = &baselinev1alpha1.RemediationBatchStatus{Phase: "Applying"}
-	setCond(cb, "Degraded", metav1.ConditionTrue, "ReconcileError", "boom")
+	setCond(cb, rollupTestNow, "Degraded", metav1.ConditionTrue, "ReconcileError", "boom")
 	publishMetrics(cb, metricsTestNow)
 
 	clearPublishedMetrics(metricsTestNow)

@@ -695,6 +695,12 @@ an accepted risk neither inflates nor tanks the score.
       time alone shortens the poll toward a waiver expiry
       (`TestReconcileReadsTheInjectedClock`,
       `TestWaiverExpiryShortensThePollOnSimulatedTime`).
+- [x] **Condition stamps come from the injected clock**: setCond and the
+      sanitize repair stamp LastTransitionTime with the clock reading handed
+      to them, so the install-stall grace measures simulated time on both
+      sides and a hand-edited condition repairs to the same stamp on every
+      replay (`TestConditionStampsComeFromTheInjectedClock`,
+      `TestSanitizeStampsConditionFromTheInjectedClock`).
 - [ ] **Two rapid spec edits**: optimistic-lock conflict on status update is
       retried via requeue, not left as permanent Degraded.
 - [ ] **Reconcile during an in-progress scan**: score is the last completed
