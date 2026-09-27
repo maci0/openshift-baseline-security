@@ -73,6 +73,7 @@ import {
   expiringWaivers,
 } from '../waivers';
 import BaselineNotConfigured from './BaselineNotConfigured';
+import { BaselineUnavailableSection } from './BaselineUnavailable';
 import LoadingCards from './LoadingCards';
 import { regionFocusProps, withDisabledTip } from './DisabledTip';
 import { ChunkError } from './ChunkError';
@@ -410,10 +411,14 @@ ProfileCounts.displayName = 'ProfileCounts';
 const Overview: React.FC<{
   baseline?: ClusterBaseline;
   loaded: boolean;
+  // Set when the baseline watch failed. CompliancePage forces `loaded` true on
+  // an error, so without it a failed watch falls into BaselineNotConfigured and
+  // claims the CR does not exist.
+  baselineError?: unknown;
   // Shared from CompliancePage (single watch); used for Recent changes titles
   // and SeverityWeighted per-profile scores.
   checkResults?: ComplianceCheckResult[];
-}> = ({ baseline, loaded, checkResults }) => {
+}> = ({ baseline, loaded, baselineError, checkResults }) => {
   const { t, i18n } = useTranslation('plugin__baseline-security-console-plugin');
   // One BCP 47 tag for all score/count formatting (same path as report / dates).
   const locale = safeLocale(i18n.language);
@@ -611,7 +616,9 @@ const Overview: React.FC<{
     return <LoadingCards cardMinWidth="300px" skeletonHeight="180px" />;
   }
   if (!baseline) {
-    return (
+    return baselineError ? (
+      <BaselineUnavailableSection error={baselineError} />
+    ) : (
       <PageSection>
         <BaselineNotConfigured />
       </PageSection>
@@ -866,7 +873,7 @@ const Overview: React.FC<{
             }}
           >
             {charts.status === 'failed' ? (
-              <ChunkError onRetry={() => setChartAttempt((n) => n + 1)} />
+              <ChunkError error={charts.error} onRetry={() => setChartAttempt((n) => n + 1)} />
             ) : Charts === null ? (
               <Skeleton height="180px" screenreaderText={t('Loading compliance data')} />
             ) : (
@@ -941,7 +948,7 @@ const Overview: React.FC<{
             <Card>
               <CardTitle>{t('Score trend')}</CardTitle>
               <CardBody>
-                <ChunkError onRetry={() => setChartAttempt((n) => n + 1)} />
+                <ChunkError error={charts.error} onRetry={() => setChartAttempt((n) => n + 1)} />
               </CardBody>
             </Card>
           ) : Charts === null ? (

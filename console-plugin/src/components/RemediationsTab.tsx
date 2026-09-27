@@ -72,6 +72,7 @@ import {
 } from '../remediation';
 import { isString, stripInvisibleText } from '../parse';
 import BaselineNotConfigured from './BaselineNotConfigured';
+import { BaselineUnavailable } from './BaselineUnavailable';
 import { regionFocusProps, withDisabledTip } from './DisabledTip';
 import { restoreFocus } from './focus';
 import { useAutoDismiss } from './useAutoDismiss';
@@ -135,7 +136,11 @@ const RemediationsTab: React.FC<{
   baseline?: ClusterBaseline;
   // Baseline watch from CompliancePage; remediations list has its own loaded flag.
   baselineLoaded?: boolean;
-}> = ({ baseline, baselineLoaded = true }) => {
+  // Baseline watch failure. `baselineLoaded` is forced true on an error, so
+  // without this a failed watch reaches BaselineNotConfigured and claims the
+  // CR does not exist.
+  baselineError?: unknown;
+}> = ({ baseline, baselineLoaded = true, baselineError }) => {
   const { t, i18n } = useTranslation('plugin__baseline-security-console-plugin');
   const profiles = baseline?.spec.profiles;
   const tailoredProfiles = baseline?.spec.tailoredProfiles;
@@ -717,7 +722,14 @@ const RemediationsTab: React.FC<{
           />
         </Bullseye>
       ) : !baseline ? (
-        <BaselineNotConfigured style={{ marginTop: 'var(--pf-t--global--spacer--md)' }} />
+        baselineError ? (
+          <BaselineUnavailable
+            error={baselineError}
+            style={{ marginTop: 'var(--pf-t--global--spacer--md)' }}
+          />
+        ) : (
+          <BaselineNotConfigured style={{ marginTop: 'var(--pf-t--global--spacer--md)' }} />
+        )
       ) : watchError && owned.length === 0 ? (
         // The watch failed and we have no (stale) rows: the danger alert above
         // already explains it; a "No remediations, rescan" empty state here would

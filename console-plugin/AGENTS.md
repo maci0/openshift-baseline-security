@@ -112,7 +112,12 @@ double casts are rejected outright.
   ban does not reach it.
 - Victory charts live in `OverviewCharts.tsx` and load after the Overview
   cards paint. Results, Remediations, and Profiles are async chunks. A failed
-  chunk GET must show Retry (`ChunkError`), not a blank tab.
+  chunk GET must show Retry (`ChunkError`), not a blank tab, and must name the
+  rejection reason: a stale chunk id and an unreachable CDN need different fixes.
+- `CompliancePage` forces `loaded` true when the baseline watch errors, so a
+  missing `baseline` no longer means "no CR". Every tab that gates on `baseline`
+  reads `baselineError` off `BaselineContext` and renders
+  `BaselineUnavailable`, never `BaselineNotConfigured`, on a watch failure.
 - A score that cannot be computed renders as no score. Never `NaN`, never
   `Infinity`: a `NaN` compares false against every threshold and paints the
   badge green.

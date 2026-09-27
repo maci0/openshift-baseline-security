@@ -2,11 +2,13 @@ import * as React from 'react';
 
 // Async-chunk load state. Tabs and Overview charts share this so a failed
 // import() shows Retry instead of a blank region (stale hashed chunk after
-// an upgrade, or a dropped request).
+// an upgrade, or a dropped request). `failed` carries the reason: a 404 on a
+// stale chunk id, a dropped request, and a webpack parse error are otherwise
+// one indistinguishable string, and nothing else logs them.
 export type ChunkState<T> =
   | { status: 'loading' }
   | { status: 'ready'; module: T }
-  | { status: 'failed' };
+  | { status: 'failed'; error: unknown };
 
 // Subscribe to a dynamic-import promise. Returns a cancel function so a
 // retry or unmount ignores a late settle. Tested without a DOM.
@@ -21,9 +23,9 @@ export const watchChunk = <T>(
         deliver({ status: 'ready', module });
       }
     },
-    () => {
+    (error: unknown) => {
       if (!cancelled) {
-        deliver({ status: 'failed' });
+        deliver({ status: 'failed', error });
       }
     },
   );
@@ -42,7 +44,17 @@ export const useChunk = <T>(load: () => Promise<T>, attempt: number): ChunkState
     state: { status: 'loading' },
   });
   React.useEffect(() => {
-    return watchChunk(load(), (next) => {
+    // watchChunk can only observe a rejection. A load() that throws
+    // synchronously must still reach the failed + Retry path instead of
+    // escaping the effect body into the console's error boundary.
+    let pending: Promise<T>;
+    try {
+      pending = load();
+    } catch (error) {
+      setSettled({ attempt, state: { status: 'failed', error } });
+      return undefined;
+    }
+    return watchChunk(pending, (next) => {
       setSettled({ attempt, state: next });
     });
   }, [load, attempt]);

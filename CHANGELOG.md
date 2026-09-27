@@ -112,6 +112,23 @@ depend on those tags.
   front of a name is a spoof and no identity needs one. CSV export is
   unchanged: a hidden character in front of a formula sigil is still neutralized
   there.
+- A failed ClusterBaseline watch rendered the Overview, Profiles, and
+  Remediations tabs as "Baseline not configured" with a **Create default
+  baseline** button. A 403 on `clusterbaselines.compliance.openshift.io`, or a
+  missing CRD, was indistinguishable from an absent CR, so the page told the
+  admin a resource the operator may already have created did not exist. The
+  tabs now render a danger state naming the read failure. The **Create default
+  baseline** button also stays silent when it loses the create race, which on a
+  broken watch left the click with no output at all; it now says the CR exists.
+- Two failing watches showed only the first message in the page banner, and the
+  second one's text was never rendered anywhere. The banner now carries every
+  watch error.
+- A failed async-chunk load and a failed report-exporter load both reported one
+  fixed sentence and discarded the rejection, so a stale chunk id after a
+  console upgrade was indistinguishable from an unreachable CDN. The reason is
+  now shown.
+- A report download whose `click()` threw left its hidden anchor element in the
+  page, one per failed export.
 - `baseline_security_scan_interval_seconds` could report a value that depended
   on which process published it first. The walk behind the gauge started at the
   publisher's clock, so an annual schedule crossing a leap year reported 365d

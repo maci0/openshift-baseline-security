@@ -1,14 +1,27 @@
 import * as React from 'react';
 import { useTranslation } from 'react-i18next';
 import { Alert, Button, PageSection, Skeleton } from '@patternfly/react-core';
+import { errorMessage } from '../errors';
 import { ChunkState, useChunk } from './chunkLoad';
 
 // Visible failure for a dropped or 404'd async chunk. Retry re-invokes the
 // same import(); webpack resets a failed chunk id so the GET runs again.
-export const ChunkError: React.FC<{ onRetry: () => void }> = ({ onRetry }) => {
+// The rejection reason is rendered when it carries a message: "network
+// unreachable" and "stale chunk id after a console upgrade" need different
+// fixes, and the alert is otherwise the only record once it is dismissed.
+export const ChunkError: React.FC<{ onRetry: () => void; error?: unknown }> = ({
+  onRetry,
+  error,
+}) => {
   const { t } = useTranslation('plugin__baseline-security-console-plugin');
+  const detail = errorMessage(error);
   return (
     <Alert variant="danger" isInline isLiveRegion title={t('Failed to load this view.')}>
+      {detail && (
+        <p>
+          {t('Reason: {{detail}}', { detail })}
+        </p>
+      )}
       <Button variant="link" isInline onClick={onRetry}>
         {t('Retry')}
       </Button>
@@ -31,7 +44,7 @@ export function ChunkGate<T>(props: ChunkGateProps<T>): React.ReactElement {
   if (chunk.status === 'failed') {
     return (
       <PageSection>
-        <ChunkError onRetry={() => setAttempt((n) => n + 1)} />
+        <ChunkError error={chunk.error} onRetry={() => setAttempt((n) => n + 1)} />
       </PageSection>
     );
   }

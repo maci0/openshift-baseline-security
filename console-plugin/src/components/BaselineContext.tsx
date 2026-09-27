@@ -11,6 +11,7 @@
 //   ClusterScoreItem.tsx - cluster Overview details score item
 //   LoadingCards.tsx     - skeleton placeholders while a chunk loads
 //   BaselineNotConfigured.tsx - empty state when no ClusterBaseline exists
+//   BaselineUnavailable.tsx - danger state when the baseline watch failed
 //   ChunkError.tsx       - ChunkGate, renders ChunkError + Retry on a failed GET
 //   DisabledTip.tsx      - tooltip wrapper for disabled controls
 //   useAutoDismiss.ts    - shared success-banner dismiss timing
@@ -25,6 +26,12 @@ import { ChunkGate } from './ChunkError';
 type BaselineContextValue = {
   baseline?: ClusterBaseline;
   loaded: boolean;
+  // Set when the baseline watch failed. `loaded` is forced true on an error so
+  // the tabs stop skeletoning, which means a missing `baseline` and a failed
+  // watch are otherwise indistinguishable: the tabs would claim the CR does not
+  // exist and offer to create it. Every tab that gates on `baseline` reads
+  // this to tell the two apart.
+  baselineError?: unknown;
   // Single shared watch of ComplianceCheckResults (CompliancePage owns it).
   // Overview and Results re-use the list instead of opening parallel watches.
   // Pre-filtered to baseline-owned suites so tabs do not re-scan foreign CCRs.
@@ -45,8 +52,15 @@ const loadProfilesTab = () =>
 // Module-level route components keep HorizontalNav page types stable across
 // CR watch updates while still re-rendering when the context value changes.
 export function OverviewRoute() {
-  const { baseline, loaded, checkResults } = React.useContext(BaselineContext);
-  return <Overview baseline={baseline} loaded={loaded} checkResults={checkResults} />;
+  const { baseline, loaded, baselineError, checkResults } = React.useContext(BaselineContext);
+  return (
+    <Overview
+      baseline={baseline}
+      loaded={loaded}
+      baselineError={baselineError}
+      checkResults={checkResults}
+    />
+  );
 }
 
 export function ResultsRoute() {
@@ -70,24 +84,32 @@ export function ResultsRoute() {
 }
 
 export function RemediationsRoute() {
-  const { baseline, loaded } = React.useContext(BaselineContext);
+  const { baseline, loaded, baselineError } = React.useContext(BaselineContext);
   return (
     <ChunkGate load={loadRemediationsTab}>
       {(m) => {
         const RemediationsTab = m.default;
-        return <RemediationsTab baseline={baseline} baselineLoaded={loaded} />;
+        return (
+          <RemediationsTab
+            baseline={baseline}
+            baselineLoaded={loaded}
+            baselineError={baselineError}
+          />
+        );
       }}
     </ChunkGate>
   );
 }
 
 export function ProfilesRoute() {
-  const { baseline, loaded } = React.useContext(BaselineContext);
+  const { baseline, loaded, baselineError } = React.useContext(BaselineContext);
   return (
     <ChunkGate load={loadProfilesTab}>
       {(m) => {
         const ProfilesTab = m.default;
-        return <ProfilesTab baseline={baseline} loaded={loaded} />;
+        return (
+          <ProfilesTab baseline={baseline} loaded={loaded} baselineError={baselineError} />
+        );
       }}
     </ChunkGate>
   );

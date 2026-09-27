@@ -53,24 +53,23 @@ const safeDownloadName = (filename: string): string => {
 // Trigger a browser download of an in-memory blob via a detached anchor.
 // Revoke on the next tick so the click has consumed the object URL first.
 // Always schedule revoke (try/finally) so a DOM throw cannot leak the blob URL.
+// The anchor is removed in a finally too: a throw from click() (CSP-blocked
+// navigation, detached document) would otherwise leave one hidden node in
+// document.body per failed download.
 export const downloadBlob = (blob: Blob, filename: string): void => {
   const url = URL.createObjectURL(blob);
+  let a: HTMLAnchorElement | undefined;
   try {
-    const a = document.createElement('a');
+    a = document.createElement('a');
     a.href = url;
     a.download = safeDownloadName(filename);
     // No navigation target, but set rel in case a browser ignores download.
     a.rel = 'noopener noreferrer';
     a.style.display = 'none';
     document.body.appendChild(a);
-    // The anchor is appended, so its removal is the release: a click that
-    // throws must not leave one hidden <a> in document.body per export.
-    try {
-      a.click();
-    } finally {
-      a.remove();
-    }
+    a.click();
   } finally {
+    a?.remove();
     window.setTimeout(() => URL.revokeObjectURL(url), 0);
   }
 };

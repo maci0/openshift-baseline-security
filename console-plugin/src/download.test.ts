@@ -242,8 +242,19 @@ describe('downloadBlob', () => {
     try {
       expect(() => downloadBlob(new Blob(['x']), 'ok.csv')).toThrow('click failed');
       expect(dom.revokeObjectURL).toHaveBeenCalledWith('blob:mock-url');
-      // Appended without removal would accumulate one hidden <a> per failed export.
-      expect(dom.anchor.remove).toHaveBeenCalledTimes(1);
+      // The anchor is appended before click, so a throw used to leave one
+      // hidden node in document.body per failed download.
+      expect(dom.anchor.remove.mock.calls).toHaveLength(1);
+    } finally {
+      dom.restore();
+    }
+  });
+
+  it('removes the anchor exactly once on the success path', () => {
+    const dom = installDom();
+    try {
+      downloadBlob(new Blob(['x']), 'ok.csv');
+      expect(dom.anchor.remove.mock.calls).toHaveLength(1);
     } finally {
       dom.restore();
     }

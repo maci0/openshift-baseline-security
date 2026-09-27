@@ -119,7 +119,13 @@ const CompliancePage: React.FC = () => {
   const [canRescan, canRescanLoading] = useAccessReview(complianceScanPatchAccess);
   const rescanGate: AccessGate = { allowed: canRescan, loading: canRescanLoading };
   const rescanWatchError = errorMessage(baselineError) ?? errorMessage(scansError);
-  const watchError = rescanWatchError ?? errorMessage(checkResultsError);
+  // Concatenate, do not short-circuit: two watches failing at once used to
+  // render only the first message, and the second one's text was never shown
+  // anywhere, so an admin could not tell which resource was unreadable.
+  const watchError = [baselineError, scansError, checkResultsError]
+    .map((e) => errorMessage(e))
+    .filter((m): m is string => !!m)
+    .join(' ') || undefined;
 
   // Selector already scopes to owned suites; keep stable aliases for rescan/export.
   const ownedScans = scans ?? EMPTY_SCANS;
@@ -214,10 +220,17 @@ const CompliancePage: React.FC = () => {
         ({ buildReportHtml } = await import(
           /* webpackChunkName: "report" */ '../report'
         ));
-      } catch {
+      } catch (e) {
+        // A bare `catch {}` here made a network drop, a 404 on the report
+        // chunk, and a webpack parse error one identical string with no
+        // recovery short of a full page reload. Name the reason when there
+        // is one; the fallback keeps the exporter framing either way.
+        const detail = errorMessage(e);
         setExportNotice({
           variant: 'danger',
-          message: t('Failed to load the report exporter.'),
+          message: detail
+            ? t('Failed to load the report exporter: {{detail}}', { detail })
+            : t('Failed to load the report exporter.'),
         });
         return;
       }
@@ -269,6 +282,9 @@ const CompliancePage: React.FC = () => {
       // does not perpetually skeleton the tab bodies. The error itself is shown
       // in the page banner; the tabs then fall to their empty/error state.
       loaded: loaded || !!baselineError,
+      // Tabs need the failure itself: with `loaded` forced true and no error in
+      // scope, an absent baseline is indistinguishable from an unreadable one.
+      baselineError,
       checkResults: ownedResults,
       checkResultsLoaded,
       checkResultsError,

@@ -311,5 +311,10 @@
   "Type to filter the base profile rules": "Type to filter the base profile rules",
   "Type to find a base rule to turn off": "Type to find a base rule to turn off",
   "Type to search rules not in the base profile": "Type to search rules not in the base profile",
-  "Showing first {{shown}} of {{total}} matches. Refine your search to find more.": "Showing first {{formattedShown}} of {{formattedTotal}} matches. Refine your search to find more."
+  "Showing first {{shown}} of {{total}} matches. Refine your search to find more.": "Showing first {{formattedShown}} of {{formattedTotal}} matches. Refine your search to find more.",
+  "Reason: {{detail}}": "Reason: {{detail}}",
+  "Failed to read the compliance baseline.": "Failed to read the compliance baseline.",
+  "The ClusterBaseline resource could not be read, so this view cannot tell whether the baseline exists.": "The ClusterBaseline resource could not be read, so this view cannot tell whether the baseline exists.",
+  "ClusterBaseline/cluster already exists; this page updates when the watch sees it.": "ClusterBaseline/cluster already exists; this page updates when the watch sees it.",
+  "Failed to load the report exporter: {{detail}}": "Failed to load the report exporter: {{detail}}"
 }

@@ -592,9 +592,12 @@ an accepted risk neither inflates nor tanks the score.
       two-point ring and a one-point ring whose time swallows the separator
       bytes must not share a key, or React keeps painting the stale series
       (jest `overviewTrend.test.ts`, "history ring fuzz").
-- [x] **Async plugin chunk load failure** delivers a failed state (jest
-      `watchChunk`) so Overview charts and lazy tabs can show Retry instead of
-      a blank region.
+- [x] **Async plugin chunk load failure** delivers a failed state carrying the
+      rejection reason (jest `watchChunk`) so Overview charts and lazy tabs can
+      show Retry instead of a blank region, and name the cause.
+- [x] **Download anchor is removed on both paths**, including when `click()`
+      throws (jest `downloadBlob`): a throw used to leave one hidden node in
+      `document.body` per failed export.
 - [x] **History never rewinds** when the newest suite is dropped
       (`TestRecordHistoryDoesNotRewind`).
 - [x] **Late score for the same endTimestamp** appends/refreshes history

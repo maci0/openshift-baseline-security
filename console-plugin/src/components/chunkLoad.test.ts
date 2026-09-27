@@ -12,16 +12,18 @@ describe('watchChunk', () => {
     expect(seen).toEqual([{ status: 'ready', module: 'mod' }]);
   });
 
-  it('delivers failed when the import rejects', async () => {
+  it('delivers failed carrying the rejection reason', async () => {
     const seen: ChunkState<string>[] = [];
-    const pending = Promise.reject(new Error('chunk 404'));
+    const reason = new Error('chunk 404');
+    const pending = Promise.reject(reason);
     // Attach a no-op so the rejection is handled even before watchChunk's then.
     pending.catch(() => undefined);
     watchChunk(pending, (next) => {
       seen.push(next);
     });
     await flush();
-    expect(seen).toEqual([{ status: 'failed' }]);
+    // The reason is what tells a stale chunk id from an unreachable CDN.
+    expect(seen).toEqual([{ status: 'failed', error: reason }]);
   });
 
   it('ignores a settle after cancel (unmount or retry)', async () => {

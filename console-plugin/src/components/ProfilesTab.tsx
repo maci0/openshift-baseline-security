@@ -87,6 +87,7 @@ import {
   toggledProfiles,
 } from '../profiles';
 import BaselineNotConfigured from './BaselineNotConfigured';
+import { BaselineUnavailableSection } from './BaselineUnavailable';
 import LoadingCards from './LoadingCards';
 import { withDisabledTip } from './DisabledTip';
 import { restoreFocus } from './focus';
@@ -283,9 +284,16 @@ const RuleMultiSelect: React.FC<{
   );
 };
 
-const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = ({
+const ProfilesTab: React.FC<{
+  baseline?: ClusterBaseline;
+  loaded?: boolean;
+  // Baseline watch failure from CompliancePage. `loaded` is forced true on an
+  // error, so without this a failed watch reads as "no ClusterBaseline".
+  baselineError?: unknown;
+}> = ({
   baseline,
   loaded = true,
+  baselineError,
 }) => {
   const { t, i18n } = useTranslation('plugin__baseline-security-console-plugin');
   const [pending, setPending] = React.useState(false);
@@ -819,7 +827,9 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
     return <LoadingCards cardMinWidth="330px" skeletonHeight="80px" />;
   }
   if (!baseline) {
-    return (
+    return baselineError ? (
+      <BaselineUnavailableSection error={baselineError} />
+    ) : (
       <PageSection>
         <BaselineNotConfigured />
       </PageSection>

@@ -28,6 +28,7 @@ const BaselineNotConfigured: React.FC<{ style?: React.CSSProperties }> = ({ styl
   const [busy, setBusy] = React.useState(false);
   const busyRef = React.useRef(false);
   const [err, setErr] = React.useState<string | null>(null);
+  const [notice, setNotice] = React.useState<string | null>(null);
 
   const create = async () => {
     if (busyRef.current) return;
@@ -40,15 +41,22 @@ const BaselineNotConfigured: React.FC<{ style?: React.CSSProperties }> = ({ styl
     busyRef.current = true;
     setBusy(true);
     setErr(null);
+    setNotice(null);
     try {
       await k8sCreate({
         model: ClusterBaselineModel,
         data: defaultClusterBaselineManifest(),
       });
     } catch (e) {
-      // A race with the operator default-create is success: the watch will
-      // replace this empty state once ClusterBaseline/cluster is visible.
-      if (!isAlreadyExists(e)) {
+      // A race with the operator default-create is not a failure, but it is not
+      // a silent one either: on a broken watch the create-rejected branch used
+      // to set nothing, leaving the click with no output and this empty state
+      // still up. Say what happened so the click is never a dead end.
+      if (isAlreadyExists(e)) {
+        setNotice(
+          t('ClusterBaseline/cluster already exists; this page updates when the watch sees it.'),
+        );
+      } else {
         setErr(errorMessage(e) ?? t('Failed to create the compliance baseline.'));
       }
     } finally {
@@ -75,6 +83,15 @@ const BaselineNotConfigured: React.FC<{ style?: React.CSSProperties }> = ({ styl
         )}
       </EmptyStateBody>
       <EmptyStateFooter>
+        {notice && (
+          <Alert
+            variant="info"
+            isInline
+            isLiveRegion
+            title={notice}
+            style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}
+          />
+        )}
         {err && (
           <Alert
             variant="danger"
