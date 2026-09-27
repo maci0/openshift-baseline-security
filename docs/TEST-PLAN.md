@@ -917,6 +917,15 @@ stale Available or eternal Progressing.
 - [x] Plugin pods: non-root, drop ALL caps, no automount SA token, optional
       serving-cert volume (unit asserts on Deployment mutate).
 - [x] Metrics: authn/authz filter + non-loopback insecure refuse.
+- [x] **Operator's own write grants stay name-scoped**: every write to a named
+      object (dashboard ConfigMap, plugin Service/Deployment/PDB/ConsolePlugin,
+      ScanSetting, console, OperatorGroup, Subscription) carries its
+      resourceNames in role.yaml and the CSV, and no read-only resource (check
+      results, scans, suites, PVCs, Infrastructure, catalog sources, CSVs) gains
+      a write verb or a cluster-wide ConfigMap read
+      (`TestOperatorRoleNamedWritesAreNameScoped`,
+      `TestOperatorRoleReadOnlyResourcesStayReadOnly`,
+      `TestOperatorRoleHasNoClusterWideConfigMapRead`).
 - [ ] **SSRF / open redirect**: `checkResultHref` and `resultsHref` stay
       path-relative; no `//evil` host injection via crafted names.
 - [ ] **XSS in rule description**: modal uses text/pre wrappers, not

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
@@ -445,4 +446,156 @@ func TestAdminRoleIncludesViewerReads(t *testing.T) {
 // a YAML item ("- patch") or an inline flow list ("verbs: [get, patch]").
 func roleDocHasVerb(doc, verb string) bool {
 	return rbacVerbListed(doc, verb) || csvVerbsInclude(doc, verb)
+}
+
+// writeVerbs are the verbs that mutate an existing object or remove it. create
+// is absent on purpose: the operator creates objects whose names it derives at
+// runtime (one ScanSettingBinding per bound profile), so create cannot be
+// name-scoped. get is absent for the same reason: it is a read, and list
+// ignores resourceNames entirely.
+var writeVerbs = []string{"update", "patch", "delete"}
+
+// namedWriteTargets maps a resource the operator mutates by name to the single
+// object name role.yaml must pin. Every rule here repairs or owns one named
+// object, so dropping its resourceNames turns a single-object write into a
+// cluster-wide one: a compromised operator SA could then rewrite any
+// Subscription, ConsolePlugin, or ConfigMap in the cluster.
+//
+// The resources with several legitimate names are absent by design:
+// ScanSettingBindings (one per bound profile), ClusterBaseline (the CEL rule
+// pins the singleton name), ComplianceRemediations and MachineConfigPools
+// (batch apply touches whichever pools the remediations name).
+var namedWriteTargets = []struct {
+	resource string
+	name     string
+}{
+	{"configmaps", "baseline-security-compliance-dashboard"},
+	{"services", "baseline-security-console-plugin"},
+	{"deployments", "baseline-security-console-plugin"},
+	{"poddisruptionbudgets", "baseline-security-console-plugin"},
+	{"consoleplugins", "baseline-security-console-plugin"},
+	{"scansettings", "baseline"},
+	{"consoles", "cluster"},
+	{"operatorgroups", "compliance-operator"},
+	{"subscriptions", "compliance-operator"},
+}
+
+// readOnlyResources the operator only ever reads. A write verb here is a
+// privilege the reconciler has no path to, and the SA is cluster-scoped, so it
+// would be reachable from any compromised pod or leaked token.
+var readOnlyResources = []string{
+	"compliancecheckresults",
+	"compliancescans",
+	"compliancesuites",
+	"persistentvolumeclaims",
+	"infrastructures",
+	"catalogsources",
+	"clusterserviceversions",
+}
+
+// TestOperatorRoleNamedWritesAreNameScoped pins the deny side of the operator's
+// own matrix in role.yaml and in the CSV that OLM installs from: every write to
+// a named object must carry that name, and at least one such rule must exist so
+// dropping a rule cannot pass this check. A create-only rule for the same
+// resource does not satisfy it.
+func TestOperatorRoleNamedWritesAreNameScoped(t *testing.T) {
+	t.Parallel()
+	sources := []struct {
+		name  string
+		rules func(t *testing.T, resource string) []policyRule
+	}{
+		{"role.yaml", func(t *testing.T, resource string) []policyRule {
+			return rulesGrantingResource(t, mustParseClusterRole(t, mustReadRoleYAML(t)), resource)
+		}},
+		{"CSV", func(t *testing.T, resource string) []policyRule {
+			return csvRulesGrantingResource(t, mustReadCSV(t), resource)
+		}},
+	}
+	for _, src := range sources {
+		for _, target := range namedWriteTargets {
+			t.Run(src.name+"/"+target.resource, func(t *testing.T) {
+				t.Parallel()
+				rules := src.rules(t, target.resource)
+				if len(rules) == 0 {
+					t.Fatalf("%s has no rule for %q", src.name, target.resource)
+				}
+				pinned := false
+				for _, rule := range rules {
+					writes := false
+					for _, verb := range writeVerbs {
+						if ruleGrantsVerb([]policyRule{rule}, verb) {
+							writes = true
+						}
+					}
+					if !writes {
+						continue
+					}
+					if !slices.Contains(rule.ResourceNames, target.name) {
+						t.Errorf("%s writes %s without resourceNames: [%s]; a "+
+							"cluster-wide write is not what the reconciler needs",
+							src.name, target.resource, strings.Join(rule.ResourceNames, ", "))
+						continue
+					}
+					pinned = true
+				}
+				if !pinned {
+					t.Errorf("%s has no name-scoped write to %s/%s", src.name, target.resource, target.name)
+				}
+			})
+		}
+	}
+}
+
+// TestOperatorRoleReadOnlyResourcesStayReadOnly pins the resources the
+// reconciler only reads: a write verb on any of them is privilege no code path
+// uses, granted to a cluster-scoped ServiceAccount.
+func TestOperatorRoleReadOnlyResourcesStayReadOnly(t *testing.T) {
+	t.Parallel()
+	role := mustParseClusterRole(t, mustReadRoleYAML(t))
+	for _, resource := range readOnlyResources {
+		t.Run("role.yaml/"+resource, func(t *testing.T) {
+			t.Parallel()
+			assertNoWriteVerbs(t, rulesGrantingResource(t, role, resource), resource, "role.yaml")
+		})
+		t.Run("CSV/"+resource, func(t *testing.T) {
+			t.Parallel()
+			assertNoWriteVerbs(t, csvRulesGrantingResource(t, mustReadCSV(t), resource), resource, "CSV")
+		})
+	}
+}
+
+// TestOperatorRoleHasNoClusterWideConfigMapRead keeps the operator's configmap
+// grant at the two it needs: create anything (CO-owned scan results, plugin
+// config) and get/patch/update the one dashboard ConfigMap by name. A
+// cluster-wide get or list would let the operator SA read every ConfigMap in
+// the cluster, application config and credentials included.
+func TestOperatorRoleHasNoClusterWideConfigMapRead(t *testing.T) {
+	t.Parallel()
+	check := func(name string, rules []policyRule) {
+		t.Helper()
+		for _, rule := range rules {
+			if len(rule.ResourceNames) > 0 {
+				continue
+			}
+			for _, verb := range []string{"get", "list", "watch"} {
+				if ruleGrantsVerb([]policyRule{rule}, verb) {
+					t.Errorf("%s reads configmaps cluster-wide (verb %q); "+
+						"only create may be unscoped", name, verb)
+				}
+			}
+		}
+	}
+	check("role.yaml", rulesGrantingResource(t, mustParseClusterRole(t, mustReadRoleYAML(t)), "configmaps"))
+	check("CSV", csvRulesGrantingResource(t, mustReadCSV(t), "configmaps"))
+}
+
+func assertNoWriteVerbs(t *testing.T, rules []policyRule, resource, source string) {
+	t.Helper()
+	for _, rule := range rules {
+		for _, verb := range writeVerbs {
+			if ruleGrantsVerb([]policyRule{rule}, verb) {
+				t.Errorf("%s grants %q on %s; the reconciler only reads it", source, verb, resource)
+			}
+		}
+	}
 }
