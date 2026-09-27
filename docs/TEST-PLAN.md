@@ -817,7 +817,7 @@ stale Available or eternal Progressing.
 
 | Scenario | Available | Progressing | Degraded | Covered |
 |---|---|---|---|---|
-| Happy path CO+scans ready | True | False | False | [x] `TestSetRollupConditions`, happy reconcile |
+| Happy path CO+scans ready | True | False | False | [x] `TestSetRollupConditionsMatrix` |
 | CO Installing | False | True | False | [x] |
 | CO CSV Failed | False | False | True (CSVFailed) | [x] |
 | Invalid schedule | False | False | True (InvalidSchedule) | [x] |
@@ -832,8 +832,9 @@ stale Available or eternal Progressing.
 
 \* Available depends only on CO Ready + ScanConfigured, not on the plugin.
 
-- [ ] **Automated matrix test**: table-driven `setRollupConditions` cases for
-      every row above in one `TestSetRollupConditionsMatrix`.
+- [x] **Automated matrix test**: table-driven `setRollupConditions` cases for
+      every row above in one `TestSetRollupConditionsMatrix`, each on a fresh
+      `ClusterBaseline` so no row inherits the previous row's state.
 
 ## S. Time, schedule & history theater
 

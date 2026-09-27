@@ -310,6 +310,162 @@ func TestSetRollupConditions(t *testing.T) {
 	}
 }
 
+// TestSetRollupConditionsMatrix pins every row of the rollup truth table in
+// docs/TEST-PLAN.md section R. Each case builds a fresh ClusterBaseline from
+// the detail conditions production emits, so a row cannot be masked by the
+// previous row's state: the guard against a "simplify conditions" change
+// reintroducing a stale Available or an eternal Progressing.
+func TestSetRollupConditionsMatrix(t *testing.T) {
+	type detail struct {
+		typ    string
+		status metav1.ConditionStatus
+		reason string
+	}
+	cases := []struct {
+		name           string
+		details        []detail
+		backdateCO     bool
+		available      metav1.ConditionStatus
+		progressing    metav1.ConditionStatus
+		degraded       metav1.ConditionStatus
+		degradedReason string
+	}{
+		{
+			name:        "happy path CO and scans ready",
+			details:     []detail{{"ComplianceOperatorReady", metav1.ConditionTrue, "CSVSucceeded"}, {"ScanConfigured", metav1.ConditionTrue, "BindingsCreated"}},
+			available:   metav1.ConditionTrue,
+			progressing: metav1.ConditionFalse,
+			degraded:    metav1.ConditionFalse,
+		},
+		{
+			name:        "CO installing",
+			details:     []detail{{"ComplianceOperatorReady", metav1.ConditionFalse, "Installing"}, {"ScanConfigured", metav1.ConditionTrue, "BindingsCreated"}},
+			available:   metav1.ConditionFalse,
+			progressing: metav1.ConditionTrue,
+			degraded:    metav1.ConditionFalse,
+		},
+		{
+			name:           "CO CSV failed",
+			details:        []detail{{"ComplianceOperatorReady", metav1.ConditionFalse, "CSVFailed"}, {"ScanConfigured", metav1.ConditionTrue, "BindingsCreated"}},
+			available:      metav1.ConditionFalse,
+			progressing:    metav1.ConditionFalse,
+			degraded:       metav1.ConditionTrue,
+			degradedReason: "CSVFailed",
+		},
+		{
+			name:           "CO install stalled past grace",
+			details:        []detail{{"ComplianceOperatorReady", metav1.ConditionFalse, "CSVNotReady"}, {"ScanConfigured", metav1.ConditionTrue, "BindingsCreated"}},
+			backdateCO:     true,
+			available:      metav1.ConditionFalse,
+			progressing:    metav1.ConditionFalse,
+			degraded:       metav1.ConditionTrue,
+			degradedReason: "InstallStalled",
+		},
+		{
+			name:           "invalid schedule",
+			details:        []detail{{"ComplianceOperatorReady", metav1.ConditionTrue, "CSVSucceeded"}, {"ScanConfigured", metav1.ConditionFalse, "InvalidSchedule"}},
+			available:      metav1.ConditionFalse,
+			progressing:    metav1.ConditionFalse,
+			degraded:       metav1.ConditionTrue,
+			degradedReason: "InvalidSchedule",
+		},
+		{
+			name:           "scan storage pending",
+			details:        []detail{{"ComplianceOperatorReady", metav1.ConditionTrue, "CSVSucceeded"}, {"ScanConfigured", metav1.ConditionTrue, "BindingsCreated"}, {"ScanStorageReady", metav1.ConditionFalse, "ScanStoragePending"}},
+			available:      metav1.ConditionTrue,
+			progressing:    metav1.ConditionFalse,
+			degraded:       metav1.ConditionTrue,
+			degradedReason: "ScanStorageNotReady",
+		},
+		{
+			name:           "plugin unavailable past grace",
+			details:        []detail{{"ComplianceOperatorReady", metav1.ConditionTrue, "CSVSucceeded"}, {"ScanConfigured", metav1.ConditionTrue, "BindingsCreated"}, {"ConsolePluginReady", metav1.ConditionFalse, "Unavailable"}},
+			available:      metav1.ConditionTrue,
+			progressing:    metav1.ConditionFalse,
+			degraded:       metav1.ConditionTrue,
+			degradedReason: "ConsolePluginUnavailable",
+		},
+		{
+			name:        "plugin waiting for pods",
+			details:     []detail{{"ComplianceOperatorReady", metav1.ConditionTrue, "CSVSucceeded"}, {"ScanConfigured", metav1.ConditionTrue, "BindingsCreated"}, {"ConsolePluginReady", metav1.ConditionFalse, "WaitingForPods"}},
+			available:   metav1.ConditionTrue,
+			progressing: metav1.ConditionTrue,
+			degraded:    metav1.ConditionFalse,
+		},
+		{
+			name:        "console missing",
+			details:     []detail{{"ComplianceOperatorReady", metav1.ConditionTrue, "CSVSucceeded"}, {"ScanConfigured", metav1.ConditionTrue, "BindingsCreated"}, {"ConsolePluginReady", metav1.ConditionFalse, "ConsoleMissing"}},
+			available:   metav1.ConditionTrue,
+			progressing: metav1.ConditionFalse,
+			degraded:    metav1.ConditionFalse,
+		},
+		{
+			name:        "plugin image missing",
+			details:     []detail{{"ComplianceOperatorReady", metav1.ConditionTrue, "CSVSucceeded"}, {"ScanConfigured", metav1.ConditionTrue, "BindingsCreated"}, {"ConsolePluginReady", metav1.ConditionFalse, "ImageMissing"}},
+			available:   metav1.ConditionTrue,
+			progressing: metav1.ConditionFalse,
+			degraded:    metav1.ConditionFalse,
+		},
+		{
+			name:        "plugin disabled by admin",
+			details:     []detail{{"ComplianceOperatorReady", metav1.ConditionTrue, "CSVSucceeded"}, {"ScanConfigured", metav1.ConditionTrue, "BindingsCreated"}, {"ConsolePluginReady", metav1.ConditionFalse, "Disabled"}},
+			available:   metav1.ConditionTrue,
+			progressing: metav1.ConditionFalse,
+			degraded:    metav1.ConditionFalse,
+		},
+		{
+			name:        "CRDs missing with manual install",
+			details:     []detail{{"ComplianceOperatorReady", metav1.ConditionFalse, "NotInstalled"}, {"ScanConfigured", metav1.ConditionFalse, "CRDsMissing"}},
+			available:   metav1.ConditionFalse,
+			progressing: metav1.ConditionFalse,
+			degraded:    metav1.ConditionFalse,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cb := &baselinev1alpha1.ClusterBaseline{}
+			for _, d := range tc.details {
+				setCond(cb, d.typ, d.status, d.reason, "detail")
+			}
+			if tc.backdateCO {
+				co := meta.FindStatusCondition(cb.Status.Conditions, "ComplianceOperatorReady")
+				co.LastTransitionTime = metav1.NewTime(rollupTestNow.Add(-coInstallGrace - time.Minute))
+			}
+			setRollupConditions(cb, rollupTestNow)
+
+			for _, want := range []struct {
+				typ  string
+				cond metav1.ConditionStatus
+			}{
+				{"Available", tc.available},
+				{"Progressing", tc.progressing},
+				{"Degraded", tc.degraded},
+			} {
+				c := meta.FindStatusCondition(cb.Status.Conditions, want.typ)
+				if c == nil {
+					t.Fatalf("%s missing from rollup", want.typ)
+				}
+				if c.Status != want.cond {
+					t.Fatalf("%s = %s, want %s", want.typ, c.Status, want.cond)
+				}
+			}
+			d := meta.FindStatusCondition(cb.Status.Conditions, "Degraded")
+			if tc.degraded == metav1.ConditionFalse {
+				// A cleared Degraded must not keep a stale reason from the
+				// failure that recovered.
+				if d.Reason != "AsExpected" {
+					t.Fatalf("Degraded reason = %q, want AsExpected once healthy", d.Reason)
+				}
+				return
+			}
+			if d.Reason != tc.degradedReason {
+				t.Fatalf("Degraded reason = %q, want %q", d.Reason, tc.degradedReason)
+			}
+		})
+	}
+}
+
 // TestStuckInstallDegrades: a CO install that has been Installing/CSVNotReady
 // past the grace window rolls up to Degraded and stops Progressing (no eternal
 // 15s hot-poll), while a fresh Installing still Progresses.
