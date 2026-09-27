@@ -1,11 +1,12 @@
 // Waiver lookup, expiry, and active-set helpers (matching operator score exclusion).
+import { now as instant } from './clock';
 import { expiresAtMs } from './dates';
 import { Waiver } from './models';
 
 // A waiver is expired once its expiresAt is in the past; an expired waiver no
 // longer excludes its check (matching the operator). Unparseable expiresAt is
 // treated as expired so a corrupt hand-edit cannot grant a permanent waiver.
-export const waiverExpired = (w: Waiver, now: Date = new Date()): boolean => {
+export const waiverExpired = (w: Waiver, now: Date = instant()): boolean => {
   if (!w.expiresAt) {
     return false;
   }
@@ -32,7 +33,7 @@ export const isWaived = (name: string, waivers?: Waiver[], now?: Date): boolean 
     if (w.name !== name) {
       continue;
     }
-    at = at ?? now ?? new Date();
+    at = at ?? now ?? instant();
     if (!waiverExpired(w, at)) {
       return true;
     }
@@ -45,7 +46,7 @@ export const isWaived = (name: string, waivers?: Waiver[], now?: Date): boolean 
 // Shared by scoring, CSV export, and the Results table.
 export const activeWaivedNames = (
   waivers: Waiver[] | undefined,
-  now: Date = new Date(),
+  now: Date = instant(),
 ): Set<string> => {
   const set = new Set<string>();
   for (const w of waivers ?? []) {
@@ -71,7 +72,7 @@ const futureExpiryMs = (w: Waiver | undefined, nowMs: number): number | null => 
 export const expiringWaivers = (
   waivers: Waiver[] | undefined,
   withinMs: number,
-  now: Date = new Date(),
+  now: Date = instant(),
 ): Waiver[] =>
   (waivers ?? []).filter((w) => {
     const t = futureExpiryMs(w, now.getTime());

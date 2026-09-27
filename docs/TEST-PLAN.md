@@ -450,6 +450,10 @@ an accepted risk neither inflates nor tanks the score.
       DST fall-back that repeats 23:00 (`expiresAtMs` / `dateInputEndOfDayIso`
       in `dates.test.ts`); RFC3339 hour 24 / min 60 / leap-second 60 fail
       closed in `addWaiverPatch`.
+- [x] **Plugin clock is injected, not read from the wall**: a frozen source
+      decides waiver expiry, the active-waiver set, and the date-input default
+      the same way on every run, and `resetClock` restores the real clock
+      (jest `clock.test.ts`).
 - [x] **Waive UI gated + present**: modal offers Waive on FAIL checks (score-
       affecting only) and Remove for any already-waived name; enabled only with
       `clusterbaselines:patch` (Playwright asserts enabled for kubeadmin;

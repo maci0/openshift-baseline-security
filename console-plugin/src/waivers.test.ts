@@ -262,8 +262,9 @@ describe('waivers', () => {
       'FAIL',
     );
     // Expired waiver must not map to WAIVED (score re-includes the FAIL).
-    // resultFilterStatus does not take `now`; isWaived defaults to Date.now().
-    // Use a clearly-past year so wall-clock CI drift cannot flip the chip.
+    // resultFilterStatus does not take `now`; isWaived defaults to the
+    // injected clock. Use a clearly-past year so wall-clock CI drift cannot
+    // flip the chip.
     expect(
       resultFilterStatus(
         { metadata: { name: 'f1' }, status: 'FAIL' },

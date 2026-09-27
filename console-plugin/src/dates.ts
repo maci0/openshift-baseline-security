@@ -1,10 +1,11 @@
 // Local-calendar date helpers for form inputs and display. Shared by waivers,
 // report, and Results UI so timezone edge cases live in one place.
+import { now } from './clock';
 
 // YYYY-MM-DD for an <input type="date"> min/max/value in the user's local
 // calendar. Avoid toISOString().slice(0, 10): that is UTC and shifts the day
 // near midnight for non-UTC zones (and always for UTC+ users in the evening).
-export const localDateInputValue = (d: Date = new Date()): string => {
+export const localDateInputValue = (d: Date = now()): string => {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');

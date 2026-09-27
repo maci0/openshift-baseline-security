@@ -5,6 +5,7 @@
 // so the content key and reschedule cadence cannot drift between Overview and
 // Results.
 import * as React from 'react';
+import { nowMs } from '../clock';
 import { encodeKeyPart } from '../contentKey';
 import { Waiver } from '../models';
 import { futureWaiverDeadlineMs, soonestDeadlineDelayMs } from '../waivers';
@@ -30,7 +31,7 @@ export const useWaiverExpiryClock = (
   const key = waiversContentKey(waivers);
   const [tick, setTick] = React.useState(0);
   React.useEffect(() => {
-    const now = Date.now();
+    const now = nowMs();
     const delay = soonestDeadlineDelayMs(now, futureWaiverDeadlineMs(waivers, now, offsetsMs));
     if (delay === 0) {
       return;

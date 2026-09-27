@@ -1,5 +1,6 @@
 // Printable HTML compliance report builder (score, profiles, fails, waivers).
 // Presentation-only: consumes domain helpers from models/results/scoring/status.
+import { now as instant } from './clock';
 import {
   checkProfileLabel,
   ClusterBaseline,
@@ -219,7 +220,7 @@ const defaultReportTranslate: ReportTranslate = (key, options) => {
 export const buildReportHtml = (
   baseline: ClusterBaseline,
   results: ComplianceCheckResult[] = [],
-  now: Date = new Date(),
+  now: Date = instant(),
   translate: ReportTranslate = defaultReportTranslate,
   localeTag?: string,
 ): string => {

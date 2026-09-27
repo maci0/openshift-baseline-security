@@ -32,6 +32,7 @@ import {
   ownedSuiteSelector,
   scanningDisabled,
 } from '../models';
+import { now, nowMs } from '../clock';
 import { formatCount } from '../dates';
 import { downloadBlob, openBlobInTab } from '../download';
 import { errorMessage } from '../errors';
@@ -154,7 +155,7 @@ const CompliancePage: React.FC = () => {
     // Unique value so a click always mutates the annotation (CO watches
     // changes, so a repeated value starts no scan).
     rescanSeq.current += 1;
-    const token = rescanToken(Date.now(), rescanSeq.current);
+    const token = rescanToken(nowMs(), rescanSeq.current);
     // allSettled never rejects; rejections land in the results array.
     try {
       const results = await Promise.allSettled(
@@ -223,7 +224,7 @@ const CompliancePage: React.FC = () => {
         const html = buildReportHtml(
           baseline,
           ownedResults,
-          new Date(),
+          now(),
           t,
           i18n.language,
         );

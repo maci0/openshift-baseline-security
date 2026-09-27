@@ -51,6 +51,13 @@ Domain logic lives in flat modules under `src/` with a colocated
 `<module>.test.ts`. Components under `src/components/` are presentation and
 data-fetching only.
 
+`src/clock.ts` is the plugin's only wall-clock source, mirroring
+`operator/internal/controller/clock.go`. Read "now" through it (or take the
+`now: Date = now()` parameter) rather than calling `Date.now()` / `new Date()`;
+that is what lets a frozen-clock run decide waiver expiry, the rescan token,
+and the report timestamp identically every time. `setClock` exists for tests
+and simulation, which are its only callers.
+
 There is no barrel: import from the owning module, never re-export through an
 `index` or a `utils`. `src/testing/` holds test-only helpers (the deterministic
 fuzz PRNG) and nothing production imports.
