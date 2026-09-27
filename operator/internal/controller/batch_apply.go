@@ -375,11 +375,23 @@ func (r *ClusterBaselineReconciler) finishRemediationBatch(
 			anyApplying = true
 		}
 	}
-	// Cancelled only when we saw every remediation cleanly (no transient error hid
-	// an apply=true one), so a flaky Get never triggers an early resume.
-	cancelled := !anyApplying && getErr == nil
+	// A listed remediation we could not observe (NotFound, CRD gone, unreadable
+	// apply/applicationState) was never reported Applied, so it satisfies neither
+	// `applied` ("every listed remediation reported Applied") nor `cancelled`
+	// ("none still apply=true"): the state of that name is unknown, not negative.
+	// Without this, a batch whose fixes never landed because its remediations
+	// vanished mid-batch counted as a clean success and RemediationBatchGraceResume
+	// stayed silent.
+	unconfirmed := len(missing) > 0
+	if unconfirmed {
+		applied = false
+	}
+	// Cancelled only when we saw every remediation cleanly (no transient error and
+	// no unobservable name hid an apply=true one), so a flaky Get never triggers an
+	// early resume.
+	cancelled := !anyApplying && getErr == nil && !unconfirmed
 	pastGrace := batchPastGrace(batch.StartedAt, r.now())
-	if applied || pastGrace || cancelled {
+	if applied || pastGrace || cancelled || unconfirmed {
 		for _, p := range batch.Pools {
 			if err := r.setMCPPaused(ctx, p, false, batch.PauseOwner); err != nil {
 				return fmt.Errorf("resuming MachineConfigPool %q after batch: %w", p, err)
@@ -394,7 +406,9 @@ func (r *ClusterBaselineReconciler) finishRemediationBatch(
 		reason := "applied"
 		if cancelled {
 			reason = "cancelled"
-		} else if pastGrace {
+		} else if pastGrace || unconfirmed {
+			// Unconfirmed is the same signal as grace: pools came back with
+			// remediations outstanding, so RemediationBatchGraceResume must see it.
 			reason = "grace"
 		}
 		// waitError: grace can force-resume while remediations were still unreadable;

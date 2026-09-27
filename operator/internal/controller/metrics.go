@@ -79,7 +79,7 @@ var (
 	// (one series each), so there is no cardinality risk.
 	remediationBatches = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "baseline_security_remediation_batches_total",
-		Help: "Remediation batches by outcome: applied (every listed remediation reported Applied), cancelled (none still apply=true), grace (batchResumeGrace expired first, pools unpaused with remediations outstanding), orphaned (crash/cancel recovery unpaused pools that had no batch status).",
+		Help: "Remediation batches by outcome: applied (every listed remediation reported Applied), cancelled (none still apply=true), grace (batchResumeGrace expired first, or a listed remediation could not be observed, so Applied was never confirmed and pools were unpaused with remediations outstanding), orphaned (crash/cancel recovery unpaused pools that had no batch status).",
 	}, []string{"outcome"})
 
 	// Serialize publishMetrics so concurrent reconciles (or a future raise of

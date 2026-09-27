@@ -1169,6 +1169,7 @@ func TestRemediationBatchCountsOutcome(t *testing.T) {
 	ctx := context.Background()
 	// The counter is process-global, so assert deltas across the two passes.
 	cancelledBefore := testutil.ToFloat64(remediationBatches.WithLabelValues("cancelled"))
+	graceBefore := testutil.ToFloat64(remediationBatches.WithLabelValues("grace"))
 
 	if err := r.applyRemediationBatch(ctx, cb); err != nil {
 		t.Fatal(err)
@@ -1196,8 +1197,58 @@ func TestRemediationBatchCountsOutcome(t *testing.T) {
 	if got := testutil.ToFloat64(remediationBatches.WithLabelValues("cancelled")) - cancelledBefore; got != 1 {
 		t.Fatalf("cancelled outcome delta = %v, want 1", got)
 	}
-	if got := testutil.ToFloat64(remediationBatches.WithLabelValues("grace")); got != 0 {
-		t.Fatalf("grace outcome count = %v, want 0", got)
+	if got := testutil.ToFloat64(remediationBatches.WithLabelValues("grace")) - graceBefore; got != 0 {
+		t.Fatalf("grace outcome delta = %v, want 0", got)
+	}
+}
+
+// A listed remediation deleted mid-batch was never reported Applied, so the
+// batch must not close as applied (or cancelled): RemediationBatchGraceResume
+// reads the outcome long after the log line, and applied would report success
+// for fixes that never landed.
+func TestRemediationBatchMissingRemediationCountsGrace(t *testing.T) {
+	scheme := testScheme(t)
+	ok := nodeRemediation("rem-ok", "worker") // rem-gone is listed but never created
+	_ = unstructured.SetNestedField(ok.Object, true, "status", "applicationState")
+	pool := machineConfigPool("worker")
+	_ = unstructured.SetNestedField(pool.Object, true, "spec", "paused")
+	cb := newBatchCB()
+	owner := batchPauseOwner(cb)
+	pool.SetAnnotations(map[string]string{batchPauseOwnerAnnotation: owner})
+	cb.Status.RemediationBatch = &baselinev1alpha1.RemediationBatchStatus{
+		Phase:        baselinev1alpha1.RemediationBatchPhaseApplying,
+		Pools:        []string{"worker"},
+		Remediations: []string{"rem-gone", "rem-ok"},
+		StartedAt:    metav1.Now(),
+		PauseOwner:   owner,
+	}
+	cb.SetAnnotations(map[string]string{batchApplyAnnotation: "rem-gone,rem-ok"})
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).
+			WithObjects(cb, ok, pool).
+			WithStatusSubresource(&baselinev1alpha1.ClusterBaseline{}).Build(),
+		Scheme: scheme,
+	}
+	appliedBefore := testutil.ToFloat64(remediationBatches.WithLabelValues("applied"))
+	graceBefore := testutil.ToFloat64(remediationBatches.WithLabelValues("grace"))
+	if err := r.applyRemediationBatch(context.Background(), cb); err != nil {
+		t.Fatal(err)
+	}
+	if cb.Status.RemediationBatch != nil {
+		t.Fatal("batch must finish: the missing name cannot keep the pools paused")
+	}
+	gotPool := machineConfigPool("worker")
+	if err := r.Get(context.Background(), types.NamespacedName{Name: "worker"}, gotPool); err != nil {
+		t.Fatal(err)
+	}
+	if paused, _, _ := unstructured.NestedBool(gotPool.Object, "spec", "paused"); paused {
+		t.Fatal("pool must resume after the missing remediation is treated as done")
+	}
+	if got := testutil.ToFloat64(remediationBatches.WithLabelValues("applied")) - appliedBefore; got != 0 {
+		t.Fatalf("applied outcome delta = %v, want 0: a missing remediation never reported Applied", got)
+	}
+	if got := testutil.ToFloat64(remediationBatches.WithLabelValues("grace")) - graceBefore; got != 1 {
+		t.Fatalf("grace outcome delta = %v, want 1", got)
 	}
 }
 
