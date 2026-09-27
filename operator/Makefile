@@ -92,6 +92,7 @@ GO_MINOR := $(basename $(GO_VERSION))
 help:
 	@echo "Operator contributor targets:"
 	@echo "  make test          fmt-check, vet, mod-verify, go test ./..., must-gather --self-test"
+	@echo "  make test-race     the same unit suite under the race detector"
 	@echo "  make lint          golangci-lint $(GOLANGCI_LINT_VERSION), shellcheck hack/*.sh, ruff $(RUFF_VERSION) hack/"
 	@echo "  make ci            local replica of the CI operator job (needs docker)"
 	@echo "  make fuzz          short seed-corpus fuzz (run before a release)"
@@ -157,6 +158,14 @@ vet:
 test: fmt-check vet mod-verify
 	go test ./...
 	./hack/must-gather.sh --self-test
+
+# Race detector over the same unit suite. A reconcile-time data race produces no
+# failing assertion in a plain `go test`, so it can merge unnoticed and only
+# surface as a crash in production; the fuzz job runs this too, which leaves the
+# window open for a day.
+.PHONY: test-race
+test-race:
+	go test -race ./...
 
 # Live-cluster e2e; requires KUBECONFIG pointing at a cluster with the operator
 # installed (make deploy or OLM) and a ClusterBaseline reconciled.
@@ -263,6 +272,7 @@ govulncheck:
 .PHONY: ci
 ci:
 	$(MAKE) --no-print-directory test
+	$(MAKE) --no-print-directory test-race
 	$(MAKE) --no-print-directory build
 	$(MAKE) --no-print-directory lint
 	$(MAKE) --no-print-directory govulncheck

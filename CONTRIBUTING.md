@@ -28,7 +28,7 @@ cd openshift-baseline-security
 
 # operator (GOTOOLCHAIN matches go.mod; first run may download that toolchain)
 cd operator
-make test lint
+make test test-race lint
 
 # console plugin
 cd ../console-plugin
@@ -63,7 +63,7 @@ that step needs root, so it is not part of the per-clone loop.
 ## Before a PR
 
 1. Branch `fix/`, `feat/`, `docs/`, or `chore/` from `main`. Never commit to `main`.
-2. Operator edits: `cd operator && make test lint`. Also `make generate manifests`
+2. Operator edits: `cd operator && make test test-race lint`. Also `make generate manifests`
    if you touched API markers or the manager ClusterRole (`config/rbac/role.yaml`),
    and commit the output. CI fails on `git diff --exit-code` after that command.
 3. Plugin edits: `cd console-plugin && yarn lint && yarn lint:oxlint && yarn typecheck && yarn test`.

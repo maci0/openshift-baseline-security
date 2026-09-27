@@ -20,9 +20,9 @@ run. A checklist item should name the cheapest tier that can prove it.
 
 | Tier | Purpose | Command / harness | Gate |
 |---|---|---|---|
-| 0 | Fast local correctness | `operator: make test lint`; `console-plugin: yarn lint && yarn lint:oxlint && yarn typecheck && yarn test` | Every PR |
+| 0 | Fast local correctness | `operator: make test test-race lint`; `console-plugin: yarn lint && yarn lint:oxlint && yarn typecheck && yarn test` | Every PR |
 | 1 | Generated/build artifacts | `operator: make build && make bundle`; repo: `kubectl kustomize operator/config/default`; `console-plugin: yarn build`, whose CI job then prints each `dist` asset raw and `gzip -5` bytes (`yarn ci` is tier 0 plus this build) | Every PR touching manifests, packaging, or frontend |
-| 2 | Hardening | `operator: go test -race ./... && make fuzz` | Nightly and before release |
+| 2 | Hardening | `operator: make test-race && make fuzz` (`make test-race` also runs in tier 0) | Nightly and before release |
 | 3 | API admission | envtest or server-side dry-run against generated CRDs | PRs touching API markers/CRD schema |
 | 4 | Live OpenShift | Go e2e with `KUBECONFIG`; Playwright with `CONSOLE_URL`, `KUBEADMIN_PASSWORD`, and seeded Compliance Operator data | Release candidates |
 | 5 | Release / supply chain | image smoke, bundle install/upgrade, vulnerability scan, SBOM/provenance validation | Release candidates |
@@ -53,7 +53,7 @@ than a copied date.
 |---|---|---|---|
 | 0 Fast local correctness | CI `ci.yml`, every PR/push | see latest Actions run on `main` | gating |
 | 1 Generated/build artifacts | CI `ci.yml` (`make bundle`, `yarn build`) | see latest Actions run | gating |
-| 2 Hardening (`-race`, fuzz) | CI `ci.yml` job `fuzz` on schedule + workflow_dispatch; seeds also run under `make test` | see latest scheduled Actions run | gating (nightly) |
+| 2 Hardening (fuzz) | CI `ci.yml` job `fuzz` on schedule + workflow_dispatch; seeds also run under `make test`; `make test-race` gates every PR | see latest scheduled Actions run | gating (nightly), race run every PR |
 | 3 API admission (envtest) | manual (not yet automated) | envtest harness not yet run; live informer/batch rows below reuse this label | n/a |
 | 4 Live OpenShift (Go e2e + Playwright) | manual, logged below | 2026-07-11 | pass |
 | 5 Release / supply chain | manual (pre-release) | not yet run | n/a |

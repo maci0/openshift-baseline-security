@@ -17,7 +17,7 @@ Node 22 exactly, pinned by `.nvmrc` to the same patch as the digest-pinned
 ## Gate
 
 ```sh
-yarn lint          # eslint ./src ./e2e webpack.config.ts (type-aware except webpack)
+yarn lint          # eslint ./src ./e2e ./tools/attribution webpack.config.ts (type-aware except webpack)
 yarn lint:oxlint   # oxlint: @rikalabs/oxlint-standards strict + test-jest preset, perf, react plugin, local anti-slop
 yarn typecheck     # tsc --noEmit
 yarn test          # jest

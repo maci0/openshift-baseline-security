@@ -14,12 +14,23 @@ select = [
   "SIM",  # simplify
   "RET",  # return-value handling
   "ARG",  # unused arguments
+  "A",    # builtins shadowing
+  "BLE",  # blind except
   "C4",   # comprehensions
+  "C90",  # mccabe complexity
+  "DTZ",  # naive datetime
+  "EXE",  # executable shebangs and file mode
+  "FBT",  # boolean trap
+  "ICN",  # import conventions
+  "ISC",  # implicit string concatenation
+  "N",    # pep8 naming
   "PIE",  # misc lints
   "PTH",  # use pathlib over os.path
   "RUF",  # ruff-specific, includes RUF100 (unused noqa)
   "PL",   # pylint
   "S",    # bandit
+  "T10",  # stray debugger
+  "T20",  # print, allowed below for these CLIs
   "TID",  # tidy imports
 ]
 # The scripts are CLIs: `print` is the output channel, and small counts and
