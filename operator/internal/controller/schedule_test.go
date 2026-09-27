@@ -66,6 +66,17 @@ func TestNormalizedScheduleTable(t *testing.T) {
 		// Wrong field count rejects.
 		{"* * * *", false},
 		{"* * * * * *", false},
+		// Unicode field separators. strings.Fields splits on unicode.IsSpace, so
+		// NEL (U+0085), NBSP (U+00A0), and the ideographic space separate fields
+		// exactly like an ASCII space. U+FEFF is a JS-only \s member and is NOT a
+		// separator here, so it leaves four fields and the schedule rejects. The
+		// console validator mirrors this set (CRON_FIELD_SEPARATORS in cron.ts)
+		// so a pasted zero-width space is refused before the CR Degrades.
+		// Lockstep with cron.test.ts.
+		{"0\u0085 3 * * *", true},
+		{"0\u00a03 * * *", true},
+		{"0\u30003 * * *", true},
+		{"0\ufeff3 * * *", false},
 	}
 	for _, c := range cases {
 		_, _, err := normalizeAndParseSchedule(c.in)

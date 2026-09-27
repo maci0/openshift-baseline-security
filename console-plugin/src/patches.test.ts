@@ -1,4 +1,4 @@
-import { isValidCron } from './cron';
+import { isValidCron, trimCron } from './cron';
 import { isValidK8sName } from './names';
 import { isString } from './parse';
 import { batchApplyPatch, batchApplyRequested, remediationApplyPatch, rescanPatch, rescanToken, resourceVersionTest, schedulePatch, tailoredProfileBindingPatch } from './patches';
@@ -160,6 +160,10 @@ describe('schedule editor helpers', () => {
     expect(isValidCron(`0 1 * * ${'1'.repeat(200)}`)).toBeFalsy();
   });
 
+  // Restated here, not imported from cron.ts, so the field count is checked against
+  // the operator's rule rather than against the validator under test.
+  const operatorSpaceRe = /[\t\n\u000b\f\r\u0020\u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+/;
+
   // Schedule editor feeds free-form text into isValidCron before patching the
   // CR; arbitrary input must never throw and must only accept 5-field forms.
   it('fuzz: isValidCron never throws; true implies five fields', () => {
@@ -179,9 +183,14 @@ describe('schedule editor helpers', () => {
         ok = isValidCron(s);
       }).not.toThrow();
       expect(ok).toBeDefined();
+      // Split on the operator's set (Go unicode.IsSpace, as used by strings.Fields
+      // in schedule.go), not \s: a value that is five fields to the operator is
+      // what must round-trip, and \s admits U+FEFF, which the operator does not
+      // split on.
       let bad: string | undefined;
-      if (ok && s.trim().split(/\s+/).length !== 5) {
-        bad = `isValidCron accepted ${JSON.stringify(s)} (${s.trim().split(/\s+/).length} fields)`;
+      const count = trimCron(s).split(operatorSpaceRe).length;
+      if (ok && count !== 5) {
+        bad = `isValidCron accepted ${JSON.stringify(s)} (${count} fields)`;
       }
       expect(bad).toBeUndefined();
     }

@@ -1,4 +1,4 @@
-import { isValidCron } from './cron';
+import { isValidCron, trimCron } from './cron';
 
 // Local predicate: the sweep pins that isValidCron returns a strict boolean,
 // and typeof checks live only inside type predicates.
@@ -84,6 +84,11 @@ describe('isValidCron accept/reject behavior', () => {
       // A large but int64-parseable step must stay accepted on both sides: the
       // overflow guard must not over-reject what the operator's robfig accepts.
       '*/1000000 * * * *',
+      // Unicode field separators the operator's strings.Fields accepts
+      // (unicode.IsSpace). Lockstep with operator TestNormalizedScheduleTable.
+      '0\u0085 3 * * *',
+      '0\u00a03 * * *',
+      '0\u30003 * * *',
     ]) {
       expect(isValidCron(s)).toBeTruthy();
     }
@@ -108,6 +113,14 @@ describe('isValidCron accept/reject behavior', () => {
       '0 0 L * *',
       '0 0 * * 1#2',
       'H H * * *',
+      // A zero-width no-break space pasted from a web page splits the expression
+      // into five fields under JS \s but only four under the operator's
+      // strings.Fields, so accepting it here would report the schedule saved and
+      // then Degrade the CR with InvalidSchedule. Lockstep with operator
+      // TestNormalizedScheduleTable.
+      '0\ufeff3 * * *',
+      '\ufeff0 3 * * *',
+      '0 3 * * *\ufeff',
     ]) {
       expect(isValidCron(s)).toBeFalsy();
     }
@@ -149,10 +162,15 @@ describe('isValidCron throw-safety (fuzz sweep)', () => {
     }
   });
 
-  it('never accepts anything other than exactly five whitespace fields', () => {
+  it('never accepts a string the operator would not split into five fields', () => {
+    // Restated here rather than imported: the assertion is that every accepted
+    // value is five fields under the operator's own separator set (Go
+    // unicode.IsSpace, as used by strings.Fields in schedule.go), so widening
+    // CRON_FIELD_SEPARATORS past what the operator splits on fails here.
+    const operatorSpaceRe = /[\t\n\u000b\f\r\u0020\u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+/;
     for (const s of HOSTILE) {
       if (!isValidCron(s)) continue;
-      const fields = s.trim().split(/\s+/);
+      const fields = trimCron(s).split(operatorSpaceRe);
       expect(fields).toHaveLength(5);
     }
   });
