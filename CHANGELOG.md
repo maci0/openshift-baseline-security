@@ -1273,6 +1273,18 @@ depend on those tags.
   brotli and zstd are extra module builds, so gzip stays the served encoding
   and the level is the lever.
 
+
+- The console plugin now gzips its assets at level 9 instead of level 5. Every
+  file it serves is content-hashed and marked immutable for a year, so the
+  bytes are compressed once at image build and each browser pays the cost at
+  most once per plugin version; the extra effort is spent on a cache miss and
+  the bytes it saves are spent on every cold fill. The build-time size report
+  and the CI size step already measured at level 9, so the number in the run
+  log is now the number on the wire. Precompressed files plus `gzip_static`
+  are not available here (the UBI module set has no `gzip_static`), and
+  brotli and zstd are extra module builds, so gzip stays the served encoding
+  and the level is the lever.
+
 - The two OpenTelemetry OTLP trace exporter modules move from v1.40.0 to
   v1.44.0, onto the same version as the `go.opentelemetry.io/otel` core
   modules. The exporter builds on the core trace SDK and the two are released
@@ -1454,6 +1466,189 @@ depend on those tags.
   a baseline-only patch created and rewrote objects the operator then consumed.
 
 ### Fixed
+
+- The bundle, catalog, and console plugin image digests followed the clock.
+  `SOURCE_DATE_EPOCH` clamps image and layer creation timestamps, not the
+  mtimes a `COPY` carries into a layer, so `bundle/` (stamped by the checkout),
+  `catalog/` (only clamped locally, not on the CI path) and `dist/` (stamped
+  when webpack ran) each put build time into the layer. The same source built
+  twice, or built locally and in CI, produced two different digests, so a digest
+  comparison could not distinguish a real change from a clock. The three trees
+  are now clamped to `SOURCE_DATE_EPOCH` through one script
+  (`operator/hack/normalize-mtimes.sh`), and `make verify-versions` fails if a
+  clamp is dropped.
+
+- Unbinding a tailored profile while its Edit form was still loading left the
+  modal open on a profile no scan includes any more, and saving it reported
+  `Tailored profile updated.` for a TailoredProfile nothing bound. Edit and
+  Unbind are both enabled on the same card, and the Unbind write now supersedes
+  the in-flight load, as creating one already did.
+- Focus returned to a modal's trigger could land a frame late, after the admin
+  had opened the next dialog, and pull focus out of it behind its backdrop.
+  The deferred restore is now cancelled when its effect re-runs or the view
+  unmounts, and yields when focus is already inside a dialog.
+- Two waiver changes started in the same frame: the second click reached the
+  patch while the first was in flight and did nothing, with no message. It now
+  reports that a waiver change is already in progress.
+- The console and the operator could read a different status from the same
+  Compliance Operator annotation. Both trim the per-node tokens, but JavaScript
+  `String#trim` and Go `strings.TrimSpace` disagree on exactly two characters:
+  the console trims U+FEFF, which Go does not, and Go trims U+0085, which
+  JavaScript does not. An `inconsistent-source` or `most-common-status` value
+  carrying either, from text pasted out of a web page or a word processor, was
+  therefore a status the console displayed and the operator did not count. The
+  console now trims the set Go trims, so an INCONSISTENT check, a batch-apply
+  request, and a remediation dependency list all read the same on both sides.
+- The e2e `.env` loader rejected a whole file that began with a UTF-8 BOM. The
+  BOM is decoded to U+FEFF, is not whitespace to `trim()`, and so became part of
+  the first key, which was then reported as an unknown key. Any `.env` written
+  or re-saved by a Windows editor carries one.
+- A mis-set boolean environment variable whose value was mostly non-ASCII was
+  truncated mid-character in the resulting startup error, so the operator logged
+  a mojibake fragment of a value the admin had set in full. The value is now cut
+  on a rune boundary.
+- `hack/restore.sh` refused a second run against an object the first run had
+  just restored. Both writes bump the live `resourceVersion`, so the staleness
+  guard fired on the restore's own write, printed a warning claiming waiver
+  edits made since the backup would be discarded (the ones that run had just
+  put there), and pointed at `--force`, whose status replace is an
+  unconditional overwrite of state an operator reads as current. The script now
+  also compares the live object's `spec` with the artifact's. The operator
+  never writes `spec`, so a match means the object is already at this backup
+  and the run is a re-run: it is announced and allowed, sending the status
+  without the captured `resourceVersion` that its own previous write staled. A
+  spec that differs in any way is an admin's edit and the guard is unchanged.
+- A failed `CatalogSource` read while auto-detecting the Compliance Operator
+  catalog was discarded with no log. Detection then fails safe to "assume the
+  catalog is present", so a persistent RBAC denial or apiserver error left the
+  `compliance-operator` Subscription pinned to a source that was never
+  verified, and the Subscription sync path declined to correct it for the same
+  reason. The only symptom was a `ScanConfigured` / `ComplianceOperatorReady`
+  stuck on `Installing` with nothing in the operator logs. The read failure is
+  now logged at Error (rate-limited to one line per 30m, V(1) in between) with
+  the CatalogSource name and the underlying cause, and the Subscription create
+  records when the source it wrote came from an unverified guess.
+- Typing one more character than the last match in the Remediations search
+  unmounted the search box itself, leaving no way to back off by a character
+  short of clearing the query and retyping it. The search box and the
+  "Showing X of Y" count now stay on screen in the no-match state.
+- Every link between the Compliance tabs ("Go to Profiles", "Review check
+  results", "Clear filters", the Overview drill-downs) was a bare anchor to a
+  console route, so each one left the single-page app and reloaded the whole
+  console shell, dropping the plugin's open watches. They now navigate inside
+  the console; a modified click still opens the target in a new tab.
+- A remediation whose apply the operator had accepted but not yet written to
+  `status.applicationState` read "Not applied" next to a clickable "Unapply".
+  It now reads "Applying…" until the operator confirms the state.
+- The Results table sorted Status and Severity alphabetically, so an ascending
+  sort read Error, Fail, ..., Pass and High, Info, Low, Medium. Both now sort
+  by their facet order, matching the order of the filter chips above them.
+- Exporting a CSV while a filter was active wrote the filtered rows but
+  confirmed only "Results downloaded as compliance-results.csv.", so a subset
+  was indistinguishable from a full export. The confirmation now names the row
+  count written.
+- The "Showing X of Y checks" and "Showing X of Y remediations" search counts
+  carried no plural form, so a set of one read "Showing 1 of 1 remediations" in
+  English and gave a translator no form to pick for languages that inflect the
+  noun by count. Both are plural keys now, selected by the total.
+- The singular form of the filtered-export confirmation read "Exported 1 of N
+  filtered checks" with a hardcoded numeral. French counts zero in its
+  singular form, so exporting an empty filtered set told a French session it
+  had exported one row. The form interpolates the locale-formatted count.
+- Removing an orphaned waiver reported "The check counts toward the score
+  again", which is false for a waiver that matches no result. The button in the
+  orphan list now shows a progress spinner on the click that is in flight and
+  carries the check name as its tooltip.
+- The Results table gave no count, so a filter that dropped most of the set
+  looked like the whole set. It now shows the filtered count under the filter
+  chips, using the same wording the Remediations search already used.
+
+- On a single-node cluster the console plugin rolled out with
+  `maxUnavailable: 1` against a one-replica Deployment, so a plugin upgrade
+  could take the only pod down and blank Administration → Compliance until its
+  replacement was ready. The plugin Deployment now pins `maxUnavailable: 0`
+  whenever it runs a single replica; two-replica clusters keep `1`, which is
+  what keeps the Deployment Available while a node is drained.
+- The Overview tab rendered one link per newly failing and per fixed check on
+  first paint, and `status.newlyFailed` / `status.fixed` hold up to 4096 names
+  each, so a large scan delta put thousands of elements into the DOM before the
+  rest of the page painted. Both surfaces now render the first 25 of each group
+  and the Recent changes card shows the remainder on request; the counts in the
+  alert and the group headings still report the full totals. The compliance
+  score card on the cluster Overview also passed a fresh watch options object
+  on every render, re-subscribing to the `ClusterBaseline` list each time.
+- A render failure in Administration → Compliance left a blank page. The
+  console mounts an extension page with no error boundary, so a throw while
+  rendering a tab or the page shell unmounted the whole route, and the browser
+  console carried no record of what threw. Every tab route and the page shell
+  now sit behind an error boundary that names the view, reports the reason and
+  the error object to the browser console, and offers Retry, so a bad
+  `ClusterBaseline` or Compliance Operator object an admin fixes no longer
+  needs a full page reload to recover from.
+- The same check status was drawn in different colors depending on which view
+  read it. `MANUAL` was the icon-token amber on the console composition donut
+  and a brighter yellow in the Observe dashboard; `WAIVED` was teal on the
+  console (donut wedge and Results status chip) and the same grey as
+  not-applicable in the dashboard, which stacks the two adjacent. The dashboard
+  now paints both from the same PatternFly 6 tokens the console reads, and the
+  exported HTML report's score and severity type now uses the text status
+  tokens it claimed to use (the warning amber and the success green were
+  hand-picked values that matched no token), so a status is one color across
+  the console, the report, and the dashboard. `TestDashboardUsesStatusPalette`
+  pins the widened set.
+- The Results tab reported "Baseline not configured" with a Create button when
+  the `ClusterBaseline` watch failed, for example on a 403 or a missing CRD.
+  The page forces its loaded flag true on a watch error so the tabs stop
+  skeletonning, and Results was the one tab that did not read
+  `baselineError` off the shared context, so it could not tell a failed read
+  from an absent CR. It now renders the same danger state, naming the reason,
+  that Overview, Remediations, and Profiles already render.
+- The Overview "newly failing" banner and the Recent changes card disagreed
+  with each other. The banner counted only the regressions whose check result
+  was still present, so a scan whose failing rules had all been removed or
+  unbound read "0 checks newly failing" while the status behind it listed
+  them, and Recent changes then claimed there were no changes at all. Both now
+  fall back to the operator's own count and say how many of those have no
+  result left to open.
+- The Degraded and Progressing banners on Overview printed the condition
+  message with no `dir="auto"`, so a right-to-left message reordered the
+  punctuation around it, and a Degraded condition carrying no message rendered
+  a title with no explanation. Both render the message as its own element now,
+  with fallback text when the operator set none.
+- Apiserver and cluster-object text shown in error banners (Remediations
+  apply, unapply, batch, auto-apply and clipboard failures; the schedule
+  editor; baseline create) rendered without `dir="auto"`, unlike every other
+  banner in the plugin, so an RTL resource name inside the message could
+  reorder the text around it.
+- `Export HTML report` disappeared from the page header whenever no
+  `ClusterBaseline` existed, while `Rescan now` stayed visible, disabled, and
+  carrying its reason. The two header controls now behave the same way.
+- The Profiles tab hid `New tailored profile` from anyone without the create
+  verb, leaving no reason and no hint that tailored profiles exist. It renders
+  disabled with the permission reason now, like every other write control in
+  the plugin.
+- `hack/verify-backup.sh` computed the backup age with `date -u -d`, which is
+  GNU coreutils only. On a host with BSD `date` (macOS, which `hack/backup.sh`
+  and `hack/restore.sh` already support for the digest) the conversion failed,
+  the age check was skipped with a note on stderr, and the script exited 0: a
+  backup that had not been refreshed in a year verified as restorable, which
+  is the one failure it exists to catch. The age is now read off the stamp
+  itself (`hack/lib-timestamp.sh`, no external `date` call), and a MANIFEST
+  whose `takenAt` is missing or unparseable fails the check instead of
+  passing it, so an unmeasurable age can no longer be alerted on as a healthy
+  one. `hack/restore.sh` reports the same case as an unknown RPO rather than
+  printing no age at all.
+- `hack/verify-backup.sh` digested the artifact with `sha256sum` directly,
+  where the other two scripts go through `hack/lib-sha256.sh`, so the check
+  could not run at all on a host without GNU coreutils, which is the host the
+  doc tells an admin to pull the off-cluster copy back onto.
+- `hack/restore.sh` now refuses, before any write, an artifact taken at an
+  `apiVersion` the cluster's CRD does not serve. `oc apply` reports that as
+  `no matches for kind`, which during an incident points at RBAC rather than
+  at the version; the refusal names the artifact's version and the served
+  ones, and `--force` overrides it. A cluster whose CRD cannot be read (an
+  etcd restore still in progress) is left to the apply.
+
 
 - A failed `CatalogSource` read while auto-detecting the Compliance Operator
   catalog was discarded with no log. Detection then fails safe to "assume the
@@ -2300,6 +2495,7 @@ depend on those tags.
   that head; delete a leftover Subscription/CSV. ClusterBaseline CRs stay, and
   `hack/backup.sh` / `hack/restore.sh` capture and recover the object if the
   reinstall goes wrong.
+
 
 ## [0.6.1] - 2026-09-02
 

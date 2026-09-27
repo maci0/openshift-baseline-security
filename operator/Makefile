@@ -423,7 +423,11 @@ CATALOG_IMG ?= quay.io/openshift-baseline-security/baseline-security-operator-ca
 # Also checks, in every one of the five Dockerfiles, that each stage declares
 # ARG SOURCE_DATE_EPOCH: BuildKit clamps a stage's layer timestamps only where
 # the ARG is declared, so a stage that drops it re-embeds host build time and
-# two builds of one source stop matching.
+# two builds of one source stop matching. That ARG covers image and layer
+# timestamps only; the mtimes a COPY carries into a layer are the files' own, so
+# every tree an image copies is clamped separately by hack/normalize-mtimes.sh
+# (bundle/ in `make bundle`, catalog/ in `make catalog-prepare`, dist/ in the
+# console-plugin Dockerfile). The three greps below keep those calls in place.
 #
 # The recipe is one shell: every line ends in a backslash, so no shell comment
 # may sit inside it. A comment line without one ends make's continuation and
@@ -522,6 +526,12 @@ verify-versions:
 		|| { echo "Dockerfile.ci go build flags must match the release Dockerfile (reproducibility parity)"; fail=1; }; \
 	grep -qE -- '-trimpath -buildvcs=false -mod=readonly -buildmode=pie' Makefile \
 		|| { echo "Makefile GO_BUILD_FLAGS must match the image go build flags (trimpath, no VCS, readonly, PIE)"; fail=1; }; \
+	grep -qF 'hack/normalize-mtimes.sh bundle/manifests bundle/metadata' Makefile \
+		|| { echo "make bundle must clamp the bundle tree's mtimes; the bundle image digest would otherwise follow the checkout time"; fail=1; }; \
+	grep -qF 'hack/normalize-mtimes.sh catalog' Makefile \
+		|| { echo "make catalog-prepare must clamp the catalog tree's mtimes (the opm cache and the COPY layer read them)"; fail=1; }; \
+	grep -qF 'find dist -exec touch' ../console-plugin/Dockerfile \
+		|| { echo "console-plugin Dockerfile must clamp dist/ mtimes after yarn build; the runtime image digest would otherwise follow the build time"; fail=1; }; \
 	grep -qF -- '-X main.version=$${VERSION}' Dockerfile \
 		|| { echo "release Dockerfile must stamp the version into the binary so manager --version matches the image label"; fail=1; }; \
 	grep -qF -- '-X main.version=$${VERSION}' Dockerfile.ci \
@@ -600,6 +610,12 @@ verify-product-lockstep:
 bundle: manifests
 	$(MAKE) --no-print-directory verify-crd verify-manifests verify-csv-rbac verify-csv-deploy verify-monitoring-bundle verify-bundle-static verify-versions verify-product-lockstep
 	cp config/crd/bases/baselinesecurity.openshift.io_clusterbaselines.yaml bundle/manifests/
+	# Clamp the bundle tree's mtimes before anything copies it into an image:
+	# BuildKit's SOURCE_DATE_EPOCH clamps layer creation times, not the mtimes a
+	# COPY carries in, so an unnormalized bundle/ would make the bundle image
+	# digest depend on when the checkout was made. Same script normalizes
+	# catalog/ (see catalog-prepare), so the two cannot derive the stamp apart.
+	@./hack/normalize-mtimes.sh bundle/manifests bundle/metadata
 	# DOCKER_RUN_FLAGS: pure filesystem I/O (no registry pulls, ro mount).
 	# Ensure the tool image is local first (network=none cannot pull).
 	@$(call ensure_image,$(OPERATOR_SDK_IMAGE))
@@ -733,15 +749,10 @@ catalog-prepare: bundle
 	@grep -qE '^image: .+' catalog/bundle.yaml \
 		|| { echo "catalog/bundle.yaml missing image pullspec after inject"; exit 1; }
 	printf 'schema: olm.package\nname: baseline-security-operator\ndefaultChannel: alpha\n---\nschema: olm.channel\npackage: baseline-security-operator\nname: alpha\nentries:\n  - name: baseline-security-operator.v$(VERSION)\n' > catalog/package.yaml
-	# Clamp mtimes so COPY layers / opm cache do not embed host checkout times.
-	# touch -t is portable (GNU + BSD); avoid GNU-only touch -d @epoch.
-	@epoch="$(SOURCE_DATE_EPOCH)"; \
-	if [ -z "$$epoch" ] || [ "$$epoch" = "0" ]; then \
-		find catalog -exec touch -t 197001010000.00 {} +; \
-	else \
-		ts=$$(date -u -d "@$$epoch" +%Y%m%d%H%M.%S 2>/dev/null || date -u -r "$$epoch" +%Y%m%d%H%M.%S); \
-		find catalog -exec touch -t "$$ts" {} +; \
-	fi
+	# Clamp mtimes so the COPY layer and the opm cache do not embed host
+	# checkout or generator time. Same script and same stamp the bundle image
+	# gets from `make bundle`.
+	@./hack/normalize-mtimes.sh catalog
 	docker run $(DOCKER_RUN_FLAGS) -v "$(CURDIR)/catalog:/catalog:ro,Z" $(OPM_IMAGE) validate /catalog
 
 .PHONY: catalog-build

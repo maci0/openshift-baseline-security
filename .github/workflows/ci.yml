@@ -329,6 +329,14 @@ jobs:
         with:
           persist-credentials: false
       - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+      # BuildKit's SOURCE_DATE_EPOCH clamps image and layer creation timestamps,
+      # not the mtimes a COPY carries into a layer. bundle/ comes straight from
+      # the checkout here, so without this its mtimes are the runner's clone
+      # time and this job's bundle digest cannot match the one `make catalog-
+      # prepare` builds from the same source. `make bundle` runs the same script.
+      - name: normalize bundle mtimes
+        if: matrix.name == 'bundle'
+        run: operator/hack/normalize-mtimes.sh operator/bundle/manifests operator/bundle/metadata
       # --pull: re-verify digest-pinned bases (runners may have a stale local tag).
       # --provenance/--sbom false: attestations embed build metadata and make digests non-reproducible.
       # SOURCE_DATE_EPOCH: BuildKit clamps timestamps for more reproducible digests.

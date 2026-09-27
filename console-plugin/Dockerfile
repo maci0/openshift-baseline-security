@@ -32,7 +32,11 @@ COPY locales/ locales/
 COPY tools/attribution/ tools/attribution/
 COPY tools/size/ tools/size/
 # --network=none: webpack must not fetch packages (install already locked them in).
-RUN --network=none yarn build
+# The find clamps dist/ to SOURCE_DATE_EPOCH: BuildKit clamps the image and layer
+# creation timestamps, not the mtimes the final-stage COPY carries in, so without
+# it the runtime image digest would record the moment this layer ran and two
+# builds of one source would not match. touch is GNU coreutils in the base image.
+RUN --network=none yarn build && find dist -exec touch -d "@${SOURCE_DATE_EPOCH}" {} +
 
 # Image-equivalent layout (document root /opt/app-root/src) with TLS only on 9443.
 # nginx.conf is checked into the repo (no brittle sed against the base image).
