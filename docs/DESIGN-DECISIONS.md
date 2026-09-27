@@ -220,7 +220,8 @@ use `PartialObjectMetadata`: the handler only needs namespace and the suite
 label, and caching full CheckResult/Scan/Remediation bodies would pin
 hundreds of MB on multi-profile clusters. Aggregation still live-lists
 CheckResults (unstructured client, server-side suite selector) in pages of
-500 so a single List cannot timeout or hold the whole set. Keep a
+500 so a single List cannot timeout or hold the whole set. The manager cache is
+scoped to the namespaces those reads use (ADR-032). Keep a
 requeue as a fallback: 1m steady, 15s while Progressing or batch Applying, and
 shorten toward the soonest active waiver `expiresAt` (floored at 1s; see
 ADR-005) so accepted-risk expiry is not stuck behind a full minute when watches
@@ -382,10 +383,15 @@ config CRs (`cluster` name, cluster-scoped).
 
 ## ADR-020: Deleting the baseline does not uninstall the Compliance Operator
 
-**Decision:** Finalizer cleanup removes owned ScanSetting/bindings, console
-plugin resources, dashboard ConfigMap, and resumes any MCP pause this operator
-owns. It does **not** delete the Compliance Operator Subscription, namespace,
-or foreign CO objects (other bindings, remediations already applied).
+**Decision:** Deleting the CR takes the owned objects with it, but through the
+apiserver rather than the finalizer: the ScanSetting, ScanSettingBindings,
+plugin Service/Deployment/PDB, ConsolePlugin CR, and dashboard ConfigMap all
+carry a controller owner reference to the ClusterBaseline, so garbage collection
+removes them. The finalizer does the two things GC cannot: it resumes any MCP
+pause this operator owns and deregisters the plugin from
+`consoles.operator.openshift.io/cluster`. It does **not** delete the Compliance
+Operator Subscription, namespace, or foreign CO objects (other bindings,
+remediations already applied).
 
 **Alternatives:** Uninstall CO on CR delete; leave ScanSettingBindings
 orphaned.
@@ -648,3 +654,37 @@ self-contradictory and fails only after the write.
 repaired by hand; a future change to this rule needs a migration note.
 
 *Recorded: 2026-09-02 (git history, 0.6.0).*
+
+## ADR-032: Manager cache is namespace-scoped, not cluster-wide
+
+**Decision:** `ManagerCacheOptions` bounds the manager's informer cache to the
+two namespaces the reconciler reads: `openshift-compliance` (scan-storage PVCs
+and the compliance CRs the lazy watcher follows) and the plugin namespace
+(Deployment, Service, PodDisruptionBudget). `ClusterBaseline` is cluster-scoped
+and stays cache-wide; foreign CO/OLM/console objects are read unstructured and
+bypass the cache. The metadata-only compliance informers cannot be named in
+`ByObject` (the key would be a bare `*metav1.PartialObjectMetadata`, for which
+`apiutil.GVKForObject` resolves no GVK, so `cache.New` would refuse to start),
+so they ride `DefaultNamespaces` instead. No `cache.AllNamespaces` catch-all: it
+re-admits the named namespaces through a field selector, and a namespaced read
+added outside the two should fail loudly on a cache miss rather than quietly
+widen the cache.
+
+**Alternatives:** Leave the default cluster-wide cache per type; scope only the
+explicit `ByObject` entries; watch the compliance CRs as typed full objects
+instead of `PartialObjectMetadata`; keep a single dedicated cluster for the
+plugin namespace.
+
+**Tradeoff:** The first typed read is what starts an informer, so the scan-storage
+PVC check cached every PersistentVolumeClaim in the cluster and the plugin check
+cached every Deployment, Service, and PDB, and the unbounded compliance informers
+held name, labels, and resourceVersion for every compliance object in every
+namespace for the life of the process. Bounding them trades that heap for a
+constraint: a namespaced typed read outside these two namespaces has to be added
+here as a new `ByObject` entry or it will not be found. Cluster-scoped types are
+unaffected (a multi-namespace cache routes them to its own cluster-wide cache).
+
+**Status:** Keep. Revisit only if a namespaced typed read the reconciler cannot
+avoid appears outside the two namespaces.
+
+*Recorded: 2026-09-27 (git history).*
