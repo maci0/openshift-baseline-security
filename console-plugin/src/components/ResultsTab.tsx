@@ -226,6 +226,15 @@ const ResultsTab: React.FC<{
     setWaiveError(null);
   };
 
+  // Waiver form onChange: store the edit and drop a stale submit error, so the
+  // admin is not still reading the last failed attempt's message mid-typing.
+  const waiveEdit =
+    (set: React.Dispatch<React.SetStateAction<string>>) =>
+    (_e: unknown, value: string) => {
+      set(value);
+      if (waiveError) setWaiveError(null);
+    };
+
   // User dismiss (Escape/X/Cancel): block while a patch is in flight so form
   // state and the error context are not wiped mid-request. Use the ref, not
   // React state: setBusy is async and a dismiss between busyRef=true and the
@@ -1039,11 +1048,7 @@ const ResultsTab: React.FC<{
                             <TextArea
                               id="waive-reason"
                               value={waiveReason}
-                              onChange={(_e, v) => {
-                                setWaiveReason(v);
-                                // Stale submit errors must clear once the admin edits again.
-                                if (waiveError) setWaiveError(null);
-                              }}
+                              onChange={waiveEdit(setWaiveReason)}
                               // Match ClusterBaseline CRD waiver field MaxLength
                               // (same constant the patch validator enforces).
                               maxLength={WAIVER_REASON_MAX_LEN}
@@ -1061,10 +1066,7 @@ const ResultsTab: React.FC<{
                                 <TextInput
                                   id="waive-req"
                                   value={waiveRequestedBy}
-                                  onChange={(_e, v) => {
-                                    setWaiveRequestedBy(v);
-                                    if (waiveError) setWaiveError(null);
-                                  }}
+                                  onChange={waiveEdit(setWaiveRequestedBy)}
                                   maxLength={WAIVER_ATTRIBUTION_MAX_LEN}
                                   autoComplete="name"
                                 />
@@ -1075,10 +1077,7 @@ const ResultsTab: React.FC<{
                                 <TextInput
                                   id="waive-appr"
                                   value={waiveApprovedBy}
-                                  onChange={(_e, v) => {
-                                    setWaiveApprovedBy(v);
-                                    if (waiveError) setWaiveError(null);
-                                  }}
+                                  onChange={waiveEdit(setWaiveApprovedBy)}
                                   maxLength={WAIVER_ATTRIBUTION_MAX_LEN}
                                   autoComplete="name"
                                 />
@@ -1093,10 +1092,7 @@ const ResultsTab: React.FC<{
                                   // Local calendar day (not UTC) so min matches the date picker.
                                   min={localDateInputValue()}
                                   value={waiveExpiresAt}
-                                  onChange={(_e, v) => {
-                                    setWaiveExpiresAt(v);
-                                    if (waiveError) setWaiveError(null);
-                                  }}
+                                  onChange={waiveEdit(setWaiveExpiresAt)}
                                   aria-label={t('Expires (optional)')}
                                 />
                               </FormGroup>
@@ -1109,10 +1105,7 @@ const ResultsTab: React.FC<{
                                   // A review deadline in the past is not schedulable; match Expires.
                                   min={localDateInputValue()}
                                   value={waiveReviewBy}
-                                  onChange={(_e, v) => {
-                                    setWaiveReviewBy(v);
-                                    if (waiveError) setWaiveError(null);
-                                  }}
+                                  onChange={waiveEdit(setWaiveReviewBy)}
                                   aria-label={t('Review by (optional)')}
                                 />
                               </FormGroup>
@@ -1146,7 +1139,7 @@ const ResultsTab: React.FC<{
             {showWaiverForm &&
               (findWaiver(selectedLive.metadata.name, waivers)
                 ? withDisabledTip(
-                    waiveDisabled && waiveDisabledReason ? waiveDisabledReason : undefined,
+                    waiveDisabledReason,
                     <Button
                       variant="secondary"
                       isDisabled={waiveDisabled}
@@ -1157,7 +1150,7 @@ const ResultsTab: React.FC<{
                     </Button>,
                   )
                 : withDisabledTip(
-                    waiveDisabled && waiveDisabledReason ? waiveDisabledReason : undefined,
+                    waiveDisabledReason,
                     <Button
                       variant="primary"
                       isDisabled={waiveDisabled}

@@ -342,7 +342,7 @@ const CompliancePage: React.FC = () => {
                   </Button>,
                 )}
               {withDisabledTip(
-                rescanDisabled && rescanDisabledReason ? rescanDisabledReason : undefined,
+                rescanDisabledReason,
                 <Button
                   variant="secondary"
                   onClick={() => {
