@@ -154,28 +154,7 @@ export const missingDependencySummary = (
 // Sort key for guided remediation: applyable remediations first so prerequisite
 // fixes appear above MissingDependencies rows (openspec guided-remediation).
 // Stable by name within each group. Names are untrusted list-watch data: coerce
-// so a partial/tampered item cannot throw mid-sort. Build one comparator with
-// applyOrderComparator instead of calling localeCompare per comparison.
-export type RemediationOrderComparator = (
-  a: ComplianceRemediation,
-  b: ComplianceRemediation,
-) => number;
-
-export const applyOrderComparator = (collator: Intl.Collator): RemediationOrderComparator => (
-  a,
-  b,
-): number => {
-  const blocked = (r: ComplianceRemediation) =>
-    r.status?.applicationState === 'MissingDependencies' ? 1 : 0;
-  const d = blocked(a) - blocked(b);
-  if (d !== 0) {
-    return d;
-  }
-  const an = isString(a.metadata?.name) ? a.metadata.name : '';
-  const bn = isString(b.metadata?.name) ? b.metadata.name : '';
-  return collator.compare(an, bn);
-};
-
+// so a partial/tampered item cannot throw mid-sort.
 // textCollator, not a bare new Intl.Collator(): it carries the console locale
 // (so a German console orders like the rest of the page, not like the browser's
 // default) and numeric:true, so rule_2 sorts before rule_10 as it does in the
@@ -185,4 +164,18 @@ export const applyOrderComparator = (collator: Intl.Collator): RemediationOrderC
 // other sorted list on the page once the console locale differs.
 export const compareRemediationsForApplyOrder = (
   locale?: string,
-): RemediationOrderComparator => applyOrderComparator(textCollator(locale));
+): ((a: ComplianceRemediation, b: ComplianceRemediation) => number) => {
+  const collator = textCollator(locale);
+  const blocked = (r: ComplianceRemediation) =>
+    r.status?.applicationState === 'MissingDependencies' ? 1 : 0;
+  return (a, b) => {
+    const d = blocked(a) - blocked(b);
+    if (d !== 0) {
+      return d;
+    }
+    return collator.compare(
+      isString(a.metadata?.name) ? a.metadata.name : '',
+      isString(b.metadata?.name) ? b.metadata.name : '',
+    );
+  };
+};

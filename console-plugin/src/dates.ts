@@ -159,7 +159,6 @@ export const textDirection = (locale?: string): 'ltr' | 'rtl' => {
       }
     ).getTextInfo().direction;
     if (dir === 'rtl') return 'rtl';
-    if (dir === 'ltr') return 'ltr';
   } catch {
     switch (tag.split('-')[0].toLowerCase()) {
       case 'ar':
