@@ -464,6 +464,19 @@ const Overview: React.FC<{
     }
     return key;
   })();
+  // Per-bucket result counts. profileScore falls back to flat pass/fail counts
+  // when the CCR bucket is empty and history is empty too, so weightedScores
+  // below reads these and must recompute when they change.
+  const countsKey = (() => {
+    let key = '';
+    for (const p of statusProfiles ?? []) {
+      key += `${p.key}\0${p.pass ?? 0}\0${p.fail ?? 0}\0${p.manual ?? 0}\0${p.info ?? 0}\0${p.error ?? 0}\0${p.inconsistent ?? 0}\0${p.waived ?? 0}\0${p.notApplicable ?? 0}\x01`;
+    }
+    for (const tp of statusTailored ?? []) {
+      key += `tp-${tp.name}\0${tp.pass ?? 0}\0${tp.fail ?? 0}\0${tp.manual ?? 0}\0${tp.info ?? 0}\0${tp.error ?? 0}\0${tp.inconsistent ?? 0}\0${tp.waived ?? 0}\0${tp.notApplicable ?? 0}\x01`;
+    }
+    return key;
+  })();
 
   // One waiver Set + one score pass for all cards (avoids N Set builds and
   // re-scoring every Overview re-render during CCR watch churn).
@@ -501,7 +514,7 @@ const Overview: React.FC<{
     return scores;
     // profiles/waivers read when content keys or expiry clock change.
     // eslint-disable-next-line react-hooks/exhaustive-deps -- content keys + clock
-  }, [resultsByKey, waiversKey, profileHistKey, waiverClock]);
+  }, [resultsByKey, waiversKey, profileHistKey, countsKey, waiverClock]);
 
   // Hooks must run before early returns. Resolve titles from the watched CCR
   // list; one index pass for newlyFailed + fixed (no dual full-list scan).
@@ -538,18 +551,8 @@ const Overview: React.FC<{
 
   // Composition donut totals from status only (not CCR list). Memoize so CCR
   // watch churn does not re-aggregate when profile arrays only reallocate.
-  // Content key: pass/fail/etc counts; identity of status.profiles flaps every
-  // status update even when rollup numbers are unchanged.
-  const countsKey = (() => {
-    let key = '';
-    for (const p of statusProfiles ?? []) {
-      key += `${p.key}\0${p.pass ?? 0}\0${p.fail ?? 0}\0${p.manual ?? 0}\0${p.info ?? 0}\0${p.error ?? 0}\0${p.inconsistent ?? 0}\0${p.waived ?? 0}\0${p.notApplicable ?? 0}\x01`;
-    }
-    for (const tp of statusTailored ?? []) {
-      key += `tp-${tp.name}\0${tp.pass ?? 0}\0${tp.fail ?? 0}\0${tp.manual ?? 0}\0${tp.info ?? 0}\0${tp.error ?? 0}\0${tp.inconsistent ?? 0}\0${tp.waived ?? 0}\0${tp.notApplicable ?? 0}\x01`;
-    }
-    return key;
-  })();
+  // countsKey above: identity of status.profiles flaps every status update
+  // even when rollup numbers are unchanged.
   const totals = React.useMemo(
     () => aggregateCounts(...(statusProfiles ?? []), ...(statusTailored ?? [])),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- content key

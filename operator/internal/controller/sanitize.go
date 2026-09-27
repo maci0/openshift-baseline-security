@@ -520,7 +520,10 @@ func clampFailureListsToBudget(lists ...*[]string) {
 			return // all empty; nothing left to trim
 		}
 		l := lists[largest]
-		removed := len((*l)[len(*l)-1]) + perEntryOverhead
+		// Same accounting as the size pass above: an escaped name releases more
+		// than its byte length, and a raw len here would subtract too little and
+		// trim entries the budget can still hold.
+		removed := jsonStringLen((*l)[len(*l)-1]) + perEntryOverhead
 		*l = (*l)[:len(*l)-1]
 		sizes[largest] -= removed
 		total -= removed
