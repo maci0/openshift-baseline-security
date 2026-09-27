@@ -82,8 +82,10 @@ const NUMBERS = [0, -0, 1, -1, 1e21, -1e21, Number.MAX_SAFE_INTEGER, 0.5, NaN, I
 // Subset of HOSTILE that neither the date-only branch nor `new Date` can turn
 // into a Date, so the fallback contract for them is exact: the input is
 // returned verbatim. Listed explicitly rather than derived, so the assertion
-// states the expectation instead of re-running the parse it checks.
-const UNPARSEABLE = [
+// states the expectation instead of re-running the parse it checks. Iterated as
+// its own list in the fuzz below, so the verbatim claim never sits behind an
+// `if` over the wider corpus.
+const UNPARSEABLE = new Set([
   '',
   ' ',
   '\0',
@@ -101,7 +103,7 @@ const UNPARSEABLE = [
   'NaN',
   'Infinity',
   'x'.repeat(1000),
-];
+]);
 
 describe('dates throw-safety (fuzz sweep)', () => {
   for (const s of HOSTILE) {
@@ -162,12 +164,14 @@ describe('dates throw-safety (fuzz sweep)', () => {
       for (const fmt of [formatLocalDate, formatLocalDateTime]) {
         const out = fmt(s, 'en-US');
         expect(out).not.toContain('Invalid Date');
-        // The exact fallback contract for input the runtime cannot parse at
-        // all: the string comes back verbatim rather than as a locale format
-        // of some other date.
-        if (UNPARSEABLE.includes(s)) {
-          expect(out).toBe(s);
-        }
+      }
+    }
+    // The exact fallback contract for input the runtime cannot parse at all: the
+    // string comes back verbatim rather than as a locale format of some other
+    // date. Its own loop, so the claim is not conditional on the wider corpus.
+    for (const s of UNPARSEABLE) {
+      for (const fmt of [formatLocalDate, formatLocalDateTime]) {
+        expect(fmt(s, 'en-US')).toBe(s);
       }
     }
   });

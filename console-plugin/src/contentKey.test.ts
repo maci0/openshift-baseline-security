@@ -1,4 +1,5 @@
 import { encodeKeyList, encodeKeyPart } from './contentKey';
+import { isString } from './parse';
 import { mulberry32, randomString } from './testing/fuzz';
 
 const NUL = String.fromCharCode(0);
@@ -58,7 +59,12 @@ describe('encodeKeyList', () => {
 // The oracle is the inverse of the encoding's promise, so it holds for every
 // input rather than for a sample of them: equal keys imply values that print
 // the same and share a type. Anything wider is a forge.
-const KEY_LEAVES: unknown[] = [
+// The value shapes the encoder has to stay injective over: the leaf types a
+// hand-edited status.history or waiver can carry. The generator and the oracle
+// share the type, so neither exposes a bare unknown.
+type KeyLeaf = string | number | null | undefined;
+
+const KEY_LEAVES: KeyLeaf[] = [
   undefined,
   null,
   '',
@@ -85,7 +91,7 @@ const KEY_LEAVES: unknown[] = [
   -Infinity,
 ];
 
-const keyLeaf = (next: () => number): unknown => {
+const keyLeaf = (next: () => number): KeyLeaf => {
   if (next() < 0.5) {
     return KEY_LEAVES[Math.floor(next() * KEY_LEAVES.length)];
   }
@@ -95,24 +101,39 @@ const keyLeaf = (next: () => number): unknown => {
   return frag[Math.floor(next() * frag.length)] + randomString(Math.floor(next() * 6));
 };
 
-const keyList = (next: () => number): unknown[] =>
+const keyList = (next: () => number): KeyLeaf[] =>
   Array.from({ length: Math.floor(next() * 4) }, () => keyLeaf(next));
+
+// The kind a part encodes, read off the domain type rather than a fresh typeof
+// probe. Two values of different kinds that print the same must not share a key.
+const leafKind = (leaf: KeyLeaf): string =>
+  leaf === null ? 'null' : leaf === undefined ? 'undefined' : isString(leaf) ? 'string' : 'number';
+
+// The seeds that forged a key, reported together: a fuzz loop that stops at the
+// first collision hides how widespread one is.
+const forge = (seed: number, detail: string): string => `seed ${seed}: ${detail}`;
 
 describe('content key injectivity fuzz', () => {
   it('equal keys imply values that print the same and share a type', () => {
+    const forgeries: string[] = [];
     for (let seed = 1; seed <= 5000; seed++) {
       const next = mulberry32(seed);
       const a = keyLeaf(next);
       const b = keyLeaf(next);
-      if (encodeKeyPart(a) === encodeKeyPart(b)) {
-        if (typeof a !== typeof b || String(a) !== String(b)) {
-          throw new Error(`seed ${seed}: ${JSON.stringify(a)} and ${JSON.stringify(b)} share a key`);
-        }
+      if (encodeKeyPart(a) !== encodeKeyPart(b)) {
+        continue;
+      }
+      if (leafKind(a) !== leafKind(b) || String(a) !== String(b)) {
+        forgeries.push(
+          forge(seed, `${JSON.stringify(a)} and ${JSON.stringify(b)} share a key`),
+        );
       }
     }
+    expect(forgeries).toEqual([]);
   });
 
   it('equal list keys imply the same length and the same elements', () => {
+    const forgeries: string[] = [];
     for (let seed = 1; seed <= 5000; seed++) {
       const next = mulberry32(seed);
       const a = keyList(next);
@@ -121,15 +142,22 @@ describe('content key injectivity fuzz', () => {
         continue;
       }
       if (a.length !== b.length) {
-        throw new Error(`seed ${seed}: ${JSON.stringify(a)} and ${JSON.stringify(b)} share a key`);
+        forgeries.push(
+          forge(seed, `${JSON.stringify(a)} and ${JSON.stringify(b)} share a key`),
+        );
+        continue;
       }
       for (let i = 0; i < a.length; i++) {
-        if (typeof a[i] !== typeof b[i] || String(a[i]) !== String(b[i])) {
-          throw new Error(
-            `seed ${seed} element ${i}: ${JSON.stringify(a[i])} and ${JSON.stringify(b[i])} share a key`,
+        if (leafKind(a[i]) !== leafKind(b[i]) || String(a[i]) !== String(b[i])) {
+          forgeries.push(
+            forge(
+              seed,
+              `element ${i}: ${JSON.stringify(a[i])} and ${JSON.stringify(b[i])} share a key`,
+            ),
           );
         }
       }
     }
+    expect(forgeries).toEqual([]);
   });
 });

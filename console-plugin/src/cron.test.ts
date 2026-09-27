@@ -168,6 +168,7 @@ describe('isValidCron throw-safety (fuzz sweep)', () => {
     // value is five fields under the operator's own separator set (Go
     // unicode.IsSpace, as used by strings.Fields in schedule.go), so widening
     // GO_SPACE in text.ts past what the operator splits on fails here.
+    // oxlint-disable-next-line eslint/no-control-regex -- the operator's separator set is defined by the control characters in it (tab, LF, VT, FF, CR), spelled as escapes
     const operatorSpaceRe = /[\t\n\u000b\f\r\u0020\u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+/;
     for (const s of HOSTILE) {
       if (!isValidCron(s)) continue;

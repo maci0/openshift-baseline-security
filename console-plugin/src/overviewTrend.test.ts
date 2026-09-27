@@ -1,5 +1,6 @@
 import { historyContentKey, toTrendData } from './overviewTrend';
 import { ScoreSnapshot } from './models';
+import { isString } from './parse';
 import { mulberry32 } from './testing/fuzz';
 
 describe('toTrendData', () => {
@@ -176,7 +177,9 @@ describe('history ring fuzz (untrusted status.history)', () => {
       } catch (e) {
         throw new Error(`seed ${seed} threw: ${String(e)}`);
       }
-      expect(typeof key).toBe('string');
+      // The key is a string, checked through the repo's boundary guard rather
+      // than a fresh typeof probe.
+      expect(isString(key)).toBe(true);
       expect(again).toBe(key);
     }
   });

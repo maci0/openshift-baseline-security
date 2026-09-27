@@ -2,6 +2,7 @@ import * as React from 'react';
 import { useTranslation } from 'react-i18next';
 import { Alert, Button, PageSection } from '@patternfly/react-core';
 import { errorMessage } from '../errors';
+import type { UntrustedValue } from '../parse';
 import { reportRenderError } from './renderError';
 
 type TabErrorBoundaryProps = {
@@ -16,7 +17,7 @@ type TabErrorBoundaryState = {
   // and a state keyed on the value would clear itself and remount the same
   // throwing subtree forever.
   failed: boolean;
-  error: unknown;
+  error: UntrustedValue;
 };
 
 // The console renders a dynamic plugin page with no error boundary of its own,
@@ -35,11 +36,11 @@ export class TabErrorBoundary extends React.Component<
 > {
   override state: TabErrorBoundaryState = { failed: false, error: undefined };
 
-  static getDerivedStateFromError(error: unknown): TabErrorBoundaryState {
+  static getDerivedStateFromError(error: UntrustedValue): TabErrorBoundaryState {
     return { failed: true, error };
   }
 
-  override componentDidCatch(error: unknown): void {
+  override componentDidCatch(error: UntrustedValue): void {
     reportRenderError(this.props.name, error);
   }
 
@@ -55,7 +56,7 @@ export class TabErrorBoundary extends React.Component<
   };
 }
 
-const TabError: React.FC<{ name: string; error: unknown; onRetry: () => void }> = ({
+const TabError: React.FC<{ name: string; error: UntrustedValue; onRetry: () => void }> = ({
   name,
   error,
   onRetry,

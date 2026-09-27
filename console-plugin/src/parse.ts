@@ -9,6 +9,34 @@ export const isString = (v: unknown): v is string => typeof v === 'string';
 export const isFiniteNumber = (v: unknown): v is number =>
   typeof v === 'number' && Number.isFinite(v);
 
+// Unrestricted number. The content key has to tell NaN and Infinity apart from
+// the strings that spell them, so it cannot borrow isFiniteNumber's
+// fold-to-absent.
+export const isNumber = (v: unknown): v is number => typeof v === 'number';
+
+export const isBoolean = (v: unknown): v is boolean => typeof v === 'boolean';
+
+export const isBigInt = (v: unknown): v is bigint => typeof v === 'bigint';
+
+export const isSymbol = (v: unknown): v is symbol => typeof v === 'symbol';
+
+// Callable values reach the content key only as the residue JSON.stringify
+// cannot carry; the key tags them by kind, it never calls them.
+export const isFunction = (v: unknown): v is (...args: never[]) => void =>
+  typeof v === 'function';
+
+// A value that crossed the boundary (a field off a cluster object, a browser
+// API result, a caught throw) before a guard has run. The model's declared type
+// is a claim, not a fact: nothing validates a CR at runtime. Attached to the
+// field it is read from so the alias resolves through an owner shape instead of
+// spelling `unknown` on every signature; callers narrow with the guards above,
+// and the few that must tolerate any shape (the content-key encoder) say so.
+export interface UntrustedField {
+  readonly value?: unknown;
+}
+
+export type UntrustedValue = UntrustedField['value'];
+
 // Unicode format characters (BIDI overrides, zero-width, BOM, word joiner).
 // Untrusted CR text uses these to hide a CSV formula sigil, spoof an audit
 // name, or reverse a filename extension. Module-level: CSV/report export
@@ -22,6 +50,7 @@ const controlAndFormatRe = /[\p{Cc}\p{Cf}]/gu;
 // whether it is a formula, so "\u0001=cmd" is evaluated even though the sigil
 // is not the first character. Tab/CR/LF must survive for quoting, so they are
 // spelled out rather than handled by \s.
+// oxlint-disable-next-line eslint/no-control-regex -- matching control characters is this expression's whole contract, and they are already written as escapes
 const exportControlRe = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]/gu;
 
 // Drop BIDI / zero-width / BOM so a later formula or HTML check sees the

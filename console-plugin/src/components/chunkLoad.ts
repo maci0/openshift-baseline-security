@@ -1,5 +1,7 @@
 import * as React from 'react';
 
+import type { UntrustedValue } from '../parse';
+
 // Async-chunk load state. Tabs and Overview charts share this so a failed
 // import() shows Retry instead of a blank region (stale hashed chunk after
 // an upgrade, or a dropped request). `failed` carries the reason: a 404 on a
@@ -8,7 +10,7 @@ import * as React from 'react';
 export type ChunkState<T> =
   | { status: 'loading' }
   | { status: 'ready'; module: T }
-  | { status: 'failed'; error: unknown };
+  | { status: 'failed'; error: UntrustedValue };
 
 // Subscribe to a dynamic-import promise. Returns a cancel function so a
 // retry or unmount ignores a late settle. Tested without a DOM.
@@ -23,7 +25,7 @@ export const watchChunk = <T>(
         deliver({ status: 'ready', module });
       }
     },
-    (error: unknown) => {
+    (error: UntrustedValue) => {
       if (!cancelled) {
         deliver({ status: 'failed', error });
       }

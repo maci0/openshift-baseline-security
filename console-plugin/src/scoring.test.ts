@@ -646,11 +646,9 @@ describe('normalizeScore', () => {
     for (let i = 0; i < 200; i++) {
       const v = i % 3 === 0 ? randomString(1 + (i % 8)) : Math.floor(fuzzRand() * 400) - 100;
       const got = normalizeScore(v);
-      expect(got === null || isNum(got)).toBeTruthy();
-      if (got !== null) {
-        expect(got).toBeGreaterThanOrEqual(0);
-        expect(got).toBeLessThanOrEqual(100);
-      }
+      // Stated as one claim rather than a matcher behind an `if`: a non-number
+      // must not survive, and a surviving number must be inside the CRD range.
+      expect(got === null || (isNum(got) && got >= 0 && got <= 100)).toBe(true);
     }
   });
 });

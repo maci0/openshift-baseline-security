@@ -12,6 +12,7 @@ import {
 import { effectiveStatus } from './status';
 import { activeWaivedNames } from './waivers';
 import { isFiniteNumber, isString } from './parse';
+import type { UntrustedValue } from './parse';
 
 // Operator annotation recording which scoring mode wrote the latest history
 // ring points (lockstep with operator historyScoringModeAnn). Used to detect
@@ -54,7 +55,7 @@ const SCORE_MAX = 100;
  * the operator's clampScore clamps it on write, so the console shows what the
  * operator would have published.
  */
-export const normalizeScore = (v: unknown): number | null => {
+export const normalizeScore = (v: UntrustedValue): number | null => {
   if (!isFiniteNumber(v)) {
     return null;
   }

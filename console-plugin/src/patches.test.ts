@@ -163,6 +163,7 @@ describe('schedule editor helpers', () => {
 
   // Restated here, not imported from cron.ts, so the field count is checked against
   // the operator's rule rather than against the validator under test.
+  // oxlint-disable-next-line eslint/no-control-regex -- the operator's separator set is defined by the control characters in it (tab, LF, VT, FF, CR), spelled as escapes
   const operatorSpaceRe = /[\t\n\u000b\f\r\u0020\u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+/;
 
   // Schedule editor feeds free-form text into isValidCron before patching the

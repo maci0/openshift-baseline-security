@@ -61,10 +61,10 @@ function collect(dir: string, prefix: string): readonly DistFile[] {
 	return files;
 }
 
-function measureAssets(files: readonly DistFile[]): {
-	assets: readonly AssetSize[];
-	unclassifiedJs: readonly string[];
-} {
+// Return inferred: `assets` is narrowed to AssetSize[] by the pushes below, and
+// spelling the shape out here is what the anti-slop widening rule calls a
+// discarded owner contract.
+function measureAssets(files: readonly DistFile[]) {
 	const assets: AssetSize[] = [];
 	const unclassifiedJs: string[] = [];
 	for (const file of files) {

@@ -11,14 +11,19 @@ import { restoreFocus } from './focus';
 // dereferences nothing beyond isConnected and focus at runtime.
 type ElementLike = { isConnected?: boolean; focus(): void };
 
+// Structural stand-in for the dialog surface restoreFocus matches against: it
+// only ever holds these in a Set and compares one by identity.
+type DialogLike = { name: string };
+
 describe('restoreFocus', () => {
   // SAFETY: this suite runs in the jest node environment, where globalThis
-  // carries no window binding; the only member touched here is window, and
-  // restoreFocus reads exactly window.requestAnimationFrame off it.
-  const globalWithWindow = global as { window?: unknown };
+  // carries no window or document binding; restoreFocus reads exactly
+  // window.requestAnimationFrame, window.cancelAnimationFrame, and the
+  // document surface stubbed below (querySelectorAll, activeElement), so this
+  // one cast carries both members.
+  const globalWithWindow = global as { window?: unknown; document?: unknown };
   const origWindow = globalWithWindow.window;
-  const globalWithDocument = global as { document?: unknown };
-  const origDocument = globalWithDocument.document;
+  const origDocument = globalWithWindow.document;
   const pendingFrames: Map<number, (t: number) => void> = new Map();
   let nextFrame = 0;
   beforeEach(() => {
@@ -39,7 +44,7 @@ describe('restoreFocus', () => {
   });
   afterEach(() => {
     globalWithWindow.window = origWindow;
-    globalWithDocument.document = origDocument;
+    globalWithWindow.document = origDocument;
   });
 
   // Defer the frame so the test controls when the callback runs, which is what
@@ -112,10 +117,13 @@ describe('restoreFocus', () => {
 
   // A dialog element stub: the helper only ever puts these in a Set, matches
   // one by identity, and reads querySelectorAll off the document.
-  const fakeDialog = (name: string) => ({ name });
+  const fakeDialog = (name: string): DialogLike => ({ name });
 
-  const stubDocument = (dialogs: unknown[], focused: unknown) => {
-    globalWithDocument.document = {
+  // Structural stand-in for the dialogs the helper matches by identity; it puts
+  // them in a Set and compares one against activeElement.closest()'s result, so
+  // nothing else is dereferenced. `focused` is null for the no-dialog case.
+  const stubDocument = (dialogs: DialogLike[], focused: DialogLike | null) => {
+    globalWithWindow.document = {
       querySelectorAll: () => dialogs,
       activeElement: { closest: () => focused },
     };

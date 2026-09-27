@@ -157,11 +157,10 @@ export const listSeparators = (count: number, locale?: string): string[] => {
   if (count === 2) {
     return [pattern.pair];
   }
-  const out: string[] = new Array(count - 1);
+  // Every interior slot is the same literal, so fill them in one go and set the
+  // two ends; a locale needs one fewer separator than there are items.
+  const out: string[] = Array.from({ length: count - 1 }, () => pattern.mid);
   out[0] = pattern.start;
-  for (let i = 1; i < count - 2; i++) {
-    out[i] = pattern.mid;
-  }
   out[count - 2] = pattern.end;
   return out;
 };

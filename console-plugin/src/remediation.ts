@@ -2,6 +2,7 @@
 import { ComplianceRemediation, nodePoolFromScanName, SCAN_NAME_LABEL } from './models';
 import { isValidK8sName } from './names';
 import { isString, stripFormatChars, stripInvisibleText } from './parse';
+import type { UntrustedValue } from './parse';
 import { formatList, textCollator, trimGoSpace } from './text';
 
 // Fields of a compliance-operator depends-on-obj JSON entry; values are
@@ -98,7 +99,7 @@ export const missingDependencySummary = (
   // disagree on U+FEFF and U+0085 (see text.ts).
   const csvList = (text: string): string[] =>
     text.split(',').map((s) => trimGoSpace(s)).filter(Boolean);
-  const field = (v: unknown): string => stripFormatChars(isString(v) ? trimGoSpace(v) : '');
+  const field = (v: UntrustedValue): string => stripFormatChars(isString(v) ? trimGoSpace(v) : '');
 
   parts.push(...csvList(read(dependsOnAnn)));
 

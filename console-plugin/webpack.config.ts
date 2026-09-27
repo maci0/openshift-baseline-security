@@ -113,11 +113,14 @@ const config: Configuration & { devServer?: DevServerConfiguration } = {
       patterns: [{ from: path.resolve(__dirname, 'locales'), to: 'locales' }],
     }),
   ],
-  // Undefined in a production build, so devServerOptions (and the env it
-  // reads) is never called there. Assigning it unconditionally evaluated
-  // PLUGIN_DEV_ALLOWED_ORIGIN on every `yarn build`, so a mis-set dev-only
-  // value failed the image build this config claims it cannot affect.
-  ...(isProd ? {} : { devServer: devServerOptions() }),
 };
+
+// Undefined in a production build, so devServerOptions (and the env it reads)
+// is never called there. Assigning it unconditionally evaluated
+// PLUGIN_DEV_ALLOWED_ORIGIN on every `yarn build`, so a mis-set dev-only value
+// failed the image build this config claims it cannot affect.
+if (!isProd) {
+  config.devServer = devServerOptions();
+}
 
 export default config;

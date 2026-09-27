@@ -2,6 +2,7 @@
 // Returns null when there is no text a user can act on, so callers can fall back
 // to a translated fail message (errorMessage(e) ?? t('…')).
 import { isString } from './parse';
+import type { UntrustedValue } from './parse';
 
 // Fields a console SDK HttpError or hand-built rejection may carry. Values are
 // untrusted, so every read is narrowed through parse guards before use.
@@ -20,7 +21,7 @@ type RejectionField = RejectionFields['message'];
 const asRejection = (v: unknown): v is RejectionFields =>
   v !== null && typeof v === 'object';
 
-export const errorMessage = (cause: unknown): string | null => {
+export const errorMessage = (cause: UntrustedValue): string | null => {
   if (cause == null || cause === '') {
     return null;
   }
@@ -132,7 +133,7 @@ const reasonIsAlreadyExists = (
 // Do not treat bare HTTP 409 as AlreadyExists: Conflict (optimistic concurrency
 // / resourceVersion mismatch on patch) is also 409. Prefer reason, then
 // message text; bare code alone is ambiguous and returns false.
-export const isAlreadyExists = (cause: unknown): boolean => {
+export const isAlreadyExists = (cause: UntrustedValue): boolean => {
   if (isString(cause)) {
     return /already exists/i.test(cause);
   }

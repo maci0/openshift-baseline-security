@@ -8,14 +8,15 @@
 // the component and the reason to the browser console, where a support bundle
 // reads it from, and hand the reason back so the boundary can render it.
 import { errorMessage } from '../errors';
+import type { UntrustedValue } from '../parse';
 
 // messageForRenderError names the component that threw and the reason it gave.
 // A throw with no usable message is still reported: the component name and the
 // captured error are the record.
-export const messageForRenderError = (component: string, error: unknown): string =>
+export const messageForRenderError = (component: string, error: UntrustedValue): string =>
   `${component}: ${errorMessage(error) ?? 'render failed with no message'}`;
 
-export const reportRenderError = (component: string, error: unknown): string => {
+export const reportRenderError = (component: string, error: UntrustedValue): string => {
   const message = messageForRenderError(component, error);
   // The error object follows the line so the stack survives in the console,
   // which truncates a lone string in some devtools openers.

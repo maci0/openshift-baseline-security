@@ -2,6 +2,7 @@
 import { COMPLIANCE_NAMESPACE, DEFAULT_BASE_PROFILE, isProfileKey, PROFILE_MAX_ITEMS } from './models';
 import { isValidK8sName, isValidTailoredProfileName } from './names';
 import { isString } from './parse';
+import type { UntrustedValue } from './parse';
 
 // Rule object written into TailoredProfile disableRules/enableRules.
 export interface ConsoleRule {
@@ -193,7 +194,7 @@ export const tailoredProfileSpecMatches = (
   const spec = existing?.spec ?? {};
   const isRuleRef = (v: unknown): v is { name?: unknown } =>
     v !== null && typeof v === 'object';
-  const names = (rules: unknown): string[] => {
+  const names = (rules: UntrustedValue): string[] => {
     const list: readonly unknown[] = Array.isArray(rules) ? rules : [];
     return list
       .filter(isRuleRef)

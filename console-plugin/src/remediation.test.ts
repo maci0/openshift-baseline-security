@@ -140,16 +140,17 @@ describe('remediation helpers', () => {
   });
 
   it('missingDependencySummary coerces a non-string annotation instead of throwing', () => {
-    const bogus: unknown = { not: 'a string' };
+    // SAFETY: a hand-edited CR carries an object where the model declares an
+    // annotation string; JSON.parse reproduces exactly that payload, and the
+    // summary must coerce it rather than throw .split on it.
+    const bogus = JSON.parse('{"not": "a string"}') as string;
     expect(
       missingDependencySummary(
         rem(undefined, undefined, {
           metadata: {
             name: 'r',
             namespace: 'openshift-compliance',
-            // SAFETY: annotation values are untrusted CR text; a tampered
-            // non-string must not throw .split on it.
-            annotations: { 'compliance.openshift.io/depends-on': bogus as string },
+            annotations: { 'compliance.openshift.io/depends-on': bogus },
           },
         }),
       ),

@@ -74,7 +74,9 @@ describe('timer seam', () => {
     setTimer(60_000, () => fired.push(ms));
     expect(fired).toEqual([]);
     ms += 60_000;
-    for (const [key, timer] of [...pending]) {
+    // Snapshot before firing: a timer callback may schedule another timer, and
+    // this loop must run only the timers that were due when it started.
+    for (const [key, timer] of Array.from(pending)) {
       if (timer.at <= ms) {
         pending.delete(key);
         timer.fn();
