@@ -103,6 +103,9 @@ help:
 	@echo "  make test-alerts   promtool alert unit tests (needs docker)"
 	@echo "  make fmt           rewrite with gofmt"
 	@echo "  make generate manifests  controller-gen; commit the output"
+	@echo "Release (version lockstep, run after any VERSION bump):"
+	@echo "  make verify-versions   CSV / package.json / CHANGELOG / README agree on VERSION"
+	@echo "  make catalog-prepare   render + validate the file-based catalog (needs docker)"
 	@echo "Single test: go test ./internal/controller/ -count=1 -run TestName"
 
 .PHONY: all
@@ -242,6 +245,7 @@ lint-shell:
 
 .PHONY: lint-python
 lint-python:
+	@command -v uvx >/dev/null || { echo "uvx not on PATH (install uv, then: uvx ruff@$(RUFF_VERSION) --version)" >&2; exit 1; }
 	uvx ruff@$(RUFF_VERSION) check --no-cache hack/
 	uvx ruff@$(RUFF_VERSION) format --no-cache --check hack/
 

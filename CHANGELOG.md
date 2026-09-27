@@ -146,6 +146,15 @@ depend on those tags.
   profile's own score did not carry the score color band the badge beside it,
   the donut center, and the score trend card all use. It is now colored from
   its latest point, which is the profile's current score.
+- Contributor setup: `make lint` reached for `shellcheck` and `uvx ruff`, and
+  neither was in the prerequisites table, so the documented clean-clone command
+  (`make test lint`, in both README and CONTRIBUTING) failed on a host without
+  them. Both are now declared, and `make lint-python` names uv the way
+  `make lint-shell` already named shellcheck instead of failing with a bare
+  `uvx: command not found`.
+- `make help` did not list the release-path targets a version bump needs
+  (`make verify-versions`, `make catalog-prepare`), which are only mentioned in
+  AGENTS.md and the CSV comments.
 - Console plugin `Rescan now` did not always start a scan. The rescan
   annotation value came from a counter that restarted at 1 on every page load,
   so the first rescan after a reload or a tab switch back to the plugin wrote

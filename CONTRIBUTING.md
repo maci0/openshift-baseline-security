@@ -11,11 +11,14 @@ commands that have to work.
 | Go | `go` directive in `operator/go.mod` | Makefile sets `GOTOOLCHAIN` from that line; host Go 1.21+ downloads it |
 | Node | major 22, exact patch in `console-plugin/.nvmrc` | `package.json` `engines.node` is `>=22 <23`; `yarn` scripts refuse any other major |
 | Yarn 4 | `packageManager` in `console-plugin/package.json` | `corepack enable` then `corepack prepare` (same as CI) |
+| shellcheck | n/a | `make lint` only (`lint-shell`); preinstalled on the CI runner, `brew install shellcheck` / `apt-get install shellcheck` elsewhere |
+| uv | n/a | `make lint` only (`lint-python` runs `uvx ruff`); the Makefile names it if `uvx` is missing |
 | docker | n/a | only for `make ci`, `make bundle`, `make test-alerts`, and image builds |
 | `oc` | n/a | only for `make run` / `make deploy` / live e2e |
 
-No other system packages are required for unit tests. Alert unit tests need
-`python3` on PATH (stdlib only) plus docker.
+No other system packages are required for unit tests. `make lint` is the
+only target needing shellcheck and uv. Alert unit tests need `python3` on
+PATH (stdlib only) plus docker.
 
 ## Setup
 
