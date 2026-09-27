@@ -348,7 +348,8 @@ func (r *ClusterBaselineReconciler) finishRemediationBatch(
 			missing = append(missing, name)
 			continue
 		}
-		if s, _, err := unstructured.NestedString(rem.Object, "status", "applicationState"); err != nil {
+		s, _, err := unstructured.NestedString(rem.Object, "status", "applicationState")
+		if err != nil {
 			// Permanent corruption: treat as done (like NotFound). Do not set getErr
 			// or the wait path sticky-Degrades every reconcile until grace even when
 			// sibling remediations are Applied / not applying.
@@ -356,10 +357,12 @@ func (r *ClusterBaselineReconciler) finishRemediationBatch(
 				"remediation", name, "name", cb.Name, "error", err.Error())
 			missing = append(missing, name)
 			continue
-		} else if s != "Applied" {
+		}
+		if s != "Applied" {
 			applied = false
 		}
-		if a, _, err := unstructured.NestedBool(rem.Object, "spec", "apply"); err != nil {
+		a, _, err := unstructured.NestedBool(rem.Object, "spec", "apply")
+		if err != nil {
 			// Permanent corruption: not Applied, not applying, not getErr. Allows
 			// cancel when no healthy rem is still apply=true, and applied when
 			// every other rem is Applied (this name counts as terminal).
@@ -367,7 +370,8 @@ func (r *ClusterBaselineReconciler) finishRemediationBatch(
 				"remediation", name, "name", cb.Name, "error", err.Error())
 			missing = append(missing, name)
 			continue
-		} else if a {
+		}
+		if a {
 			anyApplying = true
 		}
 	}

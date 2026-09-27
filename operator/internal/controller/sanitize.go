@@ -496,13 +496,14 @@ func jsonStringLen(s string) int {
 			i += 2
 		case c >= utf8.RuneSelf:
 			// A well-formed rune is copied verbatim, so skip its trailing bytes.
-			// An ill-formed one is one byte in and the six-byte \ufffd escape
-			// out: the encoder coerces rather than failing, and a status
+			// An ill-formed one is one byte in and one raw U+FFFD out (three
+			// bytes, not the six of the \ufffd escape older encoding/json
+			// wrote): the encoder coerces rather than failing, and a status
 			// restored from a protobuf backup can carry lone continuation
 			// bytes, which a one-byte count under-budgets.
 			_, size := utf8.DecodeRuneInString(s[i:])
 			if size == 1 {
-				n += 5
+				n += 2
 				break
 			}
 			i += size - 1
