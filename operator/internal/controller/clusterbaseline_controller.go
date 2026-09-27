@@ -80,6 +80,11 @@ const (
 	// descriptions) on a slow API; longer leaves a wedged call past useful
 	// recovery. controller-runtime default is 0 (no timeout).
 	reconcileTimeout = 5 * time.Minute
+	// One Reconcile at a time. The target is a cluster-scoped singleton, so
+	// concurrency buys nothing, and the reconciler's transition-logging and
+	// rate-limit fields are written without synchronization. Pinned in
+	// SetupWithManager so that invariant does not rest on a library default.
+	maxConcurrentReconciles = 1
 	// Desired HA for the console plugin Deployment.
 	pluginReplicas = int32(2)
 	// Ready threshold for ConsolePluginReady=True: one ready pod is enough for
@@ -473,7 +478,20 @@ func (r *ClusterBaselineReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&appsv1.Deployment{}).
 		Owns(&corev1.Service{}).
 		Named("clusterbaseline").
-		WithOptions(controller.Options{ReconciliationTimeout: reconcileTimeout}).
+		// MaxConcurrentReconciles is pinned, not left at the controller-runtime
+		// default. The reconciler carries unsynchronized per-reconcile state
+		// (goneLogged, lastPostureLogSig, lastHistoryStallLog, lastDashboardErrLog,
+		// lastInfraErrLog) whose transition-logging and rate-limit correctness
+		// assumes one Reconcile at a time. The default happens to be 1, but
+		// relying on a dependency's default for a data-race invariant means a
+		// library bump, or one MaxConcurrentReconciles added here later, silently
+		// turns those fields into torn read-modify-writes. Naming the value makes
+		// the assumption an enforced property; raising it requires putting a mutex
+		// around those fields first.
+		WithOptions(controller.Options{
+			ReconciliationTimeout:   reconcileTimeout,
+			MaxConcurrentReconciles: maxConcurrentReconciles,
+		}).
 		Build(r)
 	if err != nil {
 		return err

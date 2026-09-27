@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/tls"
 	"errors"
 	"net"
@@ -15,6 +16,12 @@ import (
 	certutil "k8s.io/client-go/util/cert"
 )
 
+// writeTestPair stages a rotated cert/key pair and renames each into place.
+// Rename, not os.WriteFile: TestMetricsCertProviderConcurrentReload rotates
+// while other goroutines read the same two paths, and an in-place write truncates
+// before it writes, so a concurrent reader could see a zero-length tls.crt and
+// take the corrupt-Secret path for reasons the rotation never intended. Each path
+// now flips atomically, so a reader sees the whole old file or the whole new one.
 func writeTestPair(t *testing.T, dir string) {
 	t.Helper()
 	certPEM, keyPEM, err := certutil.GenerateSelfSignedCertKeyWithFixtures(
@@ -22,10 +29,36 @@ func writeTestPair(t *testing.T, dir string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "tls.crt"), certPEM, 0o600); err != nil {
+	writeFileAtomic(t, filepath.Join(dir, "tls.crt"), certPEM)
+	writeFileAtomic(t, filepath.Join(dir, "tls.key"), keyPEM)
+}
+
+// writeFileAtomic stages the bytes in a fresh temp file in the target's directory
+// and renames them over it, so a concurrent reader never observes a partially
+// written file. CreateTemp picks the name atomically: a shared fixed temp name
+// would be the same torn-write race one level down.
+func writeFileAtomic(t *testing.T, path string, data []byte) {
+	t.Helper()
+	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".*.tmp")
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "tls.key"), keyPEM, 0o600); err != nil {
+	name := tmp.Name()
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		os.Remove(name)
+		t.Fatal(err)
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(name)
+		t.Fatal(err)
+	}
+	if err := os.Chmod(name, 0o600); err != nil {
+		os.Remove(name)
+		t.Fatal(err)
+	}
+	if err := os.Rename(name, path); err != nil {
+		os.Remove(name)
 		t.Fatal(err)
 	}
 }
@@ -476,6 +509,53 @@ func TestMetricsCertProviderConcurrentReload(t *testing.T) {
 	}
 	if cachedFP != wantFP {
 		t.Fatal("cache fingerprint does not match final on-disk pair after concurrent reload")
+	}
+}
+
+// A rotation must not be observable as a truncated file. writeTestPair renames
+// each path into place, so a reader racing the writer sees the whole old file or
+// the whole new one; the in-place write it replaced left a truncate-to-zero window
+// that concurrent handshakes could read as an empty Secret.
+func TestWriteTestPairIsAtomicUnderConcurrentReads(t *testing.T) {
+	dir := t.TempDir()
+	writeTestPair(t, dir)
+	// Large enough that the truncate-then-write window of an in-place write spans
+	// many read attempts rather than a few instructions.
+	big := bytes.Repeat([]byte("-----BEGIN CERTIFICATE-----\n"), 4096)
+	// Establish the post-rotation size before the reader starts, so every read
+	// is compared against the same length.
+	writeFileAtomic(t, filepath.Join(dir, "tls.crt"), big)
+
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	var short atomic.Int64
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			for _, p := range []string{"tls.crt", "tls.key"} {
+				b, err := os.ReadFile(filepath.Join(dir, p))
+				if err != nil {
+					continue
+				}
+				if len(b) == 0 || (p == "tls.crt" && len(b) < len(big)) {
+					short.Add(1)
+				}
+			}
+		}
+	}()
+	for i := 0; i < 50; i++ {
+		writeFileAtomic(t, filepath.Join(dir, "tls.crt"), big)
+	}
+	close(stop)
+	wg.Wait()
+	if n := short.Load(); n > 0 {
+		t.Fatalf("observed %d truncated reads during rotation", n)
 	}
 }
 
