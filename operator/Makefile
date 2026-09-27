@@ -606,9 +606,9 @@ verify-monitoring-bundle:
 	@diff -u <(sed '/^  namespace: openshift-baseline-security$$/d' config/prometheus/prometheusrule.yaml) \
 		bundle/manifests/baseline-security-operator_monitoring.coreos.com_v1_prometheusrule.yaml \
 		|| { echo "bundle PrometheusRule drifted from config/prometheus/prometheusrule.yaml"; exit 1; }
-	# Strip namespace + comments: config SM is multi-doc and annotated for humans.
+	# Strip namespace + comments: the config SM is annotated for humans.
 	@diff -u \
-		<(sed -n '/^apiVersion: monitoring.coreos.com/,$${ /^  namespace: openshift-baseline-security$$/d; /^[[:space:]]*#/d; p; }' \
+		<(sed '/^  namespace: openshift-baseline-security$$/d; /^[[:space:]]*#/d' \
 			config/prometheus/servicemonitor.yaml) \
 		bundle/manifests/baseline-security-operator_monitoring.coreos.com_v1_servicemonitor.yaml \
 		|| { echo "bundle ServiceMonitor drifted from config/prometheus/servicemonitor.yaml"; exit 1; }

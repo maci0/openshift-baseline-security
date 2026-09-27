@@ -5,5 +5,6 @@ kind: Kustomization
 # without the Prometheus Operator CRDs; ship by default.
 resources:
   - serving-ca-configmap.yaml
+  - metrics_scraper.yaml
   - servicemonitor.yaml
   - prometheusrule.yaml
