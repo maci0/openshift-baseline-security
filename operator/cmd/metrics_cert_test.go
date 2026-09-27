@@ -12,6 +12,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"unicode/utf8"
 
 	certutil "k8s.io/client-go/util/cert"
 )
@@ -320,6 +321,35 @@ func TestParseEnvBoolTruncatesRejectedValue(t *testing.T) {
 	}
 	if strings.Count(err.Error(), "x") > envBoolValueMaxLog {
 		t.Fatalf("error still contains the full value: len=%d", len(err.Error()))
+	}
+}
+
+// A mostly-multibyte rejected value must truncate on a rune boundary. A byte
+// slice cuts mid-rune here, and the invalid byte reaches the error string
+// escaped as \x.., so the setup log shows mojibake for a value the admin set.
+func TestParseEnvBoolTruncationKeepsValidUTF8(t *testing.T) {
+	const key = "BASELINE_SECURITY_SKIP_DEFAULT_CR"
+	// 'é' is 2 bytes: 64 of them is 128 bytes, so the old byte-slice cap cut
+	// inside the 33rd rune. '€' is 3 bytes and exercises a different stride.
+	for _, filler := range []string{"é", "€", "💩"} {
+		t.Setenv(key, strings.Repeat(filler, envBoolValueMaxLog+8)+"junk")
+		_, err := parseEnvBool(key)
+		if err == nil {
+			t.Fatalf("%q: oversize junk must be rejected", filler)
+		}
+		if !strings.Contains(err.Error(), "...") {
+			t.Fatalf("%q: rejected value should be truncated: %v", filler, err)
+		}
+		if strings.Contains(err.Error(), `\x`) {
+			t.Fatalf("%q: truncation split a rune: %v", filler, err)
+		}
+		if !utf8.ValidString(err.Error()) {
+			t.Fatalf("%q: error is not valid UTF-8: %q", filler, err)
+		}
+		// The cap is in runes, so exactly envBoolValueMaxLog survive.
+		if got := strings.Count(err.Error(), filler); got != envBoolValueMaxLog {
+			t.Fatalf("%q: kept %d runes, want %d", filler, got, envBoolValueMaxLog)
+		}
 	}
 }
 

@@ -2,6 +2,7 @@
 import { ComplianceCheckResult, Waiver } from './models';
 import { isWaived } from './waivers';
 import { isString } from './parse';
+import { trimGoSpace } from './text';
 
 export type NodeStatus = { node: string; status: string };
 
@@ -112,15 +113,15 @@ export const inconsistentSources = (
   const raw = ann[inconsistentSourceAnn] ?? '';
   const sources = raw
     .split(',')
-    .map((s) => s.trim())
+    .map((s) => trimGoSpace(s))
     .filter(Boolean)
     .map((s) => {
       const i = s.indexOf(':');
       return i < 0
         ? { node: s, status: '' }
-        : { node: s.slice(0, i).trim(), status: upperStatusToken(s.slice(i + 1).trim()) };
+        : { node: trimGoSpace(s.slice(0, i)), status: upperStatusToken(trimGoSpace(s.slice(i + 1))) };
     });
-  const mostCommon = upperStatusToken((ann[mostCommonStatusAnn] ?? '').trim());
+  const mostCommon = upperStatusToken(trimGoSpace(ann[mostCommonStatusAnn] ?? ''));
   return { sources, mostCommon: mostCommon || null };
 };
 
@@ -192,11 +193,11 @@ export const effectiveStatus = (
   while (start <= raw.length) {
     const comma = raw.indexOf(',', start);
     const end = comma < 0 ? raw.length : comma;
-    const s = raw.slice(start, end).trim();
+    const s = trimGoSpace(raw.slice(start, end));
     if (s) {
       const colon = s.indexOf(':');
       if (colon >= 0) {
-        const st = upperStatusToken(s.slice(colon + 1).trim());
+        const st = upperStatusToken(trimGoSpace(s.slice(colon + 1)));
         if (st) {
           add(st);
         }
@@ -207,7 +208,7 @@ export const effectiveStatus = (
     }
     start = comma + 1;
   }
-  const mostCommon = (ann?.[mostCommonStatusAnn] ?? '').trim();
+  const mostCommon = trimGoSpace(ann?.[mostCommonStatusAnn] ?? '');
   if (mostCommon) {
     add(upperStatusToken(mostCommon));
   }

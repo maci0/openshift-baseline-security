@@ -131,7 +131,23 @@ depend on those tags.
 - Two waiver changes started in the same frame: the second click reached the
   patch while the first was in flight and did nothing, with no message. It now
   reports that a waiver change is already in progress.
-
+- The console and the operator could read a different status from the same
+  Compliance Operator annotation. Both trim the per-node tokens, but JavaScript
+  `String#trim` and Go `strings.TrimSpace` disagree on exactly two characters:
+  the console trims U+FEFF, which Go does not, and Go trims U+0085, which
+  JavaScript does not. An `inconsistent-source` or `most-common-status` value
+  carrying either, from text pasted out of a web page or a word processor, was
+  therefore a status the console displayed and the operator did not count. The
+  console now trims the set Go trims, so an INCONSISTENT check, a batch-apply
+  request, and a remediation dependency list all read the same on both sides.
+- The e2e `.env` loader rejected a whole file that began with a UTF-8 BOM. The
+  BOM is decoded to U+FEFF, is not whitespace to `trim()`, and so became part of
+  the first key, which was then reported as an unknown key. Any `.env` written
+  or re-saved by a Windows editor carries one.
+- A mis-set boolean environment variable whose value was mostly non-ASCII was
+  truncated mid-character in the resulting startup error, so the operator logged
+  a mojibake fragment of a value the admin had set in full. The value is now cut
+  on a rune boundary.
 - A failed `CatalogSource` read while auto-detecting the Compliance Operator
   catalog was discarded with no log. Detection then fails safe to "assume the
   catalog is present", so a persistent RBAC denial or apiserver error left the

@@ -23,6 +23,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -398,8 +399,13 @@ func parseEnvBool(key string) (bool, error) {
 		return false, nil
 	default:
 		shown := raw
-		if len(shown) > envBoolValueMaxLog {
-			shown = shown[:envBoolValueMaxLog] + "..."
+		// Rune count, and a rune-boundary cut, not a byte slice: a value that
+		// is mostly multibyte ("hééé…") hits the cap in far fewer than 64
+		// bytes, and a byte cut can land mid-rune, putting a raw invalid byte
+		// into the error string that %q then escapes as \x.., so the setup log
+		// shows mojibake for a value the admin set in full.
+		if n := utf8.RuneCountInString(shown); n > envBoolValueMaxLog {
+			shown = string([]rune(shown)[:envBoolValueMaxLog]) + "..."
 		}
 		return false, fmt.Errorf("%w: %s=%q (want true/false, 1/0, yes/no, on/off, y/n, t/f, enable/disable)", errInvalidEnvBool, key, shown)
 	}

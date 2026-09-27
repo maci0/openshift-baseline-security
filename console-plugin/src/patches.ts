@@ -3,7 +3,7 @@ import { isValidCron, trimCron } from './cron';
 import { TAILORED_PROFILE_MAX_ITEMS, WAIVER_MAX_ITEMS, Waiver } from './models';
 import { isValidK8sName, isValidTailoredProfileName } from './names';
 import { isString, stripControlAndFormat, stripInvisibleText } from './parse';
-import { codePointLength } from './text';
+import { codePointLength, trimGoSpace } from './text';
 
 // One RFC 6902 operation emitted by the patch builders in this module. value
 // is the JSON payload written at path; tests assert exact shapes.
@@ -30,7 +30,7 @@ export const batchApplyRequested = (
     return false;
   }
   for (const part of raw.split(',')) {
-    if (part.trim()) {
+    if (trimGoSpace(part)) {
       return true;
     }
   }
@@ -90,7 +90,7 @@ export const batchApplyPatch = (hasAnnotations: boolean, names: string[]): Patch
   const seen = new Set<string>();
   const list: string[] = [];
   for (const raw of names) {
-    const n = raw.trim();
+    const n = trimGoSpace(raw);
     if (!n || !isValidK8sName(n) || seen.has(n)) continue;
     seen.add(n);
     list.push(n);

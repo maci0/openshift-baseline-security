@@ -1,4 +1,4 @@
-import { codePointLength, compareForDisplay, foldForSearch, foldSearchQuery, formatList, listSeparators, matchesFolded, textCollator } from './text';
+import { codePointLength, compareForDisplay, foldForSearch, foldSearchQuery, formatList, listSeparators, matchesFolded, textCollator, trimGoSpace } from './text';
 
 describe('foldForSearch', () => {
   it('folds case and strips diacritics', () => {
@@ -260,5 +260,44 @@ describe('codePointLength', () => {
   it('agrees with .length on ASCII', () => {
     expect(codePointLength('no_empty_passwords')).toBe('no_empty_passwords'.length);
     expect(codePointLength('')).toBe(0);
+  });
+});
+
+describe('trimGoSpace', () => {
+  // The set Go's strings.TrimSpace trims. The parity paths (INCONSISTENT status
+  // tokens, the batch-apply annotation) must not read a status the operator
+  // does not, and the two sets disagree on exactly two characters.
+  it('trims what Go trims, including NEL which String#trim does not', () => {
+    for (const sp of [
+      '\t', '\n', '\v', '\f', '\r', '\u0020', '\u0085', '\u00a0', '\u1680',
+      '\u2000', '\u200a', '\u2028', '\u2029', '\u202f', '\u205f', '\u3000',
+    ]) {
+      expect(trimGoSpace(`${sp}PASS${sp}`)).toBe('PASS');
+    }
+    // U+0085 NEL: operator trims, String#trim does not.
+    expect('\u0085PASS'.trim()).not.toBe('PASS');
+    expect(trimGoSpace('\u0085PASS')).toBe('PASS');
+  });
+
+  it('keeps U+FEFF, which Go does not trim and String#trim wrongly does', () => {
+    // The operator leaves the BOM in the token, so it reads as an unknown
+    // status (INCONSISTENT). Trimming it here would show the console a PASS
+    // the operator never counted.
+    expect('\uFEFFPASS'.trim()).toBe('PASS');
+    expect(trimGoSpace('\uFEFFPASS')).toBe('\uFEFFPASS');
+  });
+
+  it('keeps non-space invisible characters, matching Go', () => {
+    // ZWSP is not unicode.IsSpace: neither side trims it, so a status token
+    // carrying one stays unknown on both.
+    expect(trimGoSpace('\u200bPASS')).toBe('\u200bPASS');
+    // An interior space is untouched; only the ends are trimmed.
+    expect(trimGoSpace(' NOT APPLICABLE ')).toBe('NOT APPLICABLE');
+  });
+
+  it('trims both ends and leaves an all-space value empty', () => {
+    expect(trimGoSpace('  \r\n PASS \t ')).toBe('PASS');
+    expect(trimGoSpace(' \t ')).toBe('');
+    expect(trimGoSpace('')).toBe('');
   });
 });

@@ -80,7 +80,12 @@ export function parseDotEnv(text: string, file: string): Map<string, string> {
 // alone.
 export function loadDotEnv(path: string): void {
   if (!existsSync(path)) return;
-  for (const [key, val] of parseDotEnv(readFileSync(path, 'utf8'), path)) {
+  // Strip a leading UTF-8 BOM: readFileSync decodes it to U+FEFF and it is not
+  // whitespace to trim(), so the first KEY becomes "CONSOLE_URL" and the
+  // whole file is rejected as unknown keys. A BOM rides in on any .env written
+  // or re-saved by a Windows editor.
+  const text = readFileSync(path, 'utf8').replace(/^\uFEFF/, '');
+  for (const [key, val] of parseDotEnv(text, path)) {
     const existing = process.env[key];
     if (existing !== undefined && existing.trim() !== '') continue;
     process.env[key] = val;

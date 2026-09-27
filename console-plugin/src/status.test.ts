@@ -106,6 +106,39 @@ describe('inconsistentSources', () => {
       expect(mostCommon === null || isString(mostCommon)).toBeTruthy();
     }
   });
+
+  // Operator parity for the annotation trim. Go's strings.TrimSpace and
+  // String#trim disagree on U+0085 (operator trims) and U+FEFF (console
+  // trims), so a pasted annotation with either made the console and the
+  // operator disagree on the status, silently, because both characters are
+  // invisible. Pinned here so the parity trim stays trimGoSpace.
+  it('trims the annotation exactly as the operator TrimSpace does', () => {
+    // NEL: operator reads PASS, so the console must too (collapses to PASS).
+    expect(
+      effectiveStatus(
+        withAnn({
+          'compliance.openshift.io/inconsistent-source': 'n0:PASS',
+          'compliance.openshift.io/most-common-status': 'NOT-APPLICABLE',
+        }),
+      ),
+    ).toBe('PASS');
+    // BOM: the operator does NOT trim it, so the token stays unknown and the
+    // check stays INCONSISTENT. Trimming it would report a PASS the operator
+    // never counted.
+    expect(
+      effectiveStatus(
+        withAnn({
+          'compliance.openshift.io/inconsistent-source': 'n0:﻿PASS',
+          'compliance.openshift.io/most-common-status': 'NOT-APPLICABLE',
+        }),
+      ),
+    ).toBe('INCONSISTENT');
+    expect(
+      inconsistentSources(
+        withAnn({ 'compliance.openshift.io/inconsistent-source': 'n0:﻿PASS' }),
+      ).sources,
+    ).toEqual([{ node: 'n0', status: '﻿PASS' }]);
+  });
 });
 
 describe('effectiveStatus', () => {

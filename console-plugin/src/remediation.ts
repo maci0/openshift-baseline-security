@@ -2,7 +2,7 @@
 import { ComplianceRemediation, nodePoolFromScanName, SCAN_NAME_LABEL } from './models';
 import { isValidK8sName } from './names';
 import { isString, stripFormatChars, stripInvisibleText } from './parse';
-import { formatList, textCollator } from './text';
+import { formatList, textCollator, trimGoSpace } from './text';
 
 // Fields of a compliance-operator depends-on-obj JSON entry; values are
 // untrusted annotation text, so each field is narrowed before use.
@@ -93,10 +93,12 @@ export const missingDependencySummary = (
     return stripFormatChars(isString(v) ? v : '');
   };
   // Comma-separated annotation values are trimmed and dropped when empty, the
-  // same on every annotation that carries one.
+  // same on every annotation that carries one. trimGoSpace, not String#trim:
+  // the operator's splitCSV trims with Go's strings.TrimSpace, and the two sets
+  // disagree on U+FEFF and U+0085 (see text.ts).
   const csvList = (text: string): string[] =>
-    text.split(',').map((s) => s.trim()).filter(Boolean);
-  const field = (v: unknown): string => stripFormatChars(isString(v) ? v.trim() : '');
+    text.split(',').map((s) => trimGoSpace(s)).filter(Boolean);
+  const field = (v: unknown): string => stripFormatChars(isString(v) ? trimGoSpace(v) : '');
 
   parts.push(...csvList(read(dependsOnAnn)));
 

@@ -167,6 +167,30 @@ export const listSeparators = (count: number, locale?: string): string[] => {
   return out;
 };
 
+// Trim the character set Go's strings.TrimSpace trims (unicode.IsSpace plus the
+// Latin-1 specials): the ASCII whitespace controls, space, NEL, NBSP, and the
+// Unicode_Space_Separator plus line/paragraph separator blocks.
+//
+// String#trim is NOT this set, and the difference breaks operator parity in
+// both directions on the paths that must agree with a Go TrimSpace:
+//
+//   U+FEFF  JS-only. "node:\uFEFFPASS" is "PASS" to the console and
+//           "\uFEFFPASS" (an unknown token, so INCONSISTENT) to the operator.
+//   U+0085  operator-only (NEL, C1). "node:\u0085PASS" is "PASS" to the operator
+//           and "\u0085PASS" to the console.
+//
+// Both characters ride in on text pasted from a web page or a word processor,
+// and both are invisible, so the mismatch is silent: the console shows one
+// status while the operator counts another. Same set and same reasoning as
+// CRON_FIELD_SEPARATORS in cron.ts, which tracks the operator's strings.Fields.
+// Keep the two in lockstep.
+const GO_SPACE =
+  '\t\n\u000b\f\r\u0020\u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000';
+// Global, so a value padded on both sides loses both runs.
+const goSpaceTrimRe = new RegExp(`^[${GO_SPACE}]+|[${GO_SPACE}]+$`, 'gu');
+
+export const trimGoSpace = (value: string): string => value.replace(goSpaceTrimRe, '');
+
 // Length in Unicode code points, the unit a CRD maxLength is expressed in: the
 // API server counts runes (utf8.RuneCountInString on the operator's side, the
 // same clamp in sanitize.go), not bytes and not UTF-16 code units.
