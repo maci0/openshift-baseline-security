@@ -44,6 +44,16 @@ depend on those tags.
 ## [Unreleased]
 ### Added
 
+- State chips on the Remediations tab, alongside the name filter. A blocked or
+  failing remediation could otherwise only be found by knowing its name; the
+  chips narrow the list to the states an admin acts on and each carries its own
+  count. Selecting several unions them, and the list reports how many of the
+  total are shown. Batch apply is unaffected: it still acts on every batchable
+  remediation, not on the filtered view.
+
+- A confirmation after the create-baseline button succeeds, so the click is
+  never a silent no-op while the watch catches up.
+
 - A name filter on the Remediations tab. A full benchmark run lists thousands
   of remediations and the tab had no way to narrow them, so finding one rule
   meant scrolling the whole list; Results has had chips for the same reason.

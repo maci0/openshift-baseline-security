@@ -56,7 +56,7 @@ import { AccessGate, mayWrite } from '../permissions';
 import { encodeKeyList } from '../contentKey';
 import { formatCount } from '../dates';
 import { errorMessage } from '../errors';
-import { foldForSearch, foldSearchQuery, listSeparators, matchesFolded } from '../text';
+import { foldForSearch, foldSearchQuery, listSeparators, matchesFolded, compareForDisplay } from '../text';
 import {
   batchApplyMaxNames,
   batchApplyPatch,
@@ -125,6 +125,34 @@ const stateStyle: StateVisualMap = {
 const defaultStateStyle = { color: 'grey' as const, icon: <MinusCircleIcon /> };
 const applyingStateStyle = { color: 'blue' as const, icon: <InProgressIcon /> };
 
+// A delegated apply sets spec.apply before the operator writes
+// status.applicationState, so the row would read "Not applied" beside a
+// clickable "Unapply" until the two converge. Error and MissingDependencies are
+// terminal outcomes, not pending ones, so they keep their own state. One
+// predicate for the row Label and the state chips, so the two cannot drift.
+const APPLYING_STATE = 'Applying';
+
+const isApplying = (r: ComplianceRemediation): boolean => {
+  const state = r.status?.applicationState ?? 'NotApplied';
+  return r.spec?.apply === true && (state === 'NotApplied' || state === 'Outdated');
+};
+
+// Filter key per row: the synthetic Applying state when the two sources
+// disagree, otherwise the operator's own token (an unknown one passes through
+// so a forward-compat state still shows under a chip titled by its raw value).
+const remediationStateKey = (r: ComplianceRemediation): string =>
+  isApplying(r) ? APPLYING_STATE : (r.status?.applicationState ?? 'NotApplied');
+
+// Chip order: the states an admin acts on first, not the enum's own order.
+const STATE_FILTER_ORDER: readonly string[] = [
+  'NotApplied',
+  APPLYING_STATE,
+  'Outdated',
+  'MissingDependencies',
+  'Error',
+  'Applied',
+];
+
 // CR applicationState enums stay English for logic; only the Label text is localized.
 const stateDisplayTitle = (state: string, t: (k: string) => string): string => {
   switch (state) {
@@ -138,6 +166,8 @@ const stateDisplayTitle = (state: string, t: (k: string) => string): string => {
       return t('Outdated');
     case 'MissingDependencies':
       return t('Missing dependencies');
+    case APPLYING_STATE:
+      return t('Applying…');
     default:
       return state;
   }
@@ -185,6 +215,9 @@ const RemediationsTab: React.FC<{
   // remediations and this tab had no way to narrow them, so an admin hunting
   // one rule had to scroll a long list (Results has chips for the same reason).
   const [query, setQuery] = React.useState('');
+  // State chips (see stateCounts below). Multiple selections union, no
+  // selection shows every state, matching the chip filter Results uses.
+  const [stateFilters, setStateFilters] = React.useState<string[]>([]);
   // Monotonic token fencing the clipboard write. writeText settles
   // asynchronously (permission prompt, unfocused document), and every open and
   // close of this modal resets `copied` and `error`, so a late settlement would
@@ -297,13 +330,53 @@ const RemediationsTab: React.FC<{
     () => ordered.map((r) => foldForSearch(r.metadata?.name ?? '')),
     [ordered],
   );
-  const visible = React.useMemo(
-    () =>
-      foldedQuery.length === 0
-        ? ordered
-        : ordered.filter((_r, i) => matchesFolded(foldedNames[i], foldedQuery)),
-    [ordered, foldedNames, foldedQuery],
+  // State chips: with thousands of remediations a full CIS run lists, the name
+  // box cannot answer "which ones are blocked or failing", and Results carries
+  // the same statuses as chips. Counts per state, plus the states actually
+  // present so a chip never offers an empty view of its own making.
+  const stateCounts = React.useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const r of ordered) {
+      const key = remediationStateKey(r);
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    return counts;
+  }, [ordered]);
+  const stateKeys = React.useMemo(() => {
+    const present = [...stateCounts.keys()];
+    // Known states first in the action order, then any forward-compat token
+    // the operator added, collated like every other sorted list on the page.
+    const known = STATE_FILTER_ORDER.filter((k) => stateCounts.has(k));
+    const extra = present
+      .filter((k) => !STATE_FILTER_ORDER.includes(k))
+      .sort((a, b) => compareForDisplay(a, b, i18n.language));
+    return [...known, ...extra];
+  }, [stateCounts, i18n.language]);
+  // A state can leave the set (auto-apply, another admin) while its chip is
+  // selected. Dropping it here keeps the filter from hiding rows behind a chip
+  // that no longer renders, which would strand the list on an unexplained
+  // subset.
+  const stateKeysId = stateKeys.join(',');
+  const activeStates = React.useMemo(
+    () => stateFilters.filter((k) => stateCounts.has(k)),
+    // stateKeysId carries membership; stateCounts is read when it changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- content key
+    [stateFilters, stateKeysId],
   );
+  const activeStateSet = React.useMemo(
+    () => (activeStates.length ? new Set(activeStates) : null),
+    [activeStates],
+  );
+  const visible = React.useMemo(() => {
+    if (foldedQuery.length === 0 && !activeStateSet) {
+      return ordered;
+    }
+    return ordered.filter(
+      (r, i) =>
+        (foldedQuery.length === 0 || matchesFolded(foldedNames[i], foldedQuery)) &&
+        (!activeStateSet || activeStateSet.has(remediationStateKey(r))),
+    );
+  }, [ordered, foldedNames, foldedQuery, activeStateSet]);
 
   // Reset the confirm flag if the live watch emptied the batchable set while the
   // modal was open (rows applied by auto-apply / another admin). Adjusting state
@@ -503,44 +576,85 @@ const RemediationsTab: React.FC<{
     }
   }
 
-  // Search box and result count. Rendered by both the table branch and the
-  // no-match branch: the input the user is typing into used to unmount the
-  // moment the query narrowed past the last match, so backing off one
-  // character meant clearing and retyping.
+  // Search box, state chips, and result count. Rendered by both the table
+  // branch and the no-match branch: the input the user is typing into used to
+  // unmount the moment the query narrowed past the last match, so backing off
+  // one character meant clearing and retyping.
+  const filtering = foldedQuery.length > 0 || activeStates.length > 0;
+  const toggleState = (key: string) => {
+    setStateFilters((prev) =>
+      prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key],
+    );
+  };
   const searchToolbar = (
     <Flex
-      justifyContent={{ default: 'justifyContentSpaceBetween' }}
-      alignItems={{ default: 'alignItemsCenter' }}
-      flexWrap={{ default: 'wrap' }}
-      gap={{ default: 'gapMd' }}
+      direction={{ default: 'column' }}
+      alignItems={{ default: 'alignItemsStretch' }}
+      gap={{ default: 'gapSm' }}
       style={{ marginTop: 'var(--pf-t--global--spacer--md)' }}
     >
-      <FlexItem>
-        <SearchInput
-          placeholder={t('Search remediations by name')}
-          aria-label={t('Search remediations by name')}
-          value={query}
-          onChange={(_e, v) => setQuery(v)}
-          onClear={() => setQuery('')}
-        />
-      </FlexItem>
-      <FlexItem>
-        <HelperText>
-          <HelperTextItem>
-            {foldedQuery
-              ? t('Showing {{formattedShown}} of {{count}} remediations', {
-                  count: owned.length,
-                  formattedCount: formatCount(owned.length, i18n.language),
-                  formattedShown: formatCount(visible.length, i18n.language),
-                  formattedTotal: formatCount(owned.length, i18n.language),
-                })
-              : t('{{count}} remediation', {
-                  count: owned.length,
-                  formattedCount: formatCount(owned.length, i18n.language),
+      <Flex
+        justifyContent={{ default: 'justifyContentSpaceBetween' }}
+        alignItems={{ default: 'alignItemsCenter' }}
+        flexWrap={{ default: 'wrap' }}
+        gap={{ default: 'gapMd' }}
+      >
+        <FlexItem>
+          <SearchInput
+            placeholder={t('Search remediations by name')}
+            aria-label={t('Search remediations by name')}
+            value={query}
+            onChange={(_e, v) => setQuery(v)}
+            onClear={() => setQuery('')}
+          />
+        </FlexItem>
+        <FlexItem>
+          <HelperText>
+            <HelperTextItem>
+              {filtering
+                ? t('Showing {{formattedShown}} of {{count}} remediations', {
+                    count: owned.length,
+                    formattedCount: formatCount(owned.length, i18n.language),
+                    formattedShown: formatCount(visible.length, i18n.language),
+                    formattedTotal: formatCount(owned.length, i18n.language),
+                  })
+                : t('{{count}} remediation', {
+                    count: owned.length,
+                    formattedCount: formatCount(owned.length, i18n.language),
+                  })}
+            </HelperTextItem>
+          </HelperText>
+        </FlexItem>
+      </Flex>
+      {/* One state in the whole set needs no chip row; it is what the list
+          already shows. Chips carry their own count so a filter never hides
+          rows the admin did not expect to lose. */}
+      {stateKeys.length > 1 && (
+        <Flex
+          gap={{ default: 'gapSm' }}
+          flexWrap={{ default: 'wrap' }}
+          role="group"
+          aria-label={t('Filter by state')}
+        >
+          {stateKeys.map((key) => {
+            const on = activeStates.includes(key);
+            return (
+              <Button
+                key={key}
+                variant={on ? 'primary' : 'secondary'}
+                aria-pressed={on}
+                onClick={() => toggleState(key)}
+              >
+                {t('{{state}} ({{count}})', {
+                  state: stateDisplayTitle(key, t),
+                  count: stateCounts.get(key) ?? 0,
+                  formattedCount: formatCount(stateCounts.get(key) ?? 0, i18n.language),
                 })}
-          </HelperTextItem>
-        </HelperText>
-      </FlexItem>
+              </Button>
+            );
+          })}
+        </Flex>
+      )}
     </Flex>
   );
 
@@ -872,13 +986,38 @@ const RemediationsTab: React.FC<{
             style={{ marginTop: 'var(--pf-t--global--spacer--xl)' }}
           >
             <EmptyStateBody>
-              {/* The query is text this browser typed, so it is its own element
-                  with dir=auto rather than a {{query}} interpolation: an RTL
-                  query must not reorder the sentence's own punctuation. */}
-              {t('No remediation name matches')} <span dir="auto">&quot;{query}&quot;</span>.{' '}
-              <Button variant="link" isInline onClick={() => setQuery('')}>
-                {t('Clear search')}
-              </Button>
+              {/* Name the filter that emptied the list. A state chip and a
+                  query can both be active; then both are named, and clearing
+                  one alone would still show nothing. */}
+              {query && (
+                <>
+                  {/* The query is text this browser typed, so it is its own
+                      element with dir=auto rather than a {{query}}
+                      interpolation: an RTL query must not reorder the
+                      sentence's own punctuation. */}
+                  {t('No remediation name matches')} <span dir="auto">&quot;{query}&quot;</span>.{' '}
+                </>
+              )}
+              {activeStates.length > 0 && (
+                <>
+                  {t('No remediation matches the selected state filter.')}{' '}
+                  <Button
+                    variant="link"
+                    isInline
+                    onClick={() => {
+                      setStateFilters([]);
+                      setQuery('');
+                    }}
+                  >
+                    {t('Clear filters')}
+                  </Button>
+                </>
+              )}
+              {activeStates.length === 0 && (
+                <Button variant="link" isInline onClick={() => setQuery('')}>
+                  {t('Clear search')}
+                </Button>
+              )}
             </EmptyStateBody>
           </EmptyState>
         ) : (
@@ -902,16 +1041,11 @@ const RemediationsTab: React.FC<{
           <Tbody>
             {visible.map((rem) => {
               const state = rem.status?.applicationState ?? 'NotApplied';
-              // A delegated apply sets spec.apply before the operator writes
-              // status.applicationState, so the row would read "Not applied"
-              // beside a clickable "Unapply" until the two converge. Error and
-              // MissingDependencies are terminal outcomes, not pending ones, so
-              // they keep their own state.
-              const applying =
-                rem.spec?.apply === true &&
-                (state === 'NotApplied' || state === 'Outdated');
+              // Same predicate the state chips filter on, so a row can never
+              // show one state and be counted under another.
+              const applying = isApplying(rem);
               const style = applying ? applyingStateStyle : stateStyle[state] ?? defaultStateStyle;
-              const stateTitle = applying ? t('Applying…') : stateDisplayTitle(state, t);
+              const stateTitle = stateDisplayTitle(remediationStateKey(rem), t);
               // Only blocked rows read the dependency annotations; skip the
               // split / JSON.parse (missingDependencySummary) and the Blocked
               // tip interpolation on every other row on every render.

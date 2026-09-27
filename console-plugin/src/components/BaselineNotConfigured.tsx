@@ -47,6 +47,10 @@ const BaselineNotConfigured: React.FC<{ style?: React.CSSProperties }> = ({ styl
         model: ClusterBaselineModel,
         data: defaultClusterBaselineManifest(),
       });
+      // The watch takes a moment to deliver, so a silent success left the
+      // spinner stopping on an unchanged empty state and the click reading as
+      // a no-op. Say the create landed; the empty state disappears on its own.
+      setNotice(t('Baseline created. This page updates when the watch sees it.'));
     } catch (e) {
       // A race with the operator default-create is not a failure, but it is not
       // a silent one either: on a broken watch the create-rejected branch used
