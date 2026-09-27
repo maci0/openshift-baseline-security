@@ -1,14 +1,17 @@
 # Console plugin image build. Flags match operator/Makefile DOCKER_BUILD_FLAGS
 # (reproducible digests: no provenance/SBOM, fixed SOURCE_DATE_EPOCH, re-pull base).
-# Image version label uses the Dockerfile ARG VERSION default (lockstep via
-# operator `make verify-versions`); do not add a sixth VERSION source here.
 IMG ?= quay.io/openshift-baseline-security/baseline-security-console-plugin:latest
+# Image version label, read from package.json: one of the five lockstep files
+# `operator make verify-versions` already checks, so this is a read, not a sixth
+# hand-maintained source. The Dockerfile ARG VERSION default stays the fallback
+# for a plain `docker build`, and verify-versions pins that default too.
+VERSION ?= $(shell sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' package.json | head -1)
 SOURCE_DATE_EPOCH ?= 0
 export SOURCE_DATE_EPOCH
 export TZ := UTC
 export LC_ALL := C
 export DOCKER_BUILDKIT := 1
-DOCKER_BUILD_FLAGS ?= --pull --provenance=false --sbom=false --build-arg SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH)
+DOCKER_BUILD_FLAGS ?= --pull --provenance=false --sbom=false --build-arg SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) --build-arg VERSION=$(VERSION)
 
 SHELL := /usr/bin/env bash
 .SHELLFLAGS := -euo pipefail -c
@@ -32,7 +35,7 @@ help:
 	@echo "  yarn test-e2e      Playwright (needs CONSOLE_URL; see .env.example)"
 	@echo "                    plus a one-time: yarn playwright install chromium"
 	@echo "Image:"
-	@echo "  make docker-build docker-push IMG=..."
+	@echo "  make docker-build docker-push IMG=... [VERSION=x.y.z]"
 
 test:
 	@command -v yarn >/dev/null || { echo "yarn not on PATH; enable Yarn 4 via corepack (see CONTRIBUTING.md)" >&2; exit 1; }
@@ -47,6 +50,9 @@ ci:
 	yarn ci
 
 docker-build:
+	# An unreadable or empty version would stamp org.opencontainers.image.version
+	# with an empty string instead of failing; fail before the (slow) build.
+	@test -n "$(VERSION)" || { echo "cannot read VERSION from console-plugin/package.json; set VERSION=<x.y.z>" >&2; exit 1; }
 	docker build $(DOCKER_BUILD_FLAGS) -t $(IMG) .
 
 docker-push:
