@@ -587,3 +587,56 @@ metric and next-fire computations.
 **Status:** Keep.
 
 *Recorded: 2026-07-15 (git history).*
+
+## ADR-030: No OLM `replaces` graph; CSV capability is `Basic Install`
+
+**Decision:** Every bundle is a standalone head on the `alpha` channel: the CSV
+carries no `spec.replaces` and no `spec.skipRange`, and the catalog ships no
+channel edges between versions. `spec.capabilities` is `Basic Install`.
+Upgrading is install-the-new-head (point the CatalogSource at the new catalog
+tag, install it, delete a leftover Subscription/CSV); ClusterBaseline CRs and
+the CRD stay. `make verify-versions` fails if either field reappears.
+
+**Alternatives:** Maintain a `replaces` chain (what 0.5.0 to 0.5.4 shipped);
+publish `Seamless Upgrades` and hope OLM resolves the gaps.
+
+**Tradeoff:** No in-place OLM upgrade for an installed CSV, so an upgrader has
+to reinstall the channel head, which the CHANGELOG **Migration notes** spell
+out. In exchange, no channel is left advertising a version that OLM cannot
+actually deliver, and a pre-1.0 break (the 0.5.0 group rename) does not need a
+`replaces` edge. `Basic Install` in OperatorHub describes that install-the-head
+path honestly instead of promising an upgrade that does not exist.
+
+**Status:** Keep while the channel is `alpha` with no 1.0 API. Reintroduce a
+`replaces` graph only when a stable API exists and multi-version upgrade is a
+stated requirement.
+
+*Recorded: 2026-07-14 (git history, 0.5.5).*
+
+## ADR-031: Waiver names are unique at admission (CEL)
+
+**Decision:** `spec.waivers` entries must have unique `name` values, enforced
+by a CEL rule on the list
+(`self.all(x, self.exists_one(y, y.name == x.name))`, message "waiver names
+must be unique"). The console replaces an existing entry for a check rather
+than appending a second one, so the CR never carries duplicates.
+`listType=map` is a merge key for strategic merge, not a uniqueness guarantee,
+so it cannot carry this rule.
+
+**Alternatives:** Rely on `listType=map` merge semantics; deduplicate in the
+controller on read; keep duplicates admitted and let the console overwrite.
+
+**Tradeoff:** A stored CR that already holds two waivers for the same check
+(both were admitted before 0.6.0) is rejected by the apiserver on its next
+write: patching, re-applying, or waiving from the console fails until an admin
+removes the duplicate. That is a one-time upgrade step, documented in CHANGELOG
+0.6.0 **Migration notes** with the `oc get` command that finds the offending
+names. In exchange the score never double-counts one accepted risk and the rule
+is visible to any client instead of being an operator convention.
+Controller-side deduplication was rejected: it leaves the stored spec
+self-contradictory and fails only after the write.
+
+**Status:** Keep. The CRD is `v1alpha1` and 0.x, so a stored object can be
+repaired by hand; a future change to this rule needs a migration note.
+
+*Recorded: 2026-09-02 (git history, 0.6.0).*

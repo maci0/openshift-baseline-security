@@ -1,6 +1,6 @@
 # OpenShift Baseline Security
 
-Design specification for the product on `main` (0.5.x line plus work still under
+Design specification for the product on `main` (0.6.x line plus work still under
 CHANGELOG **[Unreleased]**). Targets OpenShift Container Platform 4.22. What is
 in a published CSV/image tag is defined only by [CHANGELOG.md](../CHANGELOG.md)
 and the **Current release** line in the root README; do not assume every
@@ -392,13 +392,13 @@ ComplianceAsCode/compliance-operator master, and npm dist-tags).
 | Tool | Version | Matches |
 |---|---|---|
 | Go | 1.26 | openshift 4.22 builder (`rhel-9-golang-1.26-openshift-4.22`); compliance-operator master is go 1.25.8 |
-| Kubernetes | 1.35 (`k8s.io/*` v0.35.x) | OCP 4.22 kube level (4.21 = 1.34, 4.20 = 1.33) |
-| controller-runtime | v0.23.3 | release-0.23 targets k8s 1.35; same pairing as compliance-operator master |
+| Kubernetes | `k8s.io/*` v0.36.4 | OCP 4.22 kube level is 1.35 (4.21 = 1.34, 4.20 = 1.33); the CSV still gates installs with `minKubeVersion: 1.35.0` while the client libraries run a minor ahead (landed in 0.6.0) |
+| controller-runtime | v0.24.1 | release-0.24 pairs with k8s 1.36 (`PodSpec.workloadRef` is tombstoned upstream in 1.36) |
 | dynamic-plugin-sdk | 4.22.0 (`4.22-latest` dist-tag) | console 4.22 (SDK major.minor == console version since 4.18) |
 | React | ^18.3.1 | console 4.22 frontend |
 | PatternFly | ~6.4.x | console 4.22 frontend |
 | TypeScript | 5.9.3 | console 4.22 frontend |
-| webpack | ^5.107.x | console-plugin-template main |
+| webpack | ^5.110.x | console-plugin-template main |
 | Node (build image) | 22 (`ubi9/nodejs-22`) | console 4.22 build image stream |
 | Yarn | 4.14 via corepack | console-plugin-template |
 | Scaffold | kubebuilder go/v4 layout | operator-sdk CLI deprecated (last shipped in OCP 4.18); note operator-sdk v1.42.3 scaffolds still pin k8s 1.33, hence hand-pinned versions here |
@@ -489,6 +489,9 @@ same Makefile targets (`test`, `lint`, `docker-build`).
 | 0.3 (S2) | Score history + trendline; tailored profiles; metrics/alerts. | Done (30-entry status ring + trend chart) |
 | 0.4 (S1 + expand-compliance-features) | Remediation gated apply + MCP-paused batch; waivers; scan diff; severity-weighted score; schedule/report UI; TailoredProfile authoring; benign INCONSISTENT→PASS; Helm removed (OLM only). | Done; see CHANGELOG.md 0.4.0 |
 | 0.5.0 (breaking group rename) | Empty `spec.profiles: []` disables scanning; DNS-1123 `complianceCatalogSource`; raw-FAIL scan-diff; status list-type map-merge; HA-safe score/fail alerts; dynamic informer; post-0.4 metrics/alerts (see CHANGELOG **[0.5.0]**). | Done; see CHANGELOG.md 0.5.0 |
+| 0.5.x patches | OLM `replaces` graph dropped (every bundle is a standalone channel head, ADR-030); no static operator PDB (ADR-028); single-node plugin topology; cadence-aware `ComplianceScanStale`; never-firing schedule Degrades (ADR-029); published Quay images and catalog; 5-minute reconcile timeout. | Done; see CHANGELOG.md 0.5.5 to 0.5.15 |
+| 0.6.0 | Toolchain bump (k8s.io v0.36.4, controller-runtime v0.24.1); metadata-only compliance watches and paged CheckResult lists; `baseline-security-admin` no longer aggregated onto `admin`; CSV `capabilities: Basic Install`; waiver names unique at admission (ADR-031); `/licenses/LICENSE` and OCI labels on every image. | Done; see CHANGELOG.md 0.6.0 |
+| 0.6.1 | Image `/licenses` directory mode fix (readable by the non-root runtime user); browserslist advisory bump in the plugin build. | Done; see CHANGELOG.md 0.6.1 |
 | Productization | Done in 0.5.0: API group renamed to `baselinesecurity.openshift.io`; `registry.ci.openshift.org` build variant (`Dockerfile.ci` + `.ci-operator.yaml`). Remaining: finish ci-operator onboarding in openshift/release, split the plugin into its own repo, Red Hat enhancement proposal referencing this spec. | Partial |
 
 ## 11. Prerequisites

@@ -53,6 +53,14 @@ depend on those tags.
   operator ClusterRole, the platform-Prometheus scrape as a boundary, and the
   remediation clipboard copy as an untrusted-output sink. Every file reference
   was re-read against 0.6.1.
+- Docs: `docs/SPEC.md` tracked the 0.5.x line and the pre-0.6.0 toolchain pins
+  (k8s.io v0.35.x, controller-runtime v0.23.3, webpack 5.107) while the released
+  line is 0.6.1 built on k8s.io v0.36.4 / controller-runtime v0.24.1 / webpack
+  5.110. The spec header and pin table now match `operator/go.mod` and
+  `console-plugin/package.json`, the roadmap covers 0.5.5 through 0.6.1, and
+  two shipped decisions that had no record are captured: ADR-030 (no OLM
+  `replaces` graph, CSV `capabilities: Basic Install`) and ADR-031 (waiver
+  names unique at admission).
 
 ### Fixed
 
