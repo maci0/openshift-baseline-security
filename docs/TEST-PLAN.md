@@ -565,6 +565,9 @@ an accepted risk neither inflates nor tanks the score.
 - [x] Fuzz: suite-label round-trip, profile-key parse, score, CSV export,
       results href, history ring, profile names, `withoutPlugin`,
       `matchesAnyProfile` (role-suffix oracle).
+- [x] Paged CSV search: folding each List page into the incumbent picks the same
+      CSV as the single-shot search at every page boundary, including
+      wrong-typed phases and non-CSV names (`FuzzFoldComplianceOperatorCSVs`).
 - [x] **Status sanitize, text side**: a fuzzed status (profile names, tailored
       names, object refs, the four failure lists, condition type/reason/message,
       the remediation batch) sanitizes to a CRD-admissible object under every
@@ -889,6 +892,9 @@ stale Available or eternal Progressing.
       (`TestAppendHistoryRing`, `FuzzAppendHistoryRing`).
 - [x] Score-history content key is not forgeable, so the trend chart recomputes
       when a snapshot changes (jest `historyContentKey`, `encodeKeyPart`).
+- [x] Content key encoding is injective: equal keys imply values of the same
+      type that print the same, for parts and for lists (jest
+      `content key injectivity fuzz`).
 - [x] **DST / timezone**: cron is evaluated in UTC (CO ScanSettings fire on the
       container clock). `TestNextScanTime` pins FixedZone UTC-5 plus
       America/New_York spring-forward (2026-03-08) and fall-back (2026-11-01)

@@ -564,3 +564,81 @@ func FuzzSetRollupConditions(f *testing.F) {
 		}
 	})
 }
+
+// FuzzFoldComplianceOperatorCSVs: the paged CSV search folds each List page into
+// the incumbent instead of holding every page resident, so the winner must not
+// depend on where the apiserver split the pages. Folds the fuzzed list at every
+// split point and requires both tiers to match the single-shot pick over the
+// whole list. Names and phases come off cluster objects (wrong-typed status
+// included), so the fold must also survive objects that are not CSVs at all.
+func FuzzFoldComplianceOperatorCSVs(f *testing.F) {
+	f.Add([]byte("compliance-operator.v1.0.0\x00Succeeded,compliance-operator.v1.9.1\x00Failed,,compliance-operator.v1.9.1\x00Succeeded"), uint8(2))
+	f.Add([]byte("not-a-co-csv\x00Succeeded"), uint8(0))
+	f.Add([]byte("compliance-operator.v\x00\x00compliance-operator.v1\x00Succeeded"), uint8(1))
+	f.Fuzz(func(t *testing.T, packed []byte, split uint8) {
+		const maxItems = 32
+		// Fields are NUL-separated; an empty field is a missing one (no name, no
+		// phase), which the apiserver can hand back for a partially written object.
+		parts := strings.Split(string(packed), "\x00")
+		if len(parts) > 2*maxItems {
+			parts = parts[:2*maxItems]
+		}
+		items := make([]unstructured.Unstructured, 0, len(parts)/2)
+		for i := 0; i+1 < len(parts); i += 2 {
+			obj := map[string]any{}
+			if parts[i] != "" {
+				obj["metadata"] = map[string]any{"name": parts[i], "namespace": "openshift-compliance"}
+			}
+			switch {
+			case parts[i+1] == "":
+				obj["status"] = map[string]any{}
+			case i%5 == 4:
+				// Hostile shape: status.phase is not a string, so NestedString
+				// errors and the CSV must fall into the non-Succeeded tier.
+				obj["status"] = map[string]any{"phase": []any{parts[i+1]}}
+			default:
+				obj["status"] = map[string]any{"phase": parts[i+1]}
+			}
+			items = append(items, unstructured.Unstructured{Object: obj})
+		}
+
+		wantSucceeded := pickComplianceOperatorCSV(items, "", true)
+		wantOther := pickComplianceOperatorCSV(items, "", false)
+		// The fuzzer picks one split; the sweep proves the invariant holds for
+		// every page boundary, which is the whole point of the fold.
+		for _, cut := range append([]int{int(split) % (len(items) + 1)}, allCuts(len(items))...) {
+			gotSucceeded, gotOther := foldComplianceOperatorCSVs(items[:cut], nil, nil)
+			gotSucceeded, gotOther = foldComplianceOperatorCSVs(items[cut:], gotSucceeded, gotOther)
+			assertSameCSVWinner(t, cut, "Succeeded", gotSucceeded, wantSucceeded)
+			assertSameCSVWinner(t, cut, "other", gotOther, wantOther)
+		}
+	})
+}
+
+// assertSameCSVWinner: fold and pick must name the same CSV, or both find none.
+func assertSameCSVWinner(t *testing.T, cut int, tier string, got, want *unstructured.Unstructured) {
+	t.Helper()
+	switch {
+	case got == nil && want == nil:
+	case got == nil || want == nil:
+		t.Fatalf("cut %d tier %s: fold=%v pick=%v", cut, tier, csvWinnerName(got), csvWinnerName(want))
+	case got.GetName() != want.GetName():
+		t.Fatalf("cut %d tier %s: fold=%q pick=%q", cut, tier, got.GetName(), want.GetName())
+	}
+}
+
+func csvWinnerName(u *unstructured.Unstructured) string {
+	if u == nil {
+		return "<nil>"
+	}
+	return u.GetName()
+}
+
+// allCuts returns every page boundary of an n-item list, n+1 of them.
+func allCuts(n int) []int {
+	cuts := make([]int, 0, n+1)
+	for i := 0; i <= n; i++ {
+		cuts = append(cuts, i)
+	}
+	return cuts
+}

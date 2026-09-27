@@ -224,6 +224,7 @@ fuzz:
 	go test ./internal/controller/ -run=^$$ -fuzz=^FuzzNotIn$$ -fuzztime=3s
 	go test ./internal/controller/ -run=^$$ -fuzz=^FuzzSetCond$$ -fuzztime=3s
 	go test ./internal/controller/ -run=^$$ -fuzz=^FuzzPickComplianceOperatorCSV$$ -fuzztime=5s
+	go test ./internal/controller/ -run=^$$ -fuzz=^FuzzFoldComplianceOperatorCSVs$$ -fuzztime=5s
 	go test ./internal/controller/ -run=^$$ -fuzz=^FuzzSetComplianceOperatorReadyFromCSV$$ -fuzztime=5s
 	go test ./internal/controller/ -run=^$$ -fuzz=^FuzzCheckSeverityTypeConfusion$$ -fuzztime=3s
 	go test ./internal/controller/ -run=^$$ -fuzz=^FuzzPoolFromRemediationTypeConfusion$$ -fuzztime=3s
