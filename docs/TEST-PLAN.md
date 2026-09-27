@@ -558,6 +558,17 @@ an accepted risk neither inflates nor tanks the score.
 - [x] Fuzz: suite-label round-trip, profile-key parse, score, CSV export,
       results href, history ring, profile names, `withoutPlugin`,
       `matchesAnyProfile` (role-suffix oracle).
+- [x] **Status sanitize, text side**: a fuzzed status (profile names, tailored
+      names, object refs, the four failure lists, condition type/reason/message,
+      the remediation batch) sanitizes to a CRD-admissible object under every
+      pattern, MaxItems, MaxLength, and Minimum bound, and a second sanitize
+      pass is a no-op (`FuzzSanitizeStatusUntrustedText`; the numeric side is
+      `FuzzSanitizeStatusForUpdate`).
+- [x] **Serialized-size budget is exact**: `jsonStringLen` equals
+      `len(json.Marshal(s))` for arbitrary strings, including every escape
+      class and ill-formed UTF-8, so the failure-list budget cannot be
+      under-counted (`FuzzJSONStringLenMatchesMarshal`,
+      `TestJSONStringLenMatchesMarshal`).
 - [x] CSV formula-injection neutralized, including whitespace-prefixed sigils
       and Unicode format-character prefixes (ZWSP, BIDI, BOM) (jest
       `resultsCsv`).

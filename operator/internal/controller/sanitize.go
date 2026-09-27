@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"regexp"
 	"time"
+	"unicode/utf8"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	utilvalidation "k8s.io/apimachinery/pkg/util/validation"
@@ -457,8 +458,10 @@ const failureListsSizeBudget = 768 * 1024
 
 // jsonStringLen returns the exact number of bytes encoding/json writes for the
 // string s, without allocating. It must stay equal to len(json.Marshal(s)) for
-// a string (TestJSONStringLenMatchesMarshal pins that against the real encoder
-// over every escape class below).
+// a string under the Go toolchain go.mod pins (FuzzJSONStringLenMatchesMarshal
+// pins that against the real encoder over every escape class below, including
+// ill-formed UTF-8, whose \ufffd coercion a newer encoding/json writes
+// differently).
 //
 // An additive len(name)+constant estimate is wrong by up to 6x on names full of
 // '&', '<', '>' or control characters, which are exactly the names a hostile or
@@ -483,8 +486,19 @@ func jsonStringLen(s string) int {
 			// Three bytes in, six out.
 			n += 3
 			i += 2
+		case c >= utf8.RuneSelf:
+			// A well-formed rune is copied verbatim, so skip its trailing bytes.
+			// An ill-formed one is one byte in and the six-byte \ufffd escape
+			// out: the encoder coerces rather than failing, and a status
+			// restored from a protobuf backup can carry lone continuation
+			// bytes, which a one-byte count under-budgets.
+			_, size := utf8.DecodeRuneInString(s[i:])
+			if size == 1 {
+				n += 5
+				break
+			}
+			i += size - 1
 		}
-		// Every other byte, including all multi-byte runes, is copied verbatim.
 	}
 	return n
 }

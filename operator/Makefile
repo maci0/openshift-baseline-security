@@ -243,6 +243,8 @@ fuzz:
 	go test ./internal/controller/ -run=^$$ -fuzz=^FuzzClampString$$ -fuzztime=3s
 	go test ./internal/controller/ -run=^$$ -fuzz=^FuzzClampSetList$$ -fuzztime=5s
 	go test ./internal/controller/ -run=^$$ -fuzz=^FuzzSortedDiff$$ -fuzztime=5s
+	go test ./internal/controller/ -run=^$$ -fuzz=^FuzzJSONStringLenMatchesMarshal$$ -fuzztime=5s
+	go test ./internal/controller/ -run=^$$ -fuzz=^FuzzSanitizeStatusUntrustedText$$ -fuzztime=5s
 
 GOLANGCI_LINT_VERSION ?= v2.12.2
 # hack/*.sh run in CI, in the bundle and alert checks, and in must-gather's
