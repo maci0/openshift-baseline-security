@@ -3582,9 +3582,12 @@ func TestSetComplianceOperatorReadyFromCSVPhaseShape(t *testing.T) {
 		wantReason string
 		wantSub    string
 	}{
-		{name: "empty string", phase: "", wantReason: "CSVNotReady", wantSub: "phase=unknown"},
-		{name: "missing status", omitStatus: true, wantReason: "CSVNotReady", wantSub: "phase=unknown"},
+		{name: "empty string", phase: "", wantReason: "CSVNotReady", wantSub: `phase="unknown"`},
+		{name: "missing status", omitStatus: true, wantReason: "CSVNotReady", wantSub: `phase="unknown"`},
 		{name: "wrong type", phase: int64(42), wantReason: "CSVNotReady", wantSub: "unreadable CSV status.phase"},
+		// A foreign ClusterServiceVersion status.phase reaching the message raw
+		// would put newlines and ANSI escapes into the CR and the console.
+		{name: "control characters", phase: "Installing\nFAKE=1\x1b[31m", wantReason: "CSVNotReady", wantSub: `phase="Installing\nFAKE=1\x1b[31m"`},
 		{name: "succeeded", phase: "Succeeded", wantReason: "CSVSucceeded"},
 		{name: "failed", phase: "Failed", wantReason: "CSVFailed", wantSub: "phase=Failed"},
 	}

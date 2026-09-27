@@ -59,6 +59,7 @@ import { downloadBlob } from '../download';
 import { errorMessage } from '../errors';
 import { stripControlAndFormat, stripInvisibleText } from '../parse';
 import { AccessGate, mayWrite } from '../permissions';
+import { encodeKeyList } from '../contentKey';
 import { checkResultHref, machineConfigPoolHref } from '../links';
 import {
   addWaiverPatch,
@@ -626,8 +627,8 @@ const ResultsTab: React.FC<{
 
   // Content keys: status-only baseline updates reallocate profile arrays with
   // the same membership; avoid rebuilding chips (and rowFilters) every tick.
-  const profilesKey = (profiles ?? []).join('\0');
-  const tailoredKey = (tailored ?? []).join('\0');
+  const profilesKey = encodeKeyList(profiles);
+  const tailoredKey = encodeKeyList(tailored);
   // When the baseline already lists suites, chips come from those lists alone
   // (CompliancePage suite-selects CCRs to the same set). Drop ownedResults from
   // deps so multi-thousand CCR watch ticks do not rebuild filter chips.

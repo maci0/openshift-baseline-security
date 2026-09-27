@@ -56,6 +56,7 @@ import { formatCount, safeLocale } from '../dates';
 import { errorMessage } from '../errors';
 import { resultsHref } from '../links';
 import { historyContentKey, toTrendData } from '../overviewTrend';
+import { encodeKeyList } from '../contentKey';
 import { resourceVersionTest, schedulePatch } from '../patches';
 import { ChangedCheck, changedChecksMany } from '../results';
 import { formatList, listSeparators } from '../text';
@@ -469,12 +470,12 @@ const Overview: React.FC<{
     for (const p of statusProfiles ?? []) {
       const h = p.history;
       const last = h && h.length > 0 ? h[h.length - 1] : undefined;
-      key += `${p.key}\0${last?.score ?? ''}\x01`;
+      key += encodeKeyList([p.key, last?.score]);
     }
     for (const tp of statusTailored ?? []) {
       const h = tp.history;
       const last = h && h.length > 0 ? h[h.length - 1] : undefined;
-      key += `tp-${tp.name}\0${last?.score ?? ''}\x01`;
+      key += encodeKeyList([`tp:${tp.name}`, last?.score]);
     }
     return key;
   })();
@@ -484,10 +485,16 @@ const Overview: React.FC<{
   const countsKey = (() => {
     let key = '';
     for (const p of statusProfiles ?? []) {
-      key += `${p.key}\0${p.pass ?? 0}\0${p.fail ?? 0}\0${p.manual ?? 0}\0${p.info ?? 0}\0${p.error ?? 0}\0${p.inconsistent ?? 0}\0${p.waived ?? 0}\0${p.notApplicable ?? 0}\x01`;
+      key += encodeKeyList([
+        p.key, p.pass ?? 0, p.fail ?? 0, p.manual ?? 0, p.info ?? 0,
+        p.error ?? 0, p.inconsistent ?? 0, p.waived ?? 0, p.notApplicable ?? 0,
+      ]);
     }
     for (const tp of statusTailored ?? []) {
-      key += `tp-${tp.name}\0${tp.pass ?? 0}\0${tp.fail ?? 0}\0${tp.manual ?? 0}\0${tp.info ?? 0}\0${tp.error ?? 0}\0${tp.inconsistent ?? 0}\0${tp.waived ?? 0}\0${tp.notApplicable ?? 0}\x01`;
+      key += encodeKeyList([
+        `tp:${tp.name}`, tp.pass ?? 0, tp.fail ?? 0, tp.manual ?? 0, tp.info ?? 0,
+        tp.error ?? 0, tp.inconsistent ?? 0, tp.waived ?? 0, tp.notApplicable ?? 0,
+      ]);
     }
     return key;
   })();
@@ -538,11 +545,8 @@ const Overview: React.FC<{
   // The CRD caps these at 4096 names, so the key join is megabytes of string.
   // Memoize on array identity: status updates reallocate the array, so a new
   // reference still recomputes, while a re-render from any other state does not.
-  const newlyFailedKey = React.useMemo(
-    () => newlyFailed.join('\0'),
-    [newlyFailed],
-  );
-  const fixedKey = React.useMemo(() => fixed.join('\0'), [fixed]);
+  const newlyFailedKey = React.useMemo(() => encodeKeyList(newlyFailed), [newlyFailed]);
+  const fixedKey = React.useMemo(() => encodeKeyList(fixed), [fixed]);
   const recentChanges = React.useMemo(
     () => changedChecksMany([newlyFailed, fixed], checkResults),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- content keys

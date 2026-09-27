@@ -23,3 +23,10 @@ export const encodeKeyPart = (value: unknown): string => {
   const s = String(value);
   return `s${s.length}:${s}`;
 };
+
+// Same encoding for a whole list, so an element cannot forge the encoding of a
+// different list. `['a\0b']` and `['a', 'b']` share a plain join('\0') key, which
+// makes the memo serve one derivation for the other. Parts are self-delimiting,
+// so they concatenate with no separator of their own.
+export const encodeKeyList = (values: readonly unknown[] | undefined): string =>
+  (values ?? []).map((v) => encodeKeyPart(v)).join('');

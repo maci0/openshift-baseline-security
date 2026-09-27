@@ -53,6 +53,7 @@ import {
   scanningDisabled,
 } from '../models';
 import { AccessGate, mayWrite } from '../permissions';
+import { encodeKeyList } from '../contentKey';
 import { formatCount } from '../dates';
 import { errorMessage } from '../errors';
 import {
@@ -140,8 +141,8 @@ const RemediationsTab: React.FC<{
   const tailoredProfiles = baseline?.spec.tailoredProfiles;
   // Content keys: status-only CR updates reallocate spec arrays with the same
   // membership; identity deps would rebuild the remediation watch every reconcile.
-  const profilesKey = (profiles ?? []).join('\0');
-  const tailoredKey = (tailoredProfiles ?? []).join('\0');
+  const profilesKey = encodeKeyList(profiles);
+  const tailoredKey = encodeKeyList(tailoredProfiles);
   // Suite selector scopes the watch to this baseline; skip full-namespace list
   // when no suites are selected (avoids foreign remediations in the browser).
   // profiles/tailoredProfiles are read when keys change (content-stable deps).

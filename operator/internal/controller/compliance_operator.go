@@ -404,7 +404,11 @@ func setComplianceOperatorReadyFromCSV(ctx context.Context, cb *baselinev1alpha1
 		setCond(cb, "ComplianceOperatorReady", metav1.ConditionFalse, "CSVFailed", "phase=Failed")
 		return
 	}
-	setCond(cb, "ComplianceOperatorReady", metav1.ConditionFalse, "CSVNotReady", "phase="+phase)
+	// %q, not concatenation: phase is a foreign ClusterServiceVersion status
+	// string, and the message lands in the CR (and the console that renders it).
+	// Raw newlines and ANSI escapes would survive condMessage, which caps
+	// length only, so quote it the way the unreadable-phase branch above does.
+	setCond(cb, "ComplianceOperatorReady", metav1.ConditionFalse, "CSVNotReady", fmt.Sprintf("phase=%q", phase))
 }
 
 // setScanCRDsMissing marks ScanConfigured false when the compliance.openshift.io

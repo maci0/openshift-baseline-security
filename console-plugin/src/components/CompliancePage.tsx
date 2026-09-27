@@ -37,6 +37,7 @@ import { formatCount } from '../dates';
 import { downloadBlob, openBlobInTab } from '../download';
 import { errorMessage } from '../errors';
 import { AccessGate, mayWrite } from '../permissions';
+import { encodeKeyList } from '../contentKey';
 import { rescanPatch, rescanToken } from '../patches';
 import { withDisabledTip } from './DisabledTip';
 import { useAutoDismiss } from './useAutoDismiss';
@@ -66,8 +67,8 @@ const CompliancePage: React.FC = () => {
   // Content keys: status-only CR updates reallocate spec arrays with the same
   // membership. Identity deps would rebuild suiteSel (and re-open CCR/scan
   // watches) on every reconcile even when owned suites did not change.
-  const profilesKey = (profiles ?? []).join('\0');
-  const tailoredKey = (tailored ?? []).join('\0');
+  const profilesKey = encodeKeyList(profiles);
+  const tailoredKey = encodeKeyList(tailored);
   // Suite selector depends on the baseline; wait for baseline load so we do not
   // briefly open an unfiltered full-namespace CCR watch.
   const suiteSel = React.useMemo(

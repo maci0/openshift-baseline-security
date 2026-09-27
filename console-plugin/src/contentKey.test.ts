@@ -1,4 +1,4 @@
-import { encodeKeyPart } from './contentKey';
+import { encodeKeyList, encodeKeyPart } from './contentKey';
 
 const NUL = String.fromCharCode(0);
 const SOH = String.fromCharCode(1);
@@ -28,5 +28,22 @@ describe('encodeKeyPart', () => {
 
   it('encodes separator bytes as ordinary content', () => {
     expect(encodeKeyPart(`a${NUL}b${SOH}c`)).toContain(`a${NUL}b${SOH}c`);
+  });
+});
+
+describe('encodeKeyList', () => {
+  it('is stable for the same list', () => {
+    expect(encodeKeyList(['cis', 'cis-node'])).toBe(encodeKeyList(['cis', 'cis-node']));
+  });
+
+  it('does not let an element forge a different list', () => {
+    // The defect a plain join('\0') has: these two produce the same string.
+    expect(encodeKeyList([`a${NUL}b`])).not.toBe(encodeKeyList(['a', 'b']));
+    expect(encodeKeyList(['a', 'bc'])).not.toBe(encodeKeyList(['ab', 'c']));
+  });
+
+  it('keeps an absent list distinct from an empty one', () => {
+    expect(encodeKeyList(undefined)).toBe(encodeKeyList([]));
+    expect(encodeKeyList(['a'])).not.toBe(encodeKeyList(['a', '']));
   });
 });
