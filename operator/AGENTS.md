@@ -9,7 +9,7 @@ over the cluster-scoped singleton `ClusterBaseline/cluster`.
 make test          # fmt-check, vet, mod-verify, go test ./..., must-gather --self-test
 make test-race     # the same unit suite under the race detector
 make mod-tidy-check # go.mod/go.sum match the imports; run `go mod tidy` when it fails
-make lint          # golangci-lint, shellcheck hack/*.sh, ruff check + format --check on hack/
+make lint          # golangci-lint, shellcheck hack/*.sh, ruff check + format --check on hack/, yamllint ../.yamllint.yaml
 make ci            # local replica of the GHA operator job (needs docker)
 make verify-reproducible  # build ./cmd twice (path, TZ, locale, umask) and diff the SHA-256
 make fuzz          # short timed fuzz per target; run before a release cut
