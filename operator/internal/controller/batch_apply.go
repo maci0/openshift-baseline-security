@@ -214,14 +214,6 @@ func (r *ClusterBaselineReconciler) openRemediationBatch(
 	return nil
 }
 
-// finishRemediationBatch is phase two: resume when every listed remediation is
-// Applied, or past grace. NotFound/NoMatch: remediation or CRDs gone; skip (do
-// not block resume forever). Transient Get errors must not look like Applied
-// (would unpause early), but must not bypass batchResumeGrace either (pools
-// must never stay paused forever). Also track whether any remediation is still
-// apply=true: if none are (the user reverted them all), the batch is cancelled
-// and we resume at once.
-
 // remediationListPageSize bounds one apiserver List of ComplianceRemediations.
 // The namespace also holds remediations CO created for foreign scans, so the
 // page caps what a single response pins while the batch polls every 15s.
@@ -293,6 +285,13 @@ func (r *ClusterBaselineReconciler) listRemediationsForBatch(
 	}
 }
 
+// finishRemediationBatch is phase two: resume when every listed remediation is
+// Applied, or past grace. NotFound/NoMatch: remediation or CRDs gone; skip (do
+// not block resume forever). Transient Get errors must not look like Applied
+// (would unpause early), but must not bypass batchResumeGrace either (pools
+// must never stay paused forever). Also track whether any remediation is still
+// apply=true: if none are (the user reverted them all), the batch is cancelled
+// and we resume at once.
 func (r *ClusterBaselineReconciler) finishRemediationBatch(
 	ctx context.Context, cb *baselinev1alpha1.ClusterBaseline,
 ) error {

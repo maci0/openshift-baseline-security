@@ -276,8 +276,9 @@ func (r *ClusterBaselineReconciler) resumeOrphanedBatch(
 // pools are already safe. batch-apply is cleared only if its CSV matches
 // requestMatch (the finish path passes the batch's own names); the orphan path
 // passes the empty set, which clears an empty-valued request key while
-// preserving a concurrent resubmit that names real remediations. A nil
-// requestMatch clears whatever request is present; no caller passes it today.
+// preserving a concurrent resubmit that names real remediations. requestMatch
+// is never nil: every caller passes either the batch's own names or the empty
+// set.
 // Keeps cb annotations + RV aligned.
 func (r *ClusterBaselineReconciler) clearBatchAnnotations(
 	ctx context.Context, cb *baselinev1alpha1.ClusterBaseline,
@@ -296,8 +297,7 @@ func (r *ClusterBaselineReconciler) clearBatchAnnotations(
 		}
 		changed := false
 		if value, ok := ann[batchApplyAnnotation]; ok {
-			if requestMatch == nil ||
-				slices.Equal(batchRemediationNames(value), uniqueSortedStrings(requestMatch)) {
+			if slices.Equal(batchRemediationNames(value), uniqueSortedStrings(requestMatch)) {
 				delete(ann, batchApplyAnnotation)
 				changed = true
 			}

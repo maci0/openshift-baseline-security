@@ -79,11 +79,6 @@ if [[ ${#DIRS[@]} -gt 1 ]]; then
   exit 2
 fi
 DIR="${DIRS[0]:-./baseline-backup}"
-if [[ -z "$DIR" || "$DIR" == -* ]]; then
-  echo "restore.sh: invalid backup directory: ${DIR:-<empty>}" >&2
-  usage >&2
-  exit 2
-fi
 
 command -v oc >/dev/null || {
   echo "restore.sh: oc not on PATH" >&2
@@ -159,13 +154,13 @@ if grep -qE '^  lastScanTime: "?([0-9]{4})' "$ARTIFACT"; then
 fi
 
 # Age is the RPO this restore actually buys: everything edited or scanned
-# since takenAt is not in the artifact and cannot be recovered from it.
+# since takenAt is not in the artifact and cannot be recovered from it. An
+# unreadable stamp is not a young one.
 TAKEN_AT="$(sed -n 's/^takenAt=//p' "$MANIFEST" | head -1)"
 AGE_NOTE="${TAKEN_AT:-unknown time}"
 if [[ -z "$TAKEN_AT" ]] || ! TAKEN_EPOCH="$(iso8601_to_epoch "$TAKEN_AT")"; then
-  # The age is the RPO this restore buys, and an unreadable stamp is not a
-  # young one. Say the RPO is unknown rather than reporting nothing, so the
-  # operator looks for a newer backup instead of assuming this is recent.
+  # Say the RPO is unknown rather than reporting nothing, so the operator
+  # looks for a newer backup instead of assuming this is recent.
   echo "restore.sh: note: MANIFEST takenAt '${TAKEN_AT:-<none>}' is not a" >&2
   echo "restore.sh: YYYY-MM-DDTHH:MM:SSZ stamp, so the RPO this restore buys is" >&2
   echo "restore.sh: unknown. Check the artifact really is recent before relying" >&2
@@ -240,21 +235,19 @@ fi
 ARTIFACT_VERSION="$(sed -n 's|^apiVersion: *baselinesecurity\.openshift\.io/||p' "$ARTIFACT" | head -1)"
 SERVED_VERSIONS="$(oc get crd clusterbaselines.baselinesecurity.openshift.io \
   -o jsonpath='{range .spec.versions[?(@.served==true)]}{.name}{"\n"}{end}' 2>/dev/null || true)"
-if [[ -n "$SERVED_VERSIONS" ]]; then
-  if ! grep -qxF "$ARTIFACT_VERSION" <<<"$SERVED_VERSIONS"; then
-    if [[ "$FORCE" == true ]]; then
-      echo "restore.sh: note: --force; artifact is ${ARTIFACT_VERSION}, this CRD serves" >&2
-      echo "restore.sh: $(tr '\n' ' ' <<<"$SERVED_VERSIONS")" >&2
-    else
-      echo "restore.sh: the artifact was taken at ${ARTIFACT_VERSION}, which this" >&2
-      echo "restore.sh: cluster's CRD does not serve. Served versions:" >&2
-      echo "restore.sh: $(tr '\n' ' ' <<<"$SERVED_VERSIONS")" >&2
-      echo "restore.sh: Nothing was changed. Restore the CRD that serves" >&2
-      echo "restore.sh: ${ARTIFACT_VERSION} first, or re-take the backup against this" >&2
-      echo "restore.sh: cluster, or force it anyway:" >&2
-      echo "restore.sh:   hack/restore.sh --force $DIR" >&2
-      exit 1
-    fi
+if [[ -n "$SERVED_VERSIONS" ]] && ! grep -qxF "$ARTIFACT_VERSION" <<<"$SERVED_VERSIONS"; then
+  if [[ "$FORCE" == true ]]; then
+    echo "restore.sh: note: --force; artifact is ${ARTIFACT_VERSION}, this CRD serves" >&2
+    echo "restore.sh: $(tr '\n' ' ' <<<"$SERVED_VERSIONS")" >&2
+  else
+    echo "restore.sh: the artifact was taken at ${ARTIFACT_VERSION}, which this" >&2
+    echo "restore.sh: cluster's CRD does not serve. Served versions:" >&2
+    echo "restore.sh: $(tr '\n' ' ' <<<"$SERVED_VERSIONS")" >&2
+    echo "restore.sh: Nothing was changed. Restore the CRD that serves" >&2
+    echo "restore.sh: ${ARTIFACT_VERSION} first, or re-take the backup against this" >&2
+    echo "restore.sh: cluster, or force it anyway:" >&2
+    echo "restore.sh:   hack/restore.sh --force $DIR" >&2
+    exit 1
   fi
 fi
 

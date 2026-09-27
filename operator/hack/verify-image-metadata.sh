@@ -79,15 +79,14 @@ docker image inspect "$image" >/dev/null 2>&1 || {
   exit 1
 }
 
+user=$(docker image inspect -f '{{.Config.User}}' "$image")
 if [ "$allow_scratch_user" = "--allow-scratch-user" ]; then
-  user=$(docker image inspect -f '{{.Config.User}}' "$image")
   echo "${prog}: Config.User=${user} (scratch image, USER not required)" >&2
   if [ -n "$user" ] && { [ "$user" = "0" ] || [ "$user" = "root" ] || [ "$user" = "0:0" ]; }; then
     echo "${prog}: scratch image ${image} must not declare a root USER" >&2
     exit 1
   fi
 else
-  user=$(docker image inspect -f '{{.Config.User}}' "$image")
   echo "${prog}: Config.User=${user}" >&2
   [ -n "$user" ] || { echo "${prog}: ${image} has no USER; it would run as root" >&2; exit 1; }
   [ "$user" != "0" ] || { echo "${prog}: ${image} runs as root (USER 0)" >&2; exit 1; }

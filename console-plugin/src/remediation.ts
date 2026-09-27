@@ -92,13 +92,13 @@ export const missingDependencySummary = (
     const v = ann[key];
     return stripFormatChars(isString(v) ? v : '');
   };
+  // Comma-separated annotation values are trimmed and dropped when empty, the
+  // same on every annotation that carries one.
+  const csvList = (text: string): string[] =>
+    text.split(',').map((s) => s.trim()).filter(Boolean);
+  const field = (v: unknown): string => stripFormatChars(isString(v) ? v.trim() : '');
 
-  for (const raw of read(dependsOnAnn).split(',')) {
-    const id = raw.trim();
-    if (id) {
-      parts.push(id);
-    }
-  }
+  parts.push(...csvList(read(dependsOnAnn)));
 
   const rawObj = read(dependsOnObjAnn).trim();
   if (rawObj) {
@@ -113,8 +113,6 @@ export const missingDependencySummary = (
           }
           // Narrow, then strip: JSON.parse yields whatever the annotation held,
           // so a name is arbitrary untrusted text on this path.
-          const field = (v: unknown): string =>
-            stripFormatChars(isString(v) ? v.trim() : '');
           const name = field(d.name);
           const kind = field(d.kind);
           const ns = field(d.namespace);
@@ -134,12 +132,7 @@ export const missingDependencySummary = (
     }
   }
 
-  for (const raw of read(unsetValueAnn).split(',')) {
-    const v = raw.trim();
-    if (v) {
-      parts.push(`value:${v}`);
-    }
-  }
+  parts.push(...csvList(read(unsetValueAnn)).map((v) => `value:${v}`));
 
   if (parts.length) {
     return formatList(parts, locale);

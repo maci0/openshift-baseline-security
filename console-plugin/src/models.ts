@@ -336,6 +336,20 @@ export type ResultCounts = {
   notApplicable: number;
 };
 
+// The eight ResultCounts fields, in report-table order. One list so the
+// aggregate, the cluster total, and the report's per-category rows cannot drift
+// from the type. The satisfies clause fails the build if a field is renamed.
+export const RESULT_COUNT_KEYS = [
+  'pass',
+  'fail',
+  'manual',
+  'info',
+  'error',
+  'inconsistent',
+  'waived',
+  'notApplicable',
+] as const satisfies readonly (keyof ResultCounts)[];
+
 export type Waiver = {
   name: string;
   reason?: string;

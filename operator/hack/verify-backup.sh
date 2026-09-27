@@ -81,11 +81,6 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 DIR="${DIR:-./baseline-backup}"
-if [[ -z "$DIR" ]]; then
-  echo "verify-backup.sh: invalid backup directory: <empty>" >&2
-  usage >&2
-  exit 2
-fi
 if ! [[ "$MAX_AGE_DAYS" =~ ^[0-9]+$ ]]; then
   echo "verify-backup.sh: --max-age-days takes a whole number, got '${MAX_AGE_DAYS}'" >&2
   usage >&2

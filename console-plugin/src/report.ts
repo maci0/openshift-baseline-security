@@ -7,6 +7,7 @@ import {
   ComplianceCheckResult,
   isOwnedByBaseline,
   profileTitle,
+  RESULT_COUNT_KEYS,
 } from './models';
 import { checkTitle, severityDisplayTitle } from './results';
 import { aggregateCounts, checkSeverity, normalizeScore, scoreStatus } from './scoring';
@@ -270,15 +271,7 @@ export const buildReportHtml = (
   // Aggregate all eight status categories across built-in + tailored profiles,
   // the same set the on-screen composition donut and per-profile cards show.
   const totals = aggregateCounts(...(st.profiles ?? []), ...(st.tailoredProfiles ?? []));
-  const totalChecks =
-    totals.pass +
-    totals.fail +
-    totals.manual +
-    totals.info +
-    totals.error +
-    totals.inconsistent +
-    totals.waived +
-    totals.notApplicable;
+  const totalChecks = RESULT_COUNT_KEYS.reduce((n, k) => n + totals[k], 0);
   // Match the donut: with zero evaluated checks a non-null status.score is stale
   // (0/0) and the UI shows "—", so the report must not print a number over it.
   // normalizeScore folds a non-numeric / non-finite / out-of-range status.score

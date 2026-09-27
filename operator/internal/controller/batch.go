@@ -143,7 +143,7 @@ func splitValidRemediationNames(
 ) (valid, invalid []string) {
 	valid = make([]string, 0, len(names))
 	for _, name := range names {
-		if len(utilvalidation.IsDNS1123Subdomain(name)) > 0 {
+		if validK8sName(name) == "" {
 			log.FromContext(ctx).Info(logMsg, "remediation", name, "name", cb.Name)
 			invalid = append(invalid, name)
 			continue

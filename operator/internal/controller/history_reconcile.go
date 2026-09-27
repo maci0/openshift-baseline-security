@@ -30,12 +30,12 @@ func (r *ClusterBaselineReconciler) stampHistoryScoringMode(cb *baselinev1alpha1
 	if cb.Annotations[historyScoringModeAnn] == mode {
 		return
 	}
-	if cb.Annotations == nil {
-		cb.Annotations = map[string]string{historyScoringModeAnn: mode}
-		return
+	ann := maps.Clone(cb.Annotations)
+	if ann == nil {
+		ann = map[string]string{}
 	}
-	cb.Annotations = maps.Clone(cb.Annotations)
-	cb.Annotations[historyScoringModeAnn] = mode
+	ann[historyScoringModeAnn] = mode
+	cb.Annotations = ann
 }
 
 // persistHistoryScoringMode durably writes the mode annotation set in memory by

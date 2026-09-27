@@ -30,18 +30,8 @@ export const tailoredEffectiveCounts = (
   disableRules: readonly string[],
   enableRules: readonly string[],
 ): TailoredEffectiveCounts => {
-  const baseSet = new Set<string>();
-  for (const r of baseRules) {
-    if (r) {
-      baseSet.add(r);
-    }
-  }
-  const disableSet = new Set<string>();
-  for (const r of disableRules) {
-    if (r) {
-      disableSet.add(r);
-    }
-  }
+  const baseSet = new Set(baseRules.filter(Boolean));
+  const disableSet = new Set(disableRules.filter(Boolean));
   let remainingBase = 0;
   for (const r of baseSet) {
     if (!disableSet.has(r)) {
@@ -121,9 +111,8 @@ const cleanRuleNames = (rules: string[]): string[] => {
   return out;
 };
 
-// Rule object written into TailoredProfile disableRules/enableRules. Shared by
-// tailoredProfileManifest and the ProfilesTab update path so both write the
-// identical shape.
+// Shared by tailoredProfileManifest and the ProfilesTab update path so both
+// write the identical shape.
 export const consoleRule = (n: string): ConsoleRule => ({
   name: n,
   rationale: 'set via console',
@@ -179,10 +168,9 @@ export const tailoredProfileManifest = (
     title: profileName,
     extends: extendsName,
   };
-  const rule = consoleRule;
   const { disable, enable } = cleanRuleSelection(disableRules, enableRules);
-  if (enable.length) spec.enableRules = enable.map(rule);
-  if (disable.length) spec.disableRules = disable.map(rule);
+  if (enable.length) spec.enableRules = enable.map(consoleRule);
+  if (disable.length) spec.disableRules = disable.map(consoleRule);
   return {
     apiVersion: 'compliance.openshift.io/v1alpha1',
     kind: 'TailoredProfile',
@@ -205,13 +193,14 @@ export const tailoredProfileSpecMatches = (
   const spec = existing?.spec ?? {};
   const isRuleRef = (v: unknown): v is { name?: unknown } =>
     v !== null && typeof v === 'object';
-  const isRuleList = (v: unknown): v is readonly unknown[] => Array.isArray(v);
-  const names = (rules: readonly unknown[] | undefined): string[] =>
-    (rules ?? [])
+  const names = (rules: unknown): string[] => {
+    const list: readonly unknown[] = Array.isArray(rules) ? rules : [];
+    return list
       .filter(isRuleRef)
       .map((r) => (isString(r.name) ? r.name : ''))
       .filter(Boolean)
       .sort();
+  };
   const eq = (a: string[], b: string[]) =>
     a.length === b.length && a.every((x, i) => x === b[i]);
   // Mirror the manifest's normalization: default extends and the same
@@ -224,7 +213,7 @@ export const tailoredProfileSpecMatches = (
   const existingExtends = isString(spec.extends) ? spec.extends : '';
   return (
     existingExtends === extendsName &&
-    eq(names(isRuleList(spec.disableRules) ? spec.disableRules : []), disableSorted) &&
-    eq(names(isRuleList(spec.enableRules) ? spec.enableRules : []), enableSorted)
+    eq(names(spec.disableRules), disableSorted) &&
+    eq(names(spec.enableRules), enableSorted)
   );
 };

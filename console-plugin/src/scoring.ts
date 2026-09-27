@@ -5,6 +5,7 @@ import {
   ComplianceCheckResult,
   isOwnedByBaseline,
   ResultCounts,
+  RESULT_COUNT_KEYS,
   ScoreSnapshot,
   suiteFilterKey,
   Waiver,
@@ -136,14 +137,9 @@ export const aggregateCounts = (...groups: ResultCounts[]): ResultCounts => {
     notApplicable: 0,
   };
   for (const g of groups) {
-    a.pass = addCount(a.pass, count(g.pass));
-    a.fail = addCount(a.fail, count(g.fail));
-    a.manual = addCount(a.manual, count(g.manual));
-    a.info = addCount(a.info, count(g.info));
-    a.error = addCount(a.error, count(g.error));
-    a.inconsistent = addCount(a.inconsistent, count(g.inconsistent));
-    a.waived = addCount(a.waived, count(g.waived));
-    a.notApplicable = addCount(a.notApplicable, count(g.notApplicable));
+    for (const k of RESULT_COUNT_KEYS) {
+      a[k] = addCount(a[k], count(g[k]));
+    }
   }
   return a;
 };
