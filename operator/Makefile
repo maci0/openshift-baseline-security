@@ -98,6 +98,7 @@ help:
 	@echo "  make fuzz          short seed-corpus fuzz (run before a release)"
 	@echo "  make govulncheck   vulnerability scan (pinned)"
 	@echo "  make build         generate, manifests, fmt-check, vet, bin/manager"
+	@echo "  make verify-reproducible  build ./cmd twice (path, TZ, locale, umask) and diff the SHA-256"
 	@echo "  make run           build and run against the current kubeconfig"
 	@echo "  make bundle        verify-* then operator-sdk bundle validate (needs docker)"
 	@echo "  make test-e2e      live-cluster e2e (needs KUBECONFIG)"
@@ -298,6 +299,7 @@ ci:
 	$(MAKE) --no-print-directory mod-tidy-check
 	$(MAKE) --no-print-directory test-race
 	$(MAKE) --no-print-directory build
+	$(MAKE) --no-print-directory verify-reproducible
 	$(MAKE) --no-print-directory lint
 	$(MAKE) --no-print-directory govulncheck
 	$(MAKE) --no-print-directory test-alerts
@@ -323,6 +325,14 @@ build: generate manifests
 	CGO_ENABLED=0 go build $(GO_BUILD_FLAGS) -ldflags="$(GO_LDFLAGS)" -o bin/manager ./cmd
 	# Fail if the linker wrote nothing (partial failure / empty artifact).
 	@test -s bin/manager || { echo "bin/manager missing or empty after go build" >&2; exit 1; }
+
+# Reproducibility gate for the release binary: build ./cmd twice from different
+# absolute paths, TZ, locale, and umask, and require an identical SHA-256. The
+# flags are passed in so GO_BUILD_FLAGS / GO_LDFLAGS above stay the single source
+# of the build recipe; the script never restates them.
+.PHONY: verify-reproducible
+verify-reproducible:
+	@./hack/verify-reproducible.sh "$(GO_BUILD_FLAGS)" "$(GO_LDFLAGS)"
 
 .PHONY: run
 run: build

@@ -56,6 +56,11 @@ jobs:
       - run: make test-race
       # Release-shaped binary (CGO off, trimpath, stripped); image build is separate.
       - run: make build
+      # Build ./cmd a second time from a different path/TZ/locale/umask and
+      # require an identical SHA-256. Keeps the -trimpath / -buildvcs=false /
+      # -buildid= claims in the Makefile and Dockerfiles from being comments
+      # nobody checks.
+      - run: make verify-reproducible
       - run: make lint
       # Version pinned in operator/Makefile GOVULNCHECK_VERSION (single source).
       - run: make govulncheck

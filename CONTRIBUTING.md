@@ -77,8 +77,15 @@ that step needs root, so it is not part of the per-clone loop.
 
 `cd operator && make ci` is the single command that matches the GitHub Actions
 `operator` job (unit tests, lint, govulncheck, alert tests, generated-file
-drift, bundle validate). `cd console-plugin && yarn ci` matches the
-`console-plugin` job except `yarn npm audit`. Image builds stay in CI.
+drift, binary reproducibility, bundle validate). `cd console-plugin && yarn ci`
+matches the `console-plugin` job except `yarn npm audit`. Image builds stay in
+CI.
+
+`cd operator && make verify-reproducible` on its own rebuilds the manager from
+a second absolute path with a different timezone, locale, and umask and fails
+unless the two binaries have the same SHA-256. Run it after touching the build
+flags or the Go toolchain pin; a green `make build` alone does not prove the
+binary is reproducible.
 
 ## Adding a test
 

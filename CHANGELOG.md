@@ -43,6 +43,17 @@ depend on those tags.
 
 ## [Unreleased]
 
+### Added
+
+- `make verify-reproducible` (in `make ci` and the GitHub Actions `operator`
+  job) builds the manager twice, from two different absolute paths and under a
+  different timezone, locale, and umask, and fails unless both binaries hash
+  identically. The `-trimpath`, `-buildvcs=false`, and `-buildid=` flags were
+  already set in the Makefile and both Dockerfiles, and the release claims the
+  local and in-image binaries match, but nothing checked it: a dropped or
+  misspelled flag produced a different binary and every image and test run
+  still passed.
+
 ### Changed
 
 - `docs/THREAT_MODEL.md` brought back in line with the code. The commit stamp

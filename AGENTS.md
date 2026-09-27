@@ -23,7 +23,7 @@ cd console-plugin && yarn lint && yarn lint:oxlint && yarn typecheck && yarn tes
 ```
 
 `make -C operator ci` is the local replica of the GHA `operator` job (also
-build, `govulncheck`, `mod-tidy-check`, alert tests, generated-file drift,
+build, the reproducible-binary check, `govulncheck`, `mod-tidy-check`, alert tests, generated-file drift,
 `make bundle`; needs docker). `cd console-plugin && yarn ci` is the replica of the GHA
 `console-plugin` job except `yarn npm audit`. The required `images` and
 `catalog` jobs have no local replica beyond `make bundle` and
