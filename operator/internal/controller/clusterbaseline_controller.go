@@ -43,8 +43,13 @@ const (
 	// match the listen directive in console-plugin/nginx.conf.
 	pluginPort = 9443
 	// pluginHealthzPath is the constant-return location nginx exposes for the
-	// kubelet probes. It must match `location = /healthz` in nginx.conf.
+	// startup and liveness probes. It must match `location = /healthz` in
+	// nginx.conf.
 	pluginHealthzPath = "/healthz"
+	// pluginReadyzPath is the readiness location: constant 200 only when the
+	// asset root is readable by the nginx worker. It must match
+	// `location = /readyz` in nginx.conf.
+	pluginReadyzPath = "/readyz"
 	// operatorName is this operator, the entity that owns the objects it
 	// reconciles; it is the app.kubernetes.io/managed-by value.
 	operatorName = "baseline-security-operator"

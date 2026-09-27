@@ -164,22 +164,41 @@ func TestPluginHealthzPathExistsInNginxConf(t *testing.T) {
 		t.Fatalf("read %s: %v", conf, err)
 	}
 	text := string(raw)
-	loc := "location = " + pluginHealthzPath + " {"
-	start := strings.Index(text, loc)
-	if start < 0 {
-		t.Fatalf("nginx.conf has no `%s` block; the plugin probes it", pluginHealthzPath)
-	}
-	// The location must be a constant return: a probe that reads the asset tree
-	// would fail for an unrelated reason and take the pod down with it.
-	block := text[start:]
-	if end := strings.Index(block, "\n        }"); end >= 0 {
-		block = block[:end]
-	}
+	// Startup and liveness take the constant return: a restart cannot change
+	// whether the baked-in asset tree is readable, so failing liveness there
+	// would only CrashLoop a broken image.
+	block := locationBlock(t, text, pluginHealthzPath)
 	if !strings.Contains(block, "return 200") {
 		t.Fatalf("%s block does not `return 200`:\n%s", pluginHealthzPath, block)
+	}
+	// Readiness has to answer a question the constant return cannot: can this
+	// worker read the asset root. Without the check a pod holding the listener
+	// over an unreadable tree reports ready and 404s every console asset.
+	ready := locationBlock(t, text, pluginReadyzPath)
+	if !strings.Contains(ready, "return 503") {
+		t.Fatalf("%s block does not `return 503` on an unreadable asset root:\n%s", pluginReadyzPath, ready)
+	}
+	if !strings.Contains(ready, "-r /opt/app-root/src") {
+		t.Fatalf("%s block does not test readability of the asset root:\n%s", pluginReadyzPath, ready)
 	}
 	// The listen port the probes target must match the TLS listener.
 	if !strings.Contains(text, "listen "+strconv.Itoa(pluginPort)+" ssl http2;") {
 		t.Fatalf("nginx.conf does not listen on %d, the port the probes target", pluginPort)
 	}
+}
+
+// locationBlock returns the body of the `location = <path>` block in an nginx
+// config, so a test can assert on the directives a probe path really carries.
+func locationBlock(t *testing.T, text, path string) string {
+	t.Helper()
+	loc := "location = " + path + " {"
+	start := strings.Index(text, loc)
+	if start < 0 {
+		t.Fatalf("nginx.conf has no `%s` block; the plugin probes it", loc)
+	}
+	block := text[start:]
+	if end := strings.Index(block, "\n        }"); end >= 0 {
+		block = block[:end]
+	}
+	return block
 }

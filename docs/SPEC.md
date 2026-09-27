@@ -170,9 +170,10 @@ Responsibilities:
    preferred pod anti-affinity on multi-node topologies; collapses to 1
    replica with no PDB on SingleReplica clusters so the single node can
    drain; TLS + HTTP/2 on 9443, gzip for JS/JSON, service-serving-cert mounted at
-   `/var/serving-cert`; all three probes are HTTP GET on the constant-return
-   `/healthz` location, so a pod that holds the listener but serves no asset is
-   removed from the Service), Service, cluster-scoped `ConsolePlugin` CR
+   `/var/serving-cert`; startup and liveness are HTTP GET on the constant-return
+   `/healthz` location, readiness on `/readyz`, which returns 503 unless the nginx
+   worker can read the asset root, so a pod that holds the listener but serves no
+   asset is removed from the Service), Service, cluster-scoped `ConsolePlugin` CR
    (created if missing), and registration on
    `consoles.operator.openshift.io/cluster` `spec.plugins` (removed on CR
    deletion via finalizer, or when `spec.console.managementState` is Removed).

@@ -42,7 +42,6 @@ git tag `vX.Y.Z` (never force-moved); the compare links in the footer below
 depend on those tags.
 
 ## [Unreleased]
-
 ### Added
 
 - A name filter on the Remediations tab. A full benchmark run lists thousands
@@ -104,14 +103,6 @@ depend on those tags.
   `manager --version` inside a running pod reports the build it came from
   instead of a bare digest. A binary built without the stamp (plain `go
   build`) reports `dev`.
-
-- `hack/must-gather.sh` no longer dumps a Secret into a support archive. It
-  collected every object named in `status.relatedObjects`, and the only filter
-  on that list was a character check, so a hand-edited or etcd-restored
-  `relatedObjects` entry naming `secrets` was collected like any other object,
-  putting the metrics TLS private key and the scraper service-account token
-  into an attachment the operator can no longer redact. Collection is now
-  pinned to the six kinds the reconciler actually writes.
 
 - `yarn size` (in `yarn build` and `yarn ci`) reports the transferred size of
   the built console plugin and fails over the ceilings in
@@ -605,7 +596,222 @@ depend on those tags.
   still patches only the baseline and is unchanged). This closes a path where
   a baseline-only patch created and rewrote objects the operator then consumed.
 
+
+- The console plugin now gzips its assets at level 9 instead of level 5. Every
+  file it serves is content-hashed and marked immutable for a year, so the
+  bytes are compressed once at image build and each browser pays the cost at
+  most once per plugin version; the extra effort is spent on a cache miss and
+  the bytes it saves are spent on every cold fill. The build-time size report
+  and the CI size step already measured at level 9, so the number in the run
+  log is now the number on the wire. Precompressed files plus `gzip_static`
+  are not available here (the UBI module set has no `gzip_static`), and
+  brotli and zstd are extra module builds, so gzip stays the served encoding
+  and the level is the lever.
+
+
+- The console plugin now gzips its assets at level 9 instead of level 5. Every
+  file it serves is content-hashed and marked immutable for a year, so the
+  bytes are compressed once at image build and each browser pays the cost at
+  most once per plugin version; the extra effort is spent on a cache miss and
+  the bytes it saves are spent on every cold fill. The build-time size report
+  and the CI size step already measured at level 9, so the number in the run
+  log is now the number on the wire. Precompressed files plus `gzip_static`
+  are not available here (the UBI module set has no `gzip_static`), and
+  brotli and zstd are extra module builds, so gzip stays the served encoding
+  and the level is the lever.
+
+- The two OpenTelemetry OTLP trace exporter modules move from v1.40.0 to
+  v1.44.0, onto the same version as the `go.opentelemetry.io/otel` core
+  modules. The exporter builds on the core trace SDK and the two are released
+  together, so leaving the exporters two minors behind is skew the graph only
+  tolerated. It brings `go.opentelemetry.io/proto/otlp` to v1.10.0 and
+  `grpc-ecosystem/grpc-gateway/v2` to v2.29.0.
+
+- The operator builds against `k8s.io/streaming` v0.36.4, matching the rest of
+  the `k8s.io/*` set (v0.36.4 for api, apimachinery, client-go; v0.36.0 for the
+  apiserver staging modules), instead of v0.37.0. The 0.37 line arrived with the
+  dependency bump as an indirect and is compiled into the binary, because
+  client-go's exec and port-forward paths build on `k8s.io/streaming`'s
+  `httpstream` and `wsstream` packages. Kubernetes 0.37 is not adoptable yet:
+  no controller-runtime release targets it, and its client-go adds
+  `HasSyncedChecker` to an interface v0.24.1 does not implement. No observable
+  behavior change.
+
+- The CRD and manager ClusterRole are generated with controller-gen v0.21.0
+  instead of v0.20.1. The Makefile asks for the controller-tools release whose
+  `k8s.io/*` matches the operator's, and the k8s bump to v0.36.4 left it a
+  minor behind: v0.20.1 builds against k8s v0.35. The generated schema is
+  byte-identical apart from the `controller-gen.kubebuilder.io/version`
+  annotation, so no field changes.
+
+- `yarn size` reports the first-paint download (entry bundles plus the manifest
+  and locale the console fetches ahead of them) and no longer counts
+  `THIRD-PARTY-NOTICES.txt` in the dist total. No page links that file, so it
+  was inflating the ceiling that stands for what a browser actually
+  downloads, and the locale bundle the first paint waits on was invisible to
+  the report. No shipped bytes changed.
+
+- The Observe → Dashboards view and the exported HTML report now paint statuses
+  in the same colors the console paints them in. Every dashboard graph panel
+  took Grafana's default categorical palette, where a failing-check series can
+  render green and a passing one blue, and the report and dashboard carried
+  PatternFly 4-era hexes while the console plugin reads PatternFly 6 status
+  tokens. All three surfaces share one palette now (success `#3d7317`, danger
+  `#b1380b`, warning `#dca614`, info `#5e40be`, custom `#147878`, orangered
+  `#fbbea8` for Error, neutral `#a3a3a3`), and the 30-day score trend follows
+  the same 60/90 bands as the score beside it.
+
+- `docs/THREAT_MODEL.md` brought back in line with the code. The commit stamp
+  and eleven line citations across `role.yaml`, `cmd/main.go`, `plugin.go`,
+  `plugin_pod.go`, `nginx.conf`, both Dockerfiles, `CompliancePage.tsx`,
+  `RemediationsTab.tsx`, and the e2e dotenv loader were stale, and two surfaces
+  the model never named are now covered: the leader-election Lease and its
+  separate Role, and the operator's cluster-wide RBAC grants. No shipped
+  behavior changed.
+
+- Console plugin built a fresh `Intl.NumberFormat` / `Intl.DateTimeFormat` on
+  every count, date label, and chart tick. A console session sets an explicit
+  locale, and the engine only caches the runtime default, so each card, waiver
+  row, remediation row, and axis label paid a formatter construction on the
+  main thread. `formatCount`, `formatLocalDate`, and `formatChartDate` now hold
+  one formatter per locale tag, matching how the display collator is already
+  cached. Output is unchanged, including the fallback for an invalid tag.
+
+- Console plugin re-canonicalized the console locale on every count, date label,
+  collator comparison, and list join: `safeLocale` ran `Intl.getCanonicalLocales`
+  per call, and `compareForDisplay` calls it once per comparison, so sorting the
+  rule catalog canonicalized the tag thousands of times per sort. `safeLocale`
+  now holds one entry per locale tag, like the formatters above it. Output is
+  unchanged, including the invalid-tag fallback.
+
+- Profiles typeahead re-folded the whole rule catalog, plus the query once per
+  option, on every keystroke, so typing in the enable-rules picker redid a
+  thousand NFD normalizations per character over unchanged names. The catalog
+  is now folded when it changes and the query when it is typed, leaving a
+  substring test per option. Matching is unchanged, including diacritic and
+  Turkish dotted/dotless i handling.
+
+- The operator seeded every gauge to 0 at startup, and
+  `baseline_security_status_observed_timestamp_seconds` was seeded to 0 as a
+  "never published" sentinel. Only `baseline_security_compliance_score` (the -1
+  sentinel of ADR-018) and the `baseline_security_condition` children need that;
+  every other gauge is written on each publish, and a published timestamp is a
+  wall clock, never 0. The seeds are gone, so on a replica that has not
+  reconciled yet `baseline_security_last_scan_timestamp_seconds`,
+  `baseline_security_newly_failed`, `baseline_security_remediation_batch_active`,
+  `baseline_security_remediation_batch_started_timestamp_seconds`, and
+  `baseline_security_scan_interval_seconds` are absent rather than 0. A
+  dashboard panel or recording rule that read one of them as 0 in that window
+  now sees no series; add `or vector(0)` in PromQL where the zero is the answer
+  you want. Alert firing is unchanged: `ComplianceStatusStale` catches the
+  never-published case through its `absent()` disjunct, which the seed removal
+  makes the primary path, and the HA newest-publisher selection every other
+  alert uses simply matches nothing until the first publish.
+
+- The console plugin's nginx access log no longer uses the `combined` format.
+  It logged the admin's client IP, the referring console URL, and the browser
+  user agent, none of which triage a failed static-asset fetch, and the log
+  line is copied verbatim into `hack/must-gather.sh` output and from there into
+  support archives. The line now carries the method, the path without its query
+  string, the protocol, the status, and the response size. Log volume, the
+  non-2xx/3xx filter, and the destination are unchanged.
+
+- The manager printed its usage text to stdout on a usage error, so a caller
+  that captured stdout on the exit-2 path (an unknown flag, an unexpected
+  positional argument) read the whole help text as command output while the
+  error itself went to stderr. `--help` still writes to stdout, so
+  `manager --help | less` keeps working; a bad invocation now writes the
+  message and the usage text to stderr, and the message names the binary.
+
+- Kubernetes objects the operator ships (manager Deployment, metrics Service,
+  ServiceMonitor, PrometheusRule, and the plugin Service/Deployment/PDB) now
+  carry the recommended `app.kubernetes.io/name`, `component`, `part-of`, and
+  `managed-by` labels, and the CSV pod template carries
+  `app.kubernetes.io/version`. Selectors still match on `app` alone, because
+  the Deployment selector is immutable and a selector requiring a new label
+  would stop matching pods created before it.
+
+- Exported HTML report: the frame rule was a fixed brand red on every report,
+  including a passing one. It now takes its color from the score band using the
+  same success/warning/danger hexes as the Grafana dashboard thresholds, and an
+  unscored report is framed in neutral grey rather than danger red. The palette
+  and the type scale moved into one `REPORT_TOKENS` table so a report's colors
+  are edited in one place, the score is a clear step above the page title rather
+  than four pixels, section headings carry a rule so the three tables read as
+  three groups, and the page is held to a 72rem measure so the six-column waiver
+  table stops stretching across a wide monitor.
+
+- Per-profile score sparkline on the Overview tab took the charting library's
+  default blue, so a profile card showed a green score chip above a blue trend
+  bar while the overall trend chart beside it was banded by score. It now uses
+  the same `scoreColor` band as the chip, the donut center, the cluster Overview
+  detail item, and the exported report, driven by the latest snapshot.
+
+- Threat model: the manager pod was described as running under Restricted PSS.
+  The pod spec satisfies Restricted, but no
+  `pod-security.kubernetes.io/enforce` label exists anywhere in the repo, so
+  nothing enforces it. The model now records it as defense in depth and lists
+  the missing label as a named gap, alongside the unbounded
+  `machineconfigpools` patch and full CRUD on `scansettingbindings` in the
+  operator ClusterRole, the platform-Prometheus scrape as a boundary, and the
+  remediation clipboard copy as an untrusted-output sink. Every file reference
+  was re-read against 0.6.1.
+
+- Docs: `docs/SPEC.md` tracked the 0.5.x line and the pre-0.6.0 toolchain pins
+  (k8s.io v0.35.x, controller-runtime v0.23.3, webpack 5.107) while the released
+  line is 0.6.1 built on k8s.io v0.36.4 / controller-runtime v0.24.1 / webpack
+  5.110. The spec header and pin table now match `operator/go.mod` and
+  `console-plugin/package.json`, the roadmap covers 0.5.5 through 0.6.1, and
+  two shipped decisions that had no record are captured: ADR-030 (no OLM
+  `replaces` graph, CSV `capabilities: Basic Install`) and ADR-031 (waiver
+  names unique at admission).
+
+- Operator, reconcile: several passes read the Compliance Operator objects they
+  need one object at a time, so a full pass cost dozens of live apiserver round
+  trips (one `Get` per selected ScanSettingBinding, on every pass, on every
+  replica). They now take one paged `List` and derive the
+  per-object decisions from it, and the cluster-wide CSV lookup (the fallback
+  used when the Compliance Operator is installed outside
+  `openshift-compliance`) is paged too, since a CSV carries its whole install
+  spec and `alm-examples`. Reconcile latency and apiserver QPS drop on clusters
+  with many profiles or check results; the objects written are unchanged, and
+  every read is still a live unstructured read rather than a cached one.
+
+- Console, Remediations: **Batch apply** and **Auto-apply** now need `patch`
+  on `complianceremediations` in `openshift-compliance` as well as `patch` on
+  the `ClusterBaseline`. Both controls write only the baseline (an annotation,
+  or `spec.remediation.apply`), and the operator then patches the
+  remediations, which rolls a node reboot, so a user granted the baseline patch
+  alone could spend a write the per-row Apply action already refused.
+  **Before:** a user with the baseline patch could batch apply and toggle
+  auto-apply. **After:** the same user sees both controls disabled, with the
+  reason on hover, and the toggle refuses rather than writing the baseline.
+  Grant `patch complianceremediations.compliance.openshift.io` in
+  `openshift-compliance` to restore the previous behavior. `cluster-admin` and
+  the built-in `admin` ClusterRole in that namespace already hold it; a custom
+  role that granted only the baseline patch does not.
+
+- Console, Profiles: authoring a tailored profile now needs `create` on
+  `tailoredprofiles` in `openshift-compliance`, and editing a profile bound to
+  a baseline needs `update` on the same resource, each on top of the
+  `ClusterBaseline` patch the controls already spent. **Before:** the baseline
+  patch alone gated Author and Edit. **After:** a user without those verbs
+  loses the Author button and the Edit control (the Unbind control beside Edit
+  still patches only the baseline and is unchanged). This closes a path where
+  a baseline-only patch created and rewrote objects the operator then consumed.
+
+
 ### Fixed
+
+- The console plugin's readiness probe asked a question nginx answered
+  unconditionally. All three probes targeted the constant-return `/healthz`
+  location, so an nginx pod holding the 9443 listener over an unreadable asset
+  root (a bad `fsGroup`, a truncated image) still reported ready and stayed in
+  the Service, 404ing every asset the console fetched. Readiness now targets
+  `/readyz`, which returns 503 unless the worker can read the asset root and so
+  pulls that pod out of the endpoints. Startup and liveness keep `/healthz`: the
+  tree is baked into the image under a read-only rootfs, so a restart cannot
+  make it readable and failing liveness would only CrashLoop a broken image.
 
 - A `MachineConfigPool` whose `spec.paused` is not a bool was read as "not
   paused" instead of as a failed read. A pool named in the
@@ -2237,60 +2443,6 @@ depend on those tags.
   annotation made since, with no `--force` and no warning. `--force` does not
   override it, since the operator cannot have meant to clobber an object whose
   current resourceVersion was never read.
-- `hack/must-gather.sh` no longer dumps a Secret into a support archive. It
-  collected every object named in `status.relatedObjects`, and the only filter
-  on that list was a character check, so a hand-edited or etcd-restored
-  `relatedObjects` entry naming `secrets` was collected like any other object,
-  putting the metrics TLS private key and the scraper service-account token
-  into an attachment the operator can no longer redact. Collection is now
-  pinned to the six kinds the reconciler actually writes.
-- The operator built against `google.golang.org/grpc` v1.82.1, which is
-  affected by GO-2026-6348 (heap exhaustion from HTTP/2 DATA frame
-  fragmentation) and is fixed in v1.83.1. `govulncheck` reaches it from
-  `cmd/main.go` through the manager start, so an API server that fragments its
-  responses could drive the operator out of memory. Pinned to v1.83.1, which
-  brings the `go.opentelemetry.io/otel` core modules to v1.44.0 with it.
-- The operator namespace now ships a `NetworkPolicy`. Any pod in the cluster
-  could previously open a TCP connection to the operator's metrics port 8443;
-  the bearer token was the only control. Ingress is now denied on every
-  operator port except 8443, and only for `openshift-monitoring` (the
-  platform Prometheus scrape) and the service-ca operator (which mints the
-  serving cert the scrape verifies against). Egress is deliberately left
-  unrestricted so the policy cannot intersect the platform's own policies and
-  cut the operator off from the API server.
-- The serialized-size budget that trims `status` failure lists under-counted
-  a string carrying ill-formed UTF-8 by up to 4 bytes per bad byte, because it
-  counted the three-byte replacement rune where `encoding/json` writes the
-  six-byte escape. A `ClusterBaseline` whose failure names came back from a
-  protobuf restore with lone continuation bytes could therefore exceed the
-  size bound and fail every subsequent status write, wedging conditions,
-  score, and phase. The count now uses the wider of the two forms, which can
-  only trim a list early.
-- A console write is now denied while its access review is still in flight, not
-  only once the review comes back negative. `mayWrite` is the single chokepoint
-  every mutation passes through, and it read `allowed` alone, so a permission
-  revoked between the moment a control rendered and the moment it was clicked
-  could still be spent on the wire when the review had not resolved yet. The
-  check now fails closed on an unresolved review, matching what the plugin's
-  contributor rules already stated.
-- `hack/restore.sh` now refuses a backup artifact that holds more than one YAML
-  document. `oc apply -f` and `oc replace -f` apply every document in a
-  multi-document file, so a backup directory with a second document appended
-  after the `ClusterBaseline` would have been written to the cluster with the
-  restoring operator's own credentials, whatever privilege it held. The
-  existing kind and apiVersion checks match on any line and could not see the
-  extra document, and the MANIFEST sha256 does not help: it lives in the same
-  directory and is recomputable by anyone who can edit the artifact. Backups
-  taken by `hack/backup.sh` are a single named object and never contain a
-  `---` separator, so no valid backup is affected.
-- `hack/restore.sh` now stops, changing nothing, when it cannot read the live
-  `ClusterBaseline/cluster`. A failed read left the resourceVersion comparison
-  with an empty value, which read the same as an absent object: the rollback
-  guard was skipped, and an out-of-date backup was applied over a live object
-  that had moved on, discarding every waiver edit and remediation batch
-  annotation made since, with no `--force` and no warning. `--force` does not
-  override it, since the operator cannot have meant to clobber an object whose
-  current resourceVersion was never read.
 - Results CSV export hardened against a formula sigil hidden behind a leading
   control character. `csvCell` dropped NULs and Unicode format characters, then
   checked the cell for a formula starter, so a cell such as `\u0001=cmd` kept a
@@ -2300,89 +2452,6 @@ depend on those tags.
   evaluated formula. Export rows now drop the controls a spreadsheet trims
   (tab, CR, and LF stay, since RFC 4180 quoting needs them). Cells that held a
   control character other than a delimiter lose it from the export.
-- Console write controls were gated on `useAccessReview` through their
-  `isDisabled` prop alone. A tab holding an open confirm modal, a stopped
-  editor, or a pending form across a permission revocation would still send the
-  patch the button had already admitted. Every mutation now re-checks the
-  reviewed permission at the request boundary through one chokepoint
-  (`console-plugin/src/permissions.ts`), and an unresolved review denies rather
-  than defaulting to allow. Covered: rescan, profile toggle, schedule save,
-  waiver add and remove, TailoredProfile create, update, and bind, tailored
-  profile unbind, default baseline create, and every remediation path
-  (per-row apply, unapply, auto-apply, batch apply).
-
-
-- `hack/must-gather.sh` no longer dumps a Secret into a support archive. It
-  collected every object named in `status.relatedObjects`, and the only filter
-  on that list was a character check, so a hand-edited or etcd-restored
-  `relatedObjects` entry naming `secrets` was collected like any other object,
-  putting the metrics TLS private key and the scraper service-account token
-  into an attachment the operator can no longer redact. Collection is now
-  pinned to the six kinds the reconciler actually writes.
-
-- The operator built against `google.golang.org/grpc` v1.82.1, which is
-  affected by GO-2026-6348 (heap exhaustion from HTTP/2 DATA frame
-  fragmentation) and is fixed in v1.83.1. `govulncheck` reaches it from
-  `cmd/main.go` through the manager start, so an API server that fragments its
-  responses could drive the operator out of memory. Pinned to v1.83.1, which
-  brings the `go.opentelemetry.io/otel` core modules to v1.44.0 with it.
-
-- The operator namespace now ships a `NetworkPolicy`. Any pod in the cluster
-  could previously open a TCP connection to the operator's metrics port 8443;
-  the bearer token was the only control. Ingress is now denied on every
-  operator port except 8443, and only for `openshift-monitoring` (the
-  platform Prometheus scrape) and the service-ca operator (which mints the
-  serving cert the scrape verifies against). Egress is deliberately left
-  unrestricted so the policy cannot intersect the platform's own policies and
-  cut the operator off from the API server.
-
-- The serialized-size budget that trims `status` failure lists under-counted
-  a string carrying ill-formed UTF-8 by up to 4 bytes per bad byte, because it
-  counted the three-byte replacement rune where `encoding/json` writes the
-  six-byte escape. A `ClusterBaseline` whose failure names came back from a
-  protobuf restore with lone continuation bytes could therefore exceed the
-  size bound and fail every subsequent status write, wedging conditions,
-  score, and phase. The count now uses the wider of the two forms, which can
-  only trim a list early.
-
-- A console write is now denied while its access review is still in flight, not
-  only once the review comes back negative. `mayWrite` is the single chokepoint
-  every mutation passes through, and it read `allowed` alone, so a permission
-  revoked between the moment a control rendered and the moment it was clicked
-  could still be spent on the wire when the review had not resolved yet. The
-  check now fails closed on an unresolved review, matching what the plugin's
-  contributor rules already stated.
-
-- `hack/restore.sh` now refuses a backup artifact that holds more than one YAML
-  document. `oc apply -f` and `oc replace -f` apply every document in a
-  multi-document file, so a backup directory with a second document appended
-  after the `ClusterBaseline` would have been written to the cluster with the
-  restoring operator's own credentials, whatever privilege it held. The
-  existing kind and apiVersion checks match on any line and could not see the
-  extra document, and the MANIFEST sha256 does not help: it lives in the same
-  directory and is recomputable by anyone who can edit the artifact. Backups
-  taken by `hack/backup.sh` are a single named object and never contain a
-  `---` separator, so no valid backup is affected.
-
-- `hack/restore.sh` now stops, changing nothing, when it cannot read the live
-  `ClusterBaseline/cluster`. A failed read left the resourceVersion comparison
-  with an empty value, which read the same as an absent object: the rollback
-  guard was skipped, and an out-of-date backup was applied over a live object
-  that had moved on, discarding every waiver edit and remediation batch
-  annotation made since, with no `--force` and no warning. `--force` does not
-  override it, since the operator cannot have meant to clobber an object whose
-  current resourceVersion was never read.
-
-- Results CSV export hardened against a formula sigil hidden behind a leading
-  control character. `csvCell` dropped NULs and Unicode format characters, then
-  checked the cell for a formula starter, so a cell such as `\u0001=cmd` kept a
-  control prefix that a spreadsheet trims before deciding whether the cell is a
-  formula. A tampered `ComplianceCheckResult` name, description first line, or
-  `check-severity` label could therefore reach a downloaded export as an
-  evaluated formula. Export rows now drop the controls a spreadsheet trims
-  (tab, CR, and LF stay, since RFC 4180 quoting needs them). Cells that held a
-  control character other than a delimiter lose it from the export.
-
 - Console write controls were gated on `useAccessReview` through their
   `isDisabled` prop alone. A tab holding an open confirm modal, a stopped
   editor, or a pending form across a permission revocation would still send the
@@ -2452,7 +2521,6 @@ depend on those tags.
   reinstall goes wrong.
 
 ## [0.6.1] - 2026-09-02
-
 ### Fixed
 
 - Operator, console plugin, bundle, and catalog images: `/licenses` was
@@ -2461,6 +2529,7 @@ depend on those tags.
   single `COPY --chmod=0644` also stamps the parent directory BuildKit
   creates; the directory is now copied at 0755 and the file at 0644.
 
+
 ### Security
 
 - Console plugin build pulls browserslist 4.28.8, clearing two high-severity
@@ -2468,8 +2537,9 @@ depend on those tags.
   crash / prototype write via custom stats) that reached the tree through
   webpack. Build-time only; nothing shipped in the plugin bundle changes.
 
-## [0.6.0] - 2026-09-02
 
+
+## [0.6.0] - 2026-09-02
 ### Changed
 
 - Operator builds against controller-runtime 0.24.1 and the Kubernetes 0.36.4
@@ -2518,6 +2588,7 @@ depend on those tags.
 - Overview paints score cards before loading Victory charts. Results,
   Remediations, and Profiles load when those tabs are opened. A Retry alert
   is shown if a chunk fails to load.
+
 
 ### Fixed
 
@@ -2596,6 +2667,7 @@ depend on those tags.
   not-applicable rows (WAIVED had no status style of its own). They now use
   a teal label, matching the Overview composition donut.
 
+
 ### Security
 
 - Console: `yarn install` no longer runs package lifecycle scripts
@@ -2619,15 +2691,6 @@ depend on those tags.
 - Operator binary is linked as a PIE (`-buildmode=pie`) in the Makefile and
   both Dockerfiles.
 
-### Docs
-
-- Threat model: add `docs/THREAT_MODEL.md` (entry points, trust boundaries,
-  ranked threats, mitigations mapped to code) and link it from SECURITY.md.
-- Document operator process flags and env vars in the README, and comment
-  the optional ClusterBaseline spec fields on the sample CR.
-- README Versioning: the no-`replaces` upgrade path is install-the-new-head
-  (CatalogSource tag + delete a leftover Subscription/CSV); OperatorHub
-  capability is Basic Install.
 
 ### Migration notes
 
@@ -2653,7 +2716,26 @@ depend on those tags.
   tag and install that head; delete a leftover Subscription/CSV.
   ClusterBaseline CRs stay.
 
+
+### Docs
+
+- Threat model: add `docs/THREAT_MODEL.md` (entry points, trust boundaries,
+  ranked threats, mitigations mapped to code) and link it from SECURITY.md.
+- Document operator process flags and env vars in the README, and comment
+  the optional ClusterBaseline spec fields on the sample CR.
+- README Versioning: the no-`replaces` upgrade path is install-the-new-head
+  (CatalogSource tag + delete a leftover Subscription/CSV); OperatorHub
+  capability is Basic Install.
+
+
+
 ## [0.5.15] - 2026-08-26
+### Fixed
+
+- CI: run `yarn lint:oxlint` in the console-plugin job. The type-aware
+  anti-slop rules were configured but never gated, so a violation could land
+  on `main` unnoticed.
+
 
 ### Security
 
@@ -2667,11 +2749,6 @@ depend on those tags.
   (GHSA-4cwx-7wf7-3272 high, GHSA-8xcm-r25x-g524 moderate, via node-gyp).
   `yarn npm audit` reports no suggestions.
 
-### Fixed
-
-- CI: run `yarn lint:oxlint` in the console-plugin job. The type-aware
-  anti-slop rules were configured but never gated, so a violation could land
-  on `main` unnoticed.
 
 ### Docs
 
@@ -2679,13 +2756,15 @@ depend on those tags.
   the gate, the version lockstep, generated-file rules, and the per-component
   conventions. `CLAUDE.md` symlinks to each.
 
-## [0.5.14] - 2026-08-26
 
+
+## [0.5.14] - 2026-08-26
 ### Added
 
 - Release workflow: CycloneDX SBOMs for the operator, console-plugin, bundle,
   and catalog images, generated in a separate job (publish digests unchanged),
   uploaded as artifacts and attached to the GitHub release when one exists.
+
 
 ### Changed
 
@@ -2693,6 +2772,7 @@ depend on those tags.
   the `victory` umbrella package, and no longer pulls `@types/react-dom`. No
   rendering change; the build no longer carries candlestick, histogram,
   errorbar, canvas, or brush-line modules.
+
 
 ### Fixed
 
@@ -2719,6 +2799,7 @@ depend on those tags.
 - Operator: resuming an orphaned batch clears its annotations through the shared
   helper, so a concurrent resubmit carrying real remediation names survives.
 
+
 ### Security
 
 - Release workflow: the `workflow_dispatch` version input is passed through an
@@ -2731,6 +2812,7 @@ depend on those tags.
   and tar ^7.5.21 (GHSA-r292-9mhp-454m, via node-gyp). `yarn npm audit` is
   clean.
 
+
 ### Docs
 
 - README: add a Quickstart with a complete `oc apply` install sequence at the
@@ -2741,8 +2823,9 @@ depend on those tags.
 - Repo hygiene: text files pinned to LF via `.gitattributes` (a CRLF checkout
   breaks the make recipes, `hack/*.sh` shebangs, and Dockerfile `RUN` lines).
 
-## [0.5.13] - 2026-07-23
 
+
+## [0.5.13] - 2026-07-23
 ### Changed
 
 - Console: the tailored-profile rule pickers are now typeahead multi-selects.
@@ -2750,6 +2833,7 @@ depend on those tags.
   (enable extra rules); selections show as removable chips, and a live readout
   reports the effective rule count (`Scans N of M base rules`) as you edit. The
   dropdown scrolls for long result lists.
+
 
 ### Fixed
 
@@ -2761,14 +2845,16 @@ depend on those tags.
   found zero endpoints and no metrics were scraped, firing `ComplianceStatusStale`
   on an otherwise healthy operator.
 
+
 ### Docs
 
 - README: document installing from the published Quay catalog
   (`quay.io/openshift-baseline-security/baseline-security-operator-catalog`) as
   the recommended path, alongside the existing build-from-source instructions.
 
-## [0.5.12] - 2026-07-23
 
+
+## [0.5.12] - 2026-07-23
 ### Changed
 
 - Console: reworked the create/edit tailored-profile modal. Current rule
@@ -2777,8 +2863,9 @@ depend on those tags.
   profile that already has enable rules); a one-line intro explains the base +
   disable + enable model; clearer search/chip copy.
 
-## [0.5.11] - 2026-07-23
 
+
+## [0.5.11] - 2026-07-23
 ### Added
 
 - Console: the "New tailored profile" form now uses selections instead of
@@ -2787,6 +2874,7 @@ depend on those tags.
   Compliance Operator rule catalog.
 - Console: existing bound tailored profiles can be edited (base profile and
   enable/disable rule sets) from an Edit action on each card.
+
 
 ### Fixed
 
@@ -2797,21 +2885,24 @@ depend on those tags.
   a tailored profile that has enable rules (the AlreadyExists match previously
   ignored enableRules).
 
-## [0.5.10] - 2026-07-23
 
+
+## [0.5.10] - 2026-07-23
 ### Fixed
 
 - Console: the per-benchmark score cards now bottom-align their trend charts,
   so the sparklines line up across cards even when a card has an extra status
   row (e.g. PCI-DSS with Inconsistent).
 
+
 ### Security
 
 - Base-image CVE patches (digest bumps to ubi9 `nodejs-22`, `nginx-120`, and
   `go-toolset`; the language versions stay pinned by `.nvmrc` / `GOTOOLCHAIN`).
 
-## [0.5.9] - 2026-07-23
 
+
+## [0.5.9] - 2026-07-23
 ### Added
 
 - Release workflow publishing the operator, console-plugin, OLM bundle, and
@@ -2821,6 +2912,7 @@ depend on those tags.
   to the internal registry, then `make deploy`) for dev/lab/disconnected
   clusters with no external registry.
 
+
 ### Security
 
 - Bump `golang.org/x/text` v0.37.0 -> v0.39.0 (GO-2026-5970: infinite loop on
@@ -2828,8 +2920,9 @@ depend on those tags.
 - Pin `fast-uri` to `^3.1.4` (host confusion via a literal backslash authority
   delimiter in ajv's transitive 3.1.3).
 
-## [0.5.8] - 2026-07-20
 
+
+## [0.5.8] - 2026-07-20
 ### Fixed
 
 - Switching `spec.scoring.mode` no longer wipes the score history on every
@@ -2860,8 +2953,9 @@ depend on those tags.
   hashed chunks, no-cache manifest), fixing a stale-manifest failure after
   operator upgrades that broke the plugin until a hard refresh.
 
-## [0.5.7] - 2026-07-15
 
+
+## [0.5.7] - 2026-07-15
 ### Changed
 
 - Removed the operator's static PodDisruptionBudget (ADR-028). On single-node
@@ -2871,11 +2965,13 @@ depend on those tags.
   already guarantees a single active reconciler; two replicas are kept for fast
   failover.
 
+
 ### Removed
 
 - Trimmed three unused verbs from the operator ClusterRole (least privilege):
   `persistentvolumeclaims` get, `scansettings` delete, and `consoleplugins`
   list/watch. None were exercised on any code path.
+
 
 ### Fixed
 
@@ -2897,7 +2993,15 @@ depend on those tags.
   the Results tab, and an unserializable remediation object renders a localized
   placeholder instead of a raw sentinel.
 
+
+
 ## [0.5.6] - 2026-07-14
+### Added
+
+- Console e2e coverage for the Overview/Remediations governance affordances
+  (inline schedule edit, invalid-cron rejection, scoring-mode readout, score
+  trend card, HTML report export, batch-apply confirmation).
+
 
 ### Changed
 
@@ -2908,11 +3012,6 @@ depend on those tags.
   0.36, controller-runtime 0.24, @types/node 26, and react 19 were held back to
   stay on the OpenShift 4.22 / k8s 1.35 / React 18 support baseline.
 
-### Added
-
-- Console e2e coverage for the Overview/Remediations governance affordances
-  (inline schedule edit, invalid-cron rejection, scoring-mode readout, score
-  trend card, HTML report export, batch-apply confirmation).
 
 ### Fixed
 
@@ -2920,35 +3019,9 @@ depend on those tags.
   button (name-scoped "Apply <name>") and silently skipped; it now captures the
   confirmation modal.
 
+
+
 ## [0.5.5] - 2026-07-14
-
-### Fixed
-
-- Single-node OpenShift (SNO) console-plugin drain deadlock. On `SingleReplica`
-  infrastructure topology the plugin now deploys a single replica and no
-  PodDisruptionBudget, so draining the one node during a cluster upgrade is no
-  longer refused by an un-evictable second plugin pod. Multi-node clusters keep
-  the 2-replica Deployment plus the `minAvailable=1` PDB. Topology is read from
-  the cluster `Infrastructure` singleton; any read error fails safe to the HA
-  layout.
-- History scoring-mode stamp is now realigned on the reconcile error path. A
-  scoring-mode change (flat vs severity-weighted) coinciding with a transient
-  post-aggregation error no longer leaves the durable stamp lagging its rings,
-  which had fired a spurious `historyScoringModeMismatch` for one scan interval.
-
-### Changed
-
-- Operator RBAC tightened to least privilege: dropped unused `list`/`watch` on
-  `scansettings` and `machineconfigpools`, and `watch` on `scansettingbindings`.
-  These are accessed by name (Get/Patch) or a one-shot List only, never watched,
-  so the verbs were dead grants. OLM applies the narrowed ClusterRole on upgrade.
-- Dropped the OLM `replaces` upgrade graph (CSV `spec.replaces` and catalog
-  channel edges). Each bundle is a standalone `alpha` channel head.
-  **Upgrade impact**: OLM will not auto-upgrade an installed 0.5.0 (or
-  earlier) CSV to 0.5.5. Point the CatalogSource at the 0.5.5 catalog tag
-  and install that head; delete the previous Subscription/CSV if it
-  remains. ClusterBaseline CRs and the CRD stay.
-
 ### Added
 
 - `make verify-bundle-static` (run in CI and `make bundle`): fails if a
@@ -2964,16 +3037,38 @@ depend on those tags.
   image tag, `imagePullPolicy`, and the `app.kubernetes.io/version` pod label
   are the only allowed divergences.
 
+
+### Changed
+
+- Operator RBAC tightened to least privilege: dropped unused `list`/`watch` on
+  `scansettings` and `machineconfigpools`, and `watch` on `scansettingbindings`.
+  These are accessed by name (Get/Patch) or a one-shot List only, never watched,
+  so the verbs were dead grants. OLM applies the narrowed ClusterRole on upgrade.
+- Dropped the OLM `replaces` upgrade graph (CSV `spec.replaces` and catalog
+  channel edges). Each bundle is a standalone `alpha` channel head.
+  **Upgrade impact**: OLM will not auto-upgrade an installed 0.5.0 (or
+  earlier) CSV to 0.5.5. Point the CatalogSource at the 0.5.5 catalog tag
+  and install that head; delete the previous Subscription/CSV if it
+  remains. ClusterBaseline CRs and the CRD stay.
+
+
+### Fixed
+
+- Single-node OpenShift (SNO) console-plugin drain deadlock. On `SingleReplica`
+  infrastructure topology the plugin now deploys a single replica and no
+  PodDisruptionBudget, so draining the one node during a cluster upgrade is no
+  longer refused by an un-evictable second plugin pod. Multi-node clusters keep
+  the 2-replica Deployment plus the `minAvailable=1` PDB. Topology is read from
+  the cluster `Infrastructure` singleton; any read error fails safe to the HA
+  layout.
+- History scoring-mode stamp is now realigned on the reconcile error path. A
+  scoring-mode change (flat vs severity-weighted) coinciding with a transient
+  post-aggregation error no longer leaves the durable stamp lagging its rings,
+  which had fired a spurious `historyScoringModeMismatch` for one scan interval.
+
+
+
 ## [0.5.0] - 2026-07-13
-
-OLM upgrade edge: `baseline-security-operator.v0.5.0` replaces `v0.4.0`.
-
-**Breaking:** the API group was renamed `baselinesecurity.io` →
-`baselinesecurity.openshift.io`. This minor carries it (a hard rename at
-`v1alpha1`, no conversion) per the project's 0.x policy that breaking changes
-land in a minor bump. Existing `ClusterBaseline` CRs are under the old group and
-must be recreated after upgrade (see Migration notes).
-
 ### Added
 
 - Disable scanning by clearing `spec.profiles` to an empty list (with no
@@ -3017,6 +3112,7 @@ must be recreated after upgrade (see Migration notes).
   still wins (disconnected mirrors). Read-only `catalogsources` RBAC added.
 - `registry.ci.openshift.org` build variant (`operator/Dockerfile.ci` +
   `.ci-operator.yaml`) for OpenShift CI / ci-operator onboarding.
+
 
 ### Changed
 
@@ -3063,6 +3159,7 @@ must be recreated after upgrade (see Migration notes).
   installs behave the same; multi-replica HA no longer double-counts checks
   or lets a stale leader mask a lower score after failover.
 
+
 ### Fixed
 
 - `status.newlyFailed` / `status.fixed` no longer flip transiently while a
@@ -3078,6 +3175,7 @@ must be recreated after upgrade (see Migration notes).
   dashboard ConfigMap reconcile cannot block on a never-syncing informer.
 - Console plugin no longer crash-loops: the nginx `access_log` directive needs a
   format name before `if=`.
+
 
 ### Migration notes (0.4.x → 0.5.0)
 
@@ -3113,10 +3211,17 @@ must be recreated after upgrade (see Migration notes).
    expect keyed map-merge (by `type` / `key` / `name`) instead of atomic
    list replacement.
 
+
+
+OLM upgrade edge: `baseline-security-operator.v0.5.0` replaces `v0.4.0`.
+
+**Breaking:** the API group was renamed `baselinesecurity.io` →
+`baselinesecurity.openshift.io`. This minor carries it (a hard rename at
+`v1alpha1`, no conversion) per the project's 0.x policy that breaking changes
+land in a minor bump. Existing `ClusterBaseline` CRs are under the old group and
+must be recreated after upgrade (see Migration notes).
+
 ## [0.4.0] - 2026-07-11
-
-OLM upgrade edge: `baseline-security-operator.v0.4.0` replaces `v0.3.1`.
-
 ### Added
 
 - Waiver governance on `ClusterBaseline.spec.waivers` (expiry, requester/approver,
@@ -3137,6 +3242,7 @@ OLM upgrade edge: `baseline-security-operator.v0.4.0` replaces `v0.3.1`.
 - NSA/CISA hardening sample TailoredProfile
   (`operator/config/samples/tailored-nsa-cisa.yaml`).
 
+
 ### Changed
 
 - **Scoring / status behavior**: a check the Compliance Operator marks
@@ -3148,6 +3254,7 @@ OLM upgrade edge: `baseline-security-operator.v0.4.0` replaces `v0.3.1`.
   `baseline_security_compliance_score` after upgrade without any remediations
   being applied. Dashboards and alerts keyed on those series can change.
 
+
 ### Removed
 
 - **Helm chart** (`deploy/helm/`): OLM bundle + file-based catalog is the only
@@ -3157,6 +3264,7 @@ OLM upgrade edge: `baseline-security-operator.v0.4.0` replaces `v0.3.1`.
   pre-release chart from `main` must migrate to an OLM CatalogSource +
   Subscription (or `make deploy` for development). There is no automated
   Helm → OLM conversion.
+
 
 ### Migration notes (0.3.x → 0.4.0)
 
@@ -3171,25 +3279,28 @@ OLM upgrade edge: `baseline-security-operator.v0.4.0` replaces `v0.3.1`.
    `operator/config/prometheus/servicemonitor.yaml` for a standard OLM install
    (user-workload monitoring still must be enabled for scrapes to fire).
 
+
+
+OLM upgrade edge: `baseline-security-operator.v0.4.0` replaces `v0.3.1`.
+
 ## [0.3.1] - 2026-07-11
-
-OLM upgrade edge: `v0.3.1` replaces `v0.3.0`.
-
 ### Changed
 
 - Per-profile Overview cards show Inconsistent counts (previously only on the
   composition donut).
 - Dark-theme console coverage and screenshots.
 
+
 ### Fixed
 
 - Stuck-install grace and errorMessage guard behavior from the 0.3.0 line
   carried forward; full e2e re-verified on OCP 4.22 / Compliance Operator 1.9.1.
 
+
+
+OLM upgrade edge: `v0.3.1` replaces `v0.3.0`.
+
 ## [0.3.0] - 2026-07-10
-
-OLM upgrade edge: `v0.3.0` replaces `v0.2.1`.
-
 ### Added
 
 - TailoredProfile binding via `spec.tailoredProfiles`; tailored results in
@@ -3204,24 +3315,27 @@ OLM upgrade edge: `v0.3.0` replaces `v0.2.1`.
 - Waivers and INCONSISTENT drill-down (MachineConfigPool) foundations used by
   later 0.4 work.
 
+
 ### Changed
 
 - Dropped the premature `features.operators.openshift.io/disconnected: "true"`
   claim until published images are digest-pinned for air-gapped installs.
 
+
+
+OLM upgrade edge: `v0.3.0` replaces `v0.2.1`.
+
 ## [0.2.1] - 2026-07-09
-
-OLM upgrade edge: `v0.2.1` replaces `v0.2.0`.
-
 ### Fixed
 
 - Bundle `installModes` aligned for cluster-wide (`AllNamespaces`) install.
 - Packaging: relatedImages, upgrade edge, bundle validation in CI.
 
+
+
+OLM upgrade edge: `v0.2.1` replaces `v0.2.0`.
+
 ## [0.2.0] - 2026-07-09
-
-Initial packaged release.
-
 ### Added
 
 - Cluster-scoped `ClusterBaseline` API (`baselinesecurity.openshift.io/v1alpha1`).
@@ -3230,6 +3344,10 @@ Initial packaged release.
 - Console plugin under Administration → Compliance (Overview, Results,
   Remediations, Profiles).
 - OLM bundle + file-based catalog; string-enum spec; OpenShift-style conditions.
+
+
+
+Initial packaged release.
 
 [Unreleased]: https://github.com/maci0/openshift-baseline-security/compare/v0.6.1...HEAD
 [0.6.1]: https://github.com/maci0/openshift-baseline-security/compare/v0.6.0...v0.6.1

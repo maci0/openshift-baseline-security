@@ -223,16 +223,17 @@ elif [[ "$go_batch_max" != "$ts_batch_max" ]]; then
 fi
 
 # Console plugin serving contract: the Go constants, the nginx config copied
-# into the plugin image, and the image's EXPOSE are one port and one health
-# path. The Service, the container port, the ConsolePlugin backend, and the
+# into the plugin image, and the image's EXPOSE are one port and two health
+# paths. The Service, the container port, the ConsolePlugin backend, and the
 # kubelet probes all read the Go constants, so a drift on the nginx or Dockerfile
 # side is the only one nothing in Go would catch: the pod still becomes Ready
-# (the probe path is nginx's own constant return) while the console cannot reach
+# (the readiness path is nginx's own answer) while the console cannot reach
 # the assets.
 go_plugin_port=$(grep -E '^[[:space:]]*pluginPort = [0-9]+' "$PLUGIN_GO" | head -1 | sed -E 's/.*= *([0-9]+).*/\1/' || true)
 go_healthz=$(grep -E '^[[:space:]]*pluginHealthzPath = ' "$PLUGIN_GO" | head -1 | sed -E 's/.*"([^"]+)".*/\1/' || true)
-if [[ -z "$go_plugin_port" || -z "$go_healthz" ]]; then
-  die "could not read pluginPort / pluginHealthzPath"
+go_readyz=$(grep -E '^[[:space:]]*pluginReadyzPath = ' "$PLUGIN_GO" | head -1 | sed -E 's/.*"([^"]+)".*/\1/' || true)
+if [[ -z "$go_plugin_port" || -z "$go_healthz" || -z "$go_readyz" ]]; then
+  die "could not read pluginPort / pluginHealthzPath / pluginReadyzPath"
 else
   nginx_port=$(grep -E '^[[:space:]]*listen [0-9]+ ssl' "$NGINX_CONF" | head -1 | sed -E 's/.*listen ([0-9]+) ssl.*/\1/' || true)
   if [[ "$nginx_port" != "$go_plugin_port" ]]; then
@@ -242,7 +243,10 @@ else
     die "console-plugin Dockerfile must EXPOSE ${go_plugin_port} (matches nginx.conf and the operator Service)"
   fi
   if ! grep -qF "location = ${go_healthz}" "$NGINX_CONF"; then
-    die "nginx.conf has no \`location = ${go_healthz}\`; the operator probes it for readiness and liveness"
+    die "nginx.conf has no \`location = ${go_healthz}\`; the operator probes it for startup and liveness"
+  fi
+  if ! grep -qF "location = ${go_readyz}" "$NGINX_CONF"; then
+    die "nginx.conf has no \`location = ${go_readyz}\`; the operator probes it for readiness"
   fi
 fi
 

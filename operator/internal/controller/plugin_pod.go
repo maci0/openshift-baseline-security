@@ -145,6 +145,19 @@ func applyPluginContainer(pod *corev1.PodSpec, image string) {
 			Scheme: corev1.URISchemeHTTPS,
 		},
 	}
+	// Readiness is the one probe that must ask whether the pod can serve, so
+	// it hits the location that stats the asset root instead of the constant
+	// one. A pod that holds the listener over an unreadable tree then leaves
+	// the Service rather than 404ing every console asset. Liveness keeps the
+	// constant return: the tree is baked into the image, so restarting cannot
+	// change the answer.
+	readyz := corev1.ProbeHandler{
+		HTTPGet: &corev1.HTTPGetAction{
+			Path:   pluginReadyzPath,
+			Port:   intstr.FromInt32(pluginPort),
+			Scheme: corev1.URISchemeHTTPS,
+		},
+	}
 	container := corev1.Container{
 		Name:            pluginName,
 		Image:           image,
@@ -188,7 +201,7 @@ func applyPluginContainer(pod *corev1.PodSpec, image string) {
 			FailureThreshold: 30,
 		},
 		ReadinessProbe: &corev1.Probe{
-			ProbeHandler:     healthz,
+			ProbeHandler:     readyz,
 			TimeoutSeconds:   1,
 			PeriodSeconds:    10,
 			SuccessThreshold: 1,
@@ -206,9 +219,10 @@ func applyPluginContainer(pod *corev1.PodSpec, image string) {
 			PreStop: &corev1.LifecycleHandler{
 				// kube removes the endpoint only after SIGTERM, so the console can
 				// open a connection to this pod in the first seconds of termination.
-				// Sleep before the process sees SIGTERM so the endpoint leaves the
-				// Service first; nginx then quits gracefully on SIGTERM. 5s fits
-				// inside terminationGracePeriodSeconds (30) with room for the quit.
+				// Sleep before the process sees STOPSIGNAL so the endpoint leaves the
+				// Service first; nginx then quits gracefully on SIGQUIT (the
+				// image's STOPSIGNAL). 5s fits inside terminationGracePeriodSeconds
+				// (30) with room for the quit.
 				//
 				// Native sleep handler, not exec: the hook must not depend on a
 				// shell being present in the base image (the manager image is

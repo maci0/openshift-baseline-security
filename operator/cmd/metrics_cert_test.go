@@ -57,8 +57,10 @@ func writeFileAtomic(path string, data []byte) error {
 	}
 	name := tmp.Name()
 	// Every failure below leaves the staged file behind; the deferred remove
-	// covers them all without each branch having to unlink.
-	defer os.Remove(name)
+	// covers them all without each branch having to unlink. On success the
+	// rename has already moved the file, so ENOENT is the normal outcome here
+	// and is not worth reporting.
+	defer func() { _ = os.Remove(name) }()
 	if _, err := tmp.Write(data); err != nil {
 		_ = tmp.Close()
 		return err

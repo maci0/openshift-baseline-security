@@ -2194,6 +2194,8 @@ func TestApplyPluginContainerRemovesUnownedPodPayloads(t *testing.T) {
 	// startupProbe owns cold start; liveness must not use InitialDelaySeconds alone.
 	// All three probes must hit the real nginx request path over TLS: a TCP
 	// connect proves the socket is open, not that the pod serves anything.
+	// Readiness is the one that must also prove the pod can serve, so it
+	// targets the location that stats the asset root.
 	c0 := pod.Containers[0]
 	for name, probe := range map[string]*corev1.Probe{
 		"startup": c0.StartupProbe, "readiness": c0.ReadinessProbe, "liveness": c0.LivenessProbe,
@@ -2202,15 +2204,28 @@ func TestApplyPluginContainerRemovesUnownedPodPayloads(t *testing.T) {
 			t.Fatalf("%s probe required", name)
 		}
 		if probe.HTTPGet == nil {
-			t.Fatalf("%s probe = %+v, want HTTPGet %s, not TCPSocket", name, probe, pluginHealthzPath)
+			t.Fatalf("%s probe = %+v, want HTTPGet, not TCPSocket", name, probe)
 		}
-		if probe.HTTPGet.Path != pluginHealthzPath ||
-			probe.HTTPGet.Port.IntValue() != pluginPort ||
+		if probe.HTTPGet.Port.IntValue() != pluginPort ||
 			probe.HTTPGet.Scheme != corev1.URISchemeHTTPS {
-			t.Fatalf("%s probe target = %+v, want GET https://:%d%s", name, probe.HTTPGet, pluginPort, pluginHealthzPath)
+			t.Fatalf("%s probe target = %+v, want GET https://:%d", name, probe.HTTPGet, pluginPort)
 		}
 		if probe.InitialDelaySeconds != 0 {
 			t.Fatalf("%s probe InitialDelaySeconds = %d, want 0 (startupProbe owns delay)", name, probe.InitialDelaySeconds)
+		}
+	}
+	if c0.ReadinessProbe.HTTPGet.Path != pluginReadyzPath {
+		t.Fatalf("readiness probe path = %q, want %q (the location that checks the asset root)",
+			c0.ReadinessProbe.HTTPGet.Path, pluginReadyzPath)
+	}
+	// Liveness keeps the constant return: the asset tree is baked into the
+	// image, so a restart cannot make it readable and failing liveness would
+	// only CrashLoop a broken image.
+	for name, probe := range map[string]*corev1.Probe{
+		"startup": c0.StartupProbe, "liveness": c0.LivenessProbe,
+	} {
+		if probe.HTTPGet.Path != pluginHealthzPath {
+			t.Fatalf("%s probe path = %q, want %q", name, probe.HTTPGet.Path, pluginHealthzPath)
 		}
 	}
 	if c0.StartupProbe.FailureThreshold != 30 {
