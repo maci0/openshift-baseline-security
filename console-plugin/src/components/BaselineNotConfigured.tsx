@@ -34,7 +34,7 @@ const BaselineNotConfigured: React.FC<{ style?: React.CSSProperties }> = ({ styl
     if (busyRef.current) return;
     // Same gate the button carries, so a click after the review flipped to denied
     // does not spend the create.
-    if (!mayWrite({ allowed: canCreate, loading: canCreateLoading })) {
+    if (!mayWrite({ allowed: canCreate })) {
       setErr(t('You do not have permission to create the baseline.'));
       return;
     }

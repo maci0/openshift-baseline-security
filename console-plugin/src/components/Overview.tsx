@@ -147,7 +147,7 @@ const ScheduleEditor: React.FC<{ baseline: ClusterBaseline }> = ({ baseline }) =
   // Auto-clear "Schedule updated" so success feedback matches other tabs.
   useAutoDismiss(saved, false, () => setSaved(false));
   const [canEdit, canEditLoading] = useAccessReview(clusterBaselinePatchAccess);
-  const editGate: AccessGate = { allowed: canEdit, loading: canEditLoading };
+  const editGate: AccessGate = { allowed: canEdit };
   const valid = isValidCron(value);
 
   // Move focus into the field when opening edit; return it to Edit when closing.

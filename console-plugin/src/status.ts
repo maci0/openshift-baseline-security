@@ -84,44 +84,15 @@ type PassthroughStatus = Exclude<EffectiveStatus, 'INCONSISTENT'>;
 const isPassthroughStatus = (s: string): s is PassthroughStatus =>
   KNOWN_EFFECTIVE_STATUSES.has(s);
 
-// Uppercase a CO status token without allocating when the value is already a
-// common uppercase enum (PASS/FAIL/…) or has no ASCII lowercase letters.
-// ASCII only (lockstep with operator upperStatusToken): String#toUpperCase
-// maps "paß" to "PASS" and "faıl" (dotless i) to "FAIL", so a hostile
-// annotation would collapse as a real status. Protocol tokens must not
-// absorb non-ASCII letters. Multi-node INCONSISTENT annotations call this
-// per node on Results filter / CSV / score paths.
-const upperStatusToken = (s: string): string => {
-  if (!s) {
-    return '';
-  }
-  switch (s) {
-    case 'PASS':
-    case 'FAIL':
-    case 'ERROR':
-    case 'SKIP':
-    case 'INFO':
-    case 'MANUAL':
-    case 'INCONSISTENT':
-    case 'NOT-APPLICABLE':
-    case 'WAIVED':
-      return s;
-    default:
-      break;
-  }
-  for (let i = 0; i < s.length; i++) {
-    const c = s.charCodeAt(i);
-    if (c >= 97 && c <= 122) {
-      let out = s.slice(0, i);
-      for (let j = i; j < s.length; j++) {
-        const d = s.charCodeAt(j);
-        out += d >= 97 && d <= 122 ? String.fromCharCode(d - 32) : s[j];
-      }
-      return out;
-    }
-  }
-  return s;
-};
+// Uppercase a CO status token. ASCII only (lockstep with operator
+// upperStatusToken): String#toUpperCase maps "paß" to "PASS" and "faıl"
+// (dotless i) to "FAIL", so a hostile annotation would collapse as a real
+// status. Protocol tokens must not absorb non-ASCII letters. Only [a-z] is
+// matched, so an already-uppercase enum (PASS/FAIL/…) is returned as the same
+// string with no copy. Module-level regex so the per-node INCONSISTENT path
+// (Results filter / CSV / score) does not recompile it per call.
+const asciiLowerRe = /[a-z]/g;
+const upperStatusToken = (s: string): string => s.replace(asciiLowerRe, (c) => c.toUpperCase());
 
 // Per-node breakdown of an INCONSISTENT check. The Compliance Operator records
 // the nodes that diverge from the majority in the inconsistent-source annotation

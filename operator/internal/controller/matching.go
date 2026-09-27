@@ -87,27 +87,12 @@ func profileKeyFromSuite(suite string) (baselinev1alpha1.ProfileKey, bool) {
 }
 
 // splitCSV splits a comma-separated list, trimming and dropping empty items.
-// Comma walk (no strings.Split) so batch annotation lists up to 256 names do not
-// allocate an intermediate slice of every segment including empties.
 func splitCSV(s string) []string {
-	if s == "" {
-		return nil
-	}
 	var out []string
-	start := 0
-	for start <= len(s) {
-		comma := strings.IndexByte(s[start:], ',')
-		end := len(s)
-		if comma >= 0 {
-			end = start + comma
-		}
-		if p := strings.TrimSpace(s[start:end]); p != "" {
+	for _, part := range strings.Split(s, ",") {
+		if p := strings.TrimSpace(part); p != "" {
 			out = append(out, p)
 		}
-		if comma < 0 {
-			break
-		}
-		start = end + 1
 	}
 	return out
 }

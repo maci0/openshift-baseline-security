@@ -202,9 +202,8 @@ const RemediationsTab: React.FC<{
   // spends the remediation patch alone.
   const remediationGate: AccessGate = {
     allowed: canDelegateRemediationApply(canEditBaseline, canApply),
-    loading: canEditBaselineLoading || canApplyLoading,
   };
-  const applyGate: AccessGate = { allowed: canApply, loading: canApplyLoading };
+  const applyGate: AccessGate = { allowed: canApply };
   const deniedMessage = t('You do not have permission to apply remediations.');
   const watchError = errorMessage(loadError);
   // status.remediationBatch is the live batch; the annotation is the one-shot

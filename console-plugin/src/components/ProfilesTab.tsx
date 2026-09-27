@@ -316,12 +316,9 @@ const ProfilesTab: React.FC<{
   const [canEdit, canEditLoading] = useAccessReview(clusterBaselinePatchAccess);
   const [canAuthor, canAuthorLoading] = useAccessReview(tailoredProfileCreateAccess);
   const [canUpdate, canUpdateLoading] = useAccessReview(tailoredProfileUpdateAccess);
-  const baselineGate: AccessGate = { allowed: canEdit, loading: canEditLoading };
-  const createGate: AccessGate = {
-    allowed: canAuthor && canEdit,
-    loading: canAuthorLoading || canEditLoading,
-  };
-  const updateGate: AccessGate = { allowed: canUpdate, loading: canUpdateLoading };
+  const baselineGate: AccessGate = { allowed: canEdit };
+  const createGate: AccessGate = { allowed: canAuthor && canEdit };
+  const updateGate: AccessGate = { allowed: canUpdate };
   // Profile/Rule catalog is only for TailoredProfile authoring. Viewers lack
   // those verbs; listing them would 403 the Profiles tab. Skip until SAR
   // resolves so the watch does not flash a denial for readers.

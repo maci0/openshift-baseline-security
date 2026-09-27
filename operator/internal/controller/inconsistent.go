@@ -95,31 +95,24 @@ func visitInconsistentStates(item *unstructured.Unstructured, fn func(string)) {
 }
 
 // upperStatusToken uppercases a CO status token without allocating when the
-// value is already a common uppercase enum (PASS/FAIL/…) or has no ASCII
-// lowercase letters. Multi-node INCONSISTENT annotations call this per node.
+// value has no ASCII lowercase letter, which covers every common uppercase enum
+// (PASS/FAIL/…) and is why no enum list is needed. Multi-node INCONSISTENT
+// annotations call this per node.
 // ASCII only: Unicode ToUpper maps "faıl" (dotless i) to "FAIL" in Go and
 // "paß" to "PASS" in JS (full case), so a hostile annotation would collapse
 // as a real status. Protocol tokens must not absorb non-ASCII letters.
 func upperStatusToken(s string) string {
-	if s == "" {
-		return ""
-	}
-	switch s {
-	case "PASS", "FAIL", "ERROR", "SKIP", "INFO", "MANUAL", "INCONSISTENT",
-		"NOT-APPLICABLE", "WAIVED":
-		return s
-	}
 	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if c >= 'a' && c <= 'z' {
-			b := []byte(s)
-			for j, d := range b {
-				if d >= 'a' && d <= 'z' {
-					b[j] = d - 'a' + 'A'
-				}
-			}
-			return string(b)
+		if s[i] < 'a' || s[i] > 'z' {
+			continue
 		}
+		b := []byte(s)
+		for j, c := range b {
+			if c >= 'a' && c <= 'z' {
+				b[j] = c - 'a' + 'A'
+			}
+		}
+		return string(b)
 	}
 	return s
 }

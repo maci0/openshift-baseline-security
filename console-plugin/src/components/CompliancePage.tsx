@@ -118,7 +118,7 @@ const CompliancePage: React.FC = () => {
   useAutoDismiss(rescanStarted, !!rescanError, () => setRescanStarted(false));
   useAutoDismiss(exportNotice, exportNotice?.variant === 'danger', () => setExportNotice(null));
   const [canRescan, canRescanLoading] = useAccessReview(complianceScanPatchAccess);
-  const rescanGate: AccessGate = { allowed: canRescan, loading: canRescanLoading };
+  const rescanGate: AccessGate = { allowed: canRescan };
   const rescanWatchError = errorMessage(baselineError) ?? errorMessage(scansError);
   // Concatenate, do not short-circuit: two watches failing at once used to
   // render only the first message, and the second one's text was never shown

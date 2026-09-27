@@ -10,14 +10,14 @@
 // are authorized against the signed-in user). This gate exists so a revoked
 // permission does not reach the wire at all.
 
-/** One `useAccessReview` result, as the console consumes it. */
+/**
+ * One `useAccessReview` result, as the console consumes it. The in-flight flag
+ * is deliberately absent: an unresolved review reports `allowed: false`, so a
+ * pending review denies without the gate having to model "loading" at all.
+ */
 export type AccessGate = {
   readonly allowed: boolean;
-  readonly loading: boolean;
 };
 
-/**
- * True only when the reviewed permission is confirmed. An unresolved review is
- * not an authorization, so `loading` denies as well.
- */
-export const mayWrite = (gate: AccessGate): boolean => gate.allowed && !gate.loading;
+/** True only when the reviewed permission is confirmed. */
+export const mayWrite = (gate: AccessGate): boolean => gate.allowed;

@@ -198,7 +198,7 @@ const ResultsTab: React.FC<{
   // Auto-dismiss success so the banner does not stick after the user moves on.
   useAutoDismiss(waiveSuccess, false, () => setWaiveSuccess(null));
   const [canWaive, canWaiveLoading] = useAccessReview(clusterBaselinePatchAccess);
-  const waiveGate: AccessGate = { allowed: canWaive, loading: canWaiveLoading };
+  const waiveGate: AccessGate = { allowed: canWaive };
   const waivers = baseline?.spec.waivers;
   // Active waivers are time-sensitive: membership alone is not enough. A waiver
   // can expire with no CR edit, and operator status-only updates do not change
