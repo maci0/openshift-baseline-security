@@ -109,6 +109,12 @@ depend on those tags.
   three groups, and the page is held to a 72rem measure so the six-column waiver
   table stops stretching across a wide monitor.
 
+- Per-profile score sparkline on the Overview tab took the charting library's
+  default blue, so a profile card showed a green score chip above a blue trend
+  bar while the overall trend chart beside it was banded by score. It now uses
+  the same `scoreColor` band as the chip, the donut center, the cluster Overview
+  detail item, and the exported report, driven by the latest snapshot.
+
 - Threat model: the manager pod was described as running under Restricted PSS.
   The pod spec satisfies Restricted, but no
   `pod-security.kubernetes.io/enforce` label exists anywhere in the repo, so
