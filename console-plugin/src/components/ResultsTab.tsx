@@ -27,6 +27,8 @@ import {
   FlexItem,
   Label,
   FormGroup,
+  HelperText,
+  HelperTextItem,
   Modal,
   ModalBody,
   ModalFooter,
@@ -74,6 +76,7 @@ import {
   checkTitle,
   nodeScanPool,
   resultsCsv,
+  RESULT_SEVERITIES,
   severityDisplayTitle,
 } from '../results';
 import { checkSeverity } from '../scoring';
@@ -98,6 +101,7 @@ import {
 } from '../waivers';
 import BaselineNotConfigured from './BaselineNotConfigured';
 import BaselineUnavailable from './BaselineUnavailable';
+import ConsoleLink from './ConsoleLink';
 import { withDisabledTip } from './DisabledTip';
 import { restoreFocus } from './focus';
 import { useAutoDismiss } from './useAutoDismiss';
@@ -187,6 +191,9 @@ const ResultsTab: React.FC<{
   const [waiveExpiresAt, setWaiveExpiresAt] = React.useState('');
   const [waiveReviewBy, setWaiveReviewBy] = React.useState('');
   const [busy, setBusy] = React.useState(false);
+  // Which orphan waiver is mid-removal. busy alone greys every button in the
+  // group with nothing showing which request is in flight.
+  const [removingWaiverName, setRemovingWaiverName] = React.useState<string | null>(null);
   // Sync guard: React state alone cannot block a second click before re-render.
   const busyRef = React.useRef(false);
   // Return focus to the row control that opened the detail modal (WCAG 2.4.3).
@@ -387,17 +394,21 @@ const ResultsTab: React.FC<{
     // eslint-disable-next-line react-hooks/exhaustive-deps -- content key + stable results identity
   }, [loaded, resultsError, waiversKey, results]);
 
-  const removeWaiverByIndex = (index: number, name: string) => {
+  const removeWaiverByIndex = (index: number, name: string, successMsg?: string) => {
     const data = removeWaiverPatch(index, name);
     if (!data.length) {
       setWaiveError(t('Failed to remove waiver.'));
       return;
     }
+    setRemovingWaiverName(name);
     void patchWaivers(
       data,
       t('Failed to remove waiver.'),
-      t('Waiver removed. The check counts toward the score again.'),
-    );
+      // An orphaned waiver matches no result, so the live path's "the check
+      // counts toward the score again" is false there; the caller passes a
+      // message that does not claim a score effect.
+      successMsg ?? t('Waiver removed. The check counts toward the score again.'),
+    ).finally(() => setRemovingWaiverName(null));
   };
 
   // Rendered in both the main list and the empty-results early return, so that
@@ -429,7 +440,9 @@ const ResultsTab: React.FC<{
               <Button
                 variant="secondary"
                 isDisabled={busy}
-                onClick={() => removeWaiverByIndex(index, name)}
+                isLoading={busy && removingWaiverName === name}
+                title={name}
+                onClick={() => removeWaiverByIndex(index, name, t('Waiver removed.'))}
               >
                 {t('Remove waiver for {{name}}', { name })}
               </Button>
@@ -534,6 +547,45 @@ const ResultsTab: React.FC<{
     [i18n.language],
   );
 
+  // Rank sort for a column whose values come from a fixed vocabulary (Status,
+  // Severity). Alphabetical order there is noise: ascending Status reads
+  // Error, Fail, ..., Pass, and ascending Severity reads High, Info, Low,
+  // Medium. Position in the facet's own list decides instead, and a token
+  // outside it (forward-compat value off a CR) falls past the known ones and
+  // then falls back to the collator so the group stays locale-ordered.
+  const sortByRanked = React.useCallback(
+    (order: readonly string[]) =>
+      (keyOf: (r: ComplianceCheckResult) => string) =>
+      (data: ComplianceCheckResult[], sortDirection: string): ComplianceCheckResult[] => {
+        const mul = sortDirection === 'desc' ? -1 : 1;
+        const rank = (key: string): number => {
+          const i = order.indexOf(key);
+          return i === -1 ? order.length : i;
+        };
+        return data
+          .map((row, index) => ({ key: keyOf(row), index }))
+          .sort((a, b) => {
+            const byRank = rank(a.key) - rank(b.key);
+            if (byRank !== 0) {
+              return mul * byRank;
+            }
+            const byText = compareForDisplay(a.key, b.key, i18n.language);
+            return byText !== 0 ? byText : a.index - b.index;
+          })
+          .map((d) => data[d.index]);
+      },
+    [i18n.language],
+  );
+
+  const sortByStatus = React.useMemo(
+    () => sortByRanked(RESULT_FILTER_STATUSES)(rowFilterStatus),
+    [sortByRanked, rowFilterStatus],
+  );
+  const sortBySeverity = React.useMemo(
+    () => sortByRanked(RESULT_SEVERITIES)(checkSeverity),
+    [sortByRanked],
+  );
+
   const columns: TableColumn<ComplianceCheckResult>[] = React.useMemo(
     () => [
       { title: t('Check'), id: 'title', sort: sortByString(checkTitle) },
@@ -553,10 +605,10 @@ const ResultsTab: React.FC<{
           return key === undefined ? '' : suiteFilterKeyTitle(key);
         }),
       },
-      { title: t('Status'), id: 'status', sort: sortByString(rowFilterStatus) },
-      { title: t('Severity'), id: 'severity', sort: sortByString(checkSeverity) },
+      { title: t('Status'), id: 'status', sort: sortByStatus },
+      { title: t('Severity'), id: 'severity', sort: sortBySeverity },
     ],
-    [t, sortByString, rowFilterStatus],
+    [t, sortByString, sortByStatus, sortBySeverity, rowFilterStatus],
   );
 
   const Row = React.useCallback(
@@ -698,7 +750,7 @@ const ResultsTab: React.FC<{
         type: 'result-severity',
         reducer: (r) => checkSeverity(r),
         filter: chipFilter(checkSeverity),
-        items: ['high', 'medium', 'low', 'info', 'unknown'].map((s) => ({
+        items: RESULT_SEVERITIES.map((s) => ({
           id: s,
           title: severityDisplayTitle(s, t),
         })),
@@ -735,12 +787,25 @@ const ResultsTab: React.FC<{
       });
       downloadBlob(blob, 'compliance-results.csv');
       // Browser downloads are silent; confirm so the click is not a no-op.
-      setWaiveSuccess(t('Results downloaded as compliance-results.csv.'));
+      // A filtered export says how much it wrote: the file is named the same
+      // either way, so a subset would otherwise read as the full report.
+      setWaiveSuccess(
+        filteredData.length === ownedResults.length
+          ? t('Results downloaded as compliance-results.csv.')
+          : t(
+              'Exported {{count}} of {{formattedTotal}} filtered checks as compliance-results.csv.',
+              {
+                count: filteredData.length,
+                formattedCount: formatCount(filteredData.length, i18n.language),
+                formattedTotal: formatCount(ownedResults.length, i18n.language),
+              },
+            ),
+      );
     } catch (e) {
       // DOM / serialization failures must not look like a silent no-op click.
       setExportError(errorMessage(e) ?? t('Failed to export results CSV.'));
     }
-  }, [filteredData, activeWaived, t]);
+  }, [filteredData, activeWaived, ownedResults.length, i18n.language, t]);
 
   // Empty / misconfigured baselines: a bare table with no rows leaves first-time
   // admins without a next step (Overview already explains; Results must too).
@@ -764,7 +829,7 @@ const ResultsTab: React.FC<{
             {noScanning ? (
               <>
                 {t('No profiles are selected. Enable a profile to resume scanning.')}{' '}
-                <a href="/baseline-security/profiles">{t('Go to Profiles')}</a>
+                <ConsoleLink href="/baseline-security/profiles">{t('Go to Profiles')}</ConsoleLink>
               </>
             ) : (
               t(
@@ -828,6 +893,24 @@ const ResultsTab: React.FC<{
             rowFilters={rowFilters}
             onFilterChange={onFilterChange}
           />
+          {/* How much of the set the chips are showing. Without it a filter that
+              drops 4000 of 5000 rows looks like the whole result set. Same
+              wording Remediations uses for its search count. */}
+          {loaded && !resultsError && ownedResults.length > 0 && (
+            <HelperText>
+              <HelperTextItem>
+                {filteredData.length === ownedResults.length
+                  ? t('{{count}} check', {
+                      count: ownedResults.length,
+                      formattedCount: formatCount(ownedResults.length, i18n.language),
+                    })
+                  : t('Showing {{formattedShown}} of {{formattedTotal}} checks', {
+                      formattedShown: formatCount(filteredData.length, i18n.language),
+                      formattedTotal: formatCount(ownedResults.length, i18n.language),
+                    })}
+              </HelperTextItem>
+            </HelperText>
+          )}
         </FlexItem>
         <FlexItem>
           {withDisabledTip(
@@ -858,7 +941,7 @@ const ResultsTab: React.FC<{
                 'No check results match the current filters. Clear or change filters to see more.',
               )}{' '}
               {/* Query-less path drops rowFilter-* chips (ListPageFilter reads URL). */}
-              <a href="/baseline-security/results">{t('Clear filters')}</a>
+              <ConsoleLink href="/baseline-security/results">{t('Clear filters')}</ConsoleLink>
             </EmptyStateBody>
           </EmptyState>
         )}
@@ -948,9 +1031,9 @@ const ResultsTab: React.FC<{
                           <>
                             {' '}
                             {t('MachineConfigPool:')}{' '}
-                            <a href={machineConfigPoolHref(pool)} dir="auto">
+                            <ConsoleLink href={machineConfigPoolHref(pool)} dir="auto">
                               {pool}
-                            </a>
+                            </ConsoleLink>
                           </>
                         )}
                       </Content>
@@ -1017,9 +1100,9 @@ const ResultsTab: React.FC<{
                 </>
               )}
               <Content component="p" style={{ marginTop: 'var(--pf-t--global--spacer--md)' }}>
-                <a href={checkResultHref(selectedLive.metadata.name)}>
+                <ConsoleLink href={checkResultHref(selectedLive.metadata.name)}>
                   {t('View full check details in OpenShift')}
-                </a>
+                </ConsoleLink>
               </Content>
               {/* Waivers: accept a failing check as risk so it leaves the score.
                   Only FAIL affects the score, so waiving is offered for FAIL (and

@@ -75,6 +75,7 @@ import {
 import { isString, stripInvisibleText } from '../parse';
 import BaselineNotConfigured from './BaselineNotConfigured';
 import { BaselineUnavailable } from './BaselineUnavailable';
+import ConsoleLink from './ConsoleLink';
 import { regionFocusProps, withDisabledTip } from './DisabledTip';
 import { restoreFocus } from './focus';
 import { useAutoDismiss } from './useAutoDismiss';
@@ -115,6 +116,7 @@ const stateStyle: StateVisualMap = {
   MissingDependencies: { color: 'orange', icon: <ExclamationTriangleIcon /> },
 };
 const defaultStateStyle = { color: 'grey' as const, icon: <MinusCircleIcon /> };
+const applyingStateStyle = { color: 'blue' as const, icon: <InProgressIcon /> };
 
 // CR applicationState enums stay English for logic; only the Label text is localized.
 const stateDisplayTitle = (state: string, t: (k: string) => string): string => {
@@ -484,6 +486,45 @@ const RemediationsTab: React.FC<{
     }
   }
 
+  // Search box and result count. Rendered by both the table branch and the
+  // no-match branch: the input the user is typing into used to unmount the
+  // moment the query narrowed past the last match, so backing off one
+  // character meant clearing and retyping.
+  const searchToolbar = (
+    <Flex
+      justifyContent={{ default: 'justifyContentSpaceBetween' }}
+      alignItems={{ default: 'alignItemsCenter' }}
+      flexWrap={{ default: 'wrap' }}
+      gap={{ default: 'gapMd' }}
+      style={{ marginTop: 'var(--pf-t--global--spacer--md)' }}
+    >
+      <FlexItem>
+        <SearchInput
+          placeholder={t('Search remediations by name')}
+          aria-label={t('Search remediations by name')}
+          value={query}
+          onChange={(_e, v) => setQuery(v)}
+          onClear={() => setQuery('')}
+        />
+      </FlexItem>
+      <FlexItem>
+        <HelperText>
+          <HelperTextItem>
+            {foldedQuery
+              ? t('Showing {{formattedShown}} of {{formattedTotal}} remediations', {
+                  formattedShown: formatCount(visible.length, i18n.language),
+                  formattedTotal: formatCount(owned.length, i18n.language),
+                })
+              : t('{{count}} remediation', {
+                  count: owned.length,
+                  formattedCount: formatCount(owned.length, i18n.language),
+                })}
+          </HelperTextItem>
+        </HelperText>
+      </FlexItem>
+    </Flex>
+  );
+
   return (
     <PageSection>
       {/* Real DOM focus fallback: PatternFly PageSection is not forwardRef, so a
@@ -774,75 +815,45 @@ const RemediationsTab: React.FC<{
                 {noScanning ? (
                   <>
                     {t('No profiles are selected. Enable a profile to resume scanning.')}{' '}
-                    <a href="/baseline-security/profiles">{t('Go to Profiles')}</a>
+                    <ConsoleLink href="/baseline-security/profiles">{t('Go to Profiles')}</ConsoleLink>
                   </>
                 ) : (
                   <>
                     {t(
                       'The Compliance Operator generates remediations only for failing checks that can be auto-fixed. None are available for the current results.',
                     )}{' '}
-                    <a href="/baseline-security/results">{t('Review check results')}</a>
+                    <ConsoleLink href="/baseline-security/results">{t('Review check results')}</ConsoleLink>
                     {/* The locale's own list punctuation, not a hardcoded middle
                         dot: ja and zh join with nothing, and ar puts the separator
                         on the other side of the pair. */}
                     {listSeparators(2, i18n.language)[0]}
-                    <a href="/baseline-security/profiles">{t('Go to Profiles')}</a>
+                    <ConsoleLink href="/baseline-security/profiles">{t('Go to Profiles')}</ConsoleLink>
                   </>
                 )}
               </EmptyStateBody>
             </EmptyState>
           );
         })()
-      ) : visible.length === 0 ? (
-        <EmptyState
-          titleText={t('No matching remediations')}
-          headingLevel="h2"
-          style={{ marginTop: 'var(--pf-t--global--spacer--md)' }}
-        >
-          <EmptyStateBody>
-            {/* The query is text this browser typed, so it is its own element
-                with dir=auto rather than a {{query}} interpolation: an RTL
-                query must not reorder the sentence's own punctuation. */}
-            {t('No remediation name matches')} <span dir="auto">&quot;{query}&quot;</span>.{' '}
-            <Button variant="link" isInline onClick={() => setQuery('')}>
-              {t('Clear search')}
-            </Button>
-          </EmptyStateBody>
-        </EmptyState>
       ) : (
         <>
-        <Flex
-          justifyContent={{ default: 'justifyContentSpaceBetween' }}
-          alignItems={{ default: 'alignItemsCenter' }}
-          flexWrap={{ default: 'wrap' }}
-          gap={{ default: 'gapMd' }}
-          style={{ marginTop: 'var(--pf-t--global--spacer--md)' }}
-        >
-          <FlexItem>
-            <SearchInput
-              placeholder={t('Search remediations by name')}
-              aria-label={t('Search remediations by name')}
-              value={query}
-              onChange={(_e, v) => setQuery(v)}
-              onClear={() => setQuery('')}
-            />
-          </FlexItem>
-          <FlexItem>
-            <HelperText>
-              <HelperTextItem>
-                {foldedQuery
-                  ? t('Showing {{formattedShown}} of {{formattedTotal}} remediations', {
-                      formattedShown: formatCount(visible.length, i18n.language),
-                      formattedTotal: formatCount(owned.length, i18n.language),
-                    })
-                  : t('{{count}} remediation', {
-                      count: owned.length,
-                      formattedCount: formatCount(owned.length, i18n.language),
-                    })}
-              </HelperTextItem>
-            </HelperText>
-          </FlexItem>
-        </Flex>
+        {searchToolbar}
+        {visible.length === 0 ? (
+          <EmptyState
+            titleText={t('No matching remediations')}
+            headingLevel="h2"
+            style={{ marginTop: 'var(--pf-t--global--spacer--xl)' }}
+          >
+            <EmptyStateBody>
+              {/* The query is text this browser typed, so it is its own element
+                  with dir=auto rather than a {{query}} interpolation: an RTL
+                  query must not reorder the sentence's own punctuation. */}
+              {t('No remediation name matches')} <span dir="auto">&quot;{query}&quot;</span>.{' '}
+              <Button variant="link" isInline onClick={() => setQuery('')}>
+                {t('Clear search')}
+              </Button>
+            </EmptyStateBody>
+          </EmptyState>
+        ) : (
         <div
           style={{ overflowX: 'auto' }}
           tabIndex={0}
@@ -863,7 +874,16 @@ const RemediationsTab: React.FC<{
           <Tbody>
             {visible.map((rem) => {
               const state = rem.status?.applicationState ?? 'NotApplied';
-              const style = stateStyle[state] ?? defaultStateStyle;
+              // A delegated apply sets spec.apply before the operator writes
+              // status.applicationState, so the row would read "Not applied"
+              // beside a clickable "Unapply" until the two converge. Error and
+              // MissingDependencies are terminal outcomes, not pending ones, so
+              // they keep their own state.
+              const applying =
+                rem.spec?.apply === true &&
+                (state === 'NotApplied' || state === 'Outdated');
+              const style = applying ? applyingStateStyle : stateStyle[state] ?? defaultStateStyle;
+              const stateTitle = applying ? t('Applying…') : stateDisplayTitle(state, t);
               // Only blocked rows read the dependency annotations; skip the
               // split / JSON.parse (missingDependencySummary) and the Blocked
               // tip interpolation on every other row on every render.
@@ -895,7 +915,7 @@ const RemediationsTab: React.FC<{
                       color={style.color}
                       icon={style.icon}
                     >
-                      {stateDisplayTitle(state, t)}
+                      {stateTitle}
                     </Label>
                     {/* dir=auto: both are untrusted CO text (annotation values
                         and status.errorMessage) and may be RTL. */}
@@ -1004,6 +1024,7 @@ const RemediationsTab: React.FC<{
           </Tbody>
         </Table>
         </div>
+        )}
         </>
       )}
       <Modal

@@ -6,6 +6,11 @@ import { activeWaivedNames } from './waivers';
 import { checkResultHref } from './links';
 import { isString, stripExportControls, stripFormatChars } from './parse';
 
+// Severity facet order, worst first. Shared by the Results filter chips and the
+// table's severity sort so the two cannot drift, and so an ascending sort reads
+// High, Medium, Low rather than alphabetically (High, Info, Low, Medium).
+export const RESULT_SEVERITIES = ['high', 'medium', 'low', 'info', 'unknown'] as const;
+
 // Localized severity label for Results UI and the printable report. Keep a single
 // switch so chip titles and report cells cannot drift. Unknown / empty use the
 // same "Unknown" source string; other values pass through for forward-compat.

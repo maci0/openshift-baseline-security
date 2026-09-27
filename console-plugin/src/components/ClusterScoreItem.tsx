@@ -4,6 +4,7 @@ import { useK8sWatchResource } from '@openshift-console/dynamic-plugin-sdk';
 import { formatCount } from '../dates';
 import { ClusterBaseline, ClusterBaselineGVK } from '../models';
 import { clusterScore, scoreColor } from '../scoring';
+import ConsoleLink from './ConsoleLink';
 
 // Module-level so every render passes the same watch options object. A literal
 // built in the component body is a new reference on each render, and the SDK
@@ -31,9 +32,9 @@ const ClusterScoreItem: React.FC = () => {
   if (error) {
     // Distinct from loading "—": API/watch failures must not look like an empty score.
     return (
-      <a href="/baseline-security" aria-label={t('Compliance score unavailable')}>
+      <ConsoleLink href="/baseline-security" aria-label={t('Compliance score unavailable')}>
         {t('Unavailable')}
-      </a>
+      </ConsoleLink>
     );
   }
   if (!loaded) {
@@ -46,9 +47,9 @@ const ClusterScoreItem: React.FC = () => {
   const score = clusterScore(baselines);
   if (score == null) {
     return (
-      <a href="/baseline-security" aria-label={t('Compliance score not scanned')}>
+      <ConsoleLink href="/baseline-security" aria-label={t('Compliance score not scanned')}>
         {t('Not scanned')}
-      </a>
+      </ConsoleLink>
     );
   }
   // Locale-aware digits/grouping so ar/fa/hi (and others) match console locale.
@@ -68,7 +69,7 @@ const ClusterScoreItem: React.FC = () => {
       <span style={{ color: scoreColor(score) }}>
         {t('{{score}} / {{max}}', { score: scoreText, max: 100, formattedMax: maxText })}
       </span>
-    </a>
+    </ConsoleLink>
   );
 };
 

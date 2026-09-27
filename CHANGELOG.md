@@ -129,6 +129,33 @@ depend on those tags.
   now logged at Error (rate-limited to one line per 30m, V(1) in between) with
   the CatalogSource name and the underlying cause, and the Subscription create
   records when the source it wrote came from an unverified guess.
+- Typing one more character than the last match in the Remediations search
+  unmounted the search box itself, leaving no way to back off by a character
+  short of clearing the query and retyping it. The search box and the
+  "Showing X of Y" count now stay on screen in the no-match state.
+- Every link between the Compliance tabs ("Go to Profiles", "Review check
+  results", "Clear filters", the Overview drill-downs) was a bare anchor to a
+  console route, so each one left the single-page app and reloaded the whole
+  console shell, dropping the plugin's open watches. They now navigate inside
+  the console; a modified click still opens the target in a new tab.
+- A remediation whose apply the operator had accepted but not yet written to
+  `status.applicationState` read "Not applied" next to a clickable "Unapply".
+  It now reads "Applying…" until the operator confirms the state.
+- The Results table sorted Status and Severity alphabetically, so an ascending
+  sort read Error, Fail, ..., Pass and High, Info, Low, Medium. Both now sort
+  by their facet order, matching the order of the filter chips above them.
+- Exporting a CSV while a filter was active wrote the filtered rows but
+  confirmed only "Results downloaded as compliance-results.csv.", so a subset
+  was indistinguishable from a full export. The confirmation now names the row
+  count written.
+- Removing an orphaned waiver reported "The check counts toward the score
+  again", which is false for a waiver that matches no result. The button in the
+  orphan list now shows a progress spinner on the click that is in flight and
+  carries the check name as its tooltip.
+- The Results table gave no count, so a filter that dropped most of the set
+  looked like the whole set. It now shows the filtered count under the filter
+  chips, using the same wording the Remediations search already used.
+
 - On a single-node cluster the console plugin rolled out with
   `maxUnavailable: 1` against a one-replica Deployment, so a plugin upgrade
   could take the only pod down and blank Administration → Compliance until its

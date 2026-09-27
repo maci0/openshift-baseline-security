@@ -76,6 +76,7 @@ import {
 import BaselineNotConfigured from './BaselineNotConfigured';
 import { BaselineUnavailableSection } from './BaselineUnavailable';
 import LoadingCards from './LoadingCards';
+import ConsoleLink from './ConsoleLink';
 import { regionFocusProps, withDisabledTip } from './DisabledTip';
 import { ChunkError } from './ChunkError';
 import { useChunk } from './chunkLoad';
@@ -377,14 +378,14 @@ const CountRow: React.FC<{
   );
   if (linked) {
     return (
-      <a
+      <ConsoleLink
         href={href}
         // Named for screen readers: "Fail: 5", not a bare number (WCAG 2.4.4).
         aria-label={t('{{label}}: {{value}}', { label, value: countText })}
         style={{ color: 'inherit', textDecoration: 'none', display: 'block' }}
       >
         {row}
-      </a>
+      </ConsoleLink>
     );
   }
   return row;
@@ -778,9 +779,9 @@ const Overview: React.FC<{
             <Icon status={status} isInline>
               <Marker />
             </Icon>{' '}
-            <a href={c.href} dir="auto">
+            <ConsoleLink href={c.href} dir="auto">
               {c.title}
-            </a>
+            </ConsoleLink>
           </div>
         ))}
       </DescriptionListDescription>
@@ -798,7 +799,7 @@ const Overview: React.FC<{
           style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}
         >
           {t('No profiles are selected. Enable a profile to resume scanning.')}{' '}
-          <a href="/baseline-security/profiles">{t('Go to Profiles')}</a>
+          <ConsoleLink href="/baseline-security/profiles">{t('Go to Profiles')}</ConsoleLink>
         </Alert>
       )}
       {degraded && (
@@ -866,13 +867,13 @@ const Overview: React.FC<{
                 {/* Check titles are untrusted CO text and may be RTL; dir=auto
                     keeps the surrounding punctuation and separators on the
                     right side of the title. */}
-                <a href={c.href} dir="auto">
+                <ConsoleLink href={c.href} dir="auto">
                   {c.title}
-                </a>
+                </ConsoleLink>
               </React.Fragment>
             ))
           ) : (
-            <a href="/baseline-security/results">{t('Review check results')}</a>
+            <ConsoleLink href="/baseline-security/results">{t('Review check results')}</ConsoleLink>
           )}
           {changesTruncated && newlyFailedItems.length > 0 && (
             <>
@@ -929,7 +930,7 @@ const Overview: React.FC<{
             )}
           </span>
           <div>
-            <a href={resultsHref('WAIVED')}>{t('Review waived checks')}</a>
+            <ConsoleLink href={resultsHref('WAIVED')}>{t('Review waived checks')}</ConsoleLink>
           </div>
         </Alert>
       )}
@@ -1016,7 +1017,7 @@ const Overview: React.FC<{
               <DescriptionListGroup>
                 <DescriptionListTerm>{t('Remediations')}</DescriptionListTerm>
                 <DescriptionListDescription>
-                  <a href="/baseline-security/remediations">{t('Manage remediations')}</a>
+                  <ConsoleLink href="/baseline-security/remediations">{t('Manage remediations')}</ConsoleLink>
                 </DescriptionListDescription>
               </DescriptionListGroup>
             </DescriptionList>
