@@ -58,6 +58,7 @@ depend on those tags.
   advisories (GHSA-c83g-rgw3-j3cx unbounded cache growth, GHSA-73wf-gq98-2v4g
   crash / prototype write via custom stats) that reached the tree through
   webpack. Build-time only; nothing shipped in the plugin bundle changes.
+
 ## [0.6.0] - 2026-09-02
 
 ### Changed
@@ -221,6 +222,18 @@ depend on those tags.
 
 ### Migration notes
 
+- A `ClusterBaseline/cluster` that already holds two `spec.waivers` entries
+  with the same `name` (both were admitted before this release) is rejected
+  by the apiserver on the next write, so patching it, re-applying it, or
+  waiving another check from the console fails until the duplicate entry is
+  removed. Check with
+  `oc get clusterbaseline cluster -o jsonpath='{.spec.waivers[*].name}'` and
+  drop the repeated name before or right after the upgrade; nothing else
+  about the stored object changes.
+- `baseline-security-admin` is no longer aggregated onto the built-in `admin`
+  ClusterRole (see **Security** above). An install that relied on a
+  RoleBinding to `admin` in `openshift-compliance` must bind
+  `baseline-security-admin` explicitly before remediations can be applied.
 - If `BASELINE_SECURITY_SKIP_DEFAULT_CR` is set to anything other than a
   known true/false spelling, the operator now exits at process start
   instead of silently creating `ClusterBaseline/cluster`. Unset, empty,

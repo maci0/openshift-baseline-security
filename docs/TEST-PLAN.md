@@ -1147,6 +1147,10 @@ Scripted version ladder (bundle N-1 → N → N+1):
 
 - [ ] **0.2.0 → 0.2.1**: CRD gains fields; existing status objects still read;
       console zero-fills new counts.
+- [ ] **0.5.15 → 0.6.0 duplicate `spec.waivers`**: a CR holding two waiver
+      entries with the same `name` installs fine on 0.5.15, then every write to
+      it is rejected by the new CEL rule until the duplicate is removed; the
+      console waive flow replaces an existing entry instead of adding a pair.
 - [ ] **Mid-upgrade operator pod old+new**: two replicas during rollout; leader
       election single active reconcile; no dual Subscription creates.
 - [ ] **CRD conversion** (if ever v1beta1→v1alpha1 changes): round-trip

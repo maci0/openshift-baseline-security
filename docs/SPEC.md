@@ -227,7 +227,8 @@ spec:
     apply: Manual                    # Automatic maps to ScanSetting autoApplyRemediations
   scoring:
     mode: Flat                       # or SeverityWeighted (see scoring note)
-  waivers: []                        # accepted-risk exclusions from the score
+  waivers: []                        # accepted-risk exclusions from the score;
+                                    # max 256 entries, names unique (CEL-rejected)
 status:
   conditions: [...]
   complianceOperatorVersion: 1.9.1
