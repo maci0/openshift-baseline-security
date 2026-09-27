@@ -62,6 +62,9 @@ const HOSTILE = [
   '"balanced"',
   'trailing"',
   '\0nul\0byte',
+  '\x01=control-prefixed', // Excel trims leading controls, then evaluates
+  '\x0e=shiftout', // \s covers tab/LF/VT/FF/CR/space only, not the rest of C0
+  '\x1f|dde',
   'normal title',
   '',
   ' ',
@@ -129,6 +132,10 @@ const parseCsv = (text: string): string[][] => {
 // The exact hardening predicate from results.ts: a neutralized cell must NOT
 // still start (after optional whitespace) with a formula/DDE sigil.
 const formulaRe = /^\s*[=+\-@|\t\r\n＝＋－＠−]/;
+// What a spreadsheet actually decides on: leading controls and whitespace
+// trimmed, then the sigil test. A cell that still looks like a formula after
+// that trim escaped the hardening.
+const trimmedFormulaRe = /^[\s\p{Cc}]*[=+\-@|＝＋－＠−]/;
 
 describe('resultsCsv fuzz sweep', () => {
   it('keeps CSV structure and neutralizes formulas under hostile input', () => {
@@ -154,6 +161,7 @@ describe('resultsCsv fuzz sweep', () => {
         for (const cell of rows[r]) {
           // No cell may still look like a formula: hardening prepends "'".
           expect(formulaRe.test(cell)).toBeFalsy();
+          expect(trimmedFormulaRe.test(cell)).toBeFalsy();
           expect(cell).not.toContain('\0'); // NULs stripped
         }
       }

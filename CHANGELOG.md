@@ -43,6 +43,18 @@ depend on those tags.
 
 ## [Unreleased]
 
+### Security
+
+- Results CSV export hardened against a formula sigil hidden behind a leading
+  control character. `csvCell` dropped NULs and Unicode format characters, then
+  checked the cell for a formula starter, so a cell such as `\u0001=cmd` kept a
+  control prefix that a spreadsheet trims before deciding whether the cell is a
+  formula. A tampered `ComplianceCheckResult` name, description first line, or
+  `check-severity` label could therefore reach a downloaded export as an
+  evaluated formula. Export rows now drop the controls a spreadsheet trims
+  (tab, CR, and LF stay, since RFC 4180 quoting needs them). Cells that held a
+  control character other than a delimiter lose it from the export.
+
 ### Changed
 
 - Console plugin built a fresh `Intl.NumberFormat` / `Intl.DateTimeFormat` on

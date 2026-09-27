@@ -590,9 +590,10 @@ an accepted risk neither inflates nor tanks the score.
 - [ ] **Unicode / RTL / emoji in rule titles**: filter, CSV, and modal do not
       corrupt surrounding layout.
 - [x] **CSV formula variants**: fullwidth `＝`, tab-only cells, ZWSP/BIDI/BOM
-      hiding a sigil (jest `resultsCsv`). Residual: a formula on line 2 of a
-      quoted multiline cell is not prefixed (spreadsheets treat the cell as
-      text once quoted).
+      hiding a sigil, and a sigil behind a leading C0 control a spreadsheet
+      trims (jest `resultsCsv`, `stripExportControls`). Residual: a formula on
+      line 2 of a quoted multiline cell is not prefixed (spreadsheets treat the
+      cell as text once quoted).
 
 ## L. Deployment & upgrade
 
@@ -885,7 +886,8 @@ stale Available or eternal Progressing.
 
 ## U. Security & tenancy
 
-- [x] CSV export formula hardening (jest).
+- [x] CSV export formula hardening, including a sigil behind a control
+      character a spreadsheet trims (jest `resultsCsv`, `stripExportControls`).
 - [x] **Enabling batch or auto-apply needs the remediation patch, not just the
       baseline patch**: the baseline write reaches the ComplianceRemediation
       write through the operator, so `canDelegateRemediationApply` denies when

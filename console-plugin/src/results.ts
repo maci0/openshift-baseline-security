@@ -4,7 +4,7 @@ import { checkSeverity } from './scoring';
 import { resultFilterStatus } from './status';
 import { activeWaivedNames } from './waivers';
 import { checkResultHref } from './links';
-import { isString, stripFormatChars } from './parse';
+import { isString, stripExportControls, stripFormatChars } from './parse';
 
 // Localized severity label for Results UI and the printable report. Keep a single
 // switch so chip titles and report cells cannot drift. Unknown / empty use the
@@ -66,7 +66,9 @@ export const checkBody = (r: ComplianceCheckResult): string => {
 // cannot bypass the prefix check. Prefix formula-looking cells with an
 // apostrophe before quoting so spreadsheet apps import them as literal text.
 // Also catch leading whitespace before a formula sigil (Excel often trims
-// then evaluates). Fullwidth / Unicode sigils (＝＋－＠, U+2212 minus) and
+// then evaluates), and strip the control characters Excel trims off a cell
+// before the same test, so a payload cannot hide a sigil behind one. Fullwidth
+// / Unicode sigils (＝＋－＠, U+2212 minus) and
 // leading '|' (legacy Excel DDE) are treated the same as ASCII formula
 // starters (CWE-1236).
 // Module-level regexes so multi-thousand-row exports do not recompile patterns.
@@ -77,8 +79,9 @@ const csvDoubleQuoteRe = /"/g;
 const csvCell = (v: string): string => {
   // Coerce first: untrusted CR fields and resultFilterStatus may yield
   // non-string values (missing status, non-string name). Export must never throw.
-  // Format-strip after NUL so a ZWSP/BOM cannot hide a leading formula sigil.
-  const cleaned = stripFormatChars(String(v ?? '').replace(csvNulRe, ''));
+  // Format-strip after NUL so a ZWSP/BOM cannot hide a leading formula sigil,
+  // then the controls a spreadsheet trims before the same decision.
+  const cleaned = stripExportControls(stripFormatChars(String(v ?? '').replace(csvNulRe, '')));
   const safe = csvFormulaRe.test(cleaned) ? `'${cleaned}` : cleaned;
   return csvQuoteRe.test(safe) ? `"${safe.replace(csvDoubleQuoteRe, '""')}"` : safe;
 };

@@ -17,6 +17,12 @@ const formatCharRe = /\p{Cf}/gu;
 // C0/C1 controls plus format. Identity fields must not keep either; CSV
 // cells keep tab/CR/LF (quoted) so this is not used on export rows.
 const controlAndFormatRe = /[\p{Cc}\p{Cf}]/gu;
+// Controls on an export row, minus the three RFC 4180 delimiters. A
+// spreadsheet trims leading control characters off a cell before deciding
+// whether it is a formula, so "\u0001=cmd" is evaluated even though the sigil
+// is not the first character. Tab/CR/LF must survive for quoting, so they are
+// spelled out rather than handled by \s.
+const exportControlRe = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]/gu;
 
 // Drop BIDI / zero-width / BOM so a later formula or HTML check sees the
 // real first character. Leaves tab/CR/LF in place for RFC 4180 quoting.
@@ -27,3 +33,7 @@ export const stripFormatChars = (s: string): string => s.replace(formatCharRe, '
 // tab-only value stays empty rather than becoming a leftover control.
 export const stripControlAndFormat = (s: string): string =>
   s.replace(controlAndFormatRe, '');
+
+// Drop the controls a spreadsheet would trim off a cell before evaluating it,
+// keeping the RFC 4180 delimiters. Run on export rows only.
+export const stripExportControls = (s: string): string => s.replace(exportControlRe, '');
