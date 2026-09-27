@@ -624,13 +624,15 @@ const ResultsTab: React.FC<{
     // Keep the id as the filter key (reducer + resultsHref depend on it) but
     // show tailored profiles by their clean name and built-ins by localized title.
     // Sort by display title (console locale) so chip order matches what users read,
-    // not the English-ish profile key / tp- prefix.
+    // not the English-ish profile key / tp- prefix. One collator for the sort,
+    // not safeLocale + a fresh localeCompare per comparison.
+    const collator = new Intl.Collator(safeLocale(i18n.language));
     return [...keys]
       .map((k) => ({
         id: k,
         title: t(suiteFilterKeyTitle(k)),
       }))
-      .sort((a, b) => a.title.localeCompare(b.title, safeLocale(i18n.language)));
+      .sort((a, b) => collator.compare(a.title, b.title));
     // profiles/tailored read when keys change; ownedResults only when discovering.
     // eslint-disable-next-line react-hooks/exhaustive-deps -- content keys
   }, [profilesKey, tailoredKey, suiteKeysFromBaseline ? null : ownedResults, i18n, t]);

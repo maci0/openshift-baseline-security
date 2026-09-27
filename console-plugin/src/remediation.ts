@@ -130,8 +130,9 @@ export const missingDependencySummary = (rem: ComplianceRemediation): string | n
 // Sort key for guided remediation: applyable remediations first so prerequisite
 // fixes appear above MissingDependencies rows (openspec guided-remediation).
 // Stable by name within each group. Names are untrusted list-watch data: coerce
-// so a partial/tampered item cannot throw mid-sort.
-export const compareRemediationsForApplyOrder = (
+// so a partial/tampered item cannot throw mid-sort. Build one comparator with
+// applyOrderComparator instead of calling localeCompare per comparison.
+export const applyOrderComparator = (collator: Intl.Collator) => (
   a: ComplianceRemediation,
   b: ComplianceRemediation,
 ): number => {
@@ -143,5 +144,9 @@ export const compareRemediationsForApplyOrder = (
   }
   const an = isString(a.metadata?.name) ? a.metadata.name : '';
   const bn = isString(b.metadata?.name) ? b.metadata.name : '';
-  return an.localeCompare(bn);
+  return collator.compare(an, bn);
 };
+
+export const compareRemediationsForApplyOrder = applyOrderComparator(
+  new Intl.Collator(),
+);

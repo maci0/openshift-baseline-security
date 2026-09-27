@@ -8,11 +8,10 @@ import (
 	"strings"
 	"time"
 
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/types"
 	utilvalidation "k8s.io/apimachinery/pkg/util/validation"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	baselinev1alpha1 "github.com/maci0/baseline-security-operator/api/v1alpha1"
@@ -206,6 +205,63 @@ func (r *ClusterBaselineReconciler) openRemediationBatch(
 // must never stay paused forever). Also track whether any remediation is still
 // apply=true: if none are (the user reverted them all), the batch is cancelled
 // and we resume at once.
+// remediationListPageSize bounds one apiserver List of ComplianceRemediations.
+// The namespace also holds remediations CO created for foreign scans, so the
+// page caps what a single response pins while the batch polls every 15s.
+const remediationListPageSize int64 = 500
+
+// listRemediationsForBatch returns the named ComplianceRemediations from the
+// compliance namespace, indexed by name. want must be the batch's capped name
+// list. A nil map with a nil error means the CRD is absent: every name is then
+// missing, which the caller treats as terminal.
+func (r *ClusterBaselineReconciler) listRemediationsForBatch(
+	ctx context.Context, want []string,
+) (map[string]*unstructured.Unstructured, error) {
+	found := make(map[string]*unstructured.Unstructured, len(want))
+	if len(want) == 0 {
+		return found, nil
+	}
+	needed := make(map[string]bool, len(want))
+	for _, n := range want {
+		if len(utilvalidation.IsDNS1123Subdomain(n)) == 0 {
+			needed[n] = true
+		}
+	}
+	if len(needed) == 0 {
+		return found, nil
+	}
+	list := uList(remediationGVK)
+	cont := ""
+	for {
+		opts := []client.ListOption{
+			client.InNamespace(complianceNamespace),
+			client.Limit(remediationListPageSize),
+		}
+		if cont != "" {
+			opts = append(opts, client.Continue(cont))
+		}
+		if err := r.List(ctx, list, opts...); err != nil {
+			if meta.IsNoMatchError(err) {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("listing ComplianceRemediations in %s: %w", complianceNamespace, err)
+		}
+		// Index range: no copy of each remediation's map header per item.
+		for i := range list.Items {
+			item := &list.Items[i]
+			if needed[item.GetName()] {
+				found[item.GetName()] = item
+			}
+		}
+		cont = list.GetContinue()
+		// Every name is present: stop paging rather than walk the rest of the
+		// namespace's remediations.
+		if cont == "" || len(found) == len(needed) {
+			return found, nil
+		}
+	}
+}
+
 func (r *ClusterBaselineReconciler) finishRemediationBatch(
 	ctx context.Context, cb *baselinev1alpha1.ClusterBaseline,
 ) error {
@@ -226,6 +282,18 @@ func (r *ClusterBaselineReconciler) finishRemediationBatch(
 			"count", len(names), "max", batchMaxRemediations, "name", cb.Name)
 		names = names[:batchMaxRemediations]
 	}
+	// One paged List replaces a Get per name. A batch lists up to 256
+	// remediations and reconcile requeues every 15s while one is active, so the
+	// old shape spent up to 256 sequential live apiserver round trips per poll
+	// (unstructured reads bypass the manager cache) just to read apply and
+	// applicationState. Paging stops as soon as every listed name is found.
+	rems, lerr := r.listRemediationsForBatch(ctx, names)
+	if lerr != nil {
+		// Transient read failure: keep the pools paused and let the grace
+		// deadline below decide, exactly as a per-name Get failure did.
+		getErr = lerr
+		applied = false
+	}
 	for _, name := range names {
 		// A non-DNS1123 name can return 400 (not 404), which would fall through to
 		// getErr and block resume as "still waiting" until grace. Treat as terminal
@@ -236,20 +304,18 @@ func (r *ClusterBaselineReconciler) finishRemediationBatch(
 			missing = append(missing, name)
 			continue
 		}
-		rem := u(remediationGVK)
-		if err := r.Get(ctx, types.NamespacedName{Namespace: complianceNamespace, Name: name}, rem); err != nil {
-			if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) {
-				// Info: silent skip leaves on-call unable to explain why a batch
-				// finished as applied/cancelled while listed remediations vanished
-				// (UI delete, GC, or compliance CRDs removed mid-batch).
-				log.FromContext(ctx).Info("remediation missing while waiting for batch; treating as done",
-					"remediation", name, "name", cb.Name, "notFound", apierrors.IsNotFound(err))
-				missing = append(missing, name)
-				continue
-			}
-			// Name every failure so a multi-rem batch requeue says which ones broke.
-			getErr = fmt.Errorf("getting remediation %q: %w", name, err)
-			applied = false
+		if lerr != nil {
+			// State is unknown for every name this cycle.
+			continue
+		}
+		rem, found := rems[name]
+		if !found {
+			// Info: silent skip leaves on-call unable to explain why a batch
+			// finished as applied/cancelled while listed remediations vanished
+			// (UI delete, GC, or compliance CRDs removed mid-batch).
+			log.FromContext(ctx).Info("remediation missing while waiting for batch; treating as done",
+				"remediation", name, "name", cb.Name, "notFound", true)
+			missing = append(missing, name)
 			continue
 		}
 		if s, _, err := unstructured.NestedString(rem.Object, "status", "applicationState"); err != nil {

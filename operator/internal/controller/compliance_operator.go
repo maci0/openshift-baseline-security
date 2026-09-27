@@ -228,6 +228,12 @@ func (r *ClusterBaselineReconciler) syncComplianceSubscriptionSource(
 	return nil
 }
 
+// csvListPageSize bounds one apiserver List of ClusterServiceVersions. A CSV
+// carries the whole install spec and the alm-examples annotation, so an unpaged
+// cluster-wide List can hold hundreds of MB of decoded JSON; paging caps what
+// one response pins in the reconciler.
+const csvListPageSize int64 = 100
+
 func (r *ClusterBaselineReconciler) findComplianceOperatorCSV(ctx context.Context) (*unstructured.Unstructured, error) {
 	// Priority (newest version within each tier):
 	//  1. Succeeded in openshift-compliance (where we install / Get installedCSV)
@@ -253,21 +259,40 @@ func (r *ClusterBaselineReconciler) findComplianceOperatorCSV(ctx context.Contex
 		return csv, nil
 	}
 
-	csvs := uList(csvGVK)
-	if err := r.List(ctx, csvs); err != nil {
-		if meta.IsNoMatchError(err) {
-			// CRD still present for namespaced list; only non-Succeeded local remains.
-			return pickComplianceOperatorCSV(local.Items, complianceNamespace, false), nil
+	// Cluster-wide fallback. Paged: a CSVCatalog CR carries the full install
+	// spec plus the alm-examples annotation, so one unpaged List of a
+	// multi-operator cluster decodes tens to hundreds of MB into maps on a
+	// path the steady-state never takes (the local Succeeded lookup above
+	// already answered it). Only name, namespace and status.phase are read.
+	var clusterItems []unstructured.Unstructured
+	cluster := uList(csvGVK)
+	cont := ""
+	for {
+		opts := []client.ListOption{client.Limit(csvListPageSize)}
+		if cont != "" {
+			opts = append(opts, client.Continue(cont))
 		}
-		return nil, fmt.Errorf("listing CSVs cluster-wide: %w", err)
+		if err := r.List(ctx, cluster, opts...); err != nil {
+			if meta.IsNoMatchError(err) {
+				// CRD still present for namespaced list; only non-Succeeded local remains.
+				return pickComplianceOperatorCSV(local.Items, complianceNamespace, false), nil
+			}
+			return nil, fmt.Errorf("listing CSVs cluster-wide: %w", err)
+		}
+		clusterItems = append(clusterItems, cluster.Items...)
+		cont = cluster.GetContinue()
+		if cont == "" {
+			break
+		}
 	}
-	if csv := pickComplianceOperatorCSV(csvs.Items, "", true); csv != nil {
+	csvs := clusterItems
+	if csv := pickComplianceOperatorCSV(csvs, "", true); csv != nil {
 		return csv, nil
 	}
 	if csv := pickComplianceOperatorCSV(local.Items, complianceNamespace, false); csv != nil {
 		return csv, nil
 	}
-	return pickComplianceOperatorCSV(csvs.Items, "", false), nil
+	return pickComplianceOperatorCSV(csvs, "", false), nil
 }
 
 // pickComplianceOperatorCSV chooses the newest compliance-operator CSV among items.

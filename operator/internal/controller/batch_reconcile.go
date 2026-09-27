@@ -63,6 +63,8 @@ func (r *ClusterBaselineReconciler) setMCPPaused(ctx context.Context, pool strin
 		}
 		annotations := maps.Clone(mcp.GetAnnotations())
 		marker := annotations[batchPauseOwnerAnnotation]
+		// Patch base: must be the pre-mutation object, so it is taken before any
+		// branch below changes the pool.
 		before := mcp.DeepCopy()
 
 		if paused {

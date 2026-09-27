@@ -7,7 +7,6 @@ import (
 	"slices"
 	"time"
 
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -90,6 +89,54 @@ type completedSuiteRun struct {
 	latest   time.Time
 }
 
+// suiteListPageSize bounds one apiserver List of ComplianceSuites. The suite
+// count tracks bindings (tens), so a page larger than that never truncates a
+// normal namespace, but paging keeps one response from pinning every suite if a
+// cluster holds many foreign scan suites.
+const suiteListPageSize int64 = 200
+
+// listOwnedSuites returns the ComplianceSuites in the compliance namespace whose
+// name is in expected, indexed by name. A nil map with a nil error means the CRD
+// is absent (partial CO uninstall): callers treat that as history not advanced.
+//
+// One paged List replaces one Get per selected binding. Unstructured reads
+// bypass the manager cache, so the previous shape cost a live apiserver round
+// trip per profile on every reconcile.
+func (r *ClusterBaselineReconciler) listOwnedSuites(
+	ctx context.Context, expected map[string]bool,
+) (map[string]*unstructured.Unstructured, error) {
+	owned := make(map[string]*unstructured.Unstructured, len(expected))
+	list := uList(suiteGVK)
+	cont := ""
+	for {
+		opts := []client.ListOption{
+			client.InNamespace(complianceNamespace),
+			client.Limit(suiteListPageSize),
+		}
+		if cont != "" {
+			opts = append(opts, client.Continue(cont))
+		}
+		if err := r.List(ctx, list, opts...); err != nil {
+			if meta.IsNoMatchError(err) {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("listing ComplianceSuites in %s for history: %w", complianceNamespace, err)
+		}
+		cont = list.GetContinue()
+		// Index range: avoid copying each Unstructured (map header + metadata)
+		// per suite, and skip foreign suites before they reach the index.
+		for i := range list.Items {
+			item := &list.Items[i]
+			if expected[item.GetName()] {
+				owned[item.GetName()] = item
+			}
+		}
+		if cont == "" {
+			return owned, nil
+		}
+	}
+}
+
 // completedSuiteTimes returns the member-scan completion range only when the
 // suite and every status entry are complete. ComplianceSuite is the transaction
 // boundary for a ScanSettingBinding (ADR-015); recording an individual scan
@@ -147,8 +194,12 @@ func completedSuiteTimes(suite *unstructured.Unstructured, now time.Time) (compl
 // suites may be nil (rebuild via ownedSuites); aggregateStatus passes its map so
 // reconcile does not allocate the suite set twice.
 //
-// Suites are fetched by name (not a full namespace List) so foreign CO suites
-// never enter the hot path; expected set size is profiles + tailored (small).
+// Suites are read with one paged List per reconcile and indexed by name, not
+// one Get per selected profile: a multi-profile baseline selected 40 bindings
+// and paid 40 sequential live apiserver round trips (unstructured reads bypass
+// the manager cache) on every 15s/60s poll. Foreign CO suites in the namespace
+// are read but never consulted: only names in expectedSuites are looked up, and
+// the suite set is bounded by bindings (tens), so the paged List stays small.
 func (r *ClusterBaselineReconciler) recordHistory(
 	ctx context.Context,
 	cb *baselinev1alpha1.ClusterBaseline,
@@ -164,51 +215,48 @@ func (r *ClusterBaselineReconciler) recordHistory(
 	if len(expectedSuites) == 0 {
 		return nil
 	}
+	fetched, err := r.listOwnedSuites(ctx, expectedSuites)
+	if fetched == nil {
+		// CRDs absent mid-history (partial CO uninstall). The CCR list may
+		// still have succeeded. Log only when a prior scan exists so a frozen
+		// LastScanTime is explainable without requeue spam when CO was never
+		// installed.
+		if err == nil && cb.Status.LastScanTime != nil {
+			r.logHistoryStall(ctx, "compliance suite CRDs absent; history not advanced",
+				"name", cb.Name)
+		}
+		return err
+	}
 	now := time.Now()
 	var latest time.Time
 	completedSuites := make(map[string]completedSuiteRun, len(expectedSuites))
-	for name := range expectedSuites {
-		item := u(suiteGVK)
-		if err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: complianceNamespace}, item); err != nil {
-			if meta.IsNoMatchError(err) {
-				// CRDs absent mid-history (partial CO uninstall). CCR list may
-				// still have succeeded. Log only when a prior scan exists so a
-				// frozen LastScanTime is explainable without requeue spam when
-				// CO was never installed. Rate-limited like the NotFound sibling:
-				// this branch also re-fires every reconcile until the CRD returns.
-				if cb.Status.LastScanTime != nil {
-					r.logHistoryStall(ctx, "compliance suite CRDs absent; history not advanced",
-						"suite", name, "name", cb.Name)
-				}
-				return nil
-			}
+	for _, name := range slices.Sorted(maps.Keys(expectedSuites)) {
+		item, found := fetched[name]
+		if !found {
 			// Suite not created yet: wait for a full completed generation.
 			// After a scan has completed, a missing suite freezes LastScanTime
 			// and can page ComplianceScanStale; without this log there is no
 			// operator-side marker (binding deleted, suite GC'd, name drift).
 			// Pre-first-scan NotFound stays quiet (normal CO create lag).
-			if apierrors.IsNotFound(err) {
-				// Once LastScanTime is set, a missing suite freezes history and can
-				// page ComplianceScanStale with no default-level marker. Rate-limit
-				// Info (see logHistoryStall) so requeue spam stays off while still
-				// leaving a production breadcrumb before the 36h alert.
-				if cb.Status.LastScanTime != nil {
-					r.logHistoryStall(ctx, "ComplianceSuite not found; history not advanced",
-						"suite", name, "name", cb.Name,
-						"lastScanTime", cb.Status.LastScanTime.UTC().Format(time.RFC3339))
-				} else if cb.Status.Score != nil {
-					// First generation never completed, yet a partial score is already
-					// published because another selected binding produced results (e.g.
-					// a TailoredProfile whose CO profile is not Ready never yields a
-					// suite). LastScanTime stays nil so ComplianceScanStale (>0 guard)
-					// cannot fire; leave an operator-side breadcrumb so the stuck
-					// binding is not visible only as an empty per-profile card.
-					r.logHistoryStall(ctx, "selected binding has no completed ComplianceSuite; partial score published without a completed first scan",
-						"suite", name, "name", cb.Name)
-				}
-				return nil
+			// Once LastScanTime is set, a missing suite freezes history and can
+			// page ComplianceScanStale with no default-level marker. Rate-limit
+			// Info (see logHistoryStall) so requeue spam stays off while still
+			// leaving a production breadcrumb before the 36h alert.
+			if cb.Status.LastScanTime != nil {
+				r.logHistoryStall(ctx, "ComplianceSuite not found; history not advanced",
+					"suite", name, "name", cb.Name,
+					"lastScanTime", cb.Status.LastScanTime.UTC().Format(time.RFC3339))
+			} else if cb.Status.Score != nil {
+				// First generation never completed, yet a partial score is already
+				// published because another selected binding produced results (e.g.
+				// a TailoredProfile whose CO profile is not Ready never yields a
+				// suite). LastScanTime stays nil so ComplianceScanStale (>0 guard)
+				// cannot fire; leave an operator-side breadcrumb so the stuck
+				// binding is not visible only as an empty per-profile card.
+				r.logHistoryStall(ctx, "selected binding has no completed ComplianceSuite; partial score published without a completed first scan",
+					"suite", name, "name", cb.Name)
 			}
-			return fmt.Errorf("getting ComplianceSuite %s/%s for history: %w", complianceNamespace, name, err)
+			return nil
 		}
 		completed, ok := completedSuiteTimes(item, now)
 		if !ok {

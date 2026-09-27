@@ -1273,7 +1273,7 @@ func TestRemediationBatchApplyFailureResumeFailsRecordsBatch(t *testing.T) {
 	}
 }
 
-// TestRemediationBatchApplyingGetErrorKeepsPaused: a transient Get failure while
+// TestRemediationBatchApplyingGetErrorKeepsPaused: a transient read failure while
 // checking applicationState must not be treated as Applied (would unpause pools
 // and clear the batch before remediations finish), as long as grace has not elapsed.
 func TestRemediationBatchApplyingGetErrorKeepsPaused(t *testing.T) {
@@ -1293,11 +1293,15 @@ func TestRemediationBatchApplyingGetErrorKeepsPaused(t *testing.T) {
 			WithObjects(cb, rem, pool).
 			WithStatusSubresource(&baselinev1alpha1.ClusterBaseline{}).
 			WithInterceptorFuncs(interceptor.Funcs{
-				Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
-					if u, ok := obj.(*unstructured.Unstructured); ok && u.GroupVersionKind() == remediationGVK {
-						return boom
+				// The batch polls its remediations with one paged List.
+				List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+					if u, ok := list.(*unstructured.UnstructuredList); ok {
+						gvk := u.GroupVersionKind()
+						if gvk.Group == remediationGVK.Group && gvk.Kind == remediationGVK.Kind+"List" {
+							return boom
+						}
 					}
-					return c.Get(ctx, key, obj, opts...)
+					return c.List(ctx, list, opts...)
 				},
 			}).Build(),
 		Scheme: scheme,
@@ -2661,6 +2665,48 @@ func TestRecordHistoryWaitsForEveryMemberScan(t *testing.T) {
 	}
 }
 
+// TestRecordHistorySingleSuiteList: recordHistory reads the owned suites with
+// one paged List, not a Get per selected profile, and a foreign ComplianceSuite
+// in the same namespace is listed but never consulted: a foreign suite with a
+// newer endTimestamp must not move LastScanTime.
+func TestRecordHistorySingleSuiteList(t *testing.T) {
+	scheme := testScheme(t)
+	ownedEnd := time.Now().Add(-time.Hour).UTC().Truncate(time.Second)
+	foreignEnd := ownedEnd.Add(time.Hour)
+	lists := 0
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).
+			WithObjects(
+				completedSuite(bindingName("cis"), ownedEnd),
+				completedSuite("some-other-cluster-subscription", foreignEnd),
+			).
+			WithInterceptorFuncs(interceptor.Funcs{
+				List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+					if u, ok := list.(*unstructured.UnstructuredList); ok {
+						if gvk := u.GroupVersionKind(); gvk.Group == suiteGVK.Group && gvk.Kind == suiteGVK.Kind+"List" {
+							lists++
+						}
+					}
+					return c.List(ctx, list, opts...)
+				},
+			}).Build(),
+		Scheme: scheme,
+	}
+	cb := &baselinev1alpha1.ClusterBaseline{
+		Spec: baselinev1alpha1.ClusterBaselineSpec{Profiles: []baselinev1alpha1.ProfileKey{"cis"}},
+	}
+	score := int32(80)
+	if err := r.recordHistory(context.Background(), cb, &score, nil, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if lists != 1 {
+		t.Fatalf("ComplianceSuite List calls = %d, want 1", lists)
+	}
+	if cb.Status.LastScanTime == nil || !cb.Status.LastScanTime.Time.Equal(ownedEnd) {
+		t.Fatalf("lastScanTime = %v, want owned suite end %v", cb.Status.LastScanTime, ownedEnd)
+	}
+}
+
 func TestAggregateStatusClearsStaleScore(t *testing.T) {
 	scheme := testScheme(t)
 	r := &ClusterBaselineReconciler{
@@ -2691,15 +2737,15 @@ func TestAggregateStatusPropagatesSuiteGetError(t *testing.T) {
 		Client: fake.NewClientBuilder().WithScheme(scheme).
 			WithObjects(checkResult("p1", "baseline-cis", "PASS")).
 			WithInterceptorFuncs(interceptor.Funcs{
-				// recordHistory fetches owned suites by name (not a full List).
-				Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
-					if u, ok := obj.(*unstructured.Unstructured); ok {
+				// recordHistory reads the owned suites with one paged List.
+				List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+					if u, ok := list.(*unstructured.UnstructuredList); ok {
 						gvk := u.GroupVersionKind()
-						if gvk.Group == suiteGVK.Group && gvk.Kind == suiteGVK.Kind && key.Name == "baseline-cis" {
+						if gvk.Group == suiteGVK.Group && gvk.Kind == suiteGVK.Kind+"List" {
 							return forbidden
 						}
 					}
-					return c.Get(ctx, key, obj, opts...)
+					return c.List(ctx, list, opts...)
 				},
 			}).Build(),
 		Scheme: scheme,

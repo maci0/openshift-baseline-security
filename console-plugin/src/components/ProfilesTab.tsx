@@ -346,10 +346,9 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
   // Disable names that are not in the current base (edit of a stale CR, or a
   // content bump) must not pull N below the real remainder; extras stay out of
   // N so "Scans N of M base rules, plus P added" never reports N > M.
-  const { remainingBase, extraEnabled } = tailoredEffectiveCounts(
-    baseRules,
-    tpDisable,
-    tpEnable,
+  const { remainingBase, extraEnabled } = React.useMemo(
+    () => tailoredEffectiveCounts(baseRules, tpDisable, tpEnable),
+    [baseRules, tpDisable, tpEnable],
   );
   const tpNameRef = React.useRef<HTMLInputElement>(null);
   const createButtonRef = React.useRef<HTMLButtonElement>(null);

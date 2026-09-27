@@ -505,8 +505,14 @@ const Overview: React.FC<{
   // Content keys: status updates reallocate these arrays with the same names.
   const newlyFailed = baseline?.status?.newlyFailed ?? EMPTY_NAMES;
   const fixed = baseline?.status?.fixed ?? EMPTY_NAMES;
-  const newlyFailedKey = newlyFailed.join('\0');
-  const fixedKey = fixed.join('\0');
+  // The CRD caps these at 4096 names, so the key join is megabytes of string.
+  // Memoize on array identity: status updates reallocate the array, so a new
+  // reference still recomputes, while a re-render from any other state does not.
+  const newlyFailedKey = React.useMemo(
+    () => newlyFailed.join('\0'),
+    [newlyFailed],
+  );
+  const fixedKey = React.useMemo(() => fixed.join('\0'), [fixed]);
   const recentChanges = React.useMemo(
     () => changedChecksMany([newlyFailed, fixed], checkResults),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- content keys

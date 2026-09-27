@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -80,24 +81,13 @@ func (r *ClusterBaselineReconciler) ensureScanConfig(ctx context.Context, cb *ba
 		return fmt.Errorf("ensuring ScanSetting %s/%s: %w", complianceNamespace, scanSettingName, err)
 	}
 
-	for _, key := range cb.Spec.Profiles {
-		names := key.ProfileNames()
-		profiles := make([]any, 0, len(names))
-		for _, p := range names {
-			profiles = append(profiles, complianceRef("Profile", p))
-		}
-		if err := r.ensureScanBinding(ctx, cb, bindingName(key), profiles); err != nil {
-			return err
-		}
-	}
-
-	for _, name := range cb.Spec.TailoredProfiles {
-		profiles := []any{complianceRef("TailoredProfile", name)}
-		if err := r.ensureScanBinding(ctx, cb, tailoredBindingName(name), profiles); err != nil {
-			return err
-		}
-	}
-
+	// One List serves both the ensure below and the prune after it. The List is
+	// a live apiserver read (unstructured bypasses the manager cache), so the
+	// previous shape, a CreateOrUpdate Get per selected profile, cost up to 40
+	// sequential round trips every reconcile. Bindings are still written through
+	// CreateOrUpdate so the create/update conflict handling is unchanged; the
+	// pre-read only skips the Get when the binding already matches the desired
+	// state (the same comparison CreateOrUpdate does before its Update).
 	bindings := uList(bindingGVK)
 	if err := r.List(ctx, bindings, client.InNamespace(complianceNamespace)); err != nil {
 		if meta.IsNoMatchError(err) {
@@ -106,6 +96,30 @@ func (r *ClusterBaselineReconciler) ensureScanConfig(ctx context.Context, cb *ba
 		}
 		return fmt.Errorf("listing ScanSettingBindings in %s: %w", complianceNamespace, err)
 	}
+	existing := make(map[string]*unstructured.Unstructured, len(bindings.Items))
+	for i := range bindings.Items {
+		b := &bindings.Items[i]
+		existing[b.GetName()] = b
+	}
+
+	for _, key := range cb.Spec.Profiles {
+		names := key.ProfileNames()
+		profiles := make([]any, 0, len(names))
+		for _, p := range names {
+			profiles = append(profiles, complianceRef("Profile", p))
+		}
+		if err := r.ensureScanBinding(ctx, cb, bindingName(key), profiles, existing[bindingName(key)]); err != nil {
+			return err
+		}
+	}
+
+	for _, name := range cb.Spec.TailoredProfiles {
+		profiles := []any{complianceRef("TailoredProfile", name)}
+		if err := r.ensureScanBinding(ctx, cb, tailoredBindingName(name), profiles, existing[tailoredBindingName(name)]); err != nil {
+			return err
+		}
+	}
+
 	selected := ownedSuites(cb)
 	for i := range bindings.Items {
 		b := &bindings.Items[i]
@@ -154,15 +168,37 @@ func complianceRef(kind, name string) map[string]any {
 }
 
 // ensureScanBinding creates or updates a single ScanSettingBinding pointing the
-// given profile refs at the shared ScanSetting, owned by cb.
-func (r *ClusterBaselineReconciler) ensureScanBinding(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline, name string, profileRefs []any) error {
+// given profile refs at the shared ScanSetting, owned by cb. existing is the
+// same-named binding from the reconcile's List, or nil when absent. When it
+// already matches the desired state the write is skipped: CreateOrUpdate would
+// otherwise re-Get it (a live apiserver round trip per selected profile) only
+// to find nothing to update.
+func (r *ClusterBaselineReconciler) ensureScanBinding(
+	ctx context.Context,
+	cb *baselinev1alpha1.ClusterBaseline,
+	name string,
+	profileRefs []any,
+	existing *unstructured.Unstructured,
+) error {
+	mutate := func(binding *unstructured.Unstructured) error {
+		binding.Object["profiles"] = profileRefs
+		binding.Object["settingsRef"] = complianceRef("ScanSetting", scanSettingName)
+		return controllerutil.SetControllerReference(cb, binding, r.Scheme)
+	}
+	if existing != nil {
+		desired := existing.DeepCopy()
+		if err := mutate(desired); err != nil {
+			return fmt.Errorf("ensuring ScanSettingBinding %s/%s: %w", complianceNamespace, name, err)
+		}
+		if equality.Semantic.DeepEqual(existing.Object, desired.Object) {
+			return nil
+		}
+	}
 	binding := u(bindingGVK)
 	binding.SetName(name)
 	binding.SetNamespace(complianceNamespace)
 	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, binding, func() error {
-		binding.Object["profiles"] = profileRefs
-		binding.Object["settingsRef"] = complianceRef("ScanSetting", scanSettingName)
-		return controllerutil.SetControllerReference(cb, binding, r.Scheme)
+		return mutate(binding)
 	})
 	if err != nil {
 		// The scansettingbindings CRD can be absent while scansettings is present
