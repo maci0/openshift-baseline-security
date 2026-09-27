@@ -749,6 +749,10 @@ an accepted risk neither inflates nor tanks the score.
 - [x] **Translation coverage**: every user-facing string exists in the en
       locale file; no raw key leakage for new donut slices (Info, Inconsistent)
       (jest `i18n locale coverage`).
+- [x] **Typeahead search and option order follow locale rules**: the rule and
+      profile pickers match case- and accent-insensitively, keep the Turkish
+      dotted and dotless I distinct, and sort by the session locale's
+      collation rather than byte order (jest `text.test.ts`).
 - [ ] **Narrow viewport**: dashboard cards, donut legend, table filters, and
       remediation modals do not overlap or clip text at common laptop/tablet
       widths.

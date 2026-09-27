@@ -91,6 +91,7 @@ import { withDisabledTip } from './DisabledTip';
 import { restoreFocus } from './focus';
 import { useAutoDismiss } from './feedback';
 import { isString } from '../parse';
+import { compareForDisplay, matchesSearch } from '../text';
 
 // Typeahead multi-select over a (possibly large) rule catalog: type to filter,
 // pick from a checkbox dropdown, selections show as removable chips inline.
@@ -123,11 +124,13 @@ const RuleMultiSelect: React.FC<{
   const [input, setInput] = React.useState('');
   const inputRef = React.useRef<HTMLInputElement>(null);
 
-  const q = input.trim().toLowerCase();
+  // Folds case and diacritics, and keeps the Turkish dotted/dotless i
+  // distinct the way a search box must; toLowerCase().includes() does neither.
+  const q = input.trim();
   // Cap rendered options for a ~1k-rule catalog; keep the pre-cap count so a
   // truncated list says so instead of silently hiding rules past the cap.
   const allMatches = React.useMemo(
-    () => (q ? options.filter((o) => o.toLowerCase().includes(q)) : options),
+    () => (q ? options.filter((o) => matchesSearch(o, q)) : options),
     [options, q],
   );
   const matches = React.useMemo(() => {
@@ -312,8 +315,10 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
     const names = (Array.isArray(profiles) ? profiles : [])
       .map((p) => p?.metadata?.name)
       .filter((n): n is string => isString(n) && n.length > 0);
-    return names.length > 0 ? [...new Set(names)].sort() : [DEFAULT_BASE_PROFILE];
-  }, [profiles]);
+    return names.length > 0
+      ? [...new Set(names)].sort((a, b) => compareForDisplay(a, b, i18n.language))
+      : [DEFAULT_BASE_PROFILE];
+  }, [profiles, i18n.language]);
   // Rule names in the selected base profile (for the disable selection).
   const baseRules = React.useMemo(() => {
     const p = (Array.isArray(profiles) ? profiles : []).find(
@@ -322,8 +327,8 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
     const rules = (p?.rules ?? []).filter(
       (r): r is string => isString(r) && r.length > 0,
     );
-    return [...new Set(rules)].sort();
-  }, [profiles, tpExtends]);
+    return [...new Set(rules)].sort((a, b) => compareForDisplay(a, b, i18n.language));
+  }, [profiles, tpExtends, i18n.language]);
 
   // Full Rule catalog: candidates for enableRules are the rules NOT already in
   // the base profile (those are active anyway). Large list; typeahead-filtered.
@@ -334,8 +339,8 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
     const names = (Array.isArray(allRules) ? allRules : [])
       .map((r) => r?.metadata?.name)
       .filter((n): n is string => isString(n) && n.length > 0 && !inBase.has(n));
-    return [...new Set(names)].sort();
-  }, [allRules, baseRules]);
+    return [...new Set(names)].sort((a, b) => compareForDisplay(a, b, i18n.language));
+  }, [allRules, baseRules, i18n.language]);
   // A failed catalog watch (RBAC denial, CRD absent) must not masquerade as an
   // empty/one-profile catalog: surface it like every other tab's watch error,
   // so an admin does not author a tailored profile against a silently shrunk

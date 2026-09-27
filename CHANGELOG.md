@@ -50,6 +50,22 @@ depend on those tags.
   compliance CRDs absent, console plugin image unset) never set `Degraded`, so
   the operator previously reported healthy while producing no compliance score
   and no alert fired.
+- Operator and console plugin pods: neither declared a `preStop` hook, so a
+  terminating pod kept its endpoint for the seconds between SIGTERM and
+  endpoint removal, and a scrape or console request could still land on a
+  draining pod. Both containers now sleep 5s in `preStop` before the process
+  sees SIGTERM, inside the existing 30s grace period.
+- Operator `/readyz` reported ready for the whole drain. A SIGTERM now flips
+  the readiness check to failing, so the pod leaves the Service endpoints as
+  soon as the process starts shutting down.
+- Console plugin rule and profile typeahead: typing `securite` did not find
+  `sécurité`, because the filter folded case with `toLowerCase()` and left
+  diacritics in place. The filter now ignores case and diacritics and keeps the
+  Turkish dotted and dotless I distinct, so a query matches in either case.
+- Console plugin rule and profile pickers: the option lists were sorted by byte
+  value, so an accented name sorted after every plain letter and embedded
+  numbers ordered `rule_10` before `rule_2`. They now sort by the session
+  locale's collation.
 
 ### Changed
 
