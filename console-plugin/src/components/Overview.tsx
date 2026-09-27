@@ -52,7 +52,7 @@ import {
 } from '../models';
 import { isValidCron } from '../cron';
 import { AccessGate, mayWrite } from '../permissions';
-import { formatCount, safeLocale } from '../dates';
+import { formatCount, parseInstant, safeLocale } from '../dates';
 import { errorMessage } from '../errors';
 import { resultsHref } from '../links';
 import { historyContentKey, toTrendData } from '../overviewTrend';
@@ -95,6 +95,27 @@ void loadOverviewCharts().catch(() => undefined);
 const EMPTY_NAMES: readonly string[] = [];
 const EMPTY_RESULTS: ComplianceCheckResult[] = [];
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+
+// status.lastScanTime / status.nextScanTime are cluster-supplied RFC3339
+// strings. PatternFly's Timestamp takes `date`, and substitutes the browser's
+// own `new Date()` when the prop is absent or unparseable, so passing the
+// timestamp under any other name (or passing a corrupt value straight
+// through) painted the current wall clock in the scan rows: "Last scan" read
+// as now on every mount and the Details card carried no scan time at all.
+// Resolve the instant here and show the raw string when it is not one, which
+// keeps a hand-edited status visible instead of inventing a fresh-looking one.
+const ClusterTimestamp: React.FC<{ value: string; locale?: string }> = ({
+  value,
+  locale,
+}) => {
+  const { t } = useTranslation('plugin__baseline-security-console-plugin');
+  const instant = parseInstant(value);
+  return instant ? (
+    <Timestamp date={instant} locale={locale} />
+  ) : (
+    <span aria-label={t('Unknown')}>{value}</span>
+  );
+};
 
 // Donut segment colors (module-level so CCR churn does not rebind CSS var strings).
 const DONUT_GREEN = 'var(--pf-t--global--icon--color--status--success--default)';
@@ -896,7 +917,10 @@ const Overview: React.FC<{
                 <DescriptionListTerm>{t('Last scan')}</DescriptionListTerm>
                 <DescriptionListDescription>
                   {baseline.status?.lastScanTime ? (
-                    <Timestamp timestamp={baseline.status.lastScanTime} />
+                    <ClusterTimestamp
+                      value={baseline.status.lastScanTime}
+                      locale={locale}
+                    />
                   ) : (
                     // Bare em dash is silent or read as "dash"; name the empty state.
                     <span aria-label={t('Not scanned')}>—</span>
@@ -909,7 +933,7 @@ const Overview: React.FC<{
                   {scanningDisabled(baseline) ? (
                     <span aria-label={t('Scanning is disabled')}>—</span>
                   ) : baseline.status?.nextScanTime ? (
-                    <Timestamp timestamp={baseline.status.nextScanTime} />
+                    <ClusterTimestamp value={baseline.status.nextScanTime} locale={locale} />
                   ) : (
                     <span aria-label={t('n/a')}>—</span>
                   )}

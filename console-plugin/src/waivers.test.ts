@@ -550,6 +550,22 @@ describe('waivers', () => {
     expect(addWaiverPatch(undefined, { name: 'chk', expiresAt: '2026-01-01T23:59:60Z' })).toEqual(
       [],
     );
+    // A four-digit year below 0100 is a real RFC3339 year, not a two-digit
+    // shorthand: Date.UTC would have folded 0099 to 1999 and the waiver patch
+    // would have been dropped without a reason the UI could show.
+    expect(
+      addWaiverPatch(undefined, { name: 'chk', expiresAt: '0099-06-15T00:00:00Z' }),
+    ).toEqual([
+      {
+        op: 'add',
+        path: '/spec/waivers',
+        value: [{ name: 'chk', expiresAt: '0099-06-15T00:00:00Z' }],
+      },
+    ]);
+    // The calendar check still rejects an impossible day in those years.
+    expect(addWaiverPatch(undefined, { name: 'chk', expiresAt: '0099-02-30T00:00:00Z' })).toEqual(
+      [],
+    );
     expect(
       addWaiverPatch(undefined, { name: 'chk', expiresAt: '2027-01-01T00:00:00Z' }),
     ).toEqual([

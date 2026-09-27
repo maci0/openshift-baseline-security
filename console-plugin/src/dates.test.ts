@@ -8,6 +8,7 @@ import {
   formatCount,
   formatChartDate,
   localDateInputValue,
+  parseInstant,
   textDirection,
 } from './dates';
 import { randomString } from './testing/fuzz';
@@ -438,5 +439,29 @@ describe('cached Intl formatters', () => {
     // A tag still in the working set is still reused, not rebuilt per call.
     const last = tags[tags.length - 1];
     expect(intlCached(cache, last, () => new Intl.NumberFormat(last))).toBe(cache.get(last));
+  });
+});
+
+describe('parseInstant', () => {
+  it('returns the absolute instant a cluster timestamp carries', () => {
+    expect(parseInstant('2026-07-12T15:30:00Z')?.toISOString()).toBe('2026-07-12T15:30:00.000Z');
+    expect(parseInstant('2026-07-12T15:30:00.123456Z')?.getTime()).toBe(
+      Date.parse('2026-07-12T15:30:00.123456Z'),
+    );
+    // An offset is honored, not dropped: the instant is the same one.
+    expect(parseInstant('2026-07-12T17:30:00+02:00')?.toISOString()).toBe(
+      '2026-07-12T15:30:00.000Z',
+    );
+  });
+
+  it('returns null rather than a substitute instant for unusable values', () => {
+    // PatternFly's Timestamp substitutes its own new Date() for a missing or
+    // unparseable date, so a caller that forwards a null would render "now" in
+    // a scan row. A corrupt status value must resolve to null instead.
+    expect(parseInstant('not-a-date')).toBeNull();
+    expect(parseInstant('2026-02-31T00:00:00Z')).toBeNull();
+    expect(parseInstant('')).toBeNull();
+    expect(parseInstant(undefined)).toBeNull();
+    expect(parseInstant(null)).toBeNull();
   });
 });

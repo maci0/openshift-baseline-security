@@ -186,6 +186,15 @@ const parsedLocalDate = (iso: string): Date | null => {
   return Number.isNaN(d.getTime()) ? null : d;
 };
 
+// The instant an absolute cluster timestamp carries, or null when the value is
+// absent or not an instant. Callers that hand a timestamp to a component must
+// resolve it here first: a component that falls back to the browser's own
+// `new Date()` (PatternFly's Timestamp does) renders "now" in place of the
+// value, so a corrupt status timestamp would read as a scan that just finished
+// and the row would move again on every mount.
+export const parseInstant = (iso: string | undefined | null): Date | null =>
+  iso ? parsedLocalDate(iso) : null;
+
 // Formatting is the hot path on every card, waiver row, remediation row, and
 // chart tick, and each toLocale*String call builds a fresh Intl formatter. The
 // engine caches only the runtime default locale, so an explicit console locale
