@@ -193,6 +193,41 @@ describe('listSeparators', () => {
   it('falls back to the runtime default on an invalid locale tag', () => {
     expect(listSeparators(3, 'not a tag')).toEqual(listSeparators(3));
   });
+
+  // listSeparators derives the per-count pattern from two constant-size probes
+  // instead of formatting `count` items. These are the locales where the
+  // two-item pair is spelled differently from the leading separator (de, he,
+  // ar, hi, ro, fa, si), where the middle has no literal of its own (en, sv,
+  // fr, lt), where the whole list is a bare space (ja, ko), and where there is
+  // no separator at all (zh).
+  it('derives the same separators the formatter emits for a two-item pair', () => {
+    expect(listSeparators(2, 'de')).toEqual([', ']);
+    expect(listSeparators(2, 'ar')).toEqual([' و']);
+    expect(listSeparators(2, 'hi')).toEqual([' और ']);
+    expect(listSeparators(2, 'ja')).toEqual([' ']);
+    expect(listSeparators(2, 'zh')).toEqual([]);
+  });
+
+  // The real oracle: whatever the derived list is, it must equal the literals
+  // the same locale's ListFormat actually produces for that many items, or a
+  // caller interleaving links renders the wrong punctuation.
+  it('matches Intl.ListFormat for every count and locale probed', () => {
+    const locales = [
+      'en', 'de', 'fr', 'es', 'pl', 'he', 'ar', 'ja', 'zh', 'ru', 'pt', 'it',
+      'nl', 'sv', 'tr', 'ko', 'hi', 'id', 'vi', 'th', 'cs', 'hu', 'ro', 'lt',
+      'fa', 'ur', 'si', 'he-IL', 'ar-EG', 'zh-Hans', 'pt-BR', 'en-GB',
+    ];
+    for (const locale of locales) {
+      const fmt = new Intl.ListFormat(locale, { style: 'long', type: 'unit' });
+      for (const n of [2, 3, 4, 5, 6, 9, 17, 64, 300]) {
+        const expected = fmt
+          .formatToParts(Array.from({ length: n }, (_, i) => String(i)))
+          .filter((p) => p.type === 'literal')
+          .map((p) => p.value);
+        expect(listSeparators(n, locale)).toEqual(expected);
+      }
+    }
+  });
 });
 
 describe('codePointLength', () => {

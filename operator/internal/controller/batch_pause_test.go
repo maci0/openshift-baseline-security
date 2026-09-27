@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -205,6 +206,65 @@ func TestSetMCPPausedResumeLeavesUnownedPoolsAlone(t *testing.T) {
 	})
 }
 
+// Pool rediscovery reads every remediation named in the batch-apply annotation
+// through one paged List, not a Get per name. The finalizer blocks CR deletion,
+// so a per-name round trip made recovery latency scale with the batch size (up
+// to 256 sequential live apiserver calls). The pools must still be recovered
+// from the same names, so assert both the call shape and the outcome.
+func TestResumeBatchPoolsOnDeleteListsRemediationsOnce(t *testing.T) {
+	scheme := testScheme(t)
+	cb := newBatchCB()
+	cb.SetAnnotations(map[string]string{batchApplyAnnotation: "rem1,rem2,rem3"})
+	objs := []client.Object{cb}
+	for i, pool := range []string{"worker", "master", "infra"} {
+		rem := nodeRemediation(fmt.Sprintf("rem%d", i+1), pool)
+		objs = append(objs, rem)
+		mcp := machineConfigPool(pool)
+		_ = unstructured.SetNestedField(mcp.Object, true, "spec", "paused")
+		mcp.SetAnnotations(map[string]string{batchPauseOwnerAnnotation: batchPauseOwner(cb)})
+		objs = append(objs, mcp)
+	}
+	lists, gets := 0, 0
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).
+			WithObjects(objs...).
+			WithInterceptorFuncs(interceptor.Funcs{
+				List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+					if u, ok := list.(*unstructured.UnstructuredList); ok &&
+						u.GroupVersionKind() == remediationGVK.GroupVersion().WithKind(remediationGVK.Kind+"List") {
+						lists++
+					}
+					return c.List(ctx, list, opts...)
+				},
+				Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+					if u, ok := obj.(*unstructured.Unstructured); ok && u.GroupVersionKind() == remediationGVK {
+						gets++
+					}
+					return c.Get(ctx, key, obj, opts...)
+				},
+			}).Build(),
+		Scheme: scheme,
+	}
+	if err := r.resumeBatchPoolsOnDelete(context.Background(), cb); err != nil {
+		t.Fatalf("pool recovery must not fail: %v", err)
+	}
+	if gets != 0 {
+		t.Errorf("pool recovery issued %d remediation Gets; it must use the paged List", gets)
+	}
+	if lists == 0 {
+		t.Error("pool recovery never listed remediations, so it resolved no pools")
+	}
+	for _, pool := range []string{"worker", "master", "infra"} {
+		got := machineConfigPool(pool)
+		if err := r.Get(context.Background(), types.NamespacedName{Name: pool}, got); err != nil {
+			t.Fatal(err)
+		}
+		if paused, _, _ := unstructured.NestedBool(got.Object, "spec", "paused"); paused {
+			t.Errorf("MachineConfigPool %q was discovered but never resumed", pool)
+		}
+	}
+}
+
 // A remediation named in the batch-apply annotation that no longer exists must
 // not block the finalizer. Race-deleted mid-batch is normal: the batch is
 // already done for that name and the remaining pools still need resuming.
@@ -247,17 +307,18 @@ func TestResumeBatchPoolsOnDeleteBlocksOnAPIFailure(t *testing.T) {
 		Client: fake.NewClientBuilder().WithScheme(scheme).
 			WithObjects(cb, rem).
 			WithInterceptorFuncs(interceptor.Funcs{
-				Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
-					if u, ok := obj.(*unstructured.Unstructured); ok && u.GroupVersionKind() == remediationGVK {
+				List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+					if u, ok := list.(*unstructured.UnstructuredList); ok &&
+						u.GroupVersionKind() == remediationGVK.GroupVersion().WithKind(remediationGVK.Kind+"List") {
 						return boom
 					}
-					return c.Get(ctx, key, obj, opts...)
+					return c.List(ctx, list, opts...)
 				},
 			}).Build(),
 		Scheme: scheme,
 	}
 	if err := r.resumeBatchPoolsOnDelete(context.Background(), cb); err == nil {
-		t.Fatal("a non-NotFound Get failure must block finalizer removal, not be swallowed")
+		t.Fatal("a non-NotFound remediation read failure must block finalizer removal, not be swallowed")
 	}
 }
 

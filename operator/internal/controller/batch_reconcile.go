@@ -495,17 +495,28 @@ func (r *ClusterBaselineReconciler) resumeBatchPoolsOnDelete(ctx context.Context
 		names, _ = splitValidRemediationNames(ctx, cb,
 			capBatchRemediations(ctx, cb, names, "batch-apply annotation"),
 			"skipping invalid remediation name while recovering batch pools")
+		// One paged List replaces a Get per name, matching the batch open and
+		// wait paths. This ran once per name (up to 256) inside the finalizer,
+		// and the finalizer blocks CR deletion, so those sequential live
+		// apiserver round trips were the whole deletion latency of a lost-status
+		// recovery. Paging stops as soon as every listed name is found.
+		rems, lerr := r.listRemediationsForBatch(ctx, names)
+		if lerr != nil && !errors.Is(lerr, errComplianceCRDsAbsent) {
+			// Transient read failure: fail deletion so the finalizer retries
+			// rather than dropping the pools it could not resolve.
+			return fmt.Errorf("listing remediations while recovering batch pools: %w", lerr)
+		}
 		for _, name := range names {
-			rem := u(remediationGVK)
-			if err := r.Get(ctx, types.NamespacedName{Namespace: complianceNamespace, Name: name}, rem); err != nil {
-				if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) {
-					// Info: pool rediscovery skipped this name; if batch-pools
-					// was also empty, on-call needs to know why no MCP resume ran.
-					log.FromContext(ctx).Info("remediation missing while recovering batch pools",
-						"remediation", name, "name", cb.Name, "notFound", apierrors.IsNotFound(err))
-					continue
-				}
-				return fmt.Errorf("getting remediation %q while recovering batch pools: %w", name, err)
+			rem, found := rems[name]
+			if !found {
+				// CRDs uninstalled mid-recovery makes every name unknowable;
+				// the pools recorded above (or empty) still resume. Same log
+				// line as a per-name NotFound, with notFound=false so on-call
+				// reads the cause as the missing CRD, not a vanished object.
+				log.FromContext(ctx).Info("remediation missing while recovering batch pools",
+					"remediation", name, "name", cb.Name,
+					"notFound", lerr == nil)
+				continue
 			}
 			// A crafted foreign remediation must not make this finalizer mutate its
 			// MachineConfigPool through the operator's service account.

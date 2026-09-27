@@ -98,6 +98,47 @@ const listFormatter = (locale?: string): Intl.ListFormat => {
 export const formatList = (items: readonly string[], locale?: string): string =>
   listFormatter(locale).format(items);
 
+// A count of 4 exposes all three separator roles ICU can emit (the literal
+// before the first item, between the middle items, and before the last), and a
+// count of 2 is the two-item "pair" form, which several locales spell
+// differently from the start/end pair ("a und b" vs "a, b, c und d"). Both
+// probes are constant-size, so the pattern is derived once per locale and the
+// per-call work drops from formatting `count` items to filling count - 1 slots.
+const listSeparatorsCache = new Map<string, { start: string; mid: string; end: string; pair: string } | null>;
+
+// The three separator roles plus the two-item pair form for one locale, or
+// null when the locale needs no separator at all (ja, zh). intlCached caps the
+// map by insertion order; the key is a validated tag, so entries cannot grow
+// without bound.
+const listSeparatorPattern = (
+  locale?: string,
+): { start: string; mid: string; end: string; pair: string } | null => {
+  const key = safeLocale(locale) ?? '';
+  return intlCached(listSeparatorsCache, key, () => {
+    const f = listFormatter(locale);
+    const literals = (n: number): string[] =>
+      f
+        .formatToParts(['0', '1', '2', '3'].slice(0, n))
+        .filter((p) => p.type === 'literal')
+        .map((p) => p.value);
+    const pairParts = literals(2);
+    // No literal between two items means the locale joins with nothing
+    // (ja, zh); every count returns the same empty list.
+    if (pairParts.length === 0) {
+      return null;
+    }
+    const four = literals(4);
+    return {
+      pair: pairParts[0],
+      start: four[0] ?? '',
+      // A locale with no distinct middle literal (en, sv) exposes two
+      // literals for four items; start and end are then the only roles.
+      mid: four.length >= 3 ? four[1] : '',
+      end: four.length > 0 ? four[four.length - 1] : '',
+    };
+  });
+};
+
 // Same punctuation as formatList, for lists whose items are React nodes (links
 // to each check) rather than plain strings. Returns the literals only, in
 // order, so a caller can interleave its own elements: item, literal[0], item,
@@ -105,14 +146,25 @@ export const formatList = (items: readonly string[], locale?: string): string =>
 // array and the items simply sit side by side. One fewer element than the item
 // count is guaranteed for count >= 2; the count-0 and count-1 cases return
 // nothing, since there is no pair to separate.
+
 export const listSeparators = (count: number, locale?: string): string[] => {
   if (count < 2) {
     return [];
   }
-  const parts = listFormatter(locale).formatToParts(
-    Array.from({ length: count }, (_, i) => String(i)),
-  );
-  return parts.filter((p) => p.type === 'literal').map((p) => p.value);
+  const pattern = listSeparatorPattern(locale);
+  if (!pattern) {
+    return [];
+  }
+  if (count === 2) {
+    return [pattern.pair];
+  }
+  const out: string[] = new Array(count - 1);
+  out[0] = pattern.start;
+  for (let i = 1; i < count - 2; i++) {
+    out[i] = pattern.mid;
+  }
+  out[count - 2] = pattern.end;
+  return out;
 };
 
 // Length in Unicode code points, the unit a CRD maxLength is expressed in: the
