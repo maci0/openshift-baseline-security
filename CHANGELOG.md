@@ -233,6 +233,23 @@ depend on those tags.
 
 ### Fixed
 
+- Release workflow: the `version` input of a manual `workflow_dispatch` run was
+  never read, so the cut published whatever the dispatched ref resolved to and a
+  mistyped version was accepted silently. The input is now passed to
+  `resolve-release-version.sh`, which already prefers it over the ref name.
+- Release workflow: the console plugin image was published from the tagged
+  commit without running that commit's plugin tests (the operator half was
+  gated). `yarn typecheck` and `yarn test` now run, on the Node version
+  `.nvmrc` pins, before any image is pushed. Each image is also checked by
+  `hack/verify-image-metadata.sh` between build and push, as CI already did:
+  a published tag is immutable, so a root `USER` or a missing version label
+  has to fail the release rather than reach a consumer.
+- CI image smoke check: the per-matrix checks ran without `set -e`, so a failing
+  check was masked by the next command in the same branch (a missing plugin
+  manifest still passed when the license check after it succeeded). The step
+  now fails on the first failure, and the matrix values come from the
+  environment as the metadata step above already did, rather than being
+  interpolated into the script body.
 - Console plugin: a score-history time or waiver name containing the character
   the content key used as its separator made two different sets produce the same
   key. The score trend and the waiver expiry clock then skipped their recompute

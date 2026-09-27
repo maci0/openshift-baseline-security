@@ -304,28 +304,32 @@ jobs:
       # Cheap post-build smoke: entrypoint/binary or labeled bundle package exists.
       # Hardened run: no network, read-only rootfs, drop caps (local image only).
       - name: smoke ${{ matrix.name }}
+        env:
+          IMAGE_NAME: ${{ matrix.tag }}
+          IMAGE_KIND: ${{ matrix.name }}
         run: |
+          set -euo pipefail
           run_hardened() {
             docker run --rm --network=none --read-only --tmpfs /tmp \
               --cap-drop ALL --security-opt no-new-privileges:true "$@"
           }
-          case "${{ matrix.name }}" in
+          case "$IMAGE_KIND" in
             operator)
-              run_hardened --entrypoint /usr/bin/manager "${{ matrix.tag }}" -h >/dev/null
+              run_hardened --entrypoint /usr/bin/manager "$IMAGE_NAME" -h >/dev/null
               ;;
             console-plugin)
               # Manifest is the console's load contract; non-empty rejects a blank COPY.
               # No TLS certs in the image, so only filesystem checks (not nginx -t).
-              run_hardened --entrypoint test "${{ matrix.tag }}" -s /opt/app-root/src/plugin-manifest.json
-              run_hardened --entrypoint test "${{ matrix.tag }}" -s /licenses/LICENSE
+              run_hardened --entrypoint test "$IMAGE_NAME" -s /opt/app-root/src/plugin-manifest.json
+              run_hardened --entrypoint test "$IMAGE_NAME" -s /licenses/LICENSE
               ;;
             bundle)
               # FROM scratch: no shell; package label is the OLM identity.
-              pkg=$(docker image inspect -f '{{index .Config.Labels "operators.operatorframework.io.bundle.package.v1"}}' "${{ matrix.tag }}")
+              pkg=$(docker image inspect -f '{{index .Config.Labels "operators.operatorframework.io.bundle.package.v1"}}' "$IMAGE_NAME")
               test "$pkg" = "baseline-security-operator"
               ;;
             *)
-              echo "unknown matrix name ${{ matrix.name }}" >&2
+              echo "unknown matrix name $IMAGE_KIND" >&2
               exit 1
               ;;
           esac

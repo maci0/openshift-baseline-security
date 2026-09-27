@@ -57,11 +57,14 @@ Cutting a release:
 4. `RELEASE_GATE=1 make verify-versions`, which fails if `[Unreleased]` still has
    entries.
 5. Tag `vX.Y.Z`. `REQUIRE_GIT_TAGS=1` adds the tag's existence to the check.
-   The release workflow runs both gates and the tagged commit's own `make test`
-   before pushing images, and refuses to publish a version from a commit other
-   than `vX.Y.Z`. Version resolution lives in
+   The release workflow runs both gates and the tagged commit's own
+   `make -C operator test` plus the console plugin's `yarn typecheck` and
+   `yarn test` before pushing images, and refuses to publish a version from a
+   commit other than `vX.Y.Z`. Version resolution lives in
    `operator/hack/resolve-release-version.sh`; the publish and SBOM jobs both
-   call it so they cannot disagree about what is being released.
+   call it so they cannot disagree about what is being released. Its
+   `INPUT_VERSION` env is the `workflow_dispatch` `version` input, so a manual
+   cut is the version that ships, not the ref it was dispatched from.
 
 Published image, tag, and CSV version strings are immutable: never re-push,
 re-tag, or force-move one. OLM unpack caches serve stale content on a same-tag
