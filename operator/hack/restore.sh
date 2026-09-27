@@ -50,7 +50,8 @@ has them, without waiting on a full control-plane restore.
 
 Options:
   -f, --force   restore even when the live object has moved on since the
-                backup was taken, or when the artifact was taken at an
+                backup was taken, is a different object from the one the
+                backup was taken from, or the artifact was taken at an
                 apiVersion this cluster's CRD does not serve. The writes then
                 carry no resourceVersion precondition, so a repeated run
                 converges on the same object instead of failing on a conflict
@@ -211,7 +212,7 @@ fi
 # object has a higher one, the waiver edits and batch progress made since are
 # not in the artifact and apply would discard them silently. There is no
 # soft-delete window behind that, so it takes --force.
-BACKUP_RESOURCE_VERSION="$(sed -n 's/^resourceVersion=//p' "$MANIFEST" | head -1)"
+#
 # An absent object and a failed read are different states, and only the first
 # one makes the guard below unnecessary. A plain `oc get` that fails (token
 # expired mid-incident, apiserver blip) leaves the output empty, which read as
@@ -219,6 +220,19 @@ BACKUP_RESOURCE_VERSION="$(sed -n 's/^resourceVersion=//p' "$MANIFEST" | head -1
 # moved-on object with no --force and no message, losing every waiver edit made
 # since. --ignore-not-found separates the two, by exiting 0 with empty output
 # on NotFound and nonzero on every real failure.
+#
+# The uid answers a question the resourceVersion cannot. resourceVersion counts
+# writes within one object's lifetime, so it says nothing about *which* object
+# is live: a ClusterBaseline that was deleted and recreated under the same
+# name, a restore onto a different cluster, or an etcd snapshot taken from a
+# point where the object did not exist yet all produce a live object the
+# resourceVersion guard reads as merely older, and the refusal then names a
+# rollback that is not what happened. Where the two coincide it is worse than a
+# wrong message: the guard passes and the restore overwrites an unrelated
+# object's waivers, which is exactly the state nothing else records. The uid
+# is minted per object and never reused, so a difference is proof.
+BACKUP_UID="$(sed -n 's/^uid=//p' "$MANIFEST" | head -1)"
+BACKUP_RESOURCE_VERSION="$(sed -n 's/^resourceVersion=//p' "$MANIFEST" | head -1)"
 LIVE_RESOURCE_VERSION=""
 if ! LIVE_RESOURCE_VERSION="$(oc get clusterbaseline cluster --ignore-not-found \
   -o jsonpath='{.metadata.resourceVersion}')"; then
@@ -228,6 +242,38 @@ if ! LIVE_RESOURCE_VERSION="$(oc get clusterbaseline cluster --ignore-not-found 
   echo "restore.sh: moved on, discarding the waiver and batch edits made since, with" >&2
   echo "restore.sh: no --force and no warning. Fix the API access and re-run." >&2
   exit 1
+fi
+if [[ -n "$BACKUP_UID" ]]; then
+  LIVE_UID=""
+  if ! LIVE_UID="$(oc get clusterbaseline cluster --ignore-not-found \
+    -o jsonpath='{.metadata.uid}')"; then
+    echo "restore.sh: cannot read the live ClusterBaseline/cluster uid; nothing was" >&2
+    echo "restore.sh: changed. Without it there is no way to tell that the live" >&2
+    echo "restore.sh: object is the one this backup was taken from, so there is" >&2
+    echo "restore.sh: nothing to compare and no safe restore. Fix the API access and" >&2
+    echo "restore.sh: re-run." >&2
+    exit 1
+  fi
+  if [[ -n "$LIVE_UID" && "$LIVE_UID" != "$BACKUP_UID" ]]; then
+    if [[ "$FORCE" == true ]]; then
+      echo "restore.sh: note: --force; the live ClusterBaseline/cluster is a" >&2
+      echo "restore.sh: different object (uid ${LIVE_UID}) from the one this backup" >&2
+      echo "restore.sh: was taken from (uid ${BACKUP_UID})." >&2
+    else
+      echo "restore.sh: the live ClusterBaseline/cluster is a different object from" >&2
+      echo "restore.sh: the one this backup was taken from:" >&2
+      echo "restore.sh:   live   uid $LIVE_UID" >&2
+      echo "restore.sh:   backup uid $BACKUP_UID" >&2
+      echo "restore.sh: Nothing was changed. The CR was deleted and recreated, this" >&2
+      echo "restore.sh: backup came from another cluster, or the etcd snapshot the live" >&2
+      echo "restore.sh: object came from predates it. A resourceVersion comparison" >&2
+      echo "restore.sh: cannot tell those apart, which is why this check ran first." >&2
+      echo "restore.sh: Confirm the live object holds nothing this backup does not," >&2
+      echo "restore.sh: then restore anyway:" >&2
+      echo "restore.sh:   hack/restore.sh --force $DIR" >&2
+      exit 1
+    fi
+  fi
 fi
 
 # A second run of a restore that already landed has to reach the same state as

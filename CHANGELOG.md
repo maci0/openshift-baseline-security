@@ -43,6 +43,35 @@ depend on those tags.
 
 ## [Unreleased]
 
+### Fixed
+
+- A `MachineConfigPool` whose `spec.paused` is not a bool was read as "not
+  paused" instead of as a failed read. A pool named in the
+  `batch-pools` annotation is re-admitted to a re-opened batch only when it
+  carries that batch's own pause marker, and a malformed field answered that
+  question wrongly, so the pool dropped out of the pause set, the batch status,
+  and every resume path, and was left paused with no path back. The batch start
+  now fails and Degrades instead, which retries.
+
+- `hack/restore.sh` could not tell a live `ClusterBaseline` from the one its
+  backup was taken from. Its only guard was a `resourceVersion` comparison,
+  and a `resourceVersion` counts writes within one object's lifetime, so a CR
+  deleted and recreated under the same name, a backup carried over from
+  another cluster, or an etcd snapshot predating the object all read as "merely
+  older". Where the versions happened to match, the restore went through and
+  overwrote an unrelated object's waivers, which nothing else records. The
+  `uid` `hack/backup.sh` has always recorded is now compared, and a difference
+  is refused before any write, naming both uids and the three causes; a `uid`
+  that cannot be read stops the restore rather than counting as absent, and
+  `--force` does not cover it.
+
+- `hack/backup.sh` recorded a `resourceVersion` and `uid` of `unknown` when its
+  capture did not match the shape it reads them from, and
+  `hack/verify-backup.sh` passed such a MANIFEST. Both guards above are keyed
+  on those two fields, so a MANIFEST without them restores with the guards
+  silently off. `backup.sh` now refuses to write one, and `verify-backup.sh`
+  fails a directory whose MANIFEST is missing either.
+
 ### Security
 
 - `hack/must-gather.sh` no longer dumps a Secret into a support archive. It

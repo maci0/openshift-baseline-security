@@ -29,6 +29,9 @@ import (
 // batch-pools annotation and have the operator SA pause it.
 // NotFound / NoMatch read as "not ours": the pause cannot be re-asserted, and
 // setMCPPaused skips the same pool moments later rather than failing the batch.
+// A spec.paused that is not a bool is a read failure, not an answer: reporting
+// "not ours" there drops a pre-crash pause from the union its only caller
+// builds, which leaves the pool paused forever.
 func (r *ClusterBaselineReconciler) poolPausedBy(ctx context.Context, pool, owner string) (bool, error) {
 	if validK8sName(pool) == "" || owner == "" {
 		return false, nil
@@ -41,11 +44,11 @@ func (r *ClusterBaselineReconciler) poolPausedBy(ctx context.Context, pool, owne
 		return false, err
 	}
 	paused, _, err := unstructured.NestedBool(mcp.Object, "spec", "paused")
-	if err != nil || !paused {
-		// A spec.paused of the wrong type cannot be read as paused; treat it
-		// like false so the batch re-asserts the pause rather than assuming a
-		// pause it cannot confirm.
-		return false, nil //nolint:nilerr // wrong-typed spec.paused reads as not paused
+	if err != nil {
+		return false, err
+	}
+	if !paused {
+		return false, nil
 	}
 	return mcp.GetAnnotations()[batchPauseOwnerAnnotation] == owner, nil
 }

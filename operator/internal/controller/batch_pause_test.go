@@ -62,6 +62,32 @@ func TestSetMCPPausedSkipsInvalidPoolName(t *testing.T) {
 	}
 }
 
+// A pool whose spec.paused is not a bool is a read failure, not an answer.
+// poolPausedBy feeds the union of pools a prior batch paused before it crashed,
+// and reading that as "not ours" drops the pool from the pause set, the batch
+// status, and every resume path, leaving it paused forever. The error stops
+// the batch start instead, which is sticky-Degraded and retryable.
+func TestPoolPausedByFailsOnAMalformedPausedField(t *testing.T) {
+	scheme := testScheme(t)
+	cb := newBatchCB()
+	pool := machineConfigPool("worker")
+	_ = unstructured.SetNestedField(pool.Object, "yes", "spec", "paused")
+	pool.SetAnnotations(map[string]string{batchPauseOwnerAnnotation: batchPauseOwner(cb)})
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).
+			WithObjects(cb, pool).Build(),
+		Scheme: scheme,
+	}
+
+	ours, err := r.poolPausedBy(context.Background(), "worker", batchPauseOwner(cb))
+	if err == nil {
+		t.Fatalf("a spec.paused that is not a bool read as ours=%v; the pause state is unknown", ours)
+	}
+	if ours {
+		t.Error("a malformed spec.paused must not report the pool as this batch's")
+	}
+}
+
 // A missing pool, or an absent MCP CRD, must not wedge the batch: Compliance
 // Operator installs mid-life and a stale pool name outlives the pool object.
 func TestSetMCPPausedMissingPoolSkips(t *testing.T) {

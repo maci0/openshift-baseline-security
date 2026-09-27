@@ -1527,7 +1527,15 @@ the `backup.sh` / `restore.sh` round trip, the status-subresource replace
 refusal of an empty, wrong-kind, truncated, edited, or unmanifested artifact
 before any cluster write, the refusal of a multi-document artifact even when
 its checksum is valid, the refusal to roll a live object back past its own
-resourceVersion without `--force`, the refusal when the live object cannot be
+resourceVersion without `--force`, the refusal to restore over a live
+`ClusterBaseline` whose uid is not the one the backup was taken from (a
+resourceVersion counts writes within one object's lifetime, so a CR deleted
+and recreated under the same name passes the rollback guard and loses its
+waivers), the refusal when the live object's uid cannot be read at all, the
+refusal of a `backup.sh` capture that carries no resourceVersion or uid (the
+guards above are keyed on them, so a MANIFEST without them restores with those
+guards silently off) and of a directory `verify-backup.sh` passes on the same
+grounds, the refusal when the live object cannot be
 read at all (an unreadable object is not an absent one, and `--force` does not
 override it), a repeated `--force` restore converging on the state the first
 one reached (both writes go out without the captured `resourceVersion`, which
@@ -1564,6 +1572,9 @@ below still need a live cluster.
 - [ ] **Restore an older backup over a live object**: the refusal names both
       resourceVersions and writes nothing; `--force` restores and the waiver
       list matches the artifact, not the live object.
+- [ ] **Restore a backup over a recreated CR**: delete the CR, let the operator
+      and OLM recreate it, restore the backup; the refusal names both uids and
+      writes nothing; `--force` restores the artifact's waiver list.
 
 ## AR. Negative-space testing ("prove it does not…")
 

@@ -104,11 +104,35 @@ if ! grep -q '^apiVersion: baselinesecurity.openshift.io/' "$TMP" ||
 fi
 
 # resourceVersion and uid are the recovery operator's tie-breakers: a restore
-# onto a different cluster instance, or one whose CR has since moved on, shows
-# up here rather than as a silently-stale apply. kubectl quotes these scalars,
-# so the quotes are stripped to keep the MANIFEST greppable.
+# onto a different cluster instance, onto a ClusterBaseline that was deleted
+# and recreated under the same name, or onto one whose CR has since moved on,
+# each shows up here rather than as a silently-stale apply. Both are required,
+# because restore.sh's guards are keyed on them and a guard with no key is no
+# guard at all. kubectl quotes these scalars, so the quotes are stripped to
+# keep the MANIFEST greppable.
 RESOURCE_VERSION="$(sed -n 's/^  resourceVersion: *"\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' "$TMP" | head -1)"
 UID_VALUE="$(sed -n 's/^  uid: *"\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' "$TMP" | head -1)"
+
+# Both are what restore.sh's guards are keyed on: without a resourceVersion it
+# cannot tell a rollback from a no-op, and without a uid it cannot tell the
+# object this backup came from from an unrelated one that took its place. A
+# capture whose shape this sed no longer matches would otherwise be written out
+# and look like a good backup, and the guards would go silently quiet for every
+# later restore. Refuse here, where the capture is still in hand.
+if [[ -z "$RESOURCE_VERSION" || -z "$UID_VALUE" ]]; then
+  if [[ -z "$RESOURCE_VERSION" && -z "$UID_VALUE" ]]; then
+    echo "backup.sh: captured object carries neither a resourceVersion nor a uid." >&2
+  elif [[ -z "$RESOURCE_VERSION" ]]; then
+    echo "backup.sh: captured object carries no resourceVersion." >&2
+  else
+    echo "backup.sh: captured object carries no uid." >&2
+  fi
+  echo "backup.sh: restore.sh refuses a MANIFEST without them, because a backup" >&2
+  echo "backup.sh: that cannot name the object it came from cannot be guarded" >&2
+  echo "backup.sh: against restoring over a different one. Not writing a MANIFEST." >&2
+  exit 1
+fi
+
 DIGEST="$(sha256_file "$TMP")"
 
 {
@@ -124,6 +148,6 @@ trap - EXIT
 
 chmod 600 -- "$OUT/clusterbaseline.yaml" "$OUT/MANIFEST"
 
-echo "backup.sh: wrote $OUT (resourceVersion=${RESOURCE_VERSION:-unknown}, sha256=${DIGEST})"
+echo "backup.sh: wrote $OUT (resourceVersion=$RESOURCE_VERSION, uid=$UID_VALUE, sha256=$DIGEST)"
 echo "backup.sh: copy this directory off-cluster now; it restores only via:"
 echo "backup.sh:   hack/restore.sh $OUT"

@@ -34,9 +34,10 @@ usage() {
 Usage: verify-backup.sh [--max-age-days N] [backup-dir]
 
 Check that backup-dir is a complete, checksummed, recent backup that
-restore.sh can apply: the artifact is present, non-empty, the right kind, and
-matches the sha256 in MANIFEST. Needs no cluster and writes nothing, so it
-also runs against a copy pulled back from remote storage.
+restore.sh can apply: the artifact is present, non-empty, the right kind,
+matches the sha256 in MANIFEST, and the MANIFEST names the object it came
+from (resourceVersion and uid) and when. Needs no cluster and writes
+nothing, so it also runs against a copy pulled back from remote storage.
 
 Exit status is the signal: 0 restorable, 1 not restorable, 2 bad invocation.
 Alert on it from whatever schedules the backup.
@@ -112,6 +113,17 @@ if ! sha256_init; then
 fi
 ACTUAL="$(sha256_file "$ARTIFACT")"
 [[ "$ACTUAL" == "$EXPECTED" ]] || fail "checksum mismatch; the artifact was modified or truncated (expected $EXPECTED, actual $ACTUAL)"
+
+# The resourceVersion and uid are what restore.sh's guards are keyed on: the
+# first says whether the live object has moved on since the capture, the second
+# whether it is even the same object. A MANIFEST missing one passes every check
+# above and then restores with that guard switched off, so this is a failed
+# check, not a passed one.
+for TIE_BREAKER in resourceVersion uid; do
+  VALUE="$(sed -n "s/^${TIE_BREAKER}=//p" "$MANIFEST" | head -1)"
+  [[ -n "$VALUE" ]] ||
+    fail "MANIFEST has no $TIE_BREAKER; restore.sh cannot tell what it is restoring over"
+done
 
 # The age is half of what this script checks, so a MANIFEST whose takenAt
 # cannot be read is a failed check, not a passed one: "not old enough to

@@ -52,6 +52,10 @@ func resealManifest(t *testing.T, artifactPath string) {
 	}
 }
 
+// baselineUID is the uid of the captured object, named so the identity guard's
+// tests and the MANIFEST fixtures cannot drift apart.
+const baselineUID = "6f0b1c2a-7d3e-4a55-9b21-0c8e5f1d4a90"
+
 // baselineYAML is a captured ClusterBaseline/cluster: the user-owned spec
 // (waivers with their audit attribution, schedule, scoring mode) and the
 // derived status the Compliance Operator rollup produces (score, conditions,
@@ -182,12 +186,15 @@ status:
 // returns captured, or FAKE_OC_LIVE_YAML when set (a live object that has
 // moved on since the capture, which captured alone can never express); a get
 // that asks for a jsonpath field returns
-// FAKE_OC_RESOURCE_VERSION (empty by default, which reads as "no live object",
-// the case a restore onto a recovered cluster is in),
-// FAKE_OC_GET_FAIL (makes that jsonpath get fail, the way an expired token or
-// an apiserver blip does), and FAKE_OC_CRD_VERSIONS (the versions the CRD
-// serves, one per line, empty when the CRD cannot be read) stand in for the
-// two reads a restore makes. Every other subcommand is appended to the call
+// FAKE_OC_RESOURCE_VERSION and FAKE_OC_UID (both empty by default, which
+// reads as "no live object", the case a restore onto a recovered cluster is
+// in),
+// FAKE_OC_GET_FAIL (makes every jsonpath get fail, the way an expired token or
+// an apiserver blip does), FAKE_OC_UID_FAIL (makes only the uid get fail, so
+// the read of the live object succeeds and the uid read does not), and
+// FAKE_OC_CRD_VERSIONS (the versions the CRD serves, one per line, empty
+// when the CRD cannot be read) stand in for
+// the reads a restore makes. Every other subcommand is appended to the call
 // log. The stub must tolerate the --request-timeout flag both scripts pass on
 // every call, so it drops leading global flags before dispatching.
 func fakeOC(t *testing.T, dir, captured string) (logfile string) {
@@ -206,7 +213,11 @@ func fakeOC(t *testing.T, dir, captured string) (logfile string) {
 		"    for a in \"$@\"; do\n" +
 		"      case \"$a\" in\n" +
 		"        *spec.versions*) printf '%s' \"${FAKE_OC_CRD_VERSIONS:-v1alpha1}\"; exit 0 ;;\n" +
-		"        jsonpath=*) if [ -n \"${FAKE_OC_GET_FAIL:-}\" ]; then echo 'Forbidden: token expired' >&2; exit 1; fi; printf '%s' \"${FAKE_OC_RESOURCE_VERSION:-}\"; exit 0 ;;\n" +
+		"        jsonpath=*) if [ -n \"${FAKE_OC_GET_FAIL:-}\" ]; then echo 'Forbidden: token expired' >&2; exit 1; fi\n" +
+		"          case \"$a\" in\n" +
+		"            *metadata.uid*) if [ -n \"${FAKE_OC_UID_FAIL:-}\" ]; then echo 'Forbidden: token expired' >&2; exit 1; fi; printf '%s' \"${FAKE_OC_UID:-}\"; exit 0 ;;\n" +
+		"            *) printf '%s' \"${FAKE_OC_RESOURCE_VERSION:-}\"; exit 0 ;;\n" +
+		"          esac ;;\n" +
 		"      esac\n" +
 		"    done\n" +
 		"    if [ -n \"${FAKE_OC_LIVE_YAML:-}\" ]; then printf '%s\\n' \"$FAKE_OC_LIVE_YAML\"; exit 0 ; fi\n" +
@@ -314,8 +325,10 @@ func TestBackupRestoreRoundTripPreservesDurableState(t *testing.T) {
 	bin := t.TempDir()
 	log := fakeOC(t, bin, baselineYAML)
 	// The live object is exactly what the backup holds, so the staleness guard
-	// sees matching resourceVersions and lets the restore through.
+	// sees matching resourceVersions and the identity guard a matching uid, and
+	// the restore goes through.
 	t.Setenv("FAKE_OC_RESOURCE_VERSION", "41237")
+	t.Setenv("FAKE_OC_UID", baselineUID)
 	work := t.TempDir()
 
 	if _, stderr, code := runScript(t, "backup.sh", work, "bdir"); code != 0 {
@@ -608,7 +621,7 @@ func backupDir(t *testing.T, work, name, takenAt string) string {
 	}
 	// sha256Hex, not a `sha256sum` subprocess: coreutils is GNU and macOS
 	// ships none, so a shelling-out helper fails the suite on a supported host.
-	manifest := "takenAt=" + takenAt + "\nresourceVersion=41237\nuid=6f0b1c2a\nsha256=" + sha256Hex(t, path) + "\n"
+	manifest := "takenAt=" + takenAt + "\nresourceVersion=41237\nuid=" + baselineUID + "\nsha256=" + sha256Hex(t, path) + "\n"
 	if err := os.WriteFile(filepath.Join(dir, "MANIFEST"), []byte(manifest), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -715,6 +728,113 @@ func TestRestoreConvergesOnRerunWithoutForce(t *testing.T) {
 	}
 	if string(artifact) != baselineYAML {
 		t.Errorf("the restore modified the backup artifact:\n%s", artifact)
+	}
+}
+
+// A resourceVersion counts writes within one object's lifetime, so it cannot
+// tell two objects apart. A ClusterBaseline that was deleted and recreated
+// under the same name, a restore onto a different cluster, or an etcd snapshot
+// taken from a point before the object existed all put a live object in front
+// of a backup whose resourceVersion happens to match, and the rollback guard
+// read that as "nothing has moved on" and restored over it. The waivers on
+// that unrelated object are the state nothing else records, so the restore
+// destroys them with no --force and no message.
+//
+// Here the live object is at exactly the backup's resourceVersion, which is the
+// only way past the resourceVersion guard: the uid is the whole check.
+func TestRestoreRefusesADifferentObject(t *testing.T) {
+	bin := t.TempDir()
+	log := fakeOC(t, bin, baselineYAML)
+	// The CR was deleted and recreated. The new object happens to be at the
+	// same write count as the captured one.
+	t.Setenv("FAKE_OC_RESOURCE_VERSION", "41237")
+	t.Setenv("FAKE_OC_UID", "b19e77aa-0000-4000-8000-000000000001")
+	work := t.TempDir()
+	dir := backupDir(t, work, "bdir", "2026-09-20T03:00:00Z")
+
+	_, stderr, code := runScript(t, "restore.sh", work, dir)
+	if code == 0 {
+		t.Fatal("restore overwrote a live ClusterBaseline that is a different object from the one the backup was taken from")
+	}
+	if !strings.Contains(stderr, "b19e77aa-0000-4000-8000-000000000001") ||
+		!strings.Contains(stderr, baselineUID) {
+		t.Errorf("stderr %q, want both uids named", stderr)
+	}
+	if !strings.Contains(stderr, "--force") {
+		t.Errorf("stderr %q, want the override named", stderr)
+	}
+	if calls := ocCalls(t, log); strings.Contains(calls, "apply -f") {
+		t.Errorf("the refused restore still wrote to the cluster:\n%s", calls)
+	}
+
+	// Once the operator has confirmed the live object holds nothing this
+	// backup does not, --force is how they say so.
+	if _, stderr, code := runScript(t, "restore.sh", work, "--force", dir); code != 0 {
+		t.Fatalf("restore.sh --force: exit %d, want 0; stderr=%s", code, stderr)
+	}
+	calls := ocCalls(t, log)
+	if !strings.Contains(calls, "apply -f") || !strings.Contains(calls, "replace --subresource=status -f") {
+		t.Errorf("--force did not complete the restore; oc calls:\n%s", calls)
+	}
+}
+
+// The uid is the check that survives an object swap, so a read that fails is
+// not an absent uid either. Skipping the comparison on a failed read restores
+// with the guard silently off, which is the failure this guard exists to stop.
+func TestRestoreRefusesWhenLiveUIDCannotBeRead(t *testing.T) {
+	bin := t.TempDir()
+	log := fakeOC(t, bin, baselineYAML)
+	t.Setenv("FAKE_OC_RESOURCE_VERSION", "41237")
+	t.Setenv("FAKE_OC_UID_FAIL", "1")
+	work := t.TempDir()
+	dir := backupDir(t, work, "bdir", "2026-09-20T03:00:00Z")
+
+	_, stderr, code := runScript(t, "restore.sh", work, dir)
+	if code == 0 {
+		t.Fatal("restore proceeded after failing to read the live object's uid")
+	}
+	if !strings.Contains(stderr, "uid") {
+		t.Errorf("stderr %q, want it to name the uid read that failed", stderr)
+	}
+	if calls := ocCalls(t, log); strings.Contains(calls, "apply -f") {
+		t.Errorf("the refused restore still wrote to the cluster:\n%s", calls)
+	}
+	// --force does not cover it: there is nothing to compare against, and a
+	// clobber of an unknown object is not what an operator is agreeing to.
+	if _, _, code := runScript(t, "restore.sh", work, "--force", dir); code == 0 {
+		t.Error("restore.sh --force overrode a failed uid read")
+	}
+}
+
+func TestBackupRefusesACaptureWithNoRecoveryTieBreakers(t *testing.T) {
+	// An object whose metadata the capture did not read leaves the MANIFEST
+	// without the resourceVersion and uid that restore.sh's guards are keyed
+	// on. The artifact would still restore, so nothing downstream would notice
+	// the guards were off until the restore destroyed a live object's waivers.
+	for _, tc := range []struct {
+		name string
+		drop string
+		want string
+	}{
+		{"no resourceVersion", "  resourceVersion: \"41237\"\n", "no resourceVersion"},
+		{"no uid", "  uid: 6f0b1c2a-7d3e-4a55-9b21-0c8e5f1d4a90\n", "no uid"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			bin := t.TempDir()
+			fakeOC(t, bin, strings.Replace(baselineYAML, tc.drop, "", 1))
+			work := t.TempDir()
+
+			_, stderr, code := runScript(t, "backup.sh", work, "bdir")
+			if code == 0 {
+				t.Fatal("backup.sh wrote a MANIFEST that cannot guard the restore it exists for")
+			}
+			if !strings.Contains(stderr, tc.want) {
+				t.Errorf("stderr %q, want it to name %q", stderr, tc.want)
+			}
+			if _, err := os.Stat(filepath.Join(work, "bdir", "MANIFEST")); err == nil {
+				t.Error("the failed backup left a MANIFEST behind")
+			}
+		})
 	}
 }
 
@@ -1101,6 +1221,51 @@ func TestVerifyBackup(t *testing.T) {
 				return backupDir(t, work, "bdir", now.AddDate(1, 0, 0).Format(time.RFC3339))
 			},
 			want: "in the future",
+		},
+		{
+			// A MANIFEST missing a tie-breaker passes every other check and
+			// then restores with that guard switched off, so the verifier that
+			// a schedule alerts on has to refuse it.
+			name: "manifest records no uid",
+			mutate: func(t *testing.T, work string) string {
+				dir := backupDir(t, work, "bdir", now.Format(time.RFC3339))
+				manifest, err := os.ReadFile(filepath.Join(dir, "MANIFEST"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				kept := []string{}
+				for _, line := range strings.Split(string(manifest), "\n") {
+					if !strings.HasPrefix(line, "uid=") {
+						kept = append(kept, line)
+					}
+				}
+				if err := os.WriteFile(filepath.Join(dir, "MANIFEST"), []byte(strings.Join(kept, "\n")), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				return dir
+			},
+			want: "no uid",
+		},
+		{
+			name: "manifest records no resourceVersion",
+			mutate: func(t *testing.T, work string) string {
+				dir := backupDir(t, work, "bdir", now.Format(time.RFC3339))
+				manifest, err := os.ReadFile(filepath.Join(dir, "MANIFEST"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				kept := []string{}
+				for _, line := range strings.Split(string(manifest), "\n") {
+					if !strings.HasPrefix(line, "resourceVersion=") {
+						kept = append(kept, line)
+					}
+				}
+				if err := os.WriteFile(filepath.Join(dir, "MANIFEST"), []byte(strings.Join(kept, "\n")), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				return dir
+			},
+			want: "no resourceVersion",
 		},
 		{
 			// An unreadable stamp is not a young backup. Passing here would

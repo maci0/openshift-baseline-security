@@ -36,8 +36,8 @@ Stated, so they are decisions rather than surprises:
   day of waiver edits, and the score history is gone for the scans since the
   last capture (it is recomputed forward from the next scan, not backfilled).
 - **RTO: under two minutes** for a `restore.sh` run against a reachable
-  apiserver. It is a few API reads (`whoami`, the live `resourceVersion`, the
-  CRD's served versions) plus one SHA-256 digest (`sha256sum`, or
+  apiserver. It is a few API reads (`whoami`, the live `resourceVersion` and
+  `uid`, the CRD's served versions) plus one SHA-256 digest (`sha256sum`, or
   `shasum`/`openssl` where coreutils is absent, as on macOS) and the two
   writes. A full etcd restore is OpenShift's, not this project's, and is
   orders of magnitude slower.
@@ -80,9 +80,9 @@ cd operator
 
 No cluster needed and nothing is written, so it also runs against a copy
 pulled back from remote storage, which is the only place a scheduled backup
-can be proven rather than assumed. It checks the same kind, non-empty, and
-sha256 conditions `restore.sh` does, plus the age, and exits non-zero on any
-of them. `--max-age-days N` sets the age limit (default 7, the same threshold
+can be proven rather than assumed. It checks the same kind, non-empty,
+`resourceVersion`, `uid`, and sha256 conditions `restore.sh` does, plus the
+age, and exits non-zero on any of them. `--max-age-days N` sets the age limit (default 7, the same threshold
 `restore.sh` warns at). Alert on its exit status from whatever runs the
 schedule; a backup nobody re-reads is a hypothesis.
 
@@ -115,12 +115,33 @@ anyone who can edit the artifact can recompute it. `backup.sh` captures a
 single named object and never emits a `---` separator, so a real backup always
 passes.
 
-Then it reads the live object's `resourceVersion`. The MANIFEST records the one
-the backup was taken at, and a restore that has fallen behind is a rollback:
-it discards every waiver edit and batch annotation made since, and there is no
-soft-delete window behind that. The script refuses, naming both versions, and
-takes `--force` to proceed anyway. On a cluster where the CR is gone, there is
-nothing to compare against and the restore goes ahead.
+Then it reads the live object's `resourceVersion` and `uid`. The MANIFEST
+records the ones the backup was taken at. A restore that has fallen behind is
+a rollback: it discards every waiver edit and batch annotation made since, and
+there is no soft-delete window behind that. The script refuses, naming both
+versions, and takes `--force` to proceed anyway. On a cluster where the CR is
+gone, there is nothing to compare against and the restore goes ahead.
+
+The `uid` answers a question the `resourceVersion` cannot. A `resourceVersion`
+counts writes within one object's lifetime, so it says nothing about *which*
+object is live. A `ClusterBaseline` that was deleted and recreated under the
+same name, a backup carried over from another cluster, and an etcd snapshot
+taken from a point before the object existed all put a live object in front of
+a backup, and the `resourceVersion` comparison reads each of them as "merely
+older" and names a rollback that is not what happened. Where the two coincide
+it is worse than a wrong message: the guard passes and the restore overwrites
+an unrelated object's waivers, which is exactly the state nothing else records.
+A `uid` is minted per object and never reused, so a difference is proof, and
+the script refuses on one, naming both uids and the three causes. That read
+failing is not an absent `uid` either, so it stops with nothing changed, the
+same way a failed `resourceVersion` read does, and `--force` does not cover it:
+there is nothing to compare against.
+
+Because those two fields are what the guards are keyed on, `backup.sh` refuses
+to write a MANIFEST without them, and `verify-backup.sh` refuses a directory
+whose MANIFEST is missing either. A capture whose shape the `sed` no longer
+matches would otherwise be recorded as a good backup, and every later restore
+would run with the guards quietly off.
 
 A `resourceVersion` the restore moved itself is not a moved-on object, so the
 script also compares the live object's `spec` against the artifact's. The
@@ -133,7 +154,7 @@ write and offer to protect waiver edits that run had just put there. A spec
 that differs in any way is an edit, and the version guard applies unchanged.
 
 An absent object and an unreadable one are different states, and only the first
-makes that comparison unnecessary. A read that fails (an expired token
+makes those guards unnecessary. A read that fails (an expired token
 mid-incident, an apiserver blip) is not an absent object, so the script stops
 with nothing changed rather than reading the empty result as "no live object"
 and restoring over an object that had moved on. `--force` does not cover it:
@@ -197,7 +218,13 @@ Watch it converge with
 4. **Both the CR and the namespace are gone**: run `restore.sh`. Do not fight
    the terminating namespace first; `apply` will fail against it, and deleting
    the CR first is what a namespace delete wants anyway.
-5. **The CR was deleted on purpose**: nothing restores it. Deleting
+5. **The CR was deleted, and something recreated it** (an install, a
+   `kubectl apply` of a manifest, an etcd snapshot older than the delete): the
+   live object is a different object under the same name, so `restore.sh`
+   refuses on the uid, naming both. If it holds no waivers of its own, or none
+   you would rather keep, `--force` restores over it; the artifact's waiver
+   list and score history are the ones that survive.
+6. **The CR was deleted on purpose**: nothing restores it. Deleting
    `ClusterBaseline/cluster` removes the finalizer-protected plugin, the scan
    bindings, and the CRD record of your waivers, in that order. Take a backup
    before any uninstall. The operator logs, at the moment it drops the
@@ -240,6 +267,13 @@ on every `make test`, and pins the behavior that matters:
 - a restore run twice with no `--force`, against an object the first run left
   holding the artifact's own spec, converges on the second run instead of
   refusing, and sends both writes without the stale `resourceVersion`;
+- a restore over a live object that is a *different object* (uid mismatch, at
+  the same resourceVersion, which is the only way past the rollback guard) is
+  refused before any write and names both uids, and a live uid that cannot be
+  read is refused rather than treated as a match;
+- `backup.sh` refuses a capture carrying no resourceVersion or uid, and
+  `verify-backup.sh` refuses a MANIFEST missing either, so neither can be
+  recorded and later trusted with a guard switched off;
 - a live object that cannot be read is refused before any write, and
   `--force` does not override it;
 - the artifact age is reported, and a backup older than a week says so;
