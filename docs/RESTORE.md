@@ -72,10 +72,20 @@ cd operator
 ```
 
 Every check runs before any write: the artifact exists, is non-empty, is a
-`baselinesecurity.openshift.io` `ClusterBaseline`, and matches the sha256 in
-`MANIFEST`. A truncated transfer, a hand-edited artifact, or a missing
-MANIFEST is refused, because a half-restored object gets reconciled and the
-evidence of what was lost is overwritten with a plausible-looking new state.
+`baselinesecurity.openshift.io` `ClusterBaseline`, holds exactly one YAML
+document, and matches the sha256 in `MANIFEST`. A truncated transfer, a
+hand-edited artifact, or a missing MANIFEST is refused, because a
+half-restored object gets reconciled and the evidence of what was lost is
+overwritten with a plausible-looking new state.
+
+The single-document check matters because `oc apply -f` and `oc replace -f`
+apply **every** document in a multi-document YAML, not just the first. A
+backup directory carrying a second document would otherwise be written to the
+cluster with whatever cluster-admin credentials ran the restore. The MANIFEST
+checksum is not a defence against that: it lives in the same directory, so
+anyone who can edit the artifact can recompute it. `backup.sh` captures a
+single named object and never emits a `---` separator, so a real backup always
+passes.
 
 The script then applies the spec and replaces the status subresource:
 
@@ -137,6 +147,9 @@ on every `make test`, and pins the behavior that matters:
 - an empty capture, a wrong-kind object, a truncated artifact, an edited
   artifact, a missing MANIFEST, and a MANIFEST without a checksum are each
   refused, and refused **before** any call that writes to the cluster;
+- an artifact with a second YAML document appended (a smuggled
+  `ClusterRoleBinding`, say) is refused even when its checksum is valid, so the
+  refusal cannot be dismissed as checksum damage;
 - a future `lastScanTime` warns with the recovery command and still restores.
 
 Not covered, because it needs a live cluster: running the real restore

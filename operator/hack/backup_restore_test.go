@@ -13,6 +13,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -20,6 +21,34 @@ import (
 	"strings"
 	"testing"
 )
+
+// resealManifest recomputes the sha256 line in a backup directory's MANIFEST
+// from the current artifact. Cases that must be refused for a reason other
+// than a checksum mismatch need this, otherwise the checksum gate refuses them
+// first and the case proves nothing about the guard it names.
+func resealManifest(t *testing.T, artifactPath string) {
+	t.Helper()
+	raw, err := os.ReadFile(artifactPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Dir(artifactPath)
+	manifestPath := filepath.Join(dir, "MANIFEST")
+	manifest, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(raw)
+	lines := strings.Split(string(manifest), "\n")
+	for i, line := range lines {
+		if strings.HasPrefix(line, "sha256=") {
+			lines[i] = fmt.Sprintf("sha256=%x", sum)
+		}
+	}
+	if err := os.WriteFile(manifestPath, []byte(strings.Join(lines, "\n")), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
 
 // baselineYAML is a captured ClusterBaseline/cluster: the user-owned spec
 // (waivers with their audit attribution, schedule, scoring mode) and the
@@ -347,6 +376,27 @@ func TestRestoreRejectsTamperedArtifact(t *testing.T) {
 			},
 			want: "not a baselinesecurity.openshift.io object",
 		},
+		{
+			// oc apply/replace write EVERY document in a multi-doc YAML, and
+			// the MANIFEST checksum is recomputable by anyone holding the
+			// directory, so a second document is a privilege escalation the
+			// kind checks above cannot see.
+			name: "second document smuggled after the ClusterBaseline",
+			mutate: func(t *testing.T, work string) {
+				path := filepath.Join(work, "bdir", "clusterbaseline.yaml")
+				smuggled := baselineYAML +
+					"---\napiVersion: rbac.authorization.k8s.io/v1\n" +
+					"kind: ClusterRoleBinding\nmetadata:\n  name: escalate\n" +
+					"roleRef:\n  apiGroup: rbac.authorization.k8s.io\n  kind: ClusterRole\n  name: cluster-admin\n"
+				if err := os.WriteFile(path, []byte(smuggled), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				// Re-sign so the checksum gate passes and the multi-document
+				// check is what refuses.
+				resealManifest(t, path)
+			},
+			want: "more than one YAML document",
+		},
 	}
 
 	for _, tc := range cases {
@@ -391,11 +441,7 @@ func TestRestoreWarnsOnFutureLastScanTime(t *testing.T) {
 	if err := os.WriteFile(path, []byte(future), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	manifest := sha256Hex(t, path)
-	if err := os.WriteFile(filepath.Join(work, "bdir", "MANIFEST"),
-		[]byte("takenAt=2026-09-20T12:00:00Z\nsha256="+manifest+"\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	resealManifest(t, path)
 
 	_, stderr, code := runScript(t, "restore.sh", work, "bdir")
 	if code != 0 {

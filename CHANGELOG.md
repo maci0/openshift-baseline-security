@@ -43,6 +43,19 @@ depend on those tags.
 
 ## [Unreleased]
 
+### Security
+
+- `hack/restore.sh` now refuses a backup artifact that holds more than one YAML
+  document. `oc apply -f` and `oc replace -f` apply every document in a
+  multi-document file, so a backup directory with a second document appended
+  after the `ClusterBaseline` would have been written to the cluster with the
+  restoring operator's own credentials, whatever privilege it held. The
+  existing kind and apiVersion checks match on any line and could not see the
+  extra document, and the MANIFEST sha256 does not help: it lives in the same
+  directory and is recomputable by anyone who can edit the artifact. Backups
+  taken by `hack/backup.sh` are a single named object and never contain a
+  `---` separator, so no valid backup is affected.
+
 ### Added
 
 - `hack/backup.sh` and `hack/restore.sh`, a backup and restore path for

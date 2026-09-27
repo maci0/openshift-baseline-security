@@ -90,6 +90,18 @@ grep -q '^kind: ClusterBaseline$' "$ARTIFACT" || {
   echo "restore.sh: artifact is not a ClusterBaseline" >&2
   exit 1
 }
+# `oc apply -f` / `oc replace -f` apply EVERY document in a multi-doc YAML, not
+# just the first. The two greps above match on any line, so a second document
+# appended after the ClusterBaseline (a ClusterRoleBinding, say) passes both
+# while still being written to the cluster with the operator's own credentials.
+# The MANIFEST checksum is not a defence: it lives in the same directory and is
+# recomputable by anyone who can edit the artifact. Refuse a second document;
+# backup.sh captures a single named object and never emits a `---` separator.
+if grep -qE '^---[[:space:]]*($|#)' "$ARTIFACT"; then
+  echo "restore.sh: artifact holds more than one YAML document; refusing to" >&2
+  echo "restore.sh: apply every document in it" >&2
+  exit 1
+fi
 
 EXPECTED="$(sed -n 's/^sha256=//p' "$MANIFEST" | head -1)"
 if [[ -z "$EXPECTED" ]]; then
