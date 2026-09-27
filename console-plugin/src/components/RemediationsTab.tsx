@@ -9,7 +9,6 @@ import {
 import {
   Alert,
   AlertActionCloseButton,
-  Bullseye,
   Button,
   ClipboardCopyButton,
   CodeBlock,
@@ -28,7 +27,7 @@ import {
   ModalHeader,
   PageSection,
   SearchInput,
-  Spinner,
+  Skeleton,
   Switch,
   Tooltip,
 } from '@patternfly/react-core';
@@ -73,6 +72,7 @@ import {
   REMEDIATION_OBJECT_UNSERIALIZABLE,
 } from '../remediation';
 import { isString, stripInvisibleText } from '../parse';
+import { LOADING_ROW_HEIGHT } from '../layout';
 import BaselineNotConfigured from './BaselineNotConfigured';
 import BaselineUnavailable from './BaselineUnavailable';
 import ConsoleLink from './ConsoleLink';
@@ -798,13 +798,22 @@ const RemediationsTab: React.FC<{
         </ModalFooter>
       </Modal>
       {!baselineLoaded || (!loaded && !watchError) ? (
-        <Bullseye style={{ padding: 'var(--pf-t--global--spacer--xl)' }}>
-          <Spinner
-            aria-label={
-              !baselineLoaded ? t('Loading compliance data') : t('Loading remediations')
-            }
-          />
-        </Bullseye>
+        // Skeleton rows, not a centered spinner: Overview and Profiles paint
+        // the shape they are about to fill and Results hands the table its own
+        // loading state, so this tab's full-page spinner was the one view on
+        // the page that said nothing about what was coming.
+        <PageSection>
+          {/* One status region, not three skeleton labels: the same string on
+              each row would be announced once per row. */}
+          <div
+            role="status"
+            aria-label={!baselineLoaded ? t('Loading compliance data') : t('Loading remediations')}
+          >
+            {[0, 1, 2].map((i) => (
+              <Skeleton key={i} height={LOADING_ROW_HEIGHT} />
+            ))}
+          </div>
+        </PageSection>
       ) : !baseline ? (
         baselineError ? (
           <BaselineUnavailable

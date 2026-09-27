@@ -39,6 +39,7 @@ import { downloadBlob, openBlobInTab } from '../download';
 import { errorMessage } from '../errors';
 import { AccessGate, mayWrite } from '../permissions';
 import { encodeKeyList } from '../contentKey';
+import { FILTER_FIELD_MIN_WIDTH } from '../layout';
 import { rescanPatch, rescanToken } from '../patches';
 import { withDisabledTip } from './DisabledTip';
 import { TabErrorBoundary } from './TabErrorBoundary';
@@ -354,7 +355,7 @@ const CompliancePage: React.FC = () => {
           flexWrap={{ default: 'wrap' }}
           gap={{ default: 'gapMd' }}
         >
-          <FlexItem flex={{ default: 'flex_1' }} style={{ minWidth: 200 }}>
+          <FlexItem flex={{ default: 'flex_1' }} style={{ minWidth: FILTER_FIELD_MIN_WIDTH }}>
             <Title headingLevel="h1">{t('Compliance')}</Title>
             <Content component="p">
               {t('Cluster benchmark compliance, scanned by the Compliance Operator.')}

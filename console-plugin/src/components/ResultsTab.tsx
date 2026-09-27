@@ -94,6 +94,7 @@ import {
   localDateInputValue,
 } from '../dates';
 import { compareForDisplay } from '../text';
+import { FILTER_FIELD_MIN_WIDTH, WAIVER_FIELD_MIN_WIDTH } from '../layout';
 import {
   activeWaivedNames,
   findWaiver,
@@ -891,7 +892,7 @@ const ResultsTab: React.FC<{
         gap={{ default: 'gapMd' }}
         style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}
       >
-        <FlexItem grow={{ default: 'grow' }} style={{ minWidth: 200 }}>
+        <FlexItem grow={{ default: 'grow' }} style={{ minWidth: FILTER_FIELD_MIN_WIDTH }}>
           <ListPageFilter
             data={data}
             loaded={loaded}
@@ -1206,7 +1207,10 @@ const ResultsTab: React.FC<{
                             flexWrap={{ default: 'wrap' }}
                             style={{ marginTop: 'var(--pf-t--global--spacer--sm)' }}
                           >
-                            <FlexItem flex={{ default: 'flex_1' }} style={{ minWidth: 140 }}>
+                            <FlexItem
+                              flex={{ default: 'flex_1' }}
+                              style={{ minWidth: WAIVER_FIELD_MIN_WIDTH }}
+                            >
                               <FormGroup label={t('Requested by (optional)')} fieldId="waive-req">
                                 <TextInput
                                   id="waive-req"
@@ -1221,7 +1225,10 @@ const ResultsTab: React.FC<{
                                 />
                               </FormGroup>
                             </FlexItem>
-                            <FlexItem flex={{ default: 'flex_1' }} style={{ minWidth: 140 }}>
+                            <FlexItem
+                              flex={{ default: 'flex_1' }}
+                              style={{ minWidth: WAIVER_FIELD_MIN_WIDTH }}
+                            >
                               <FormGroup label={t('Approved by (optional)')} fieldId="waive-appr">
                                 <TextInput
                                   id="waive-appr"
@@ -1232,7 +1239,10 @@ const ResultsTab: React.FC<{
                                 />
                               </FormGroup>
                             </FlexItem>
-                            <FlexItem flex={{ default: 'flex_1' }} style={{ minWidth: 140 }}>
+                            <FlexItem
+                              flex={{ default: 'flex_1' }}
+                              style={{ minWidth: WAIVER_FIELD_MIN_WIDTH }}
+                            >
                               <FormGroup label={t('Expires (optional)')} fieldId="waive-exp">
                                 <TextInput
                                   id="waive-exp"
@@ -1246,7 +1256,10 @@ const ResultsTab: React.FC<{
                                 />
                               </FormGroup>
                             </FlexItem>
-                            <FlexItem flex={{ default: 'flex_1' }} style={{ minWidth: 140 }}>
+                            <FlexItem
+                              flex={{ default: 'flex_1' }}
+                              style={{ minWidth: WAIVER_FIELD_MIN_WIDTH }}
+                            >
                               <FormGroup label={t('Review by (optional)')} fieldId="waive-review">
                                 <TextInput
                                   id="waive-review"

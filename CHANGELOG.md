@@ -209,6 +209,13 @@ depend on those tags.
 
 ### Changed
 
+- The Remediations tab no longer shows a full-page spinner while its watch
+  loads. It now paints skeleton rows, the shape the tab resolves into, the way
+  Overview and Profiles already show the cards they are about to fill. Each tab
+  had picked its own loading treatment, and a spinner alone in the middle of an
+  otherwise empty page was the one that told an admin nothing about what was
+  arriving.
+
 - Every `hack/` script now reports a bad invocation the same way: the
   diagnostic first, then the usage, both on stderr, exit 2, with stdout left
   empty. `backup.sh`, `restore.sh`, and `verify-backup.sh` accepted a stray

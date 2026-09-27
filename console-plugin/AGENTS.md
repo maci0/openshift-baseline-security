@@ -94,6 +94,14 @@ There is no barrel: import from the owning module, never re-export through an
 `index` or a `utils`. `src/testing/` holds test-only helpers (the deterministic
 fuzz PRNG) and nothing production imports.
 
+`src/layout.ts` owns the measurements a PatternFly token does not cover: card
+widths, reserved chart-slot heights, and the width a form field wraps below.
+They are shared because two files have to agree on them (a card's loading
+placeholder and the card it stands in for; a reserved sparkline slot and the
+chart that fills it). A new one goes there rather than back into a view as a
+literal. Spacing, color, and type stay on `--pf-t--global--*` tokens where the
+view uses them.
+
 An export with no production caller is dead code, not coverage. Delete it and
 point its test at the shipped path instead.
 

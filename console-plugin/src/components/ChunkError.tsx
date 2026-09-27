@@ -2,6 +2,7 @@ import * as React from 'react';
 import { useTranslation } from 'react-i18next';
 import { Alert, Button, PageSection, Skeleton } from '@patternfly/react-core';
 import { errorMessage } from '../errors';
+import { TREND_SKELETON_HEIGHT } from '../layout';
 import { ChunkState, useChunk } from './chunkLoad';
 
 // Visible failure for a dropped or 404'd async chunk. Retry re-invokes the
@@ -54,7 +55,7 @@ export function ChunkGate<T>(props: ChunkGateProps<T>): React.ReactElement {
   if (chunk.status === 'loading') {
     return (
       <PageSection>
-        <Skeleton height="200px" screenreaderText={t('Loading compliance data')} />
+        <Skeleton height={TREND_SKELETON_HEIGHT} screenreaderText={t('Loading compliance data')} />
       </PageSection>
     );
   }

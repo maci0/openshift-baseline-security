@@ -21,6 +21,7 @@ import { formatChartDate, formatCount, safeLocale } from '../dates';
 import { resultsHref } from '../links';
 import { historyContentKey, toTrendData } from '../overviewTrend';
 import { scoreColor } from '../scoring';
+import { SPARKLINE_HEIGHT } from '../layout';
 import ConsoleLink from './ConsoleLink';
 
 // The neutral for a chart that has nothing to score yet: the empty ring, and
@@ -256,7 +257,13 @@ export const MiniTrend = React.memo<{ history?: ScoreSnapshot[] }>(({ history })
     // marginTop:auto bottom-aligns the sparkline within a flex-column CardBody,
     // so charts line up across cards whose stat-row counts differ (a card with
     // an extra Inconsistent/Waived row would otherwise sit its chart lower).
-    <div style={{ height: 40, marginTop: 'auto', paddingTop: 'var(--pf-t--global--spacer--sm)' }}>
+    <div
+      style={{
+        height: SPARKLINE_HEIGHT,
+        marginTop: 'auto',
+        paddingTop: 'var(--pf-t--global--spacer--sm)',
+      }}
+    >
       <Chart
         ariaTitle={t('Score trend')}
         ariaDesc={t('Score moved from {{from}} to {{to}} over {{count}} scans.', {
@@ -266,7 +273,7 @@ export const MiniTrend = React.memo<{ history?: ScoreSnapshot[] }>(({ history })
           formattedCount: formatCount(chartData.length, safeLocale(i18n.language)),
         })}
         animate={false}
-        height={40}
+        height={SPARKLINE_HEIGHT}
         padding={{ top: 4, bottom: 4, left: 0, right: 0 }}
         minDomain={{ y: 0 }}
         maxDomain={{ y: 100 }}

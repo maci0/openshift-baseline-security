@@ -51,6 +51,16 @@ import {
   suiteFilterKey,
 } from '../models';
 import { isValidCron } from '../cron';
+import {
+  CHANGES_MAX_HEIGHT,
+  DASHBOARD_CARD_MIN_WIDTH,
+  DONUT_CARD_MIN_HEIGHT,
+  DONUT_SKELETON_HEIGHT,
+  SCHEDULE_FIELD_MIN_WIDTH,
+  SCORE_CARD_MIN_WIDTH,
+  SPARKLINE_HEIGHT,
+  TREND_SKELETON_HEIGHT,
+} from '../layout';
 import { AccessGate, mayWrite } from '../permissions';
 import { formatCount, parseInstant, safeLocale } from '../dates';
 import { errorMessage } from '../errors';
@@ -275,7 +285,7 @@ const ScheduleEditor: React.FC<{ baseline: ClusterBaseline }> = ({ baseline }) =
         alignItems={{ default: 'alignItemsCenter' }}
         flexWrap={{ default: 'wrap' }}
       >
-        <FlexItem grow={{ default: 'grow' }} style={{ minWidth: 160 }}>
+        <FlexItem grow={{ default: 'grow' }} style={{ minWidth: SCHEDULE_FIELD_MIN_WIDTH }}>
           <TextInput
             ref={inputRef}
             id="schedule-cron"
@@ -677,7 +687,12 @@ const Overview: React.FC<{
   );
 
   if (!loaded) {
-    return <LoadingCards cardMinWidth="300px" skeletonHeight="180px" />;
+    return (
+      <LoadingCards
+        cardMinWidth={DASHBOARD_CARD_MIN_WIDTH}
+        skeletonHeight={DONUT_SKELETON_HEIGHT}
+      />
+    );
   }
   if (!baseline) {
     return baselineError ? (
@@ -769,8 +784,8 @@ const Overview: React.FC<{
             <Charts.MiniTrend history={history} />
           ) : charts.status === 'loading' ? (
             // Reserve the sparkline slot so cards stay bottom-aligned while
-            // the charts chunk is in flight (same 40px as MiniTrend).
-            <div style={{ height: 40, marginTop: 'auto' }} />
+            // the charts chunk is in flight (the height MiniTrend draws at).
+            <div style={{ height: SPARKLINE_HEIGHT, marginTop: 'auto' }} />
           ) : null}
         </CardBody>
       </Card>
@@ -954,7 +969,7 @@ const Overview: React.FC<{
           </div>
         </Alert>
       )}
-      <Gallery hasGutter minWidths={{ default: '300px' }}>
+      <Gallery hasGutter minWidths={{ default: DASHBOARD_CARD_MIN_WIDTH }}>
         <Card>
           <CardTitle>{t('Compliance score')}</CardTitle>
           {/* Center the donut: the card stretches to the taller Details card in
@@ -963,7 +978,7 @@ const Overview: React.FC<{
               any extra height. */}
           <CardBody
             style={{
-              minHeight: 260,
+              minHeight: DONUT_CARD_MIN_HEIGHT,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -972,7 +987,10 @@ const Overview: React.FC<{
             {charts.status === 'failed' ? (
               <ChunkError error={charts.error} onRetry={() => setChartAttempt((n) => n + 1)} />
             ) : Charts === null ? (
-              <Skeleton height="180px" screenreaderText={t('Loading compliance data')} />
+              <Skeleton
+                height={DONUT_SKELETON_HEIGHT}
+                screenreaderText={t('Loading compliance data')}
+              />
             ) : (
               <Charts.CompositionDonut
                 score={score}
@@ -1052,7 +1070,10 @@ const Overview: React.FC<{
             <Card>
               <CardTitle>{t('Score trend')}</CardTitle>
               <CardBody>
-                <Skeleton height="200px" screenreaderText={t('Loading compliance data')} />
+                <Skeleton
+                  height={TREND_SKELETON_HEIGHT}
+                  screenreaderText={t('Loading compliance data')}
+                />
               </CardBody>
             </Card>
           ) : (
@@ -1105,7 +1126,7 @@ const Overview: React.FC<{
             ) : (
               // Scrollable region is keyboard-focusable (same pattern as Remediations table).
               <div
-                style={{ maxHeight: 260, overflow: 'auto' }}
+                style={{ maxHeight: CHANGES_MAX_HEIGHT, overflow: 'auto' }}
                 tabIndex={0}
                 role="region"
                 aria-label={t('Recent changes')}
@@ -1164,7 +1185,7 @@ const Overview: React.FC<{
           instead of stretching to match the tall donut/details/trend cards. */}
       <Gallery
         hasGutter
-        minWidths={{ default: '260px' }}
+        minWidths={{ default: SCORE_CARD_MIN_WIDTH }}
         style={{ marginTop: 'var(--pf-t--global--spacer--md)' }}
       >
         {(baseline.status?.profiles ?? []).map((p) =>

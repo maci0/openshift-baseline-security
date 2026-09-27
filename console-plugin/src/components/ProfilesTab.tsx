@@ -96,6 +96,7 @@ import { restoreFocus } from './focus';
 import { useAutoDismiss } from './useAutoDismiss';
 import { isString } from '../parse';
 import { compareForDisplay, foldForSearch, foldSearchQuery, matchesFolded } from '../text';
+import { PROFILE_CARD_MIN_WIDTH, PROFILE_SKELETON_HEIGHT } from '../layout';
 
 // Inline danger alert for the tab's single watch / action error, shared by the
 // page-top slot and every modal so the presentation cannot drift per call site.
@@ -880,7 +881,12 @@ const ProfilesTab: React.FC<{
   const boundTailored = baseline?.spec.tailoredProfiles ?? [];
 
   if (!loaded) {
-    return <LoadingCards cardMinWidth="330px" skeletonHeight="80px" />;
+    return (
+      <LoadingCards
+        cardMinWidth={PROFILE_CARD_MIN_WIDTH}
+        skeletonHeight={PROFILE_SKELETON_HEIGHT}
+      />
+    );
   }
   if (!baseline) {
     return baselineError ? (
@@ -1140,7 +1146,7 @@ const ProfilesTab: React.FC<{
           </Button>
         </ModalFooter>
       </Modal>
-      <Gallery hasGutter minWidths={{ default: '330px' }}>
+      <Gallery hasGutter minWidths={{ default: PROFILE_CARD_MIN_WIDTH }}>
         {PROFILE_KEYS.map((key) => {
           const info = PROFILE_INFO[key];
           const enabled = baseline.spec.profiles?.includes(key) ?? false;
@@ -1265,7 +1271,7 @@ const ProfilesTab: React.FC<{
               'These TailoredProfiles are included in scans. Unbind to stop scanning them; the resource in openshift-compliance is kept.',
             )}
           </Content>
-          <Gallery hasGutter minWidths={{ default: '330px' }}>
+          <Gallery hasGutter minWidths={{ default: PROFILE_CARD_MIN_WIDTH }}>
             {boundTailored.map((name) => (
               <Card key={name}>
                 <CardHeader
