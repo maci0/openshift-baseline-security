@@ -502,7 +502,7 @@ const ProfilesTab: React.FC<{
     confirmModalWasOpen.current = false;
     const el = returnFocusRef.current;
     returnFocusRef.current = null;
-    restoreFocus(el, regionRef);
+    return restoreFocus(el, regionRef);
   }, [anyConfirmModalOpen]);
 
   // Auto-dismiss success so enable/disable/create feedback does not stick forever.
@@ -814,6 +814,11 @@ const ProfilesTab: React.FC<{
     const next = current.filter((n) => n !== name);
     pendingRef.current = true;
     setPending(true);
+    // A write owns the form, same as createTailored: an openEdit fetch for this
+    // profile can still be in flight (it marks nothing busy), and unbound is not
+    // deleted, so its response would resolve successfully and pre-fill the modal
+    // for a profile no scan includes any more. Supersede it before the patch.
+    editSeq.current += 1;
     setError(null);
     setSuccess(null);
     try {

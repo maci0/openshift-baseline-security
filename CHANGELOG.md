@@ -119,6 +119,19 @@ depend on those tags.
 
 ### Fixed
 
+- Unbinding a tailored profile while its Edit form was still loading left the
+  modal open on a profile no scan includes any more, and saving it reported
+  `Tailored profile updated.` for a TailoredProfile nothing bound. Edit and
+  Unbind are both enabled on the same card, and the Unbind write now supersedes
+  the in-flight load, as creating one already did.
+- Focus returned to a modal's trigger could land a frame late, after the admin
+  had opened the next dialog, and pull focus out of it behind its backdrop.
+  The deferred restore is now cancelled when its effect re-runs or the view
+  unmounts, and yields when focus is already inside a dialog.
+- Two waiver changes started in the same frame: the second click reached the
+  patch while the first was in flight and did nothing, with no message. It now
+  reports that a waiver change is already in progress.
+
 - A failed `CatalogSource` read while auto-detecting the Compliance Operator
   catalog was discarded with no log. Detection then fails safe to "assume the
   catalog is present", so a persistent RBAC denial or apiserver error left the

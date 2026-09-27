@@ -229,6 +229,7 @@
   "Recent changes appear after two completed scans.": "Recent changes appear after two completed scans.",
   "Five-field cron (minute hour day-of-month month day-of-week). Example: 0 1 * * *": "Five-field cron (minute hour day-of-month month day-of-week). Example: 0 1 * * *",
   "You do not have permission to waive checks.": "You do not have permission to waive checks.",
+  "Another waiver change is already in progress.": "Another waiver change is already in progress.",
   "You do not have permission to edit the baseline.": "You do not have permission to edit the baseline.",
   "You do not have permission to apply remediations.": "You do not have permission to apply remediations.",
   "You do not have permission to create tailored profiles.": "You do not have permission to create tailored profiles.",

@@ -271,7 +271,15 @@ const ResultsTab: React.FC<{
     failMsg: string,
     successMsg: string,
   ): Promise<void> => {
-    if (!baseline || busyRef.current) return;
+    if (!baseline) return;
+    // A second control in the same frame reaches here while the first patch is
+    // still in flight (the buttons gate on the `busy` state, which only lands on
+    // the next render, while busyRef is set synchronously). Returning silently
+    // made that click a dead no-op; say why instead.
+    if (busyRef.current) {
+      setWaiveError(t('Another waiver change is already in progress.'));
+      return;
+    }
     // Same gate the waiver controls carry, so a modal opened while permitted
     // cannot spend the patch after the review flipped to denied.
     if (!mayWrite(waiveGate)) {
@@ -364,7 +372,7 @@ const ResultsTab: React.FC<{
     // the row was virtualized away while the modal was open, the trigger is
     // detached and restoreFocus falls back to the region sentinel rather than
     // dropping focus to <body>.
-    restoreFocus(el, regionRef);
+    return restoreFocus(el, regionRef);
   }, [selectedLive]);
 
   // Named event handlers (not inline IIFE onClick) so react-hooks/refs does not

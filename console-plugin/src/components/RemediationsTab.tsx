@@ -449,7 +449,7 @@ const RemediationsTab: React.FC<{
     modalWasOpen.current = false;
     const el = returnFocusRef.current;
     returnFocusRef.current = null;
-    restoreFocus(el, regionRef);
+    return restoreFocus(el, regionRef);
   }, [anyModalOpen]);
 
   const baselineEditDisabled =

@@ -2,9 +2,10 @@ import { restoreFocus } from './focus';
 
 // restoreFocus is the WCAG 2.4.3 focus-recovery helper: focus the modal trigger
 // if it is still connected, else a stable fallback (the trigger can unmount on
-// success), and never throw. It only reads isConnected/focus and defers via
-// requestAnimationFrame, so fake objects + a synchronous rAF stub exercise every
-// branch without a DOM (this project runs jest in the node environment).
+// success), and never throw. It only reads isConnected/focus, the live
+// document.activeElement, and defers via requestAnimationFrame, so fake objects
+// + a controllable rAF stub exercise every branch without a DOM (this project
+// runs jest in the node environment).
 
 // Structural stand-in for the element surface restoreFocus touches; the helper
 // dereferences nothing beyond isConnected and focus at runtime.
@@ -16,17 +17,51 @@ describe('restoreFocus', () => {
   // restoreFocus reads exactly window.requestAnimationFrame off it.
   const globalWithWindow = global as { window?: unknown };
   const origWindow = globalWithWindow.window;
+  const globalWithDocument = global as { document?: unknown };
+  const origDocument = globalWithDocument.document;
+  const pendingFrames: Map<number, (t: number) => void> = new Map();
+  let nextFrame = 0;
   beforeEach(() => {
+    pendingFrames.clear();
+    nextFrame = 0;
     globalWithWindow.window = {
       requestAnimationFrame: (cb: (t: number) => void) => {
+        const id = nextFrame++;
+        // Synchronous by default so the existing cases read as "the frame
+        // fired"; a case that needs a pending frame swaps this out below.
         cb(0);
-        return 0;
+        return id;
+      },
+      cancelAnimationFrame: (id: number) => {
+        pendingFrames.delete(id);
       },
     };
   });
   afterEach(() => {
     globalWithWindow.window = origWindow;
+    globalWithDocument.document = origDocument;
   });
+
+  // Defer the frame so the test controls when the callback runs, which is what
+  // the dialog and cancel cases need.
+  const deferFrames = () => {
+    globalWithWindow.window = {
+      requestAnimationFrame: (cb: (t: number) => void) => {
+        const id = nextFrame++;
+        pendingFrames.set(id, cb);
+        return id;
+      },
+      cancelAnimationFrame: (id: number) => {
+        pendingFrames.delete(id);
+      },
+    };
+  };
+
+  const runPendingFrames = () => {
+    const frames = [...pendingFrames.values()];
+    pendingFrames.clear();
+    for (const cb of frames) cb(0);
+  };
 
   const fakeEl = (isConnected: boolean) => {
     const focus = jest.fn();
@@ -73,5 +108,58 @@ describe('restoreFocus', () => {
 
   it('does not throw on a null trigger', () => {
     expect(() => restoreFocus(null)).not.toThrow();
+  });
+
+  // A dialog element stub: the helper only ever puts these in a Set, matches
+  // one by identity, and reads querySelectorAll off the document.
+  const fakeDialog = (name: string) => ({ name });
+
+  const stubDocument = (dialogs: unknown[], focused: unknown) => {
+    globalWithDocument.document = {
+      querySelectorAll: () => dialogs,
+      activeElement: { closest: () => focused },
+    };
+  };
+
+  it('leaves focus alone when the frame lands in a dialog opened after scheduling', () => {
+    // A second modal opened within the deferred frame owns focus by then;
+    // restoring would pull it back to a trigger behind the new backdrop.
+    deferFrames();
+    const second = fakeDialog('second');
+    stubDocument([], second);
+    const { el, focus } = fakeEl(true);
+    restoreFocus(el);
+    runPendingFrames();
+    expect(focus).not.toHaveBeenCalled();
+  });
+
+  it('restores while the closing dialog is still mounted for its exit transition', () => {
+    // The dialog that was open when the restore was scheduled still holds focus
+    // mid-unmount; it must not veto the restore the WCAG rule asks for.
+    deferFrames();
+    const closing = fakeDialog('closing');
+    stubDocument([closing], closing);
+    const { el, focus } = fakeEl(true);
+    restoreFocus(el);
+    runPendingFrames();
+    expect(focus.mock.calls).toHaveLength(1);
+  });
+
+  it('restores focus when the frame lands outside any dialog', () => {
+    deferFrames();
+    stubDocument([], null);
+    const { el, focus } = fakeEl(true);
+    restoreFocus(el);
+    runPendingFrames();
+    expect(focus.mock.calls).toHaveLength(1);
+  });
+
+  it('cancel drops the frame, so an unmounted view never steals focus', () => {
+    deferFrames();
+    const { el, focus } = fakeEl(true);
+    const cancel = restoreFocus(el);
+    cancel();
+    runPendingFrames();
+    expect(focus).not.toHaveBeenCalled();
   });
 });
