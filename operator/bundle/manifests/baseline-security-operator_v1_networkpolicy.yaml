@@ -1,0 +1,54 @@
+# Default-deny ingress on the operator pods. Without it any pod in the cluster
+# can reach the metrics port 8443 on the operator pod IP; the bearer token is
+# the only thing between that pod and the operator's metric values.
+#
+# Ingress only. A NetworkPolicy is additive over the platform's own policies in
+# this openshift-* namespace, so an egress rule here would intersect with the
+# cluster network operator's and could cut the operator off from the API
+# server. Egress is left undeclared (unrestricted) on purpose: the operator
+# reads Compliance Operator and OLM objects cluster-wide, and narrowing that
+# needs a live cluster to enumerate every path, which is not a manifest change.
+#
+# The console-plugin Deployment lives in openshift-console, not here, so this
+# policy does not cover plugin traffic; the plugin is a static asset server on
+# :9443 with GET/HEAD only and a 1k body cap (console-plugin/nginx.conf).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: baseline-security-operator
+  labels:
+    app: baseline-security-operator
+    app.kubernetes.io/name: baseline-security-operator
+    app.kubernetes.io/component: controller
+    app.kubernetes.io/part-of: baseline-security
+    app.kubernetes.io/managed-by: olm
+spec:
+  # Ingress is declared explicitly; omitting this key would restrict egress too.
+  policyTypes:
+    - Ingress
+  podSelector:
+    matchLabels:
+      app: baseline-security-operator
+  ingress:
+    # Nothing is allowed unless it matches a rule below, so every tenant
+    # namespace is denied on every operator port.
+    - from:
+        # prometheus-k8s scrapes the metrics Service on 8443
+        # (config/prometheus/servicemonitor.yaml).
+        - namespaceSelector:
+            matchExpressions:
+              - key: kubernetes.io/metadata.name
+                operator: In
+                values: [openshift-monitoring]
+        # The service-ca operator connects to the annotated metrics Service to
+        # mint and refresh the serving cert it signs. Dropping this namespace
+        # leaves tls.crt absent, nginx-equivalent failure, and a manager that
+        # exits on the unreadable cert dir.
+        - namespaceSelector:
+            matchExpressions:
+              - key: kubernetes.io/metadata.name
+                operator: In
+                values: [openshift-service-ca-operator, openshift-service-ca]
+      ports:
+        - protocol: TCP
+          port: 8443

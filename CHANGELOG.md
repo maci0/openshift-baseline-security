@@ -45,6 +45,22 @@ depend on those tags.
 
 ### Security
 
+- The operator namespace now ships a `NetworkPolicy`. Any pod in the cluster
+  could previously open a TCP connection to the operator's metrics port 8443;
+  the bearer token was the only control. Ingress is now denied on every
+  operator port except 8443, and only for `openshift-monitoring` (the
+  platform Prometheus scrape) and the service-ca operator (which mints the
+  serving cert the scrape verifies against). Egress is deliberately left
+  unrestricted so the policy cannot intersect the platform's own policies and
+  cut the operator off from the API server.
+- The serialized-size budget that trims `status` failure lists under-counted
+  a string carrying ill-formed UTF-8 by up to 4 bytes per bad byte, because it
+  counted the three-byte replacement rune where `encoding/json` writes the
+  six-byte escape. A `ClusterBaseline` whose failure names came back from a
+  protobuf restore with lone continuation bytes could therefore exceed the
+  size bound and fail every subsequent status write, wedging conditions,
+  score, and phase. The count now uses the wider of the two forms, which can
+  only trim a list early.
 - `hack/restore.sh` now refuses a backup artifact that holds more than one YAML
   document. `oc apply -f` and `oc replace -f` apply every document in a
   multi-document file, so a backup directory with a second document appended

@@ -151,7 +151,13 @@ func sha256Hex(t *testing.T, path string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
+	defer func() {
+		// Read-only handle: a close error carries no data-loss risk, and the
+		// hash failure above has already failed the test if it mattered.
+		if cerr := f.Close(); cerr != nil {
+			t.Logf("closing %s: %v", path, cerr)
+		}
+	}()
 	h := sha256.New()
 	if _, err := io.Copy(h, f); err != nil {
 		t.Fatal(err)

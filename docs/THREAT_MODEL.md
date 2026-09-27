@@ -26,9 +26,9 @@ Kubernetes API. Model those first.
 | 6 | Untrusted Compliance Operator fields rendered in the console | CO CRs → browser | Needs write to ComplianceCheckResult (or similar) in `openshift-compliance`, or a content image that ships hostile description/instruction text | Stored XSS in an admin session if a render path uses HTML; spreadsheet formula injection on CSV export; path injection in deep-links | React text nodes (no `dangerouslySetInnerHTML`, `innerHTML`, `document.write`, or `eval` anywhere in `console-plugin/src`; the one `document.write` hit is a comment at `CompliancePage.tsx:246` explaining why the blob path replaced it); HTML escape in `console-plugin/src/report.ts`; CSV formula hardening in `console-plugin/src/results.ts`; path-relative hrefs in `console-plugin/src/links.ts`. Recurring class: TEST-PLAN §U still carries XSS and href-injection as open manual checks. |
 | 7 | Compliance posture disclosure via metrics | In-cluster network → `/metrics` | Needs a token allowed `get` on nonResourceURL `/metrics`, or access to platform Prometheus | Score, fail counts, last-scan time, batch-active | HTTPS + `filters.WithAuthenticationAndAuthorization` (`operator/cmd/main.go:232`); non-loopback insecure metrics refused (`main.go:169`); scraper SA + `baseline-security-metrics-reader` (`operator/config/prometheus/metrics_scraper.yaml`, `operator/config/rbac/metrics_reader_role.yaml`). The cert Secret volume is `optional: true` (`manager.yaml:179-183`), so a missing Secret leaves the process on its self-signed fallback; the ServiceMonitor pins `serverName`, so the scrape fails closed rather than trusting it. |
 | 8 | Operator memory / reconcile exhaustion from check-result volume | CO CRs → operator | Large genuine result sets, or a flood of ComplianceCheckResults the operator lists | Manager OOM or wedged reconcile; stale score (`ComplianceStatusStale`) | `GOMEMLIMIT=440MiB` (`manager.yaml:89`) and memory limit 512Mi (`manager.yaml:158-159`); CRD caps on waivers (256), profiles (8), tailored profiles (32); batch caps in `batch.go`; status clamps in `sanitize.go`. No admission quota on foreign CO objects. |
-| 9 | In-cluster reachability of plugin :9443 and metrics :8443 | Pod network | Any pod can TCP to the ClusterIP Services. No NetworkPolicy is shipped. | Plugin: static assets only. Metrics: still needs a token. | Plugin Service forced ClusterIP (`plugin.go:242-254`); GET/HEAD only, 1k body, TLS 1.2+ (`console-plugin/nginx.conf`). Gap: no NetworkPolicy. |
+| 9 | In-cluster reachability of plugin :9443 and metrics :8443 | Pod network | A pod in a tenant namespace can TCP to the plugin Service. The operator's metrics port is denied at the network layer. | Plugin: static assets only. | Operator: ingress-only `NetworkPolicy` (`operator/config/manager/networkpolicy.yaml`) denies every operator port except 8443 from `openshift-monitoring` and the service-ca operator. Plugin: no NetworkPolicy; its Service is forced ClusterIP (`plugin.go:242-254`) and nginx serves GET/HEAD only, 1k body, TLS 1.2+ (`console-plugin/nginx.conf`). The plugin pod lives in `openshift-console`, a platform-owned namespace this operator does not write policies into. |
 
-Gaps ranked above existing controls are 2 (image ref not pinned at deploy time), 3 (the four UI confirm modals are not authz), 4 (no webhook, waiver fields are free-form), and 9 (no NetworkPolicy).
+Gaps ranked above existing controls are 2 (image ref not pinned at deploy time), 3 (the four UI confirm modals are not authz), and 4 (no webhook, waiver fields are free-form). Gap 9 now has a partial control: the operator namespace is covered, the plugin's is not.
 
 One claimed mitigation the code does not support: "Restricted PSS" on the manager pod. The pod spec satisfies Restricted (`runAsNonRoot`, `RuntimeDefault` seccomp, `allowPrivilegeEscalation: false`, drop ALL, read-only rootfs; `manager.yaml:55-58,106-119`) but nothing enforces it, because no `pod-security.kubernetes.io/enforce` label exists on the `openshift-baseline-security` Namespace or anywhere else in the tree. A namespace admin can widen the pod spec and the pod will still be admitted. Treat the pod spec as defense in depth, not as an enforced control.
 
@@ -66,7 +66,9 @@ Absent from the code (do not model as present):
 - No admission webhook server, no conversion webhook, no mutating webhook. The
   only CR-level validation is the `ClusterBaseline` OpenAPI schema.
 - No operator REST API, no gRPC, no webhook receiver, no upload parser.
-- No NetworkPolicy manifests.
+- No NetworkPolicy for the console-plugin pod. The operator namespace has one
+  (`operator/config/manager/networkpolicy.yaml`); the plugin is deployed into
+  `openshift-console`, which this operator does not write policies into.
 - No `pprof` / debug bind in `main.go`.
 - No `secrets` API access on the operator ClusterRole (`role.yaml` contains no
   `secrets`, `nodes`, or `exec` rule at all).
@@ -233,7 +235,7 @@ Threats with no (or only UI) mitigation:
 | Cluster-wide CSV fallback read discloses the installed-operator inventory | Medium (accepted) | Deliberate and page-capped (`compliance_operator.go:274-300`). Recorded so a later pass does not "fix" it into a narrower grant that breaks the OKD/disconnected install path. |
 | No `pod-security.kubernetes.io/enforce` label | Medium | The pod spec satisfies Restricted but nothing enforces it; a namespace admin can widen it and the pod still schedules |
 | Waiver attribution spoof | Medium | Fields are spec strings; not bound to the user token |
-| No NetworkPolicy | Medium | Any pod can reach ClusterIP ports |
+| No NetworkPolicy on the console-plugin pod | Medium | Any pod can reach the plugin ClusterIP; the operator namespace is covered by `config/manager/networkpolicy.yaml` |
 | No validating webhook | Medium | Schema-only; `Automatic` remediations are a legal spec |
 | Direct status write by a client with status RBAC | Low | Clamped on the operator's side, but a third-party writer's value is only corrected on the next reconcile |
 | No Kubernetes Events on apply/waive | Low (investigation) | API audit exists cluster-wide; product emits none |

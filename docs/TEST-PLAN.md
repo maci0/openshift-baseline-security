@@ -572,7 +572,8 @@ an accepted risk neither inflates nor tanks the score.
       under-counts**: `jsonStringLen` equals `len(json.Marshal(s))` for every
       escape class on valid UTF-8, and for ill-formed UTF-8 it is bounded from
       below by the encoder, which is the direction the failure-list budget
-      depends on (the encoder's spelling of a bad byte is a toolchain detail)
+      depends on (the encoder's spelling of a bad byte is a toolchain detail).
+      Over-counting is permitted and only trims a list early
       (`FuzzJSONStringLenMatchesMarshal`, `TestJSONStringLenMatchesMarshal`).
 - [x] CSV formula-injection neutralized, including whitespace-prefixed sigils
       and Unicode format-character prefixes (ZWSP, BIDI, BOM) (jest

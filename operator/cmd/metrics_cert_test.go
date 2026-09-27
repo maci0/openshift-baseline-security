@@ -45,21 +45,34 @@ func writeFileAtomic(t *testing.T, path string, data []byte) {
 	}
 	name := tmp.Name()
 	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		os.Remove(name)
+		if cerr := tmp.Close(); cerr != nil {
+			t.Logf("closing %s: %v", name, cerr)
+		}
+		discardTemp(t, name)
 		t.Fatal(err)
 	}
 	if err := tmp.Close(); err != nil {
-		os.Remove(name)
+		discardTemp(t, name)
 		t.Fatal(err)
 	}
 	if err := os.Chmod(name, 0o600); err != nil {
-		os.Remove(name)
+		discardTemp(t, name)
 		t.Fatal(err)
 	}
 	if err := os.Rename(name, path); err != nil {
-		os.Remove(name)
+		discardTemp(t, name)
 		t.Fatal(err)
+	}
+}
+
+// discardTemp unlinks the staged file on an already-failing path. The test is
+// ending in t.Fatal either way, so an unlink error only decides whether a
+// stray file is left in the test's temp dir; report it and keep the original
+// failure as the cause.
+func discardTemp(t *testing.T, name string) {
+	t.Helper()
+	if err := os.Remove(name); err != nil && !errors.Is(err, os.ErrNotExist) {
+		t.Logf("removing %s: %v", name, err)
 	}
 }
 

@@ -505,8 +505,14 @@ func jsonStringLen(s string) int {
 			// out: the encoder coerces rather than failing, and a status restored
 			// from a protobuf backup can carry lone continuation bytes, which a
 			// one-byte count under-budgets. Go 1.27 spells the coercion as the raw
-			// three-byte U+FFFD rune instead, so counting the wider form keeps the
-			// bound one-sided on both toolchains.
+			// three-byte U+FFFD rune instead, the wider of the two forms the
+			// toolchain has used, so counting the six-byte escape keeps the
+			// bound one-sided on both toolchains: a release that emits the raw
+			// three-byte rune over-counts here and trims a failure list early,
+			// while the other direction is the apiserver-freeze case the budget
+			// exists to prevent. FuzzJSONStringLenMatchesMarshal pins this
+			// branch against the real encoder, so a toolchain that changes the
+			// form again fails there.
 			_, size := utf8.DecodeRuneInString(s[i:])
 			if size == 1 {
 				n += 5
