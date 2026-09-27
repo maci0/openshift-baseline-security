@@ -19,6 +19,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -1410,5 +1411,41 @@ func TestDefaultOutputDirsAreGitignored(t *testing.T) {
 		if err := check.Run(); err != nil {
 			t.Errorf("%s default output %s is not gitignored; a backup there can be committed with the waiver attribution it carries", name, rel)
 		}
+	}
+}
+
+// backupMaxAgeDays reads a hack/ script's staleness threshold from its
+// `NAME=<n>` assignment.
+var backupMaxAgeDays = regexp.MustCompile(`(?m)^(?:MAX_AGE_DAYS|STALE_BACKUP_MAX_AGE_DAYS)=(\d+)$`)
+
+// TestBackupStalenessThresholdsAgree pins the one staleness policy the backup
+// scripts share. verify-backup.sh fails a backup older than its threshold and
+// restore.sh warns at its own, and the two answers are the same question asked
+// of the same directory, so an admin who tunes one expects the other to move
+// with it. They are separate scripts with separate constants and only a comment
+// ties them, which is exactly the shape a value drifts out of: verify-backup
+// then passes a backup restore.sh immediately warns about, and the alert built
+// on verify-backup's exit status reports a healthy schedule that restore
+// refuses to trust.
+func TestBackupStalenessThresholdsAgree(t *testing.T) {
+	thresholds := map[string]int{}
+	for _, name := range []string{"verify-backup.sh", "restore.sh"} {
+		raw, err := os.ReadFile(scriptPath(t, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		m := backupMaxAgeDays.FindSubmatch(raw)
+		if m == nil {
+			t.Fatalf("%s declares no staleness threshold for the age check to use", name)
+		}
+		n, err := strconv.Atoi(string(m[1]))
+		if err != nil {
+			t.Fatalf("%s staleness threshold %q is not a number: %v", name, m[1], err)
+		}
+		thresholds[name] = n
+	}
+	if thresholds["verify-backup.sh"] != thresholds["restore.sh"] {
+		t.Errorf("staleness thresholds disagree: verify-backup.sh fails at %dd, restore.sh warns at %dd; a backup can pass the check and still be one restore.sh distrusts",
+			thresholds["verify-backup.sh"], thresholds["restore.sh"])
 	}
 }

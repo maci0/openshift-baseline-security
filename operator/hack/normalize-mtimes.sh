@@ -72,9 +72,10 @@ fi
 # This script takes no options, so a leading `-` is a bad invocation rather
 # than a path. Without this the flag falls through to the path loop and comes
 # back as "no such path: --foo" with exit 1, which reads as a missing tree
-# rather than the typo it is.
+# rather than the typo it is. It would also reach `find` unparsed by option
+# handling, where a flag like -exec is an instruction rather than a filename.
 for arg in "$@"; do
-  case "${arg}" in
+  case "$arg" in
   -*)
     echo "${prog}: unknown option: ${arg}" >&2
     usage >&2
