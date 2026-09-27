@@ -111,6 +111,16 @@ depend on those tags.
 
 ### Fixed
 
+- A failed `CatalogSource` read while auto-detecting the Compliance Operator
+  catalog was discarded with no log. Detection then fails safe to "assume the
+  catalog is present", so a persistent RBAC denial or apiserver error left the
+  `compliance-operator` Subscription pinned to a source that was never
+  verified, and the Subscription sync path declined to correct it for the same
+  reason. The only symptom was a `ScanConfigured` / `ComplianceOperatorReady`
+  stuck on `Installing` with nothing in the operator logs. The read failure is
+  now logged at Error (rate-limited to one line per 30m, V(1) in between) with
+  the CatalogSource name and the underlying cause, and the Subscription create
+  records when the source it wrote came from an unverified guess.
 - On a single-node cluster the console plugin rolled out with
   `maxUnavailable: 1` against a one-replica Deployment, so a plugin upgrade
   could take the only pod down and blank Administration → Compliance until its

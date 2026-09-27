@@ -149,6 +149,11 @@ type ClusterBaselineReconciler struct {
 	// HA (2 replicas + PDB), which is exactly what stalls an SNO drain, so the
 	// failure must surface (rate-limited) rather than vanish.
 	lastInfraErrLog time.Time
+	// lastCatalogErrLog rate-limits the CatalogSource detection read failure in
+	// catalogSourcePresent: on a persistent read error detection fails safe to
+	// "assume present, not definite", so the operator can write and keep a
+	// guessed catalog source to the Subscription with no other marker.
+	lastCatalogErrLog time.Time
 }
 
 // +kubebuilder:rbac:groups=baselinesecurity.openshift.io,resources=clusterbaselines,verbs=get;list;watch;create;update;patch

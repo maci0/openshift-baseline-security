@@ -80,13 +80,23 @@ func (r *ClusterBaselineReconciler) ensureComplianceOperator(ctx context.Context
 	// Create uses the best-guess source even if detection was unconfident: a wrong
 	// first guess surfaces as InstallStalled and self-corrects once the sync path
 	// re-resolves confidently.
-	createSource, _ := r.resolveCatalogSource(ctx, cb)
+	createSource, confident := r.resolveCatalogSource(ctx, cb)
 	sub.Object["spec"] = map[string]any{
 		"name": complianceOperatorName, "channel": "stable",
-		"source": createSource, "sourceNamespace": "openshift-marketplace",
+		"source": createSource, "sourceNamespace": marketplaceNS,
 	}
 	if err := createIfMissing(ctx, r.Client, sub); err != nil {
 		return fmt.Errorf("ensuring compliance-operator Subscription: %w", err)
+	}
+	if !confident {
+		// Auto-detection could not verify either catalog, so the Subscription is now
+		// pinned to the default source. A resolve failure for it surfaces only as
+		// InstallStalled, and the read failures that produced the guess are
+		// rate-limited in catalogSourcePresent, so without this line an operator has
+		// no marker that the source was never verified. Logged after the write so it
+		// fires once per install rather than on every reconcile before the create.
+		log.FromContext(ctx).Info("compliance-operator Subscription created with an unverified catalog source",
+			"name", cb.Name, "source", createSource)
 	}
 	setCond(cb, "ComplianceOperatorReady", metav1.ConditionFalse, "Installing", "waiting for CSV")
 	return nil
@@ -165,23 +175,51 @@ func (r *ClusterBaselineReconciler) resolveCatalogSource(ctx context.Context, cb
 	return baselinev1alpha1.DefaultComplianceCatalogSource, false
 }
 
+// marketplaceNS holds the OLM CatalogSources auto-detection reads. One constant
+// so the namespace in the read, in the written Subscription, and in the failure
+// log cannot drift apart.
+const marketplaceNS = "openshift-marketplace"
+
 // catalogSourcePresent reports whether a CatalogSource of the given name exists in
 // openshift-marketplace, and whether that answer is definite. A clean Get is a
 // definite presence; NotFound / NoMatch (the CatalogSource CRD absent) is a
 // definite absence. A transient/forbidden error assumes present (so detection
 // keeps its priority-ordered choice rather than wrongly falling through to the
 // default catalog) but marks the answer NOT definite, so a writing caller can
-// decline to act on a guess.
+// decline to act on a guess. That guess is a fail-safe choice, not a silent one:
+// the error is logged, because a persistent failure here leaves the Subscription
+// pinned to an unverified source and the sync path declining to correct it, with
+// InstallStalled as the only other symptom.
 func (r *ClusterBaselineReconciler) catalogSourcePresent(ctx context.Context, name string) (present, definite bool) {
 	cs := u(catalogSourceGVK)
-	err := r.Get(ctx, types.NamespacedName{Namespace: "openshift-marketplace", Name: name}, cs)
+	err := r.Get(ctx, types.NamespacedName{Namespace: marketplaceNS, Name: name}, cs)
 	if err == nil {
 		return true, true
 	}
 	if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) {
 		return false, true
 	}
+	r.logCatalogReadErr(ctx, name, err)
 	return true, false
+}
+
+// logCatalogReadErr emits a CatalogSource detection read failure at Error level
+// at most once per historyStallLogInterval, and V(1) in between. Detection runs
+// on every reconcile that owns the Subscription, so a persistent RBAC denial must
+// surface without streaming an unbounded Error log. Same shape and interval as
+// logInfraReadErr, which guards the other fail-safe read in the reconciler.
+func (r *ClusterBaselineReconciler) logCatalogReadErr(ctx context.Context, name string, err error) {
+	logger := log.FromContext(ctx)
+	kv := []any{"catalogSource", name, "namespace", marketplaceNS}
+	if r.lastCatalogErrLog.IsZero() || r.elapsed(r.lastCatalogErrLog) >= historyStallLogInterval {
+		r.lastCatalogErrLog = r.now()
+		logger.Error(err,
+			"cannot read CatalogSource; assuming it is present so catalog detection keeps its priority order",
+			kv...)
+		return
+	}
+	logger.V(1).Info("CatalogSource read failed; assuming it is present so catalog detection keeps its priority order",
+		append(kv, "error", err)...)
 }
 
 // syncComplianceSubscriptionSource updates an existing Subscription's

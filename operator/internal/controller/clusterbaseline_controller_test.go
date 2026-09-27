@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-logr/logr/funcr"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -26,6 +28,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	baselinev1alpha1 "github.com/maci0/baseline-security-operator/api/v1alpha1"
 )
@@ -283,6 +286,64 @@ func TestCatalogSourcePresent(t *testing.T) {
 	}
 	if present, definite := r.catalogSourcePresent(ctx, "no-such-cs"); present || !definite {
 		t.Fatalf("NotFound: got (present=%v, definite=%v), want (false, true)", present, definite)
+	}
+}
+
+// TestCatalogSourceReadFailureIsLogged pins that the fail-safe answer catalogSourcePresent
+// returns for a transient/forbidden Get is not silent. Detection runs every reconcile
+// and a persistent failure leaves the Subscription pinned to a source that was never
+// verified, with the sync path declining to correct it; without this line the only
+// symptom is an InstallStalled condition. A definite answer (NotFound / NoMatch) stays
+// quiet, and a repeated failure inside the rate-limit window drops to V(1) rather than
+// streaming an Error on every 1m reconcile.
+func TestCatalogSourceReadFailureIsLogged(t *testing.T) {
+	scheme := testScheme(t)
+	var buf bytes.Buffer
+	// Verbosity 1 so the rate-limited repeat below is rendered: funcr drops V(1)
+	// records at the default verbosity 0, and the Error/V(1) split is exactly
+	// what this test pins.
+	logger := funcr.NewJSON(func(obj string) { _, _ = buf.WriteString(obj + "\n") },
+		funcr.Options{Verbosity: 1})
+	ctx := log.IntoContext(t.Context(), logger)
+	noMatch := &meta.NoKindMatchError{GroupKind: schema.GroupKind{Group: "operators.coreos.com", Kind: "CatalogSource"}}
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).
+			WithInterceptorFuncs(interceptor.Funcs{
+				Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+					switch key.Name {
+					case "blip-cs":
+						return apierrors.NewServiceUnavailable("apiserver blip")
+					case "nomatch-cs":
+						return noMatch
+					}
+					return c.Get(ctx, key, obj, opts...)
+				},
+			}).Build(),
+		Scheme: scheme,
+	}
+
+	// Definite answers are normal operation, not failures: they must stay silent.
+	r.catalogSourcePresent(ctx, "nomatch-cs")
+	r.catalogSourcePresent(ctx, "no-such-cs")
+	if buf.Len() != 0 {
+		t.Fatalf("definite absence must stay quiet: %s", buf.String())
+	}
+
+	// The fail-safe answer logs, names the source, and carries the cause.
+	r.catalogSourcePresent(ctx, "blip-cs")
+	out := buf.String()
+	if !strings.Contains(out, "blip-cs") ||
+		!strings.Contains(out, "apiserver blip") ||
+		strings.Contains(out, `"level":1`) {
+		t.Fatalf("transient read failure must log at default level with the source and cause: %s", out)
+	}
+
+	// Inside the rate-limit window the repeat drops to V(1) instead of streaming.
+	buf.Reset()
+	r.catalogSourcePresent(ctx, "blip-cs")
+	out = buf.String()
+	if !strings.Contains(out, `"level":1`) {
+		t.Fatalf("repeat within the rate-limit window must drop to V(1): %s", out)
 	}
 }
 

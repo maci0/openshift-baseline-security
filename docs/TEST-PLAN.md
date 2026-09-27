@@ -1224,6 +1224,10 @@ Injectable faults for envtest or a "faulty client" wrapper:
       of replaying one page until the reconcile deadline (`TestNextPageToken`).
 - [ ] **Delete binding returns NotFound**: prune path continues.
 - [ ] **Get Console returns NoKindMatch**: deregister and ensure paths soft-fail.
+- [ ] **Get CatalogSource returns a transient error**: detection answers
+      present-but-not-definite, the Subscription source is not rewritten, and
+      the discarded read failure is logged with the source name and cause
+      (`TestCatalogSourcePresent`, `TestCatalogSourceReadFailureIsLogged`).
 - [ ] **Patch rescan returns 403 for half the scans**: UI partial failure alert.
 - [ ] **Watch stream dies and restarts**: console shows transient error then
       recovers without requiring a full reload.
