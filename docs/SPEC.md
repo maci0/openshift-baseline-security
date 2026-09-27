@@ -374,8 +374,11 @@ and Red Hat-updated.
 - Operator ClusterRole: get/list/watch Compliance Operator check results,
   scans, and suites; create/update ScanSetting (owner-ref GC'd, never
   deleted) and create/update/delete ScanSettingBindings;
-  patch ComplianceRemediations; get/patch MachineConfigPools by name only
-  (batch pause/resume; never listed or watched); create
+  patch ComplianceRemediations; get/patch MachineConfigPools for batch
+  pause/resume (the reconciler only ever Gets a pool by name, never lists or
+  watches them, but the shipped grant carries no `resourceNames`, so the
+  ClusterRole can get and patch any MCP in the cluster; see
+  [THREAT_MODEL.md](THREAT_MODEL.md)); create
   Namespace/OperatorGroup/Subscription (scoped
   by resourceNames where OLM allows); patch
   `consoles.operator.openshift.io/cluster`; full access to the owned CRD;

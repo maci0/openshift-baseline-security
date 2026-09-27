@@ -475,7 +475,13 @@ CI and `make bundle`) asserts the two surfaces stay equal: ProfileKey set,
 default schedule, MaxItems caps (profiles/tailored/waivers/batch), severity
 weights, history scoring-mode annotation, batch-apply annotation/key, and
 the operator-side failure-list cap (`FailureListMax` / MaxItems=4096 on
-scan-diff fields; console does not write those lists).
+scan-diff fields; console does not write those lists). It also pins the
+Compliance Operator keys both sides hard-code off cluster objects (suite,
+check-severity and scan-name labels; `inconsistent-source` and
+`most-common-status` annotations), the `-node-` scan-name delimiter, the
+operator-side `HistoryMax = 30` history ring, and the plugin serving contract
+across Go, `nginx.conf`, and the plugin Dockerfile (listen port, `EXPOSE`,
+healthz location).
 
 **Alternatives:** Generate TS from Go (or CRD OpenAPI); single shared JSON
 contract file; trust dual unit tests only.
