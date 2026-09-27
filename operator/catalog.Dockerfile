@@ -6,6 +6,11 @@ ARG VERSION=0.6.1
 ENV SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH}
 ENTRYPOINT ["/bin/opm"]
 CMD ["serve", "/configs", "--cache-dir=/tmp/cache"]
+# Documentation only (Kubernetes ignores it for reachability): the port OLM's
+# CatalogSource controller connects to for a grpc source. Without it, `docker
+# inspect` on the published catalog image shows no ports and the fixed port
+# reads as a hidden constant of the opm base image.
+EXPOSE 50051
 # Own configs as the runtime UID so a base-image USER drift to root cannot leave
 # root-owned FBC that 1001 cannot read after we drop privileges.
 # --chmod: host umask must not change the shipped layer digest (dirs stay traversable).

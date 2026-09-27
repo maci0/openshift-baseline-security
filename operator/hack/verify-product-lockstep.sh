@@ -29,6 +29,9 @@ BATCH="${ROOT}/operator/internal/controller/batch.go"
 MODELS="${ROOT}/console-plugin/src/models.ts"
 SCORING_TS="${ROOT}/console-plugin/src/scoring.ts"
 PATCHES="${ROOT}/console-plugin/src/patches.ts"
+PLUGIN_GO="${ROOT}/operator/internal/controller/clusterbaseline_controller.go"
+NGINX_CONF="${ROOT}/console-plugin/nginx.conf"
+PLUGIN_DOCKERFILE="${ROOT}/console-plugin/Dockerfile"
 
 fail=0
 die() { echo "verify-product-lockstep: $*" >&2; fail=1; }
@@ -48,6 +51,9 @@ need "$BATCH" || true
 need "$MODELS" || true
 need "$SCORING_TS" || true
 need "$PATCHES" || true
+need "$PLUGIN_GO" || true
+need "$NGINX_CONF" || true
+need "$PLUGIN_DOCKERFILE" || true
 if [[ "$fail" -ne 0 ]]; then
   exit 1
 fi
@@ -161,6 +167,30 @@ if [[ -z "$go_batch_max" || -z "$ts_batch_max" ]]; then
   die "could not read batch max remediations"
 elif [[ "$go_batch_max" != "$ts_batch_max" ]]; then
   die "batchMaxRemediations ($go_batch_max) != batchApplyMaxNames ($ts_batch_max)"
+fi
+
+# Console plugin serving contract: the Go constants, the nginx config copied
+# into the plugin image, and the image's EXPOSE are one port and one health
+# path. The Service, the container port, the ConsolePlugin backend, and the
+# kubelet probes all read the Go constants, so a drift on the nginx or Dockerfile
+# side is the only one nothing in Go would catch: the pod still becomes Ready
+# (the probe path is nginx's own constant return) while the console cannot reach
+# the assets.
+go_plugin_port=$(grep -E '^[[:space:]]*pluginPort = [0-9]+' "$PLUGIN_GO" | head -1 | sed -E 's/.*= *([0-9]+).*/\1/' || true)
+go_healthz=$(grep -E '^[[:space:]]*pluginHealthzPath = ' "$PLUGIN_GO" | head -1 | sed -E 's/.*"([^"]+)".*/\1/' || true)
+if [[ -z "$go_plugin_port" || -z "$go_healthz" ]]; then
+  die "could not read pluginPort / pluginHealthzPath"
+else
+  nginx_port=$(grep -E '^[[:space:]]*listen [0-9]+ ssl' "$NGINX_CONF" | head -1 | sed -E 's/.*listen ([0-9]+) ssl.*/\1/' || true)
+  if [[ "$nginx_port" != "$go_plugin_port" ]]; then
+    die "nginx.conf listens on ${nginx_port:-<none>}, operator pluginPort is ${go_plugin_port}"
+  fi
+  if ! grep -qE "^EXPOSE ${go_plugin_port}\$" "$PLUGIN_DOCKERFILE"; then
+    die "console-plugin Dockerfile must EXPOSE ${go_plugin_port} (matches nginx.conf and the operator Service)"
+  fi
+  if ! grep -qF "location = ${go_healthz}" "$NGINX_CONF"; then
+    die "nginx.conf has no \`location = ${go_healthz}\`; the operator probes it for readiness and liveness"
+  fi
 fi
 
 if [[ "$fail" -ne 0 ]]; then
