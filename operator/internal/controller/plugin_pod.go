@@ -12,7 +12,9 @@ import (
 	"k8s.io/utils/ptr"
 )
 
-// preferredHostnameAntiAffinity spreads plugin pods across nodes (CONVENTIONS.md HA).
+// preferredHostnameAntiAffinity spreads plugin pods across nodes (the HA
+// guidance in the openshift/enhancements CONVENTIONS.md, cited in
+// docs/STANDARDS.md).
 func preferredHostnameAntiAffinity(labels map[string]string) *corev1.Affinity {
 	return &corev1.Affinity{
 		PodAntiAffinity: &corev1.PodAntiAffinity{

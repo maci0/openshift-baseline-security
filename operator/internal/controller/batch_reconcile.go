@@ -187,6 +187,8 @@ func (r *ClusterBaselineReconciler) ensureBatchMetadata(
 			// compares this stamp against the injected clock, so stamping it
 			// from the wall clock can leave StartedAt a full clock ahead of it
 			// and be read back as corrupt, resuming a live pause immediately.
+			// The same clock also keeps a simulated run from reading its own
+			// virtual time against real elapsed time.
 			started = metav1.NewTime(r.now().UTC())
 			annotations[batchStartedAtAnnotation] = started.UTC().Format(time.RFC3339Nano)
 			changed = true

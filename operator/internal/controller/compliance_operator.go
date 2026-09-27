@@ -129,11 +129,14 @@ func (r *ClusterBaselineReconciler) ensureComplianceOperatorGroup(ctx context.Co
 }
 
 // resolveCatalogSource picks the OLM CatalogSource for the CO Subscription and
-// reports whether the choice is confident. An explicit spec value always wins
-// (and is confident). When unset it auto-detects the cluster flavor: OCP carries
-// the Compliance Operator in redhat-operators, OKD in community-operators. Prefer
-// redhat-operators when present; fall back to community-operators only if
-// redhat-operators is definitely absent (OKD); otherwise the default.
+// reports whether the choice is confident. An explicit spec value wins (and is
+// confident), except when it equals the 0.5.6 CRD default redhat-operators:
+// that value is persisted on every CR written under the old schema, so
+// detection decides instead (see below). When unset it auto-detects the
+// cluster flavor: OCP carries the Compliance Operator in redhat-operators, OKD
+// in community-operators. Prefer redhat-operators when present; fall back to
+// community-operators only if redhat-operators is definitely absent (OKD);
+// otherwise the default.
 //
 // confident is false when detection had to assume-present on a transient API
 // error (so the answer is a best guess, not a verified choice). The create path

@@ -1,16 +1,71 @@
 package v1alpha1
 
 import (
+	"errors"
+	"os"
 	"strings"
 	"testing"
 
 	"k8s.io/apimachinery/pkg/util/validation"
 )
 
-// The doc comment on AllProfileKeys pins its length to the CRD Enum cardinality
-// and the Profiles MaxItems marker (8), and the constants require lockstep with
-// the console PROFILE_KEYS list. These tests fail when a profile is added to one
-// place but not the others, so admission and the console cannot drift apart.
+// A new profile has to land in four places: the ProfileKey constants, the
+// kubebuilder Enum marker (which is what admission validates against), the
+// AllProfileKeys display order, and the console PROFILE_KEYS list. These tests
+// cover the first three, including reading the marker out of this package's own
+// source, since it is hand-maintained and nothing else compares it to the
+// constants. The console half is not reachable from Go: make
+// verify-product-lockstep (hack/verify-product-lockstep.sh) diffs the constants
+// against console-plugin/src/models.ts.
+
+const profileKeyEnumMarker = "+kubebuilder:validation:Enum="
+
+// TestProfileKeyEnumMarkerMatchesConstants keeps the hand-written Enum marker
+// and the ProfileKey constants in step. A profile in the constants but not the
+// marker is rejected by admission on a CR that the Go side and the console both
+// consider valid.
+func TestProfileKeyEnumMarkerMatchesConstants(t *testing.T) {
+	enum, err := profileKeyEnumValues()
+	if err != nil {
+		t.Fatalf("reading the ProfileKey Enum marker: %v", err)
+	}
+	got := AllProfileKeys()
+	if len(enum) != len(got) {
+		t.Fatalf("Enum marker lists %d values (%v), AllProfileKeys has %d (%v)", len(enum), enum, len(got), got)
+	}
+	for i, v := range enum {
+		if ProfileKey(v) != got[i] {
+			t.Fatalf("Enum[%d] = %q, AllProfileKeys[%d] = %q (order is API contract)", i, v, i, got[i])
+		}
+	}
+}
+
+var errProfileKeyEnumMarkerNotFound = errors.New("no Enum marker line on the ProfileKey type declaration")
+
+// profileKeyEnumValues reads the values out of the Enum marker on the line
+// above `type ProfileKey string`. Parsed from the source rather than the
+// generated CRD so the check runs in the plain unit suite with no build step.
+func profileKeyEnumValues() ([]string, error) {
+	src, err := os.ReadFile("clusterbaseline_types.go")
+	if err != nil {
+		return nil, err
+	}
+	lines := strings.Split(string(src), "\n")
+	for i, line := range lines {
+		if strings.TrimSpace(line) != "type ProfileKey string" {
+			continue
+		}
+		if i == 0 {
+			break
+		}
+		marker, ok := strings.CutPrefix(strings.TrimSpace(lines[i-1]), "// "+profileKeyEnumMarker)
+		if !ok {
+			break
+		}
+		return strings.Split(marker, ";"), nil
+	}
+	return nil, errProfileKeyEnumMarkerNotFound
+}
 
 func TestAllProfileKeysMatchesEnumCardinality(t *testing.T) {
 	want := []ProfileKey{

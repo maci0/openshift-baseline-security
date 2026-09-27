@@ -94,12 +94,13 @@ spec:
               -l compliance.openshift.io/check-status=INCONSISTENT
         - alert: ComplianceStatusStale
           # Operator stopped publishing (crash loop, stuck reconcile, scrape
-          # only from a demoted replica that never aggregated). The gauge is not
-          # seeded, so the series is absent until the first publish: absent() is
-          # the never-published case (all replicas gone / scaled to 0 / hard
-          # crashloop where the metrics server never binds) and the one max()
-          # over an empty vector would otherwise miss. A published value is a
-          # wall clock; == 0 stays as a guard against a zero reading.
+          # only from a demoted replica that never aggregated). The gauge is
+          # never seeded, so the series is absent until the first publish:
+          # absent() is the never-published case (all replicas gone / scaled to 0
+          # / hard crashloop where the metrics server never binds), which the
+          # one max() over an empty vector would otherwise miss. A published
+          # value is a wall clock; the == 0 disjunct is the belt-and-braces guard
+          # against a zero reading.
           # Steady requeue is 1m; 15m covers leader election + install grace.
           expr: >-
             absent(baseline_security_status_observed_timestamp_seconds)

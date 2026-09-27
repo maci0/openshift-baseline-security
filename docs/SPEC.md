@@ -149,7 +149,10 @@ Responsibilities:
      `redhat-operators` catalog. The catalog source is auto-detected when
      `spec.complianceCatalogSource` is unset: `redhat-operators` on OCP, else
      `community-operators` when only that exists (OKD). An explicit
-     `spec.complianceCatalogSource` always wins (disconnected mirrors).
+     `spec.complianceCatalogSource` wins (disconnected mirrors), except for
+     the value `redhat-operators`, which the 0.5.6 CRD used to default: it is
+     persisted on every CR written under that schema, so it is re-detected
+     rather than trusted as an explicit choice.
    - An OLM bundle `dependencies.yaml` on the compliance-operator package is
      deliberately NOT used: OLM v0 resolves dependencies into the dependent's
      namespace/OperatorGroup, but compliance-operator expects its own

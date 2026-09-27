@@ -6,7 +6,8 @@ plugin. Status: `[x]` covered by an existing test, `[ ]` gap, `[~]` partial
 
 Existing unit/fuzz tests live in `operator/internal/controller/*_test.go`,
 `operator/cmd/*_test.go`, `operator/hack/*_test.go` (the `hack/` scripts), and
-`console-plugin/src/*.test.ts`. Live e2e lives in
+`console-plugin/src/*.test.ts` plus `console-plugin/src/components/*.test.ts`.
+Live e2e lives in
 `operator/test/e2e/` (Go, build tag `e2e`) and `console-plugin/e2e/` (Playwright).
 
 When adding a case, prefer the cheapest layer that would catch a regression:
@@ -825,6 +826,7 @@ stale Available or eternal Progressing.
 | Happy path CO+scans ready | True | False | False | [x] `TestSetRollupConditionsMatrix` |
 | CO Installing | False | True | False | [x] |
 | CO CSV Failed | False | False | True (CSVFailed) | [x] |
+| CO Installing past the 15m grace | False | False | True (InstallStalled) | [x] `TestStuckInstallDegrades` |
 | Invalid schedule | False | False | True (InvalidSchedule) | [x] |
 | Scan storage Pending >2m | True* | False | True (ScanStorageNotReady) | [x] *if CO+scan cfg already True; detail is ScanStorageReady False / ScanStoragePending |
 | Plugin Unavailable >5m | True* | False | True (ConsolePluginUnavailable) | [x] |

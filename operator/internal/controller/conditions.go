@@ -141,8 +141,11 @@ func conditionProgressing(c *metav1.Condition) bool {
 
 // setRollupConditions sets Available, Progressing, and Degraded from the
 // detail conditions (ClusterOperator-style rollups). now is the reconciler's
-// clock reading, so the install-stall grace is measured on the same clock as
-// the rest of the reconcile.
+// clock reading, so every grace period here is measured on the injected clock
+// rather than the wall clock. The install-stall grace is the one comparison
+// whose other side is not: meta.SetStatusCondition stamps a new
+// LastTransitionTime from the wall clock, so a simulated run measures the CO
+// condition's real transition time against its virtual now.
 func setRollupConditions(cb *baselinev1alpha1.ClusterBaseline, now time.Time) {
 	co := meta.FindStatusCondition(cb.Status.Conditions, "ComplianceOperatorReady")
 	scan := meta.FindStatusCondition(cb.Status.Conditions, "ScanConfigured")

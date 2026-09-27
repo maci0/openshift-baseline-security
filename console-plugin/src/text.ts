@@ -58,8 +58,9 @@ export const foldForSearch = (value: string): string =>
 export const foldSearchQuery = (query: string): string => foldForSearch(query).trim();
 
 // Substring test between an already-folded option and an already-folded query.
-// A linear indexOf per option is bounded: a Kubernetes name is capped at 253
-// characters by isValidK8sName.
+// A linear indexOf per option is bounded: every option is a Kubernetes object
+// name, capped at 253 characters by the apiserver whether or not the caller
+// ran it through isValidK8sName first.
 export const matchesFolded = (foldedOption: string, foldedQuery: string): boolean =>
   foldedQuery.length === 0 || foldedOption.includes(foldedQuery);
 

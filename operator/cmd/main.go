@@ -364,7 +364,7 @@ func parseEnvBool(key string) (bool, error) {
 		if len(shown) > envBoolValueMaxLog {
 			shown = shown[:envBoolValueMaxLog] + "..."
 		}
-		return false, fmt.Errorf("%w: %s=%q (want true/false, 1/0, yes/no, on/off)", errInvalidEnvBool, key, shown)
+		return false, fmt.Errorf("%w: %s=%q (want true/false, 1/0, yes/no, on/off, y/n, t/f, enable/disable)", errInvalidEnvBool, key, shown)
 	}
 }
 

@@ -189,7 +189,6 @@ depend on those tags.
   value, so an accented name sorted after every plain letter and embedded
   numbers ordered `rule_10` before `rule_2`. They now sort by the session
   locale's collation.
-
 ### Changed
 
 - The operator seeded every gauge to 0 at startup, and
@@ -227,7 +226,6 @@ depend on those tags.
   is now folded when it changes and the query when it is typed, leaving a
   substring test per option. Matching is unchanged, including diacritic and
   Turkish dotted/dotless i handling.
-
 - The console plugin's nginx access log no longer uses the `combined` format.
   It logged the admin's client IP, the referring console URL, and the browser
   user agent, none of which triage a failed static-asset fetch, and the log
@@ -313,7 +311,6 @@ depend on those tags.
   loses the Author button and the Edit control (the Unbind control beside Edit
   still patches only the baseline and is unchanged). This closes a path where
   a baseline-only patch created and rewrote objects the operator then consumed.
-
 ### Fixed
 
 - A paged apiserver `List` that returned the continue token it had just been
@@ -341,7 +338,6 @@ depend on those tags.
   without `--from=build`, so it resolved against the build context instead,
   where `dist/` is excluded by `.dockerignore`. The file the build stage
   generated was never reachable from the runtime stage.
-
 - Release workflow: the `version` input of a manual `workflow_dispatch` run was
   never read, so the cut published whatever the dispatched ref resolved to and a
   mistyped version was accepted silently. The input is now passed to
@@ -526,6 +522,27 @@ depend on those tags.
   consumes it already caught and showed Retry. A stale cached console after a
   plugin upgrade is the common way to hit it, and the unhandled rejection
   obscured the Retry control for the same failure.
+### Security
+
+- Results CSV export hardened against a formula sigil hidden behind a leading
+  control character. `csvCell` dropped NULs and Unicode format characters, then
+  checked the cell for a formula starter, so a cell such as `\u0001=cmd` kept a
+  control prefix that a spreadsheet trims before deciding whether the cell is a
+  formula. A tampered `ComplianceCheckResult` name, description first line, or
+  `check-severity` label could therefore reach a downloaded export as an
+  evaluated formula. Export rows now drop the controls a spreadsheet trims
+  (tab, CR, and LF stay, since RFC 4180 quoting needs them). Cells that held a
+  control character other than a delimiter lose it from the export.
+- Console write controls were gated on `useAccessReview` through their
+  `isDisabled` prop alone. A tab holding an open confirm modal, a stopped
+  editor, or a pending form across a permission revocation would still send the
+  patch the button had already admitted. Every mutation now re-checks the
+  reviewed permission at the request boundary through one chokepoint
+  (`console-plugin/src/permissions.ts`), and an unresolved review denies rather
+  than defaulting to allow. Covered: rescan, profile toggle, schedule save,
+  waiver add and remove, TailoredProfile create, update, and bind, tailored
+  profile unbind, default baseline create, and every remediation path
+  (per-row apply, unapply, auto-apply, batch apply).
 
 ### Security
 

@@ -313,7 +313,7 @@ is the product config; see `operator/config/samples/` and the CRD.
 | `--zap-stacktrace-level` | error (prod) / warn (devel) | `info`, `error`, or `panic` |
 | `--kubeconfig` | client-go default | Explicit kubeconfig path; wins over `KUBECONFIG` |
 | `RELATED_IMAGE_CONSOLE_PLUGIN` | unset | Plugin image the operator deploys; unset leaves `ImageMissing` |
-| `BASELINE_SECURITY_SKIP_DEFAULT_CR` | unset (create CR) | true/1/yes/on skips the default CR; false/0/no/off is the same as unset; any other value exits |
+| `BASELINE_SECURITY_SKIP_DEFAULT_CR` | unset (create CR) | skips the default CR when true, i.e. `true`/`1`/`yes`/`on`/`y`/`t`/`enable`/`enabled`; the matching false spellings (`false`/`0`/`no`/`off`/`n`/`f`/`disable`/`disabled`), like unset, create the CR; any other value exits 1 |
 | `GOMEMLIMIT` | `440MiB` in the Deployment | Go GC soft cap (not read by operator code) |
 
 `make run` sets `--leader-elect=false --metrics-bind-address=0` and fills

@@ -118,9 +118,9 @@ type ClusterBaselineReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
 
-	// Clock is the reconcile loop's only source of wall-clock time. Nil reads
-	// the real clock; a deterministic simulation sets a virtual one so a whole
-	// run replays from a seed. See clock.go.
+	// Clock is the reconcile loop's wall-clock source. Nil reads the real clock;
+	// a deterministic simulation sets a virtual one so a whole run replays from
+	// a seed. See clock.go for the one stamp that bypasses it.
 	Clock clock
 
 	// lastHistoryStallLog rate-limits default-level Info when history cannot

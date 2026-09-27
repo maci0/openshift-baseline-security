@@ -11,12 +11,12 @@
 //
 // Files are split by concern (same package, no import cycles):
 //   - clusterbaseline_controller.go: Reconcile loop, reconcileOwned, SetupWithManager
-//   - clock.go: the reconciler's only wall-clock source (nil = real clock)
+//   - clock.go: the reconciler's wall-clock source (nil = real clock)
 //   - helpers.go: requeue cadence, createIfMissing, relatedObjectsFromSuites
 //   - unstructured.go: unstructured object/list helpers and metadata field readers
 //   - compliance_operator.go: CO Subscription/OperatorGroup/CSV readiness
 //   - scanconfig.go: ScanSetting + per-profile/tailored ScanSettingBindings
-//   - scanstorage.go: Pending PVC / StorageClass readiness condition
+//   - scanstorage.go: Pending PVC readiness condition
 //   - aggregate.go: check-result scoring, counts, profile status
 //   - history_reconcile.go: suite-completion history advance and scan-diff base
 //   - history.go: score history rings, failure-diff, per-profile ring sync, scan endTimestamp parse

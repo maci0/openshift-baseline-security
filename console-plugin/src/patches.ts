@@ -160,9 +160,9 @@ const isParseableTime = (s: string): boolean => {
 // ClusterBaseline CRD bounds for waiver text fields, in the CRD's own unit:
 // Unicode code points (codePointLength), which is what the API server counts
 // for maxLength. Shared by the patch validator and the waive form's maxLength
-// attributes so the widget can never allow what the validator rejects (or vice
-// versa): the DOM attribute counts UTF-16 code units, so it is never looser
-// than a code-point bound.
+// attributes so the widget is never looser than the validator: the DOM
+// attribute counts UTF-16 code units, so every astral character counts double
+// and the field can be stricter than the bound, never more permissive.
 export const WAIVER_REASON_MAX_LEN = 1024;
 export const WAIVER_ATTRIBUTION_MAX_LEN = 253;
 

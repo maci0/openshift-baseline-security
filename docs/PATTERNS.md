@@ -97,7 +97,8 @@ answer. Bounded lists in status (no unbounded growth).
 with `observedGeneration` (`Available` / `Progressing` / `Degraded`
 rollups plus detail `ComplianceOperatorReady`, `ScanConfigured`,
 `ScanStorageReady`, `ConsolePluginReady`), score + per-profile counts
-(suite-scoped to `baseline-<profile>` bindings), history capped at 30
+(suite-scoped to `baseline-<profile>` bindings and the tailored
+`baseline-tp-<name>` form), history capped at 30
 (oldest first), printer columns Score / Last Scan. Manager and plugin
 Deployments use 2 replicas with preferred pod anti-affinity; manager uses
 leader election and ships no PDB (ADR-028). On SingleReplica-topology

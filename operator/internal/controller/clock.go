@@ -2,12 +2,15 @@ package controller
 
 import "time"
 
-// clock is the operator's only wall-clock source. Every production read of
-// "now" (requeue cadence, waiver expiry, scan schedule, batch grace timer,
-// history timestamps, gauge freshness, log rate limits) goes through it, so a
+// clock is the operator's wall-clock source. Every production read of "now"
+// (requeue cadence, waiver expiry, scan schedule, batch grace timer, history
+// timestamps, gauge freshness, log rate limits) goes through it, so a
 // deterministic simulation can drive the reconcile loop from a virtual clock
 // and replay a run from its seed. Production wires the nil default (real
-// clock); a struct literal in a test behaves the same.
+// clock); a struct literal in a test behaves the same. The one exception is
+// sanitize.go stamping a LastTransitionTime on a condition whose value is
+// required to be non-zero: nothing compares that stamp against the clock, so
+// it cannot make a simulation non-reproducible.
 type clock interface {
 	Now() time.Time
 }
