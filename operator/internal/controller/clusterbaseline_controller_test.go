@@ -1252,6 +1252,109 @@ func TestRemediationBatchMissingRemediationCountsGrace(t *testing.T) {
 	}
 }
 
+// The finish path resumes pools, strips the batch annotations, and counts the
+// outcome; clearing status.remediationBatch is the trailing Status().Update.
+// When that write fails, the next reconcile reads a CR that still has the
+// batch in status and no batch annotations left, and runs the whole finish
+// again. The pool resumes are no-ops, but the counter is a bare Inc: the
+// outcome of one batch was recorded once per retry, unbounded, for as long as
+// the status subresource stayed unwritable.
+func TestRetriedFinishCountsTheBatchOnce(t *testing.T) {
+	scheme := testScheme(t)
+	rem := nodeRemediation("rem1", "worker")
+	pool := machineConfigPool("worker")
+	cb := newBatchCB()
+	cb.SetAnnotations(map[string]string{batchApplyAnnotation: "rem1"})
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).
+			WithObjects(cb, rem, pool).
+			WithStatusSubresource(&baselinev1alpha1.ClusterBaseline{}).Build(),
+		Scheme: scheme,
+	}
+	ctx := context.Background()
+	cancelledBefore := testutil.ToFloat64(remediationBatches.WithLabelValues("cancelled"))
+
+	if err := r.applyRemediationBatch(ctx, cb); err != nil {
+		t.Fatal(err)
+	}
+	if cb.Status.RemediationBatch == nil {
+		t.Fatal("batch not started")
+	}
+
+	// Revert spec.apply so the batch finishes as cancelled once the pools are
+	// back, which is the outcome whose counter this test watches.
+	gotRem := &unstructured.Unstructured{}
+	gotRem.SetGroupVersionKind(remediationGVK)
+	if err := r.Get(ctx, types.NamespacedName{Namespace: complianceNamespace, Name: "rem1"}, gotRem); err != nil {
+		t.Fatal(err)
+	}
+	if err := unstructured.SetNestedField(gotRem.Object, false, "spec", "apply"); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Update(ctx, gotRem); err != nil {
+		t.Fatal(err)
+	}
+
+	// A finish whose Status().Update failed: the batch is still in status,
+	// the annotations the finish path strips are gone from the cluster.
+	cb.SetAnnotations(nil)
+
+	for retry := 1; retry <= 3; retry++ {
+		if err := r.applyRemediationBatch(ctx, cb); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := testutil.ToFloat64(remediationBatches.WithLabelValues("cancelled")) - cancelledBefore; got != 0 {
+		t.Fatalf("a retried finish counted the batch %v times, want 0 (the annotations already say it was reported)", got)
+	}
+}
+
+// The other half of the contract: a batch that has not been reported yet must
+// still be counted, marker annotations present or not. batchUnreported reads
+// the CR the reconcile started from, so a first finish sees them.
+func TestFirstFinishCountsTheBatch(t *testing.T) {
+	scheme := testScheme(t)
+	rem := nodeRemediation("rem1", "worker")
+	pool := machineConfigPool("worker")
+	cb := newBatchCB()
+	cb.SetAnnotations(map[string]string{batchApplyAnnotation: "rem1"})
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).
+			WithObjects(cb, rem, pool).
+			WithStatusSubresource(&baselinev1alpha1.ClusterBaseline{}).Build(),
+		Scheme: scheme,
+	}
+	ctx := context.Background()
+	before := testutil.ToFloat64(remediationBatches.WithLabelValues("cancelled"))
+
+	if err := r.applyRemediationBatch(ctx, cb); err != nil {
+		t.Fatal(err)
+	}
+	if !batchUnreported(cb) {
+		t.Fatalf("a batch in flight carries no marker annotation: %v", cb.GetAnnotations())
+	}
+	gotRem := &unstructured.Unstructured{}
+	gotRem.SetGroupVersionKind(remediationGVK)
+	if err := r.Get(ctx, types.NamespacedName{Namespace: complianceNamespace, Name: "rem1"}, gotRem); err != nil {
+		t.Fatal(err)
+	}
+	if err := unstructured.SetNestedField(gotRem.Object, false, "spec", "apply"); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Update(ctx, gotRem); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.applyRemediationBatch(ctx, cb); err != nil {
+		t.Fatal(err)
+	}
+	if got := testutil.ToFloat64(remediationBatches.WithLabelValues("cancelled")) - before; got != 1 {
+		t.Fatalf("cancelled outcome delta = %v, want 1", got)
+	}
+	if batchUnreported(cb) {
+		t.Errorf("a finished batch still carries marker annotations: %v", cb.GetAnnotations())
+	}
+}
+
 func TestBatchPastGrace(t *testing.T) {
 	now := time.Date(2026, 7, 11, 12, 0, 0, 0, time.UTC)
 	grace := 10 * time.Minute

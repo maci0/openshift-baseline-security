@@ -46,7 +46,10 @@ has them, without waiting on a full control-plane restore.
 Options:
   -f, --force   restore even when the live object has moved on since the
                 backup was taken, or when the artifact was taken at an
-                apiVersion this cluster's CRD does not serve
+                apiVersion this cluster's CRD does not serve. The writes then
+                carry no resourceVersion precondition, so a repeated run
+                converges on the same object instead of failing on a conflict
+                it can never satisfy.
   -h, --help    print this usage and exit 0
 EOF
 }
@@ -255,14 +258,55 @@ if [[ -n "$SERVED_VERSIONS" ]]; then
   fi
 fi
 
+# The artifact carries the resourceVersion it was captured at, and that field
+# is an optimistic-concurrency precondition on both writes below: a PUT and a
+# merge patch naming a stale resourceVersion are refused with a conflict. That
+# is what makes the guard above work, and it is also what made --force
+# unrestorable: the operator had already accepted that the live object moved
+# on, so the precondition could never be satisfied again and every write was
+# refused. The script then exited with the spec half-restored and told the
+# operator to re-run, and the re-run hit the identical conflict forever.
+#
+# So under --force the restore is sent from a copy of the artifact with
+# metadata.resourceVersion removed: the writes become unconditional, the
+# restore completes, and a second run reaches the same state as the first
+# instead of failing on a precondition nobody can meet. Without --force the
+# artifact is sent as captured, so the guard above and the write agree.
+WRITE_ARTIFACT="$ARTIFACT"
+if [[ "$FORCE" == true && -n "$BACKUP_RESOURCE_VERSION" ]]; then
+  if ! WRITE_ARTIFACT="$(mktemp -- "$DIR/.restore.XXXXXX")"; then
+    echo "restore.sh: cannot write a temporary copy of the artifact in $DIR;" >&2
+    echo "restore.sh: nothing was changed." >&2
+    exit 1
+  fi
+  trap 'rm -f -- "$WRITE_ARTIFACT"' EXIT
+  # A metadata field two columns in with a scalar value: `oc get -o yaml`
+  # indents metadata's fields by two spaces, and nothing else in the object has
+  # that shape. If a resourceVersion survives the delete, the artifact was not
+  # written by that command and the write would carry a stale precondition the
+  # check above cannot see: fail rather than send it.
+  if ! sed -e '/^  resourceVersion:[[:space:]]*"\{0,1\}[0-9]*"\{0,1\}[[:space:]]*$/d' \
+    "$ARTIFACT" > "$WRITE_ARTIFACT"; then
+    echo "restore.sh: cannot strip the resourceVersion from the artifact;" >&2
+    echo "restore.sh: nothing was changed." >&2
+    exit 1
+  fi
+  if grep -qE '^[[:space:]]*resourceVersion:' "$WRITE_ARTIFACT"; then
+    echo "restore.sh: artifact carries a resourceVersion in a shape this script does" >&2
+    echo "restore.sh: not recognize, so --force would send a stale one and the writes" >&2
+    echo "restore.sh: would be refused. Nothing was changed." >&2
+    exit 1
+  fi
+fi
+
 # Spec first. If the CR does not exist at all (deleted namespace, lost CR),
 # apply creates it, and the controller recreates every owned object from the
 # restored spec on its next reconcile.
 echo "restore.sh: applying spec"
-oc apply -f "$ARTIFACT"
+oc apply -f "$WRITE_ARTIFACT"
 
 echo "restore.sh: replacing status subresource"
-if ! oc replace --subresource=status -f "$ARTIFACT"; then
+if ! oc replace --subresource=status -f "$WRITE_ARTIFACT"; then
   echo "restore.sh: status replace failed. The spec IS restored; the operator will" >&2
   echo "restore.sh: rebuild status from Compliance Operator results on its next" >&2
   echo "restore.sh: reconcile. Re-run once the cause is fixed to recover the" >&2

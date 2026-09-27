@@ -296,6 +296,10 @@ func (r *ClusterBaselineReconciler) finishRemediationBatch(
 	ctx context.Context, cb *baselinev1alpha1.ClusterBaseline,
 ) error {
 	batch := cb.Status.RemediationBatch
+	// Captured before anything is written: clearBatchAnnotations below strips
+	// these keys from the cluster, and on this same object from memory, so
+	// reading them later would always say the batch had already been counted.
+	countThis := batchUnreported(cb)
 	applied := true
 	anyApplying := false
 	var getErr error
@@ -429,7 +433,12 @@ func (r *ClusterBaselineReconciler) finishRemediationBatch(
 		log.FromContext(ctx).Info("remediation batch finished", kv...)
 		// Counted after the resume landed, so a reconcile that fails before this
 		// point does not report an outcome for a batch that is still paused.
-		remediationBatches.WithLabelValues(reason).Inc()
+		// batchUnreported keeps a retried finish (the trailing Status().Update
+		// failed, so status.remediationBatch survived while the annotations
+		// above did not) from counting the same batch once per retry.
+		if countThis {
+			remediationBatches.WithLabelValues(reason).Inc()
+		}
 		cb.Status.RemediationBatch = nil
 		return nil
 	}

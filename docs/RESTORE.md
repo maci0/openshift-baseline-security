@@ -155,6 +155,17 @@ drops the score, the conditions, the history rings, and any in-flight
 remediation batch. The operator would rebuild a partial view from Compliance
 Operator results, which is the right steady state but is not a restore.
 
+A restore runs more than once per incident as often as it runs once (after a
+transient API error, to be sure, by the next person on the incident), and the
+second run has to reach the state the first one reached. Under `--force` the
+two writes are sent from a copy of the artifact with `metadata.resourceVersion`
+removed, because that field is a precondition on both: it is what the staleness
+guard above compares, and once the operator has accepted the rollback there is
+no live `resourceVersion` left that could satisfy it. The writes are then
+unconditional, so a re-run converges instead of conflicting. Without `--force`
+the artifact is sent as captured, and the guard above and the write agree. The
+artifact on disk is never modified.
+
 Watch it converge with
 `oc get clusterbaseline cluster -o yaml --watch`.
 

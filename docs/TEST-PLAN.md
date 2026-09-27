@@ -520,7 +520,10 @@ an accepted risk neither inflates nor tanks the score.
       (`TestPublishMetricsBatchStartedTimestamp`).
 - [x] **Batch outcome counter**: `baseline_security_remediation_batches_total`
       counts the outcome once the pools are free and not on batch start
-      (`TestRemediationBatchCountsOutcome`).
+      (`TestRemediationBatchCountsOutcome`). A finish retried because the
+      trailing `Status().Update` failed does not count the same batch again
+      (`TestRetriedFinishCountsTheBatchOnce`), and a first finish still counts
+      (`TestFirstFinishCountsTheBatch`).
 - [x] **PrometheusRule** `RemediationBatchGraceResume` fires on a grace-forced
       resume and stays silent when only `applied` batches were counted
       (`make test-alerts`, `alerts_test.yaml`).
@@ -1481,7 +1484,9 @@ before any cluster write, the refusal of a multi-document artifact even when
 its checksum is valid, the refusal to roll a live object back past its own
 resourceVersion without `--force`, the refusal when the live object cannot be
 read at all (an unreadable object is not an absent one, and `--force` does not
-override it), the reported artifact age, the
+override it), a repeated `--force` restore converging on the state the first
+one reached (both writes go out without the captured `resourceVersion`, which
+is what made the second run conflict forever), the reported artifact age, the
 future-`lastScanTime` recovery hint, the deletion warning that names the
 unrecoverable waivers, `verify-backup.sh` against a good directory and every
 way a scheduled backup fails quietly, the same round trip on a PATH with

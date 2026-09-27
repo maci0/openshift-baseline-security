@@ -127,6 +127,16 @@ func fakeOC(t *testing.T, dir, captured string) (logfile string) {
 		"    cat <<'CAPTURED'\n" + captured + "CAPTURED\nexit 0 ;;\n" +
 		"esac\n" +
 		"printf '%s\\n' \"$*\" >> " + filepath.Join(dir, "oc.log") + "\n" +
+		// FAKE_OC_COPY_SENT records what a -f write actually sent. A restore
+		// that stages a temporary copy deletes it on exit, so the caller's
+		// own log line names a path that is gone by the time it reads it.
+		"prev=''\n" +
+		"for a in \"$@\"; do\n" +
+		"  if [ \"$prev\" = '-f' ] || [ \"$prev\" = '--filename' ]; then\n" +
+		"    if [ -n \"${FAKE_OC_COPY_SENT:-}\" ]; then printf '=== sent %s\\n' \"$a\" >> " + filepath.Join(dir, "sent.log") + "; cat -- \"$a\" >> " + filepath.Join(dir, "sent.log") + " 2>/dev/null || printf '<unreadable>\\n' >> " + filepath.Join(dir, "sent.log") + "; fi\n" +
+		"  fi\n" +
+		"  prev=\"$a\"\n" +
+		"done\n" +
 		"exit 0\n"
 	if err := os.WriteFile(stub, []byte(script), 0o700); err != nil {
 		t.Fatalf("writing fake oc: %v", err)
@@ -156,15 +166,19 @@ func sha256Hex(t *testing.T, path string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Read-only handle: a close error carries no data-loss risk, and the
+	// hash failure above has already failed the test if it mattered.
 	defer func() {
-		// Read-only handle: a close error carries no data-loss risk, and the
-		// hash failure above has already failed the test if it mattered.
 		if cerr := f.Close(); cerr != nil {
 			t.Logf("closing %s: %v", path, cerr)
 		}
 	}()
 	h := sha256.New()
 	if _, err := io.Copy(h, f); err != nil {
+		_ = f.Close()
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
 		t.Fatal(err)
 	}
 	return hex.EncodeToString(h.Sum(nil))
@@ -536,6 +550,79 @@ func TestRestoreRefusesToRollBackAMovedOnObject(t *testing.T) {
 	calls := ocCalls(t, log)
 	if !strings.Contains(calls, "apply -f") || !strings.Contains(calls, "replace --subresource=status -f") {
 		t.Errorf("--force did not complete the restore; oc calls:\n%s", calls)
+	}
+}
+
+// A restore is run twice for one incident as often as it is run once: the
+// operator re-runs it after a transient API error, re-runs it to be sure, and
+// hands it to a colleague who re-runs it. The second run has to reach the same
+// state as the first, not fail.
+//
+// It did fail. The artifact carries the resourceVersion it was captured at,
+// which is a precondition on both writes, and --force exists precisely for the
+// case where the live object has moved past it. So every --force write carried
+// a precondition the operator had already accepted as unsatisfiable: apply and
+// the status replace were both refused, the script exited 1 with the spec half
+// restored, and it told the operator to re-run, which hit the identical
+// conflict. Forever.
+func TestForceRestoreConvergesOnRerun(t *testing.T) {
+	bin := t.TempDir()
+	log := fakeOC(t, bin, baselineYAML)
+	t.Setenv("FAKE_OC_RESOURCE_VERSION", "41999")
+	t.Setenv("FAKE_OC_COPY_SENT", "1")
+	work := t.TempDir()
+	dir := backupDir(t, work, "bdir", "2026-09-20T03:00:00Z")
+
+	for run := 1; run <= 2; run++ {
+		if _, stderr, code := runScript(t, "restore.sh", work, "--force", dir); code != 0 {
+			t.Fatalf("restore.sh --force run %d: exit %d, want 0; stderr=%s", run, code, stderr)
+		}
+	}
+	calls := ocCalls(t, log)
+	for _, want := range []string{"apply -f", "replace --subresource=status -f"} {
+		if got := strings.Count(calls, want); got != 2 {
+			t.Errorf("wanted %q twice, one per run, got %d; oc calls:\n%s", want, got, calls)
+		}
+	}
+
+	// Both writes must have gone out without the captured resourceVersion: a
+	// stale one is the conflict this test is about, whatever the fake oc
+	// tolerates.
+	sent, err := os.ReadFile(filepath.Join(bin, "sent.log"))
+	if err != nil {
+		t.Fatalf("no record of what the restore sent: %v", err)
+	}
+	if got := strings.Count(string(sent), "=== sent "); got != 4 {
+		t.Errorf("recorded %d sent files, want 4 (apply and replace, twice):\n%s", got, sent)
+	}
+	if strings.Contains(string(sent), "resourceVersion") {
+		t.Errorf("the restore sent a resourceVersion precondition:\n%s", sent)
+	}
+	// Nothing but that line may go missing: a spec or status silently dropped
+	// by the strip is a restore that half happened.
+	for _, want := range []string{"score: 87", "schedule:", "requestedBy: alice", "lastScanTime:"} {
+		if !strings.Contains(string(sent), want) {
+			t.Errorf("the strip dropped %q from what the restore sent:\n%s", want, sent)
+		}
+	}
+
+	// The artifact on disk is the evidence; the script must not consume it.
+	artifact, err := os.ReadFile(filepath.Join(dir, "clusterbaseline.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(artifact) != baselineYAML {
+		t.Errorf("the restore modified the backup artifact:\n%s", artifact)
+	}
+	// The temporary copy is not left behind in the backup directory.
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".restore.") {
+			t.Errorf("restore left %s behind in the backup directory", e.Name())
+		}
 	}
 }
 

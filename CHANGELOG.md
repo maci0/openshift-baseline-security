@@ -197,6 +197,28 @@ depend on those tags.
 
 ### Fixed
 
+- `hack/restore.sh --force` restores again. The artifact carries the
+  `resourceVersion` it was captured at, and that field is a precondition on
+  both writes, so restoring over a live object that had moved on (exactly the
+  case `--force` exists for) sent a precondition that could never be satisfied:
+  `oc apply` and the status replace were both refused, the script exited with
+  the spec half restored and told the operator to re-run, and the re-run hit
+  the identical conflict. Under `--force` both writes now go out from a copy of
+  the artifact with that field removed, so the restore completes and a repeated
+  run reaches the state the first one reached. Without `--force` nothing
+  changed: the artifact is sent as captured, and the staleness guard and the
+  write still agree.
+
+- `baseline_security_remediation_batches_total` no longer counts one batch once
+  per retry. The finish path strips the batch annotations from the cluster and
+  then counts the outcome, but clears `status.remediationBatch` only in the
+  trailing `Status().Update`. When that write failed, every reconcile re-ran
+  the whole finish: the pool resumes were no-ops, the counter was not, and the
+  outcome of a single batch accrued once per requeue for as long as the status
+  subresource stayed unwritable. The finish path now counts only when the
+  cluster still carries that batch's annotations, which the earlier finish
+  removed.
+
 - The score trend and per-profile sparklines clamp a `status.history` score
   into the CRD `[0,100]` bounds before plotting it, the same bound the operator
   enforces on write and every other `status.score` read already applied. A

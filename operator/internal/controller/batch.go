@@ -163,6 +163,25 @@ func batchPauseOwner(cb *baselinev1alpha1.ClusterBaseline) string {
 	return clusterBaselineName
 }
 
+// batchUnreported is true when the CR still carries a durable marker of an
+// unfinished batch: the one-shot request or either recovery key. Both the
+// finish path and the orphan path strip all of them from the cluster before
+// they count an outcome, so a reconcile that arrives with the markers already
+// gone and status.remediationBatch still set is a retry of a batch that was
+// already reported, not a new batch.
+//
+// The status write that clears status.remediationBatch is the trailing
+// Status().Update, not the annotation Patch: when it fails, every reconcile
+// re-runs the finish path (resuming pools, which is an idempotent no-op, and
+// counting again). The annotations are the only durable record that the count
+// has already happened, so the counter reads them.
+func batchUnreported(cb *baselinev1alpha1.ClusterBaseline) bool {
+	ann := cb.GetAnnotations()
+	return ann[batchApplyAnnotation] != "" ||
+		ann[batchStartedAtAnnotation] != "" ||
+		ann[batchPoolsAnnotation] != ""
+}
+
 func uniqueSortedStrings(values []string) []string {
 	set := make(map[string]bool, len(values))
 	for _, value := range values {
