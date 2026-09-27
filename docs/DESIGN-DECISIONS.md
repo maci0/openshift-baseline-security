@@ -10,8 +10,46 @@ are no proposed, superseded, or deprecated entries. `**Status:** Keep` means
 accepted and active; the sentence after it names the condition that would
 reopen the decision. A record that stops matching the code is corrected in
 place, and a reversed decision is a new ADR that names the record it replaces
-(here: `Supersedes ADR-NNN`) while the old one is retitled with its
-`Superseded by ADR-MMM` status.
+(`Supersedes ADR-NNN`) while the old record's status line reads
+`Superseded by ADR-MMM` and stops being `Keep`.
+
+## Index
+
+| ADR | Decision | Recorded |
+|---|---|---|
+| [ADR-001](#adr-001-orchestration-wrapper-not-a-scanner) | Orchestration wrapper, not a scanner | 2026-07-12 |
+| [ADR-002](#adr-002-single-cluster-scoped-cr-clusterbaselinecluster) | Single cluster-scoped CR (`ClusterBaseline/cluster`) | 2026-07-12 |
+| [ADR-003](#adr-003-score-and-history-live-on-the-cr-status) | Score and history live on the CR status | 2026-07-12 |
+| [ADR-004](#adr-004-string-enums-for-installremediationconsolescoring) | String enums for install/remediation/console/scoring | 2026-07-12 |
+| [ADR-005](#adr-005-waivers-as-specwaivers-entries-keyed-by-check-name) | Waivers as `spec.waivers` entries keyed by check name | 2026-07-12 |
+| [ADR-006](#adr-006-batch-remediation-via-annotation--mcp-pause) | Batch remediation via annotation + MCP pause | 2026-07-12 |
+| [ADR-007](#adr-007-console-plugin-has-no-backend) | Console plugin has no backend | 2026-07-12 |
+| [ADR-008](#adr-008-severity-weighted-scoring-is-opt-in-history-is-mode-stamped) | Severity-weighted scoring is opt-in; history is mode-stamped | 2026-07-12 |
+| [ADR-009](#adr-009-benign-inconsistent-collapse) | Benign INCONSISTENT collapse | 2026-07-12 |
+| [ADR-010](#adr-010-ownership-via-suite-labels-not-namespace-wide-lists) | Ownership via suite labels, not namespace-wide lists | 2026-07-12 |
+| [ADR-011](#adr-011-explicit-co-subscription-not-olm-package-dependency) | Explicit CO Subscription, not OLM package dependency | 2026-07-12 |
+| [ADR-012](#adr-012-lazy-dynamic-informer-with-poll-fallback) | Lazy dynamic informer with poll fallback | 2026-07-12 |
+| [ADR-013](#adr-013-scan-diff-bookkeeping-fields-are-internal) | Scan-diff bookkeeping fields are internal | 2026-07-12 |
+| [ADR-014](#adr-014-pooled-score-not-the-mean-of-per-profile-scores) | Pooled score, not the mean of per-profile scores | 2026-07-13 |
+| [ADR-015](#adr-015-history-advances-only-when-every-owned-suite-is-complete) | History advances only when every owned suite is complete | 2026-07-13 |
+| [ADR-016](#adr-016-unstructured-clients-for-foreign-crs) | Unstructured clients for foreign CRs | 2026-07-13 |
+| [ADR-017](#adr-017-ui-score-color-bands-vs-compliancescorelow-threshold) | UI score color bands vs `ComplianceScoreLow` threshold | 2026-07-13 |
+| [ADR-018](#adr-018-score-gauge-uses--1-sentinel-ha-picks-newest-publisher) | Score gauge uses -1 sentinel; HA picks newest publisher | 2026-07-13 |
+| [ADR-019](#adr-019-default-clusterbaselinecluster-on-operator-start) | Default `ClusterBaseline/cluster` on operator start | 2026-07-13 |
+| [ADR-020](#adr-020-deleting-the-baseline-does-not-uninstall-the-compliance-operator) | Deleting the baseline does not uninstall the Compliance Operator | 2026-07-13 |
+| [ADR-021](#adr-021-integer-floor-score-in-0-100-not-a-float) | Integer floor score in [0, 100], not a float | 2026-07-13 |
+| [ADR-022](#adr-022-fixed-severity-weight-table-product-contract) | Fixed severity weight table (product contract) | 2026-07-13 |
+| [ADR-023](#adr-023-scansetting-storage-and-roles-are-fixed-product-defaults) | ScanSetting storage and roles are fixed product defaults | 2026-07-13 |
+| [ADR-024](#adr-024-dual-gots-product-contracts-ci-lockstep) | Dual Go/TS product contracts, CI lockstep | 2026-07-13 |
+| [ADR-025](#adr-025-compliance-report-is-client-side-printable-html) | Compliance report is client-side printable HTML | 2026-07-13 |
+| [ADR-026](#adr-026-score-trend-dashboard-is-a-native-console-configmap) | Score-trend dashboard is a native console ConfigMap | 2026-07-13 |
+| [ADR-027](#adr-027-prometheus-score-gauge-has-no-scoring-mode-label) | Prometheus score gauge has no scoring-mode label | 2026-07-13 |
+| [ADR-028](#adr-028-no-static-poddisruptionbudget-for-the-operator) | No static PodDisruptionBudget for the operator | 2026-07-15 |
+| [ADR-029](#adr-029-an-impossible-date-schedule-degrades-it-does-not-silently-disable) | An impossible-date schedule Degrades, it does not silently disable | 2026-07-15 |
+| [ADR-030](#adr-030-no-olm-replaces-graph-csv-capability-is-basic-install) | No OLM `replaces` graph; CSV capability is `Basic Install` | 2026-07-14 |
+| [ADR-031](#adr-031-waiver-names-are-unique-at-admission-cel) | Waiver names are unique at admission (CEL) | 2026-09-02 |
+| [ADR-032](#adr-032-manager-cache-is-namespace-scoped-not-cluster-wide) | Manager cache is namespace-scoped, not cluster-wide | 2026-09-27 |
+| [ADR-033](#adr-033-operator-namespace-networkpolicy-is-ingress-only) | Operator-namespace NetworkPolicy is ingress-only | 2026-09-27 |
 
 ## ADR-001: Orchestration wrapper, not a scanner
 
@@ -696,5 +734,43 @@ unaffected (a multi-namespace cache routes them to its own cluster-wide cache).
 
 **Status:** Keep. Revisit only if a namespaced typed read the reconciler cannot
 avoid appears outside the two namespaces.
+
+*Recorded: 2026-09-27 (git history).*
+
+## ADR-033: Operator-namespace NetworkPolicy is ingress-only
+
+**Decision:** The operator ships one `NetworkPolicy` in
+`openshift-baseline-security` selecting only its own pods, with
+`policyTypes: [Ingress]` and a single ingress rule: TCP 8443 from the
+`openshift-monitoring`, `openshift-service-ca-operator`, and
+`openshift-service-ca` namespaces. Egress is deliberately undeclared, so it
+stays unrestricted. The console-plugin pods in the same namespace are not
+selected (the policy matches `app: baseline-security-operator`), and the
+operator holds no create rights on `networking.k8s.io`, so nothing in the
+reconcile path can widen or add a policy at runtime.
+
+**Alternatives:** A full default-deny (egress rules for the API server,
+`openshift-compliance`, and the plugin namespace); one policy per
+workload type; leave the namespace open and rely on the RBAC boundary.
+
+**Tradeoff:** A default-deny policy needs the API server's address to be
+written into a manifest, so it would go stale the moment a cluster is served
+through a different endpoint. A NetworkPolicy is additive over the platform's
+own policies in an `openshift-*` namespace, so an egress rule here intersects
+with the cluster network operator's rather than replacing it, and an
+over-narrow rule is a silent reconciliation failure. Enumerating the real
+egress set needs a live cluster and a CNI whose enforcement is verified, not
+a manifest change. In exchange the metrics port is no longer reachable from
+any tenant namespace (the bearer token was the only thing between such a pod
+and the metric values) and the plugin's `:9443` traffic is untouched. Both
+namespace selectors are load-bearing and both fail silently: without the
+service-ca namespaces the manager still starts, serves its self-signed
+fallback cert, and the platform scrape fails verification; without
+`openshift-monitoring` there is simply no scraper. Neither shows up as an
+error the operator can report.
+
+**Status:** Keep. Revisit when the operator's egress set is small and stable
+enough to enumerate (a fixed API-server CIDR plus the plugin namespace), or
+when a platform requirement forces egress to be declared.
 
 *Recorded: 2026-09-27 (git history).*

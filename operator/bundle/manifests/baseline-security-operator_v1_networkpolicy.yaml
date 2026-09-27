@@ -44,8 +44,9 @@ spec:
                 values: [openshift-monitoring]
         # The service-ca operator connects to the annotated metrics Service to
         # mint and refresh the serving cert it signs. Dropping this namespace
-        # leaves tls.crt absent, nginx-equivalent failure, and a manager that
-        # exits on the unreadable cert dir.
+        # leaves tls.crt unwritten: the manager still starts and serves its
+        # self-signed fallback (cmd/metrics_cert.go), which this Prometheus
+        # does not trust, so the failure is a silently missing scrape.
         - namespaceSelector:
             matchExpressions:
               - key: kubernetes.io/metadata.name

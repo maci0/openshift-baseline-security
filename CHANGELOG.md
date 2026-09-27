@@ -200,6 +200,13 @@ depend on those tags.
   numbers ordered `rule_10` before `rule_2`. They now sort by the session
   locale's collation.
 
+- Docs: `docs/DESIGN-DECISIONS.md` had no index for its 32 records and the
+  operator-namespace `NetworkPolicy` shipped in **[Unreleased]** without a
+  decision record, although its shape (ingress-only, egress deliberately
+  undeclared) is a choice with a stated rationale. The file now carries a
+  table of contents, ADR-033 records that decision, and `docs/SPEC.md`
+  cross-references it where the policy is specified.
+
 ### Changed
 
 - Every `hack/` script now reports a bad invocation the same way: the

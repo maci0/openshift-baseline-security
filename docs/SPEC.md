@@ -394,7 +394,7 @@ and Red Hat-updated.
   namespace, so an egress rule here could cut the operator off from the API
   server. The console plugin is served from the same
   `openshift-baseline-security` namespace, but the policy's `app` selector names
-  only the operator pods, so it does not cover plugin traffic.
+  only the operator pods, so it does not cover plugin traffic (ADR-033).
 - Plugin: no service account of consequence (nginx serves static files);
   every API call is the user's own token via the console proxy.
 - ClusterRoles shipped for humans:
@@ -525,7 +525,7 @@ same Makefile targets (`test`, `lint`, `docker-build`).
 | 0.5.x patches | OLM `replaces` graph dropped (every bundle is a standalone channel head, ADR-030); no static operator PDB (ADR-028); single-node plugin topology; cadence-aware `ComplianceScanStale`; never-firing schedule Degrades (ADR-029); published Quay images and catalog; 5-minute reconcile timeout. | Done; see CHANGELOG.md 0.5.5 to 0.5.15 |
 | 0.6.0 | Toolchain bump (k8s.io v0.36.4, controller-runtime v0.24.1); metadata-only compliance watches and paged CheckResult lists; `baseline-security-admin` no longer aggregated onto `admin`; CSV `capabilities: Basic Install`; waiver names unique at admission (ADR-031); `/licenses/LICENSE` and OCI labels on every image. | Done; see CHANGELOG.md 0.6.0 |
 | 0.6.1 | Image `/licenses` directory mode fix (readable by the non-root runtime user); browserslist advisory bump in the plugin build. | Done; see CHANGELOG.md 0.6.1 |
-| Unreleased | Namespace-scoped manager cache (ADR-032); operator-namespace `NetworkPolicy` (ingress denied except the metrics scrape); alerts `ClusterBaselineNotAvailable` and `RemediationBatchGraceResume`; Observe Reconcile-loop row; `hack/backup.sh`, `hack/restore.sh`, `hack/verify-backup.sh` and `docs/RESTORE.md`; operator `--version`; `yarn size` page-weight gate and shipped third-party notices; CSV export hardened against leading-control-character formula cells; console writes re-check the reviewed permission at the request boundary; pod `preStop` drain and a `preStop`-aware `/readyz`. | In progress; see CHANGELOG.md **[Unreleased]** |
+| Unreleased | Namespace-scoped manager cache (ADR-032); operator-namespace `NetworkPolicy` (ingress denied except the metrics scrape, ADR-033); alerts `ClusterBaselineNotAvailable` and `RemediationBatchGraceResume`; Observe Reconcile-loop row; `hack/backup.sh`, `hack/restore.sh`, `hack/verify-backup.sh` and `docs/RESTORE.md`; operator `--version`; `yarn size` page-weight gate and shipped third-party notices; CSV export hardened against leading-control-character formula cells; console writes re-check the reviewed permission at the request boundary; pod `preStop` drain and a `preStop`-aware `/readyz`. | In progress; see CHANGELOG.md **[Unreleased]** |
 | Productization | Done in 0.5.0: API group renamed to `baselinesecurity.openshift.io`; `registry.ci.openshift.org` build variant (`Dockerfile.ci` + `.ci-operator.yaml`). Remaining: finish ci-operator onboarding in openshift/release, split the plugin into its own repo, Red Hat enhancement proposal referencing this spec. | Partial |
 
 ## 11. Prerequisites
