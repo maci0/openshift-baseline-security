@@ -27,6 +27,7 @@ import {
   ModalFooter,
   ModalHeader,
   PageSection,
+  SearchInput,
   Spinner,
   Switch,
   Tooltip,
@@ -56,7 +57,7 @@ import { AccessGate, mayWrite } from '../permissions';
 import { encodeKeyList } from '../contentKey';
 import { formatCount } from '../dates';
 import { errorMessage } from '../errors';
-import { listSeparators } from '../text';
+import { foldForSearch, foldSearchQuery, listSeparators, matchesFolded } from '../text';
 import {
   batchApplyMaxNames,
   batchApplyPatch,
@@ -172,6 +173,10 @@ const RemediationsTab: React.FC<{
   const [autoApplyConfirming, setAutoApplyConfirming] = React.useState(false);
   const [batchConfirming, setBatchConfirming] = React.useState(false);
   const [viewing, setViewing] = React.useState<ComplianceRemediation | null>(null);
+  // Name filter over the table. A full CIS run reports thousands of
+  // remediations and this tab had no way to narrow them, so an admin hunting
+  // one rule had to scroll a long list (Results has chips for the same reason).
+  const [query, setQuery] = React.useState('');
   // Monotonic token fencing the clipboard write. writeText settles
   // asynchronously (permission prompt, unfocused document), and every open and
   // close of this modal resets `copied` and `error`, so a late settlement would
@@ -273,6 +278,24 @@ const RemediationsTab: React.FC<{
   // overflow so the promise never overstates what happens.
   const applyCount = Math.min(batchable.length, batchApplyMaxNames);
   const batchTruncated = batchable.length > applyCount;
+
+  // Name filter, folded so case and diacritics do not hide a match (same
+  // matching the Profiles rule typeahead uses). Fold the names once per watch
+  // update rather than per keystroke: a full CIS run lists thousands of them.
+  // Batch apply keeps acting on the whole batchable set: it is a cluster-wide
+  // action, not a view of the rows.
+  const foldedQuery = foldSearchQuery(query);
+  const foldedNames = React.useMemo(
+    () => ordered.map((r) => foldForSearch(r.metadata?.name ?? '')),
+    [ordered],
+  );
+  const visible = React.useMemo(
+    () =>
+      foldedQuery.length === 0
+        ? ordered
+        : ordered.filter((_r, i) => matchesFolded(foldedNames[i], foldedQuery)),
+    [ordered, foldedNames, foldedQuery],
+  );
 
   // Reset the confirm flag if the live watch emptied the batchable set while the
   // modal was open (rows applied by auto-apply / another admin). Adjusting state
@@ -487,7 +510,8 @@ const RemediationsTab: React.FC<{
           title={t('Failed to load remediations.')}
           style={{ marginTop: 'var(--pf-t--global--spacer--md)' }}
         >
-          {watchError}
+          {/* errorMessage() carries raw apiserver text, so dir=auto. */}
+          <span dir="auto">{watchError}</span>
         </Alert>
       )}
       {/* Shown page-top only when no modal is open; the modals render their own
@@ -497,7 +521,7 @@ const RemediationsTab: React.FC<{
           variant="danger"
           isInline
           isLiveRegion
-          title={error}
+          title={<span dir="auto">{error}</span>}
           style={{ marginTop: 'var(--pf-t--global--spacer--md)' }}
           actionClose={
             <AlertActionCloseButton
@@ -612,7 +636,7 @@ const RemediationsTab: React.FC<{
               variant="danger"
               isInline
               isLiveRegion
-              title={error}
+              title={<span dir="auto">{error}</span>}
               style={{ marginTop: 'var(--pf-t--global--spacer--md)' }}
             />
           )}
@@ -683,7 +707,7 @@ const RemediationsTab: React.FC<{
               variant="danger"
               isInline
               isLiveRegion
-              title={error}
+              title={<span dir="auto">{error}</span>}
               style={{ marginTop: 'var(--pf-t--global--spacer--md)' }}
             />
           )}
@@ -769,7 +793,56 @@ const RemediationsTab: React.FC<{
             </EmptyState>
           );
         })()
+      ) : visible.length === 0 ? (
+        <EmptyState
+          titleText={t('No matching remediations')}
+          headingLevel="h2"
+          style={{ marginTop: 'var(--pf-t--global--spacer--md)' }}
+        >
+          <EmptyStateBody>
+            {/* The query is text this browser typed, so it is its own element
+                with dir=auto rather than a {{query}} interpolation: an RTL
+                query must not reorder the sentence's own punctuation. */}
+            {t('No remediation name matches')} <span dir="auto">&quot;{query}&quot;</span>.{' '}
+            <Button variant="link" isInline onClick={() => setQuery('')}>
+              {t('Clear search')}
+            </Button>
+          </EmptyStateBody>
+        </EmptyState>
       ) : (
+        <>
+        <Flex
+          justifyContent={{ default: 'justifyContentSpaceBetween' }}
+          alignItems={{ default: 'alignItemsCenter' }}
+          flexWrap={{ default: 'wrap' }}
+          gap={{ default: 'gapMd' }}
+          style={{ marginTop: 'var(--pf-t--global--spacer--md)' }}
+        >
+          <FlexItem>
+            <SearchInput
+              placeholder={t('Search remediations by name')}
+              aria-label={t('Search remediations by name')}
+              value={query}
+              onChange={(_e, v) => setQuery(v)}
+              onClear={() => setQuery('')}
+            />
+          </FlexItem>
+          <FlexItem>
+            <HelperText>
+              <HelperTextItem>
+                {foldedQuery
+                  ? t('Showing {{formattedShown}} of {{formattedTotal}} remediations', {
+                      formattedShown: formatCount(visible.length, i18n.language),
+                      formattedTotal: formatCount(owned.length, i18n.language),
+                    })
+                  : t('{{count}} remediation', {
+                      count: owned.length,
+                      formattedCount: formatCount(owned.length, i18n.language),
+                    })}
+              </HelperTextItem>
+            </HelperText>
+          </FlexItem>
+        </Flex>
         <div
           style={{ overflowX: 'auto' }}
           tabIndex={0}
@@ -788,7 +861,7 @@ const RemediationsTab: React.FC<{
             </Tr>
           </Thead>
           <Tbody>
-            {ordered.map((rem) => {
+            {visible.map((rem) => {
               const state = rem.status?.applicationState ?? 'NotApplied';
               const style = stateStyle[state] ?? defaultStateStyle;
               // Only blocked rows read the dependency annotations; skip the
@@ -931,6 +1004,7 @@ const RemediationsTab: React.FC<{
           </Tbody>
         </Table>
         </div>
+        </>
       )}
       <Modal
         variant="small"
@@ -969,7 +1043,7 @@ const RemediationsTab: React.FC<{
               variant="danger"
               isInline
               isLiveRegion
-              title={error}
+              title={<span dir="auto">{error}</span>}
               style={{ marginTop: 'var(--pf-t--global--spacer--md)' }}
             />
           )}
@@ -1041,7 +1115,7 @@ const RemediationsTab: React.FC<{
               variant="danger"
               isInline
               isLiveRegion
-              title={error}
+              title={<span dir="auto">{error}</span>}
               style={{ marginTop: 'var(--pf-t--global--spacer--md)' }}
             />
           )}
@@ -1104,7 +1178,7 @@ const RemediationsTab: React.FC<{
               variant="danger"
               isInline
               isLiveRegion
-              title={error}
+              title={<span dir="auto">{error}</span>}
               style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}
               actionClose={
                 <AlertActionCloseButton

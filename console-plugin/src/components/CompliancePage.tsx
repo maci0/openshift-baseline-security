@@ -311,14 +311,16 @@ const CompliancePage: React.FC = () => {
     [t],
   );
 
-  const exportDisabled = !checkResultsLoaded || !!checkResultsError || exporting;
+  const exportDisabled = !baseline || !checkResultsLoaded || !!checkResultsError || exporting;
   const exportDisabledReason = exporting
     ? undefined
-    : checkResultsError
-      ? t('Export is unavailable while check results fail to load.')
-      : !checkResultsLoaded
-        ? t('Waiting for check results to load.')
-        : undefined;
+    : !baseline
+      ? t('Baseline not configured')
+      : checkResultsError
+        ? t('Export is unavailable while check results fail to load.')
+        : !checkResultsLoaded
+          ? t('Waiting for check results to load.')
+          : undefined;
 
   const rescanDisabled =
     rescanning ||
@@ -359,21 +361,23 @@ const CompliancePage: React.FC = () => {
           </FlexItem>
           <FlexItem>
             <Flex gap={{ default: 'gapSm' }} flexWrap={{ default: 'wrap' }}>
-              {baseline &&
-                withDisabledTip(
-                  exportDisabled ? exportDisabledReason : undefined,
-                  <Button
-                    variant="secondary"
-                    icon={<DownloadIcon />}
-                    isDisabled={exportDisabled}
-                    isLoading={exporting}
-                    onClick={() => {
-                      void exportReport();
-                    }}
-                  >
-                    {t('Export HTML report')}
-                  </Button>,
-                )}
+              {/* Both controls stay visible whatever the baseline looks like:
+                  Rescan already renders disabled with its reason, and hiding
+                  Export alone made the header look like the feature was gone. */}
+              {withDisabledTip(
+                exportDisabled ? exportDisabledReason : undefined,
+                <Button
+                  variant="secondary"
+                  icon={<DownloadIcon />}
+                  isDisabled={exportDisabled}
+                  isLoading={exporting}
+                  onClick={() => {
+                    void exportReport();
+                  }}
+                >
+                  {t('Export HTML report')}
+                </Button>,
+              )}
               {withDisabledTip(
                 rescanDisabledReason,
                 <Button

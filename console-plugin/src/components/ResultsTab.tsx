@@ -1177,7 +1177,7 @@ const ResultsTab: React.FC<{
                           variant="danger"
                           isInline
                           isLiveRegion
-                          title={waiveError}
+                          title={<span dir="auto">{waiveError}</span>}
                           style={{ marginTop: 'var(--pf-t--global--spacer--sm)' }}
                           actionClose={
                             <AlertActionCloseButton

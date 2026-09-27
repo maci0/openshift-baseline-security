@@ -310,7 +310,7 @@ Extension points (exact SDK types):
 | Page `/baseline-security` with HorizontalNav tabs | `console.page/route` | Overview (score, composition donut, trend, schedule, waivers, scan diff), Results, Remediations, Profiles |
 | Results tab | (in-page) | virtualized ComplianceCheckResult table: filter by status/severity/profile; detail modal for description + instructions; suite-scoped to baseline bindings; CSV export |
 | Profiles tab | (in-page) | catalog of shipped profiles with enable switches writing `ClusterBaseline.spec.profiles`; TailoredProfile create/edit/bind (`useAccessReview`) |
-| Remediations tab | (in-page) | apply/unapply with confirmation; batch apply; auto-apply toggle; rendered-object view |
+| Remediations tab | (in-page) | apply/unapply with confirmation; batch apply; auto-apply toggle; rendered-object view; name filter over the list (batch apply still acts on every batchable remediation) |
 | Cluster overview details item | `console.dashboards/custom/overview/detail/item` | compliance score deep-link on the cluster Overview |
 
 Behaviors that write to the cluster:

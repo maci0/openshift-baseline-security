@@ -698,6 +698,16 @@ const ProfilesTab: React.FC<{
     }
   }
 
+  // Creating a tailored profile writes the TailoredProfile and binds it into
+  // the baseline, so it needs the create verb as well as the baseline patch.
+  const createDisabled = editDisabled || !canAuthor;
+  let createDisabledReason: string | undefined;
+  if (!pending) {
+    createDisabledReason =
+      editDisabledReason ??
+      (canAuthor ? undefined : t('You do not have permission to create tailored profiles.'));
+  }
+
   // Editing a bound profile is a k8sUpdate on the TailoredProfile itself and
   // needs the Profile/Rule catalog to pre-fill the form, so the baseline patch
   // alone is not enough. The Unbind control next to it only patches the
@@ -892,17 +902,21 @@ const ProfilesTab: React.FC<{
         />
       )}
       {/* Wait for SAR: other write gates use loading so the button does not
-          flash for viewers while useAccessReview is still resolving. */}
-      {canAuthor && !canAuthorLoading && (
+          flash for viewers while useAccessReview is still resolving. Once it
+          resolves the action stays visible either way: hiding it for a viewer
+          left the tab with no reason and no hint that tailored profiles
+          exist, while every other write control here renders disabled with its
+          reason. */}
+      {!canAuthorLoading && (
         <Split hasGutter style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}>
           <SplitItem isFilled />
           <SplitItem>
             {withDisabledTip(
-              editDisabledReason,
+              createDisabledReason,
               <Button
                 ref={createButtonRef}
                 variant="secondary"
-                isDisabled={editDisabled}
+                isDisabled={createDisabled}
                 onClick={() => {
                   setError(null);
                   setSuccess(null);

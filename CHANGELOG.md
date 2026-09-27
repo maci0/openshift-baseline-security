@@ -109,6 +109,30 @@ depend on those tags.
   `baselineError` off the shared context, so it could not tell a failed read
   from an absent CR. It now renders the same danger state, naming the reason,
   that Overview, Remediations, and Profiles already render.
+- The Overview "newly failing" banner and the Recent changes card disagreed
+  with each other. The banner counted only the regressions whose check result
+  was still present, so a scan whose failing rules had all been removed or
+  unbound read "0 checks newly failing" while the status behind it listed
+  them, and Recent changes then claimed there were no changes at all. Both now
+  fall back to the operator's own count and say how many of those have no
+  result left to open.
+- The Degraded and Progressing banners on Overview printed the condition
+  message with no `dir="auto"`, so a right-to-left message reordered the
+  punctuation around it, and a Degraded condition carrying no message rendered
+  a title with no explanation. Both render the message as its own element now,
+  with fallback text when the operator set none.
+- Apiserver and cluster-object text shown in error banners (Remediations
+  apply, unapply, batch, auto-apply and clipboard failures; the schedule
+  editor; baseline create) rendered without `dir="auto"`, unlike every other
+  banner in the plugin, so an RTL resource name inside the message could
+  reorder the text around it.
+- `Export HTML report` disappeared from the page header whenever no
+  `ClusterBaseline` existed, while `Rescan now` stayed visible, disabled, and
+  carrying its reason. The two header controls now behave the same way.
+- The Profiles tab hid `New tailored profile` from anyone without the create
+  verb, leaving no reason and no hint that tailored profiles exist. It renders
+  disabled with the permission reason now, like every other write control in
+  the plugin.
 - `hack/verify-backup.sh` computed the backup age with `date -u -d`, which is
   GNU coreutils only. On a host with BSD `date` (macOS, which `hack/backup.sh`
   and `hack/restore.sh` already support for the digest) the conversion failed,
@@ -132,6 +156,13 @@ depend on those tags.
   etcd restore still in progress) is left to the apply.
 
 ### Added
+
+- A name filter on the Remediations tab. A full benchmark run lists thousands
+  of remediations and the tab had no way to narrow them, so finding one rule
+  meant scrolling the whole list; Results has had chips for the same reason.
+  The search matches on the remediation name, ignoring case and diacritics,
+  and reports how many of the total are shown. Batch apply is unaffected: it
+  still acts on every batchable remediation, not on the filtered view.
 
 - `hack/verify-backup.sh`, a cluster-free check that a backup directory is
   still restorable: the artifact is present, non-empty, the right kind, matches

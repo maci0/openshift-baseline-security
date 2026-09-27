@@ -323,7 +323,7 @@ const ScheduleEditor: React.FC<{ baseline: ClusterBaseline }> = ({ baseline }) =
           variant="danger"
           isInline
           isLiveRegion
-          title={err}
+          title={<span dir="auto">{err}</span>}
           style={{ marginTop: 'var(--pf-t--global--spacer--xs)' }}
         />
       )}
@@ -790,7 +790,13 @@ const Overview: React.FC<{
           title={t('Scanning degraded')}
           style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}
         >
-          {degraded.message}
+          {/* Condition messages are untrusted CR text and may be absent; a bare
+              title told the admin nothing about what went wrong. */}
+          {degraded.message ? (
+            <span dir="auto">{degraded.message}</span>
+          ) : (
+            t('The operator could not complete a reconcile. Check the baseline status for details.')
+          )}
         </Alert>
       )}
       {progressing && !degraded && (
@@ -801,7 +807,11 @@ const Overview: React.FC<{
           title={t('Baseline is progressing')}
           style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}
         >
-          {progressing.message || t('Installing or configuring dependencies.')}
+          {progressing.message ? (
+            <span dir="auto">{progressing.message}</span>
+          ) : (
+            t('Installing or configuring dependencies.')
+          )}
         </Alert>
       )}
       {newlyFailed.length > 0 && (
@@ -813,9 +823,15 @@ const Overview: React.FC<{
             // count must stay numeric for i18next plural selection; formattedCount
             // is the locale-aware display value in the translated string. It is
             // the resolved count, the same one the Recent changes card shows, so
-            // the banner and the card cannot report two different totals.
-            count: newlyFailedItems.length,
-            formattedCount: formatCount(newlyFailedItems.length, locale),
+            // the banner and the card cannot report two different totals. With
+            // nothing linkable the resolved count is zero, and a "0 checks newly
+            // failing" title on a banner that fired contradicts itself; fall back
+            // to the operator's own count and say how many have no result left.
+            count: newlyFailedItems.length || newlyFailed.length,
+            formattedCount: formatCount(
+              newlyFailedItems.length || newlyFailed.length,
+              locale,
+            ),
           })}
           style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}
         >
@@ -841,7 +857,7 @@ const Overview: React.FC<{
           )}
           {/* A name in status.newlyFailed with no current check result cannot be
               linked; say so instead of silently dropping it from the count. */}
-          {unresolvedNewlyFailed > 0 && newlyFailedItems.length > 0 && (
+          {unresolvedNewlyFailed > 0 && (
             <>
               {' '}
               {t('({{count}} no longer in the results)', {
@@ -854,8 +870,10 @@ const Overview: React.FC<{
             <>
               {' '}
               {t('({{count}} fixed)', {
-                count: fixedItems.length,
-                formattedCount: formatCount(fixedItems.length, locale),
+                // Same fallback as the title: an all-unresolved set would
+                // otherwise read "(0 fixed)".
+                count: fixedItems.length || fixed.length,
+                formattedCount: formatCount(fixedItems.length || fixed.length, locale),
               })}
             </>
           )}
@@ -1003,16 +1021,28 @@ const Overview: React.FC<{
             {newlyFailedItems.length === 0 && fixedItems.length === 0 ? (
               <EmptyState
                 titleText={
-                  hasPriorScan
-                    ? t('No changes since the last scan')
-                    : t('No previous scan to compare yet')
+                  // A scan can report a regression whose check result is already
+                  // gone. Claiming "no changes" there contradicts the banner
+                  // above, which counts it.
+                  unresolvedNewlyFailed > 0
+                    ? t('{{count}} newly failing check is no longer in the results', {
+                        count: unresolvedNewlyFailed,
+                        formattedCount: formatCount(unresolvedNewlyFailed, locale),
+                      })
+                    : hasPriorScan
+                      ? t('No changes since the last scan')
+                      : t('No previous scan to compare yet')
                 }
                 headingLevel="h2"
               >
                 <EmptyStateBody>
-                  {hasPriorScan
-                    ? t('Fail and fix deltas will appear here after the next completed scan.')
-                    : t('Recent changes appear after two completed scans.')}
+                  {unresolvedNewlyFailed > 0
+                    ? t(
+                        'The rule was removed or its profile unbound, so there is no result to open. The count stays on the banner above until the next scan.',
+                      )
+                    : hasPriorScan
+                      ? t('Fail and fix deltas will appear here after the next completed scan.')
+                      : t('Recent changes appear after two completed scans.')}
                 </EmptyStateBody>
               </EmptyState>
             ) : (

@@ -97,7 +97,7 @@ const BaselineNotConfigured: React.FC<{ style?: React.CSSProperties }> = ({ styl
             variant="danger"
             isInline
             isLiveRegion
-            title={err}
+            title={<span dir="auto">{err}</span>}
             style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}
           />
         )}
