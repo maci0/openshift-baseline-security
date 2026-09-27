@@ -129,15 +129,54 @@ const parsedLocalDate = (iso: string): Date | null => {
   return Number.isNaN(d.getTime()) ? null : d;
 };
 
+// Formatting is the hot path on every card, waiver row, remediation row, and
+// chart tick, and each toLocale*String call builds a fresh Intl formatter. The
+// engine caches only the runtime default locale, so an explicit console locale
+// pays a construction (and the option resolution behind it) per call. Keep one
+// formatter per locale tag instead, the way text.ts keeps one Collator: the key
+// space is the locales a console session can offer, not the input.
+//
+// undefined (the empty key) means the runtime default and is cache-only;
+// constructing with a validated canonical tag is what safeLocale returned, so
+// these maps add no new way to throw.
+const numberFormatters = new Map<string, Intl.NumberFormat>();
+const dateFormatters = new Map<string, Intl.DateTimeFormat>();
+
+const numberFormatter = (locale?: string): Intl.NumberFormat => {
+  const tag = safeLocale(locale);
+  const key = tag ?? '';
+  let formatter = numberFormatters.get(key);
+  if (!formatter) {
+    formatter = new Intl.NumberFormat(tag);
+    numberFormatters.set(key, formatter);
+  }
+  return formatter;
+};
+
+// No component options: that is what Date#toLocaleDateString passes, so the
+// output is identical to the call it replaces. It is not Date#toLocaleString
+// (date and time), which stays on the built-in because it is only reached by
+// the report export, once per row of a downloaded file.
+const dateFormatter = (locale?: string): Intl.DateTimeFormat => {
+  const tag = safeLocale(locale);
+  const key = tag ?? '';
+  let formatter = dateFormatters.get(key);
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat(tag);
+    dateFormatters.set(key, formatter);
+  }
+  return formatter;
+};
+
 export const formatLocalDate = (iso: string, locale?: string): string => {
   // Date-only: local calendar day only (never fall through to Date('YYYY-MM-DD'),
   // which is UTC midnight and overflows invalid days like 2026-02-31).
   if (localDateOnlyRe.test(iso)) {
     const local = parseLocalDateOnly(iso);
-    return local ? local.toLocaleDateString(safeLocale(locale)) : iso;
+    return local ? dateFormatter(locale).format(local) : iso;
   }
   const d = parsedLocalDate(iso);
-  return d ? d.toLocaleDateString(safeLocale(locale)) : iso;
+  return d ? dateFormatter(locale).format(d) : iso;
 };
 
 export const formatLocalDateTime = (iso: string, locale?: string): string => {
@@ -146,16 +185,16 @@ export const formatLocalDateTime = (iso: string, locale?: string): string => {
 };
 
 // Locale-aware integer/count display (grouping separators, native digits).
-// safeLocale already rejects invalid tags so toLocaleString does not throw.
+// safeLocale already rejects invalid tags so the formatter cannot throw.
 // Non-finite values (NaN / ±Infinity from corrupt CR scores) return empty so
 // the UI never paints the English literals "NaN" or "Infinity".
 export const formatCount = (n: number, locale?: string): string =>
-  Number.isFinite(n) ? n.toLocaleString(safeLocale(locale)) : '';
+  Number.isFinite(n) ? numberFormatter(locale).format(n) : '';
 
 // Chart / axis date label from a Date or epoch ms. Invalid instants return
 // empty (Victory would otherwise paint the English "Invalid Date" string).
 // Locale is validated the same way as formatLocalDate.
 export const formatChartDate = (value: Date | number, locale?: string): string => {
   const d = value instanceof Date ? value : new Date(value);
-  return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString(safeLocale(locale));
+  return Number.isNaN(d.getTime()) ? '' : dateFormatter(locale).format(d);
 };

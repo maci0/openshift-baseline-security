@@ -336,3 +336,33 @@ describe('dateInputEndOfDayIso', () => {
     }
   });
 });
+
+describe('cached Intl formatters', () => {
+  // The formatters are cached per locale tag so a render loop constructs one
+  // Intl object instead of one per call. This pins the contract that makes that
+  // safe: the output is byte-identical to the toLocale*String calls it replaced.
+  it('formats exactly like the toLocale*String calls it replaced', () => {
+    const iso = '2026-02-03T14:05:09Z';
+    const d = new Date(iso);
+    for (const locale of ['en-US', 'de-DE', 'ar-SA', 'ja_JP', 'not a tag', undefined]) {
+      // safeLocale is the single validation gate; formatting goes through it,
+      // so the expected output is the one that gate resolves to.
+      const tag = safeLocale(locale);
+      expect(formatCount(1234567, locale)).toBe((1234567).toLocaleString(tag));
+      expect(formatLocalDate(iso, locale)).toBe(d.toLocaleDateString(tag));
+      expect(formatChartDate(d, locale)).toBe(d.toLocaleDateString(tag));
+    }
+  });
+
+  it('stays stable across repeated calls for the same locale', () => {
+    // The cached formatter must not carry state between calls: a shared
+    // Intl object that remembered the last value would drift on the 1000th.
+    const first = formatCount(1234567, 'en-US');
+    for (let i = 0; i < 1000; i++) {
+      expect(formatCount(1234567, 'en-US')).toBe(first);
+      expect(formatLocalDate('2026-02-03T14:05:09Z', 'en-US')).toBe(
+        new Date('2026-02-03T14:05:09Z').toLocaleDateString('en-US'),
+      );
+    }
+  });
+});

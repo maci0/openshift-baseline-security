@@ -42,6 +42,16 @@ depend on those tags.
 
 ## [Unreleased]
 
+### Changed
+
+- Console plugin built a fresh `Intl.NumberFormat` / `Intl.DateTimeFormat` on
+  every count, date label, and chart tick. A console session sets an explicit
+  locale, and the engine only caches the runtime default, so each card, waiver
+  row, remediation row, and axis label paid a formatter construction on the
+  main thread. `formatCount`, `formatLocalDate`, and `formatChartDate` now hold
+  one formatter per locale tag, matching how the display collator is already
+  cached. Output is unchanged, including the fallback for an invalid tag.
+
 ### Added
 
 - Observe dashboard gained a Reconcile loop row (reconcile errors against total
