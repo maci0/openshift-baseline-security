@@ -8,7 +8,7 @@ import {
   profileTitle,
 } from './models';
 import { checkTitle, severityDisplayTitle } from './results';
-import { aggregateCounts, checkSeverity, scoreStatus } from './scoring';
+import { aggregateCounts, checkSeverity, normalizeScore, scoreStatus } from './scoring';
 import { effectiveStatus } from './status';
 import {
   formatCount,
@@ -17,7 +17,7 @@ import {
   safeLocale,
   textDirection,
 } from './dates';
-import { stripFormatChars } from './parse';
+import { isFiniteNumber, stripFormatChars } from './parse';
 import { waiverExpired } from './waivers';
 
 // HTML-escape untrusted text (waiver reasons, rule titles) for the report.
@@ -44,6 +44,19 @@ const esc = (s: string): string =>
 // bidirectional override cannot reverse surrounding punctuation or column
 // labels. dir=auto also puts ellipsis on the correct side for RTL titles.
 const autoDir = (s: string): string => `<span dir="auto">${esc(s)}</span>`;
+
+// One ResultCounts field rendered as a report cell. The CR status is not
+// runtime type-checked: a non-numeric or non-finite value folds to 0 (so it can
+// neither inject markup nor print an empty cell for NaN / Infinity), and a
+// negative folds to 0 exactly as the operator's clampResultCounts does on write,
+// so the printed table never disagrees with the status the operator published.
+// All eight categories, same order as the on-screen per-profile card rows.
+const countCell = (n: number | undefined): number => {
+  if (!isFiniteNumber(n) || n < 0) {
+    return 0;
+  }
+  return n;
+};
 
 // Interpolation variables for report chrome. Keys are open-ended ({{count}},
 // {{formattedCount}}, {{name}}, ...) but values must render as text, so the
@@ -247,19 +260,23 @@ export const buildReportHtml = (
     totals.notApplicable;
   // Match the donut: with zero evaluated checks a non-null status.score is stale
   // (0/0) and the UI shows "—", so the report must not print a number over it.
-  const scored = totalChecks > 0 && st.score != null;
-  const score = scored
+  // normalizeScore folds a non-numeric / non-finite / out-of-range status.score
+  // (untrusted CR field) to no score, so a tampered value cannot print an empty
+  // red "Score:" line where the console shows "Not scanned".
+  const numericScore = normalizeScore(st.score);
+  const score = totalChecks > 0 && numericScore !== null
     ? t('{{score}} / {{max}}', {
-        score: fmt(Number(st.score)),
+        score: fmt(numericScore),
         max: 100,
         formattedMax: maxText,
       })
     : t('Not scanned');
   // Same 60/90 bands as Overview. Unscored reports stay muted, not danger.
-  const scoreClass = scored ? `score score-${scoreStatus(Number(st.score))}` : 'score score-none';
-  // The frame rule follows the same band. scoreStatus returns a closed union, so
-  // this is a known class name, never a value read off a cluster object.
-  const frameClass = scored ? `accent-${scoreStatus(Number(st.score))}` : 'accent-none';
+  // scoreStatus returns a closed union, so interpolating it yields a known
+  // class name, never a value read off a cluster object.
+  const band = totalChecks > 0 && numericScore !== null ? scoreStatus(numericScore) : null;
+  const scoreClass = band ? `score score-${band}` : 'score score-none';
+  const frameClass = band ? `accent-${band}` : 'accent-none';
   const profileRows = [
     ...(st.profiles ?? []).map((p) => ({ name: t(profileTitle(p.key ?? '')), c: p })),
     ...(st.tailoredProfiles ?? []).map((p) => ({
@@ -269,13 +286,10 @@ export const buildReportHtml = (
   ]
     .map(
       ({ name, c }) =>
-        // Coerce counts to numbers: the CR status is not runtime type-checked,
-        // so a tampered non-numeric value cannot inject markup here. All eight
-        // categories, same order as the on-screen per-profile card rows.
-        `<tr><td>${autoDir(name)}</td><td>${fmt(Number(c.pass) || 0)}</td><td>${fmt(Number(c.fail) || 0)}</td>` +
-        `<td>${fmt(Number(c.manual) || 0)}</td><td>${fmt(Number(c.info) || 0)}</td>` +
-        `<td>${fmt(Number(c.inconsistent) || 0)}</td><td>${fmt(Number(c.error) || 0)}</td>` +
-        `<td>${fmt(Number(c.waived) || 0)}</td><td>${fmt(Number(c.notApplicable) || 0)}</td></tr>`,
+        `<tr><td>${autoDir(name)}</td><td>${fmt(countCell(c.pass))}</td><td>${fmt(countCell(c.fail))}</td>` +
+        `<td>${fmt(countCell(c.manual))}</td><td>${fmt(countCell(c.info))}</td>` +
+        `<td>${fmt(countCell(c.inconsistent))}</td><td>${fmt(countCell(c.error))}</td>` +
+        `<td>${fmt(countCell(c.waived))}</td><td>${fmt(countCell(c.notApplicable))}</td></tr>`,
     )
     .join('');
   const activeWaivers = (baseline.spec.waivers ?? []).filter(

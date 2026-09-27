@@ -177,6 +177,16 @@ depend on those tags.
   same `script: message` form as the rest of `hack/`, and
   `verify-image-metadata.sh` sends its per-label output to stderr, since it is
   a pass/fail gate whose exit code is the result.
+- Console plugin: a `status.score` that was not a number, or was outside 0-100,
+  rendered as an empty or out-of-range score. The console reads the value
+  unverified from the CR, so a hand-edited or restored object could paint a
+  green empty score in the cluster Overview detail item and the compliance
+  score donut, and print `Score:  / 100` in the exported HTML report. Every
+  score read now goes through one guard: a non-finite or non-numeric value
+  renders as no score (`—`, "Not scanned", neutral donut), and an out-of-range
+  one is clamped to 0-100, which is what the operator publishes for it. The
+  report's per-profile counters got the same treatment, folding a non-finite
+  or negative count to 0 as the operator does on write.
 - Console plugin `Rescan now` did not always start a scan. The rescan
   annotation value came from a counter that restarted at 1 on every page load,
   so the first rescan after a reload or a tab switch back to the plugin wrote

@@ -61,6 +61,7 @@ import {
   aggregateCounts,
   effectiveScoringMode,
   historyScoringModeMismatch,
+  normalizeScore,
   profileScore,
   scoreLabelColor,
 } from '../scoring';
@@ -612,7 +613,10 @@ const Overview: React.FC<{
   } else if (coReady?.status === 'True') {
     coLabel = t('Installed');
   }
-  const score = baseline.status?.score;
+  // normalizeScore, not the raw field: a non-finite or out-of-range
+  // status.score must paint the unscored neutral (dash title, neutral trend
+  // fill), never "NaN" or an empty donut center.
+  const score = normalizeScore(baseline.status?.score);
   // PascalCase so TSX treats Charts.MiniTrend as a component, not an HTML tag.
   const Charts = charts.status === 'ready' ? charts.module : null;
 

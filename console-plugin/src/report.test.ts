@@ -298,6 +298,42 @@ describe('buildReportHtml data correctness', () => {
     );
     expect(high).toContain('class="score score-success"');
   });
+
+  // The CRD declares status.score an integer in [0,100], but the object is not
+  // runtime type-checked. A restored or hand-edited value must not print an
+  // empty or out-of-range number: the console shows "Not scanned" / "—" there.
+  it('shows "Not scanned" for a non-numeric score instead of an empty score line', () => {
+    type TamperedStatus = { score: string | number; profiles: { key: string; pass: number }[] };
+    const tamperedStatus: TamperedStatus = {
+      score: 'n/a',
+      profiles: [{ key: 'cis', pass: 1 }],
+    };
+    const tampered: ClusterBaseline = {
+      metadata: { name: 'cluster' },
+      spec: { profiles: ['cis'] },
+      // SAFETY: fixture mirrors a tampered CR whose status.score is not a number.
+      status: tamperedStatus as ClusterBaseline['status'],
+    };
+    const html = buildReportHtml(tampered, [], NOW);
+    expect(html).toContain('Not scanned');
+    expect(html).toContain('class="score score-none"');
+    expect(html).not.toContain('Score:  / 100');
+  });
+
+  it('clamps an out-of-range score to the CRD bounds, as the operator does on write', () => {
+    const html = buildReportHtml(
+      withStatus({
+        score: 5000,
+        profiles: [
+          { key: 'cis', pass: 1, fail: 0, manual: 0, info: 0, error: 0, inconsistent: 0, waived: 0, notApplicable: 0 },
+        ],
+      }),
+      [],
+      NOW,
+    );
+    expect(html).toContain('100 / 100');
+    expect(html).toContain('class="score score-success"');
+  });
 });
 describe('buildReportHtml', () => {
   const cb = {

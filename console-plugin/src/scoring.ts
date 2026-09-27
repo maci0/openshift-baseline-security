@@ -37,13 +37,36 @@ export const historyScoringModeMismatch = (
   return stamped !== effectiveScoringMode(baseline);
 };
 
+// CRD bounds on status.score. The operator clamps to these before writing
+// (clampScore in operator/internal/controller/scoring.go), so a value read back
+// outside them is stale or hand-edited and must not render as "5000 / 100".
+const SCORE_MIN = 0;
+const SCORE_MAX = 100;
+
+/**
+ * Every status.score read passes through here. CRs are not runtime type-checked,
+ * so a restored or hand-edited object can carry a string, null, NaN, Infinity,
+ * or an out-of-range number where the CRD declares an integer in [0,100].
+ * A non-number folds to null (no score: "—", "Not scanned", neutral donut) so no
+ * NaN/Infinity/empty cell ever reaches a threshold comparison, a
+ * toLocaleString call, or Victory; an out-of-range number is clamped exactly as
+ * the operator's clampScore clamps it on write, so the console shows what the
+ * operator would have published.
+ */
+export const normalizeScore = (v: unknown): number | null => {
+  if (!isFiniteNumber(v)) {
+    return null;
+  }
+  return Math.min(SCORE_MAX, Math.max(SCORE_MIN, v));
+};
+
 // Score of the singleton ClusterBaseline (metadata.name == "cluster"), or
 // null when it is absent / has not scored yet. Ignores any other name so a
 // list watch cannot surface a foreign object's score. Shared by the cluster
 // Overview detail item.
 export const clusterScore = (baselines?: ClusterBaseline[]): number | null => {
   const b = baselines?.find((x) => x.metadata.name === CLUSTER_BASELINE_NAME);
-  return b?.status?.score ?? null;
+  return normalizeScore(b?.status?.score);
 };
 
 // Coerce so a tampered non-numeric/non-finite count (blocked by the CRD integer
@@ -248,7 +271,7 @@ export const profileScore = (
       if (hist && hist.length > 0) {
         const last = hist[hist.length - 1]?.score;
         if (isFiniteNumber(last)) {
-          return Math.min(100, Math.max(0, Math.floor(last)));
+          return normalizeScore(Math.floor(last));
         }
       }
       return flatProfileScore(counts.pass, counts.fail);

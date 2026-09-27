@@ -1,5 +1,5 @@
 import { ClusterBaseline, ComplianceCheckResult, ResultCounts } from './models';
-import { HISTORY_SCORING_MODE_ANN, aggregateCounts, checkSeverity, clusterScore, effectiveScoringMode, flatProfileScore, historyScoringModeMismatch, profileScore, scoreColor, scoreLabelColor, scoreStatus, severityWeight } from './scoring';
+import { HISTORY_SCORING_MODE_ANN, aggregateCounts, checkSeverity, clusterScore, effectiveScoringMode, flatProfileScore, historyScoringModeMismatch, normalizeScore, profileScore, scoreColor, scoreLabelColor, scoreStatus, severityWeight } from './scoring';
 import { isFiniteNumber } from './parse';
 
 // Runtime pins for fuzz sweeps: totals must be real numbers and mode checks
@@ -613,6 +613,37 @@ describe('aggregateCounts', () => {
       const totals = aggregateCounts(g(), g(), g());
       for (const v of Object.values(totals)) {
         expect(isFiniteNumber(v)).toBeTruthy();
+      }
+    }
+  });
+});
+
+describe('normalizeScore', () => {
+  it('passes an in-range score through unchanged', () => {
+    expect(normalizeScore(0)).toBe(0);
+    expect(normalizeScore(94)).toBe(94);
+    expect(normalizeScore(100)).toBe(100);
+  });
+  it('clamps out-of-range values to the CRD bounds, as the operator clampScore does on write', () => {
+    expect(normalizeScore(-1)).toBe(0);
+    expect(normalizeScore(5000)).toBe(100);
+  });
+  // The CRD declares an integer, but a restored/hand-edited object or a
+  // converted payload can carry anything. A non-number must fold to "no score"
+  // so no NaN, Infinity, or empty cell reaches a threshold or a format call.
+  it('folds every non-finite or non-number value to null', () => {
+    for (const v of [undefined, null, Number.NaN, Infinity, -Infinity, '95', '', true, {}, []]) {
+      expect(normalizeScore(v)).toBeNull();
+    }
+  });
+  it('never returns a non-number', () => {
+    for (let i = 0; i < 200; i++) {
+      const v = i % 3 === 0 ? randomString(1 + (i % 8)) : Math.floor(fuzzRand() * 400) - 100;
+      const got = normalizeScore(v);
+      expect(got === null || isNum(got)).toBeTruthy();
+      if (got !== null) {
+        expect(got).toBeGreaterThanOrEqual(0);
+        expect(got).toBeLessThanOrEqual(100);
       }
     }
   });

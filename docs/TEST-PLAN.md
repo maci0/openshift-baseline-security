@@ -1191,6 +1191,14 @@ Beyond existing fuzz targets, properties that should always hold:
 - [x] **Score scale digits follow locale**: `of 100` / `n / 100` interpolate
       `formatCount(100)` (jest `formatCount` ar-SA; report `ar-SA` native
       digits and `dir=rtl`).
+- [x] **A score that is not a number, or is out of 0-100, is no score**: the
+      cluster detail item, the donut, and the HTML report show `—` / "Not
+      scanned" / the neutral ring instead of an empty or out-of-range number,
+      and an out-of-range number is clamped to the CRD bounds as the operator
+      publishes it (jest `normalizeScore`, `shows "Not scanned" for a non-numeric
+      score`, `clamps an out-of-range score to the CRD bounds`). Per-profile
+      counters fold a non-finite or negative count to 0, as the operator's
+      `clampResultCounts` does on write.
 - [ ] **Locale file parity with dist**: production webpack emits the same keys
       as `locales/en/…` (build gate).
 
