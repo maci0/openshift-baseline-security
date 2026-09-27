@@ -100,6 +100,7 @@ func TestVerifyAndTestAlertsHelp(t *testing.T) {
 	for _, name := range []string{
 		"test-alerts.sh",
 		"verify-bundle-static.sh",
+		"verify-csv-deploy.sh",
 		"verify-product-lockstep.sh",
 	} {
 		script := scriptPath(t, name)

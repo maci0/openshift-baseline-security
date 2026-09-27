@@ -594,6 +594,12 @@ an accepted risk neither inflates nor tanks the score.
       `inconsistent` / `info` as zero (`aggregateCounts` missing-field
       regression).
 - [x] **Bundle validates**: `make bundle` runs operator-sdk bundle validation.
+- [x] **CSV deployment spec matches the kustomize base**:
+      `make verify-csv-deploy` diffs
+      `install.spec.deployments[].spec` against the Deployment in
+      `config/manager/manager.yaml`, allowing only the image tag,
+      `imagePullPolicy`, and the `app.kubernetes.io/version` pod label. Without
+      it a base change ships to `make deploy` and not to an OLM install.
 - [x] **No OLM `replaces` graph pre-1.0**: `make verify-versions` fails if
       the CSV has `spec.replaces` / `spec.skipRange` or advertises anything
       other than `Basic Install`. Bundle CRD freshness is CI
@@ -929,8 +935,8 @@ stale Available or eternal Progressing.
       argc or unknown options exit 2; extract writes a top-level `groups:`
       file (`TestPrometheusRuleToRulesHelp`, `TestPrometheusRuleToRulesExtract`).
 - [x] **hack script --help**: `test-alerts.sh`, `verify-bundle-static.sh`,
-      and `verify-product-lockstep.sh` print usage and exit 0 instead of
-      running (`TestVerifyAndTestAlertsHelp`).
+      `verify-csv-deploy.sh`, and `verify-product-lockstep.sh` print usage and
+      exit 0 instead of running (`TestVerifyAndTestAlertsHelp`).
 - [ ] **Must-gather smoke**: `operator/hack/must-gather.sh` runs without
       cluster-admin-only assumptions beyond documented RBAC and redacts or
       avoids secrets.

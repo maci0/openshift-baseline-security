@@ -642,6 +642,14 @@ depend on those tags.
   the last unguarded release-packaging path (CRD, PrometheusRule, ServiceMonitor,
   and CSV RBAC were already checked).
 
+- `make verify-csv-deploy` (run in CI and `make bundle`): fails if the CSV
+  `install.spec.deployments[].spec` drifts from the Deployment in
+  `config/manager/manager.yaml`. The CSV is hand-maintained, so its pod spec was
+  a second, unchecked copy of the kustomize base: a probe, resource limit, or
+  volume added to the base reached `make deploy` and not an OLM install. The
+  image tag, `imagePullPolicy`, and the `app.kubernetes.io/version` pod label
+  are the only allowed divergences.
+
 ## [0.5.0] - 2026-07-13
 
 OLM upgrade edge: `baseline-security-operator.v0.5.0` replaces `v0.4.0`.

@@ -54,6 +54,11 @@ than guessing.
   profile means touching the CRD enum, the Go constants, and the plugin's
   `PROFILE_KEYS`/`PROFILE_INFO` together.
 - `verify-csv-rbac`: CSV permissions against `config/rbac/role.yaml`.
+- `verify-csv-deploy`: CSV `install.spec.deployments[].spec` against the
+  Deployment in `config/manager/manager.yaml`. The image tag,
+  `imagePullPolicy`, and the `app.kubernetes.io/version` pod label are the only
+  allowed divergences; anything else means a base change shipped to
+  `make deploy` and not to an OLM install.
 - `verify-bundle-static`: hand-copied bundle manifests against their `config/`
   sources (not the CSV, CRD, or monitoring CRs).
 - `verify-monitoring-bundle`: ServiceMonitor and PrometheusRule.
