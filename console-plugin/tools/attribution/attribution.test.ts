@@ -81,12 +81,15 @@ describe('classifyLicense', () => {
 	});
 });
 
-describe('collectNotices', () => {
-	beforeAll(makeFixture);
-	afterAll(() => {
-		fs.rmSync(FIXTURE_ROOT, { force: true, recursive: true });
-	});
+// File-level, not scoped to one describe: renderNotices, findProjectRoot, and
+// readProjectVersion all read the same fixture, and a describe-scoped afterAll
+// removed it before they ran.
+beforeAll(makeFixture);
+afterAll(() => {
+	fs.rmSync(FIXTURE_ROOT, { force: true, recursive: true });
+});
 
+describe('collectNotices', () => {
 	it('walks hoisted, scoped, and nested packages', () => {
 		const report = collectNotices(FIXTURE_ROOT);
 		const names = report.notices.map((notice) => notice.name);

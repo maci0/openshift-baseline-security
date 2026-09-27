@@ -2,6 +2,8 @@ import { isValidK8sName, isValidTailoredProfileName } from './names';
 import {
   cleanRuleSelection,
   consoleRule,
+  INVALID_BASE_PROFILE_KEY,
+  INVALID_TAILORED_NAME_KEY,
   tailoredEffectiveCounts,
   tailoredProfileManifest,
   tailoredProfileSpecMatches,
@@ -205,19 +207,21 @@ describe('tailoredProfileManifest', () => {
     expect(m.spec.enableRules?.map((r) => r.name)).toEqual(['also-ok']);
   });
   it('refuses invalid base profile extends (no silent CIS substitution)', () => {
+    // The shipped message constant is the contract: ProfilesTab renders the same
+    // string as a translation key, so a regex spelled out here would drift from it.
     expect(() => tailoredProfileManifest('x', 'not a profile!!!', [])).toThrow(
-      /invalid base profile name/,
+      INVALID_BASE_PROFILE_KEY,
     );
-    expect(() => tailoredProfileManifest('x', '../evil', [])).toThrow(/invalid base profile name/);
+    expect(() => tailoredProfileManifest('x', '../evil', [])).toThrow(INVALID_BASE_PROFILE_KEY);
   });
   it('refuses invalid metadata.name (path-shaped / over-long / empty)', () => {
-    expect(() => tailoredProfileManifest('../x', 'ocp4-cis', [])).toThrow(/invalid TailoredProfile name/);
-    expect(() => tailoredProfileManifest('', 'ocp4-cis', [])).toThrow(/invalid TailoredProfile name/);
+    expect(() => tailoredProfileManifest('../x', 'ocp4-cis', [])).toThrow(INVALID_TAILORED_NAME_KEY);
+    expect(() => tailoredProfileManifest('', 'ocp4-cis', [])).toThrow(INVALID_TAILORED_NAME_KEY);
     expect(() => tailoredProfileManifest('a'.repeat(52), 'ocp4-cis', [])).toThrow(
-      /invalid TailoredProfile name/,
+      INVALID_TAILORED_NAME_KEY,
     );
     expect(() => tailoredProfileManifest('has spaces', 'ocp4-cis', [])).toThrow(
-      /invalid TailoredProfile name/,
+      INVALID_TAILORED_NAME_KEY,
     );
   });
   it('trims a valid name before writing metadata and title', () => {
@@ -275,7 +279,7 @@ describe('tailoredProfileManifest', () => {
       } catch (e) {
         if (!(e instanceof Error)) {
           problems.push(`threw non-Error: ${String(e)}`);
-        } else if (!/invalid (TailoredProfile|base profile) name/.test(e.message)) {
+        } else if (e.message !== INVALID_TAILORED_NAME_KEY && e.message !== INVALID_BASE_PROFILE_KEY) {
           problems.push(`unexpected error message: ${e.message}`);
         }
       }

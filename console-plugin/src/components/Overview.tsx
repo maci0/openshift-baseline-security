@@ -2,7 +2,6 @@ import * as React from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   k8sPatch,
-  Timestamp,
   useAccessReview,
 } from '@openshift-console/dynamic-plugin-sdk';
 import {
@@ -30,6 +29,7 @@ import {
   Split,
   SplitItem,
   TextInput,
+  Timestamp,
 } from '@patternfly/react-core';
 import {
   CheckCircleIcon,

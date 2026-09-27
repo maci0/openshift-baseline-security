@@ -334,7 +334,13 @@ describe('severityWeight / profileScore', () => {
           filterKey: 'cis',
           results: [],
           profiles: ['cis'],
-          history: [{ score: 83 }, { score: 90 }],
+          // A history point carries no ordering without its time, and
+          // latestSnapshotScore skips an unparseable one, so the fixture has to
+          // be timestamped for this to test the preference at all.
+          history: [
+            { time: '2026-07-01T00:00:00Z', score: 83 },
+            { time: '2026-07-02T00:00:00Z', score: 90 },
+          ],
         },
       ),
     ).toBe(90);

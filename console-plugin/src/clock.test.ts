@@ -18,9 +18,15 @@ describe('clock seam', () => {
   it('reads the real clock until a source is injected', () => {
     const before = Date.now();
     const read = nowMs();
+    const viaDate = now().getTime();
+    const after = Date.now();
+    // Bracket both reads in one window instead of asserting the two calls landed
+    // in the same millisecond: that equality is a race, not evidence, and the
+    // real clock (not a frozen instant) is what this pins.
     expect(read).toBeGreaterThanOrEqual(before);
-    expect(read).toBeLessThanOrEqual(Date.now());
-    expect(now().getTime()).toBe(read);
+    expect(read).toBeLessThanOrEqual(after);
+    expect(viaDate).toBeGreaterThanOrEqual(before);
+    expect(viaDate).toBeLessThanOrEqual(after);
   });
 
   it('freezes every read at the injected instant', () => {

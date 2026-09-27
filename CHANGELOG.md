@@ -444,6 +444,39 @@ depend on those tags.
 
 ### Fixed
 
+- `hack/backup.sh` and `hack/must-gather.sh` failed on a host whose `chmod` is
+  BSD's (macOS, where the `portability` job runs), because they passed `--`
+  before the path. BSD `chmod` has no end-of-options marker and read `--` as a
+  filename, so the backup exited 1 with `chmod: --: No such file or directory`
+  before it wrote anything, and every test that drives either script through a
+  fake `oc` failed with it. Both scripts already refuse a flag-shaped output
+  directory, so the marker only ever did something on the hosts that accept it.
+
+- `yarn typecheck` failed in the console plugin, for the reasons the audit step
+  had been hiding. The Overview's `ClusterTimestamp` imported the console SDK's
+  `Timestamp`, which takes `timestamp` and renders relative time, then passed it
+  `date` and `locale`: the scan rows were mistyped and wrong at runtime, and
+  `Timestamp` now comes from PatternFly, which is the component that takes
+  `date`. The Playwright `use` block carried `animations` and `caret`, which are
+  `page.screenshot` options and never `use` options, and `reducedMotion`, which
+  moved under `contextOptions` in Playwright 1.62, so the settings that exist to
+  make a committed screenshot reproducible were rejected or ignored; `shot()`
+  now passes `animations` and `caret` at the capture site. `e2e/helpers.ts`
+  passed the masthead selectors to `page.evaluate` as an array, which matches no
+  overload of it.
+
+- The console plugin's test suite failed in five places, all of them stale
+  fixtures rather than broken behavior. The locale ordering case sorted
+  `string[]` with a `ComplianceRemediation` comparator. `profileScore`'s history
+  case passed points with no `time`, which `latestSnapshotScore` skips as
+  unparseable, so it never reached the branch it named. Two `toThrow` patterns
+  and the fuzz message check spelled out the pre-i18n message text instead of
+  the exported constants `ProfilesTab` renders. The attribution fixture's hooks
+  were scoped to one `describe`, so the three suites after it ran against a
+  directory the `afterAll` had already removed. The clock seam case asserted
+  that two consecutive reads landed in the same millisecond, which is a race
+  rather than evidence that the real clock is in use.
+
 - The backup age limit accepted a full extra day. `verify-backup.sh` and
   `restore.sh` truncated the age to whole days before comparing it to the
   limit, so a backup taken 7 days 23 hours ago passed a 7-day limit and
@@ -1204,6 +1237,27 @@ depend on those tags.
   clamp is dropped.
 
 ### Security
+
+- The console plugin's dependency tree carried two advisories the audit step
+  reported on every run. `js-yaml` 3.15.1 (GHSA-2883-xcg3-v3hh: CPU exhaustion
+  from empty merge sources) came in through `@istanbuljs/load-nyc-config`, and
+  `qs` 6.15.3 (GHSA-x5fp-wj9c-mxmx: array-limit bypass through bracket-key
+  comma parsing, and GHSA-4mjr-xmp4-gh2g: denial of service through an
+  attacker-controlled `isBuffer`) came in through `express`. Both are pinned up
+  in `resolutions`, and `yarn npm audit` no longer reports them.
+
+- `react-router` stays on the version the console 4.22 line provides and is
+  excluded from the audit by name, with the reason recorded beside
+  `--exclude immutable` in the workflow. The console provides it as a shared
+  singleton (`ConsoleRemotePlugin` sets `import: false`, so no react-router
+  code reaches `dist/`), the plugin SDK declares the peer range as `~7.13.1`,
+  and the build asserts the installed version against that range, so a bump
+  fails `yarn build` with `Console provides shared module react-router ~7.13.1
+  but plugin uses version X`. The advisories the audit lists for 7.13.x are in
+  RSC mode, SSR hydration, single-fetch, and the `__manifest` server path,
+  none of which a browser-only plugin runs. Clearing them means the console
+  moving react-router and the SDK peer range following it; re-audit when the
+  SDK reaches `~7.18.1` (`4.23.0-prerelease.5`).
 
 - Base-image CVE patches: digest bumps for ubi9 `go-toolset`, `ubi-micro`,
   `nodejs-22`, and `nginx-120`, and for `operator-framework/opm`. The Node

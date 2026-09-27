@@ -74,7 +74,20 @@ const setAccountVisibility = (
   visibility: 'hidden' | '',
 ): Promise<void> =>
   page.evaluate(
-    ([mastheadSel, controlSel, target, vis]) => {
+    // One object argument, not an array: the array form infers
+    // `(string | number)[]` for the parameter, which no `evaluate` overload
+    // accepts, and nothing the callback needs is a type assertion.
+    ({
+      mastheadSel,
+      controlSel,
+      target,
+      vis,
+    }: {
+      mastheadSel: string;
+      controlSel: string;
+      target: number;
+      vis: 'hidden' | '';
+    }) => {
       const masthead = document.querySelector(mastheadSel);
       if (!masthead) {
         return;
@@ -87,7 +100,12 @@ const setAccountVisibility = (
         el.style.visibility = vis;
       }
     },
-    [MASTHEAD_SELECTOR, CONTROL_SELECTOR, index, visibility],
+    {
+      mastheadSel: MASTHEAD_SELECTOR,
+      controlSel: CONTROL_SELECTOR,
+      target: index,
+      vis: visibility,
+    },
   );
 
 // Save a screenshot under the docs/screenshots dir, with the signed-in console
@@ -100,7 +118,14 @@ export const shot = async (page: Page, name: string): Promise<Buffer> => {
   const index = pickAccountControl(await mastheadControlRects(page));
   await setAccountVisibility(page, index, 'hidden');
   try {
-    return await page.screenshot({ path: path.join(SHOT_DIR, `${name}.png`) });
+    return await page.screenshot({
+      path: path.join(SHOT_DIR, `${name}.png`),
+      // Screenshot-level, not `use`: the `use` block cannot take these, and a
+      // committed PNG must not depend on where a CSS transition or the caret
+      // happened to be when the frame was grabbed.
+      animations: 'disabled',
+      caret: 'hide',
+    });
   } finally {
     await setAccountVisibility(page, index, '');
   }

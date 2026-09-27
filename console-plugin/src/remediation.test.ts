@@ -277,9 +277,14 @@ describe('remediation helpers', () => {
   // by its own collation. Swedish treats 'ä' as a letter of its own after 'z';
   // under the runtime default (en) it is a variant of 'a' and sorts beside it.
   it('compareRemediationsForApplyOrder orders names by the given locale', () => {
-    const names = ['zoo', 'alfa', 'älg'];
+    const items = ['zoo', 'alfa', 'älg'].map((name) =>
+      rem(undefined, undefined, { metadata: { name, namespace: 'ns' } }),
+    );
     const byLocale = (locale?: string) =>
-      [...names].sort(compareRemediationsForApplyOrder(locale)).join(',');
+      [...items]
+        .sort(compareRemediationsForApplyOrder(locale))
+        .map((r) => r.metadata.name)
+        .join(',');
     expect(byLocale('en')).toBe('alfa,älg,zoo');
     expect(byLocale('sv')).toBe('alfa,zoo,älg');
   });

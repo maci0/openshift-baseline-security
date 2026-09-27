@@ -21,7 +21,22 @@
 		"node_modules/**",
 		"tools/oxlint/anti-slop/**"
 	],
+	// This repo tests with jest, and `strict-tests-jest.json` selects that
+	// variant, but the preset extends `strict-tests.json`, which enables the
+	// vitest rules, and never turns them off. Two of them rewrite assertions the
+	// tests deliberately write exactly (`toBe(true)` to `toBeTruthy()`), and a
+	// `toBeTruthy()` passes on any truthy value, so complying would weaken 38
+	// assertions rather than enforce anything. No vitest runner exists here, so
+	// the whole namespace is off. Drop this block if the repo ever runs vitest.
 	"rules": {
+		"vitest/consistent-test-filename": "off",
+		"vitest/no-conditional-tests": "off",
+		"vitest/no-import-node-test": "off",
+		"vitest/prefer-called-once": "off",
+		"vitest/prefer-called-times": "off",
+		"vitest/prefer-to-be-falsy": "off",
+		"vitest/prefer-to-be-object": "off",
+		"vitest/prefer-to-be-truthy": "off",
 		"anti-slop/no-chained-type-assertions": "error",
 		"anti-slop/no-conditional-empty-object-spread": "error",
 		"anti-slop/no-known-value-widening": "error",
