@@ -138,6 +138,18 @@ jobs:
           SOURCE_DATE_EPOCH: "0"
           TZ: UTC
           LC_ALL: C
+      # What the console actually downloads, per asset, in the run log. gzip -5
+      # matches nginx gzip_comp_level 5, and -n drops the name/timestamp header
+      # so the number is the compressed body. Without this the only way to learn
+      # that a bundle grew is a slower page.
+      - name: plugin asset sizes
+        run: |
+          set -euo pipefail
+          find dist -type f | sort | while read -r asset; do
+            raw=$(wc -c <"$asset")
+            gz=$(gzip -5 -n -c "$asset" | wc -c)
+            printf '%8s  %8s  %s\n' "$raw" "$gz" "$asset"
+          done
 
   # Extended fuzzing is nightly/on-demand only: per-PR runs already execute the
   # saved seed corpus via `make test`, so found crashers are permanent regressions.

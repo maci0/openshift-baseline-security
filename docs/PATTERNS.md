@@ -124,6 +124,9 @@ provides correctness, the second is warm standby).
   `consoles.operator.openshift.io/cluster` `spec.plugins` (and removed on
   uninstall). Default Overview tab is in the page chunk; Victory charts and
   the other tabs are async chunks with a Retry alert if a GET fails.
+  The `console-plugin` CI job prints each `dist` asset raw and `gzip -5`
+  bytes after the build, so bundle growth is a number in the run log
+  instead of a slower page.
 
 **Here**: all of the above, including `useAccessReview` gating on rescan,
 profile/schedule/scoring/waiver patches, TailoredProfile authoring,

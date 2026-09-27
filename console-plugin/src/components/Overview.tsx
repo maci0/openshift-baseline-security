@@ -80,7 +80,10 @@ import { useWaiverExpiryClock } from './useWaiverExpiryClock';
 // for the donut slot to render.
 const loadOverviewCharts = () =>
   import(/* webpackChunkName: "overview-charts" */ './OverviewCharts');
-void loadOverviewCharts();
+// The catch is here only to keep a failed GET out of the unhandled-rejection
+// path: webpack hands the charts gate the same cached (rejected) promise, and
+// that gate is the one surface that reports the failure with Retry.
+void loadOverviewCharts().catch(() => undefined);
 
 // Stable empty list so optional status arrays do not allocate each render.
 const EMPTY_NAMES: readonly string[] = [];
