@@ -568,11 +568,12 @@ an accepted risk neither inflates nor tanks the score.
       pattern, MaxItems, MaxLength, and Minimum bound, and a second sanitize
       pass is a no-op (`FuzzSanitizeStatusUntrustedText`; the numeric side is
       `FuzzSanitizeStatusForUpdate`).
-- [x] **Serialized-size budget is exact**: `jsonStringLen` equals
-      `len(json.Marshal(s))` for arbitrary strings, including every escape
-      class and ill-formed UTF-8, so the failure-list budget cannot be
-      under-counted (`FuzzJSONStringLenMatchesMarshal`,
-      `TestJSONStringLenMatchesMarshal`).
+- [x] **Serialized-size budget is exact for well-formed input and never
+      under-counts**: `jsonStringLen` equals `len(json.Marshal(s))` for every
+      escape class on valid UTF-8, and for ill-formed UTF-8 it is bounded from
+      below by the encoder, which is the direction the failure-list budget
+      depends on (the encoder's spelling of a bad byte is a toolchain detail)
+      (`FuzzJSONStringLenMatchesMarshal`, `TestJSONStringLenMatchesMarshal`).
 - [x] CSV formula-injection neutralized, including whitespace-prefixed sigils
       and Unicode format-character prefixes (ZWSP, BIDI, BOM) (jest
       `resultsCsv`).

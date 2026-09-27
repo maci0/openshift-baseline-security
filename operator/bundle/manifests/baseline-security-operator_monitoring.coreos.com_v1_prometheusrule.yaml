@@ -94,12 +94,12 @@ spec:
         - alert: ComplianceStatusStale
           # Operator stopped publishing (crash loop, stuck reconcile, scrape
           # only from a demoted replica that never aggregated). The gauge is
-          # never seeded, so a never-published operator leaves the series absent
-          # and the absent() disjunct is the real never-published case; the == 0
-          # disjunct is the belt-and-braces guard for a zero-valued publish.
-          # absent() also catches the series vanishing entirely (all replicas
-          # gone / scaled to 0 / hard crashloop where the metrics server never
-          # binds), which max() over an empty vector would otherwise miss.
+          # never seeded, so the series is absent until the first publish:
+          # absent() is the never-published case (all replicas gone / scaled to 0
+          # / hard crashloop where the metrics server never binds), which the
+          # one max() over an empty vector would otherwise miss. A published
+          # value is a wall clock; the == 0 disjunct is the belt-and-braces guard
+          # against a zero reading.
           # Steady requeue is 1m; 15m covers leader election + install grace.
           expr: >-
             absent(baseline_security_status_observed_timestamp_seconds)

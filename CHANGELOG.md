@@ -151,9 +151,16 @@ depend on those tags.
   restore summary and called out when it is past a week.
 
 - The status size budget mis-sized text that is not valid UTF-8, which a
-  status restored from a protobuf backup can carry. Each ill-formed byte is
-  coerced to U+FFFD, three bytes out, and it was counted as six, so the
-  failure lists were trimmed further than the encoder needed.
+  status restored from a protobuf backup can carry. An ill-formed byte is
+  coerced rather than rejected, and the count of what the encoder then writes
+  has changed with the toolchain: the Go release this operator pins spells the
+  coercion as the six-byte `\ufffd` escape, Go 1.27 as the raw three-byte
+  U+FFFD rune. Counting the three-byte form under-counted on the pinned
+  toolchain, so a failure list built from the budget could land past the CRD
+  bound and the next status write would be rejected, freezing reconcile until
+  the object was hand-edited. The budget counts the six-byte form, which is
+  exact on the pinned toolchain and trims three bytes early per ill-formed
+  byte on a newer one.
 
 - Deleting `ClusterBaseline/cluster` logs, at the moment the finalizer drops,
   that the waivers and score history are not recoverable and names
