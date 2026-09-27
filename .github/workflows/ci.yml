@@ -322,6 +322,10 @@ jobs:
               # No TLS certs in the image, so only filesystem checks (not nginx -t).
               run_hardened --entrypoint test "$IMAGE_NAME" -s /opt/app-root/src/plugin-manifest.json
               run_hardened --entrypoint test "$IMAGE_NAME" -s /licenses/LICENSE
+              # Apache-2.0 4(d) notices: a COPY that lost its --from=build would
+              # still build once dist/ was in the context and ship an empty
+              # file, so assert content, not just existence.
+              run_hardened --entrypoint test "$IMAGE_NAME" -s /licenses/THIRD-PARTY-NOTICES.txt
               ;;
             bundle)
               # FROM scratch: no shell; package label is the OLM identity.

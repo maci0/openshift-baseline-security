@@ -43,6 +43,14 @@ depend on those tags.
 
 ## [Unreleased]
 
+### Fixed
+
+- Console plugin image failed to build. The `COPY` that places
+  `THIRD-PARTY-NOTICES.txt` in `/licenses/` named a path from the build stage
+  without `--from=build`, so it resolved against the build context instead,
+  where `dist/` is excluded by `.dockerignore`. The file the build stage
+  generated was never reachable from the runtime stage.
+
 ### Security
 
 - Results CSV export hardened against a formula sigil hidden behind a leading

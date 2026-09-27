@@ -475,6 +475,8 @@ verify-versions:
 		|| { echo "Dockerfile.ci must COPY the manager root-owned (parity with the release Dockerfile)"; fail=1; }; \
 	grep -qE '^USER 1001:1001$$' ../console-plugin/Dockerfile \
 		|| { echo "console-plugin Dockerfile must pin USER 1001:1001; a bare uid leaves the primary group to the base image passwd entry"; fail=1; }; \
+	grep -qE -- '--from=build --chmod=0644 /usr/src/app/dist/THIRD-PARTY-NOTICES.txt /licenses/THIRD-PARTY-NOTICES.txt' ../console-plugin/Dockerfile \
+		|| { echo "console-plugin Dockerfile must COPY the notices with --from=build; a bare source path resolves against the build context, where dist/ is .dockerignore'd, so the copy fails or ships nothing"; fail=1; }; \
 	grep -qE '^USER 1001:1001$$' catalog.Dockerfile \
 		|| { echo "catalog.Dockerfile must pin USER 1001:1001; a bare uid leaves the primary group to the base image passwd entry"; fail=1; }; \
 	grep -qE 'YARN_ENABLE_SCRIPTS=false' ../console-plugin/Dockerfile \
