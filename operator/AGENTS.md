@@ -49,6 +49,15 @@ deleted on SingleReplica; do not add a PDB to the operator bundle.
 Each has its own target and its own failure message; read the message rather
 than guessing.
 
+- `verify-manifests`: the kustomize tree itself. Every entry point
+  (`config/{crd,rbac,manager,prometheus,default}`) must build, every manifest
+  under `config/` must reach the `config/default` render (a file no
+  kustomization lists ships to nobody), and the tree-local references must
+  resolve: a RoleBinding `roleRef` to a declared Role/ClusterRole, a Service
+  selector to a pod template, a ServiceMonitor selector to a Service, and the
+  Secret/ConfigMap a ServiceMonitor names. Renders with `kustomize`, else
+  `kubectl kustomize`, else `oc kustomize`; override with `KUSTOMIZE=`.
+  Adding a manifest means listing it in its kustomization, or this fails.
 - `verify-versions`: release version, toolchain pins, image-build flags, the
   `ARG VERSION=` default in every Dockerfile, an `ARG SOURCE_DATE_EPOCH` in
   every stage of every Dockerfile, the `Dockerfile.ci` builder tag against the

@@ -69,6 +69,10 @@ jobs:
         run: |
           make generate manifests
           git diff --exit-code
+      # `make verify-manifests` renders config/ with whatever kustomize the host
+      # has; kubectl (preinstalled on the runner) supplies the embedded one, so
+      # nothing is installed for it.
+      - run: make verify-manifests
       - run: make verify-csv-rbac
       - run: make verify-monitoring-bundle
       - run: make verify-bundle-static

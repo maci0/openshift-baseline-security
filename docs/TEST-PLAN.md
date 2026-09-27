@@ -22,7 +22,7 @@ run. A checklist item should name the cheapest tier that can prove it.
 | Tier | Purpose | Command / harness | Gate |
 |---|---|---|---|
 | 0 | Fast local correctness | `operator: make test test-race lint`; `console-plugin: yarn lint && yarn lint:oxlint && yarn typecheck && yarn test` | Every PR |
-| 1 | Generated/build artifacts | `operator: make build && make bundle`; repo: `kubectl kustomize operator/config/default`; `console-plugin: yarn build`, whose CI job then prints each `dist` asset raw and `gzip -9` bytes (`yarn ci` is tier 0 plus this build) | Every PR touching manifests, packaging, or frontend |
+| 1 | Generated/build artifacts | `operator: make build && make bundle`; repo: `operator: make verify-manifests` (renders every kustomize entry point and checks the render against its sources); `console-plugin: yarn build`, whose CI job then prints each `dist` asset raw and `gzip -9` bytes (`yarn ci` is tier 0 plus this build) | Every PR touching manifests, packaging, or frontend |
 | 2 | Hardening | `operator: make test-race && make fuzz` (`make test-race` also runs in tier 0) | Nightly and before release |
 | 3 | API admission | envtest or server-side dry-run against generated CRDs | PRs touching API markers/CRD schema |
 | 4 | Live OpenShift | Go e2e with `KUBECONFIG`; Playwright with `CONSOLE_URL`, `KUBEADMIN_PASSWORD`, and seeded Compliance Operator data | Release candidates |
@@ -653,6 +653,14 @@ an accepted risk neither inflates nor tanks the score.
       `inconsistent` / `info` as zero (`aggregateCounts` missing-field
       regression).
 - [x] **Bundle validates**: `make bundle` runs operator-sdk bundle validation.
+- [x] **The kustomize tree itself renders**: `make verify-manifests` builds
+      every entry point under `operator/config/`, requires every manifest
+      there to reach the `config/default` render (a file no kustomization
+      lists ships to nobody), and resolves the tree-local references: a
+      RoleBinding `roleRef` to a declared Role/ClusterRole, a Service selector
+      to a pod template, a ServiceMonitor selector to a Service, and the
+      Secret/ConfigMap a ServiceMonitor names. The other verify-* targets
+      compare bundle/ against config/; nothing assembled config/ before this.
 - [x] **CSV deployment spec matches the kustomize base**:
       `make verify-csv-deploy` diffs
       `install.spec.deployments[].spec` against the Deployment in
@@ -1056,7 +1064,8 @@ stale Available or eternal Progressing.
       file (`TestPrometheusRuleToRulesHelp`, `TestPrometheusRuleToRulesExtract`).
 - [x] **hack script --help**: `resolve-release-version.sh`, `test-alerts.sh`,
       `verify-bundle-static.sh`, `verify-csv-deploy.sh`,
-      `verify-image-metadata.sh`, and `verify-product-lockstep.sh` print usage
+      `verify-image-metadata.sh`, `verify-manifests.sh`, and
+      `verify-product-lockstep.sh` print usage
       and exit 0 instead of running; unknown options exit 2
       (`TestHackScriptHelp`).
 - [ ] **Must-gather smoke**: `operator/hack/must-gather.sh` runs without

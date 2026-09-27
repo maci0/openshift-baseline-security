@@ -99,6 +99,7 @@ help:
 	@echo "  make govulncheck   vulnerability scan (pinned)"
 	@echo "  make build         generate, manifests, fmt-check, vet, bin/manager"
 	@echo "  make verify-reproducible  build ./cmd twice (path, TZ, locale, umask) and diff the SHA-256"
+	@echo "  make verify-manifests  build every kustomize entry point; check the render against its sources"
 	@echo "  make run           build and run against the current kubeconfig"
 	@echo "  make bundle        verify-* then operator-sdk bundle validate (needs docker)"
 	@echo "  make test-e2e      live-cluster e2e (needs KUBECONFIG)"
@@ -592,7 +593,7 @@ verify-product-lockstep:
 # validate CRD/RBAC while controller-gen is still rewriting them.
 .PHONY: bundle
 bundle: manifests
-	$(MAKE) --no-print-directory verify-crd verify-csv-rbac verify-csv-deploy verify-monitoring-bundle verify-bundle-static verify-versions verify-product-lockstep
+	$(MAKE) --no-print-directory verify-crd verify-manifests verify-csv-rbac verify-csv-deploy verify-monitoring-bundle verify-bundle-static verify-versions verify-product-lockstep
 	cp config/crd/bases/baselinesecurity.openshift.io_clusterbaselines.yaml bundle/manifests/
 	# DOCKER_RUN_FLAGS: pure filesystem I/O (no registry pulls, ro mount).
 	# Ensure the tool image is local first (network=none cannot pull).
@@ -611,6 +612,16 @@ verify-crd:
 	# be dead code, breaking zero-config CO install on OKD.
 	@! grep -qE '^[[:space:]]*default: redhat-operators' config/crd/bases/*.yaml \
 		|| (echo "CRD defaults complianceCatalogSource; drop the +kubebuilder:default so an omitted field reaches auto-detection" && exit 1)
+
+# Build the kustomize tree and check the render against its sources: every
+# entry point builds, every manifest reaches config/default, and the tree-local
+# cross-resource references resolve. The other verify-* targets compare the
+# hand-copied bundle manifests with config/; nothing else assembled config/ at
+# all, so a kustomization that named a missing file, or a manifest no
+# kustomization listed, only ever surfaced on a developer's `make deploy`.
+.PHONY: verify-manifests
+verify-manifests:
+	@./hack/verify-manifests.sh
 
 # Unit-test the PrometheusRule alerts with promtool (containerized).
 .PHONY: test-alerts

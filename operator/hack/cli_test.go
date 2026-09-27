@@ -105,6 +105,7 @@ func TestHackScriptHelp(t *testing.T) {
 		"verify-bundle-static.sh",
 		"verify-csv-deploy.sh",
 		"verify-image-metadata.sh",
+		"verify-manifests.sh",
 		"verify-product-lockstep.sh",
 	} {
 		script := scriptPath(t, name)
