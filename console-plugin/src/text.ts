@@ -12,11 +12,12 @@
 // collation decides where letters sit, so an accented name sorts beside its base
 // letter instead of after every z, and an Arabic list follows the abjad.
 
-import { safeLocale } from './dates';
+import { intlCached, safeLocale } from './dates';
 
 // Collators are expensive to build and a ~1k-rule catalog is sorted on every
-// render, so keep one per locale tag. A module-level Map is bounded by the
-// locales a console session can offer (tens), not by input.
+// render, so keep one per locale tag. intlCached caps the map: the tag comes
+// from the console session but is not limited to the console's language list, so
+// the reuse cannot rest on that assumption.
 const collators = new Map<string, Intl.Collator>();
 
 // Construct with the validated tag, never with the empty string: new
@@ -25,14 +26,11 @@ const collators = new Map<string, Intl.Collator>();
 export const textCollator = (locale?: string): Intl.Collator => {
   const tag = safeLocale(locale);
   const key = tag ?? '';
-  let collator = collators.get(key);
-  if (!collator) {
+  return intlCached(collators, key, () =>
     // numeric: true orders rule_2 before rule_10 the way a reader expects,
     // rather than by byte value where '_' (0x5f) sorts above every digit.
-    collator = new Intl.Collator(tag, { usage: 'sort', numeric: true });
-    collators.set(key, collator);
-  }
-  return collator;
+    new Intl.Collator(tag, { usage: 'sort', numeric: true }),
+  );
 };
 
 // Case- and accent-insensitive form of a string for substring search.
@@ -80,15 +78,12 @@ const listFormatters = new Map<string, Intl.ListFormat>();
 // string, which throws; the empty key is cache-only.
 const listFormatter = (locale?: string): Intl.ListFormat => {
   const key = safeLocale(locale) ?? '';
-  let formatter = listFormatters.get(key);
-  if (!formatter) {
-    formatter = new Intl.ListFormat(key || undefined, {
+  return intlCached(listFormatters, key, () =>
+    new Intl.ListFormat(key || undefined, {
       style: 'long',
       type: 'unit',
-    });
-    listFormatters.set(key, formatter);
-  }
-  return formatter;
+    }),
+  );
 };
 
 // Join a user-facing list of names with the locale's own list punctuation.

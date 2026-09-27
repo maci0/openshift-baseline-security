@@ -108,6 +108,39 @@ export const safeLocale = (locale?: string): string | undefined => {
   return canonical;
 };
 
+// Upper bound on entries per Intl cache below. The caches exist to reuse
+// formatters across renders, and the key is a canonical BCP 47 tag, whose space
+// is not the console's language list: i18next reads the tag from the URL and
+// from navigator.languages, and any well-formed tag canonicalizes to a distinct
+// key, so "en-US-u-ca-buddhist", "en-US-u-nu-arab" and friends each add one
+// entry. Unbounded, that grows for the life of the console tab. A cap keeps the
+// reuse for a session that toggles between real languages and costs only a
+// construction per call once a hostile tag stream is past it.
+const INTL_CACHE_MAX = 64;
+
+// Fetch from (or insert into) one of the module-level Intl caches. Past the cap
+// the oldest key is dropped, so the map is bounded by INTL_CACHE_MAX entries
+// rather than by how many distinct locale tags the tab has seen. Eviction is
+// insertion order, not least-recently-used: a hit does not reorder the map, which
+// keeps the hot path to one get and no reordering bookkeeping.
+export const intlCached = <T>(cache: Map<string, T>, key: string, make: () => T): T => {
+  const hit = cache.get(key);
+  if (hit !== undefined) {
+    return hit;
+  }
+  const built = make();
+  if (cache.size >= INTL_CACHE_MAX) {
+    // Map iterates in insertion order, so the first key is the oldest. It exists
+    // whenever size >= the cap.
+    for (const oldest of cache.keys()) {
+      cache.delete(oldest);
+      break;
+    }
+  }
+  cache.set(key, built);
+  return built;
+};
+
 // CSS/HTML dir from a BCP 47 tag. Used when document.dir is unset (report
 // export, tests) so Arabic/Hebrew/Persian sessions still get RTL chrome.
 // Prefers Intl.Locale#getTextInfo (Node 22 / Chromium); falls back to the
@@ -156,24 +189,18 @@ const parsedLocalDate = (iso: string): Date | null => {
 // chart tick, and each toLocale*String call builds a fresh Intl formatter. The
 // engine caches only the runtime default locale, so an explicit console locale
 // pays a construction (and the option resolution behind it) per call. Keep one
-// formatter per locale tag instead, the way text.ts keeps one Collator: the key
-// space is the locales a console session can offer, not the input.
+// formatter per locale tag instead, the way text.ts keeps one Collator.
 //
 // undefined (the empty key) means the runtime default and is cache-only;
 // constructing with a validated canonical tag is what safeLocale returned, so
-// these maps add no new way to throw.
+// these maps add no new way to throw. intlCached caps each map, so the key
+// space is bounded even when the locale tag is not one a console session offers.
 const numberFormatters = new Map<string, Intl.NumberFormat>();
 const dateFormatters = new Map<string, Intl.DateTimeFormat>();
 
 const numberFormatter = (locale?: string): Intl.NumberFormat => {
   const tag = safeLocale(locale);
-  const key = tag ?? '';
-  let formatter = numberFormatters.get(key);
-  if (!formatter) {
-    formatter = new Intl.NumberFormat(tag);
-    numberFormatters.set(key, formatter);
-  }
-  return formatter;
+  return intlCached(numberFormatters, tag ?? '', () => new Intl.NumberFormat(tag));
 };
 
 // No component options: that is what Date#toLocaleDateString passes, so the
@@ -182,13 +209,7 @@ const numberFormatter = (locale?: string): Intl.NumberFormat => {
 // the report export, once per row of a downloaded file.
 const dateFormatter = (locale?: string): Intl.DateTimeFormat => {
   const tag = safeLocale(locale);
-  const key = tag ?? '';
-  let formatter = dateFormatters.get(key);
-  if (!formatter) {
-    formatter = new Intl.DateTimeFormat(tag);
-    dateFormatters.set(key, formatter);
-  }
-  return formatter;
+  return intlCached(dateFormatters, tag ?? '', () => new Intl.DateTimeFormat(tag));
 };
 
 export const formatLocalDate = (iso: string, locale?: string): string => {

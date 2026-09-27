@@ -1,6 +1,7 @@
 import {
   dateInputEndOfDayIso,
   expiresAtMs,
+  intlCached,
   safeLocale,
   formatLocalDate,
   formatLocalDateTime,
@@ -417,5 +418,25 @@ describe('cached Intl formatters', () => {
         new Date('2026-02-03T14:05:09Z').toLocaleDateString('en-US'),
       );
     }
+  });
+
+  it('bounds the cache when the stream of distinct locale tags is not', () => {
+    // The tag comes from the console session, but its space is not the console's
+    // language list: every well-formed BCP 47 tag canonicalizes to a distinct
+    // key, so a stream of them would otherwise grow the map for the life of the
+    // tab. intlCached caps it, and output is unchanged either way.
+    const cache = new Map<string, Intl.NumberFormat>();
+    // The private-use subtag is the cheapest way to mint many distinct valid
+    // tags: "x" accepts any alphanumeric subtag, so each index is a new key.
+    const tags = Array.from({ length: 500 }, (_, i) => `en-US-x-${i.toString(16).padStart(8, '0')}`);
+    for (const tag of tags) {
+      expect(intlCached(cache, tag, () => new Intl.NumberFormat(tag)).format(1234)).toBe(
+        new Intl.NumberFormat(tag).format(1234),
+      );
+    }
+    expect(cache.size).toBeLessThanOrEqual(64);
+    // A tag still in the working set is still reused, not rebuilt per call.
+    const last = tags[tags.length - 1];
+    expect(intlCached(cache, last, () => new Intl.NumberFormat(last))).toBe(cache.get(last));
   });
 });
