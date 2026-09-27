@@ -135,6 +135,17 @@ depend on those tags.
 
 ### Fixed
 
+- Console plugin, apply-remediation confirmation: the node-remediation warning
+  told the admin to batch changes by pausing the target MachineConfigPool under
+  Compute and resuming it afterwards, which is exactly what the Remediations tab
+  does for them with the Batch apply button at the top of the same page. The
+  copy now points at that button, so the manual detour through another page is
+  no longer the only documented route.
+- Console plugin, per-profile score cards: the compact score sparkline was
+  drawn in the charting library's default blue, so the one chart that plots a
+  profile's own score did not carry the score color band the badge beside it,
+  the donut center, and the score trend card all use. It is now colored from
+  its latest point, which is the profile's current score.
 - Console plugin `Rescan now` did not always start a scan. The rescan
   annotation value came from a counter that restarted at 1 on every page load,
   so the first rescan after a reload or a tab switch back to the plugin wrote

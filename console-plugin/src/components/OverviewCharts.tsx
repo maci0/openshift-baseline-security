@@ -267,12 +267,15 @@ export const MiniTrend = React.memo<{ history?: ScoreSnapshot[] }>(({ history })
         maxDomain={{ y: 100 }}
         scale={{ x: 'time', y: 'linear' }}
       >
-        {/* Same 60/90 band token as the overall trend chart, the donut center
-            title, and the score chip above this sparkline. Unset, the sparkline
-            takes the charting library's default blue, so a profile card shows a
-            green score over a blue bar. The band follows the latest point,
-            which is the score the chip reports. */}
-        <ChartArea data={chartData} style={{ data: { fill: scoreColor(last) } }} />
+        <ChartArea
+          data={chartData}
+          // Same 60/90 band token as the score trend area, the donut center
+          // title, and the per-card badge. Unstyled, the compact sparkline is
+          // the one score plot on the page painted in the library default blue
+          // instead of the score it draws; color it by its latest point, which
+          // is the profile's current score.
+          style={{ data: { fill: scoreColor(last) } }}
+        />
       </Chart>
     </div>
   );

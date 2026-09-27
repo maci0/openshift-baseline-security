@@ -470,7 +470,8 @@ const ResultsTab: React.FC<{
         ),
       );
       return;
-    }    void patchWaivers(
+    }
+    void patchWaivers(
       data,
       t('Failed to waive check.'),
       t('Check waived. It is excluded from the score.'),
