@@ -1055,6 +1055,10 @@ stale Available or eternal Progressing.
 - [x] **Must-gather rerun**: two runs into the same output dir produce
       byte-identical files, and a run that collects no related objects leaves
       no file from the run before (`hack/must-gather.sh --self-test`).
+- [x] **Must-gather relatedObjects allowlist**: all six kinds the reconciler
+      advertises are still collected, while `secrets` and `configmaps` entries
+      and a malformed group-less resource are dropped
+      (`hack/must-gather.sh --self-test`).
 - [x] **Scan-config rerun**: a second `ensureScanConfig` on an unchanged spec
       issues no write, so the Compliance Operator sees no binding update to act
       on; one ScanSetting and one binding per profile remain

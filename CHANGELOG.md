@@ -45,6 +45,14 @@ depend on those tags.
 
 ### Security
 
+- `hack/must-gather.sh` no longer dumps a Secret into a support archive. It
+  collected every object named in `status.relatedObjects`, and the only filter
+  on that list was a character check, so a hand-edited or etcd-restored
+  `relatedObjects` entry naming `secrets` was collected like any other object,
+  putting the metrics TLS private key and the scraper service-account token
+  into an attachment the operator can no longer redact. Collection is now
+  pinned to the six kinds the reconciler actually writes.
+
 - The operator built against `google.golang.org/grpc` v1.82.1, which is
   affected by GO-2026-6348 (heap exhaustion from HTTP/2 DATA frame
   fragmentation) and is fixed in v1.83.1. `govulncheck` reaches it from

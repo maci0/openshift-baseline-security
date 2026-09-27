@@ -60,6 +60,29 @@ redact_clusterbaseline_dump() {
   )
 }
 
+# True when a status.relatedObjects entry names a kind the operator actually
+# writes, as the "<resource>.<group>" pair relatedObjectsFromSuites produces.
+#
+# The character filter in collect_related_objects is a shell-safety guard, not a
+# content guard: it lets any well-shaped resource through, so a hand-edited,
+# corrupt, or etcd-restored status naming `secrets.<group>` would dump that
+# Secret's data (metrics TLS private key, scraper SA token) into a support
+# archive, which is exactly what the secrets rule further down refuses and what
+# this script's own --help promises to omit. A support attachment is a copy the
+# operator can no longer redact, so the kind is pinned to the six the reconciler
+# can produce rather than trusted from the CR.
+related_object_allowed() {
+  case "$1:$2" in
+    scansettings:compliance.openshift.io) return 0 ;;
+    scansettingbindings:compliance.openshift.io) return 0 ;;
+    deployments:apps) return 0 ;;
+    services:) return 0 ;; # core group: the jsonpath emits a trailing dot
+    poddisruptionbudgets:policy) return 0 ;;
+    consoleplugins:console.openshift.io) return 0 ;;
+  esac
+  return 1
+}
+
 # Concatenate the YAML of every object in status.relatedObjects into one file,
 # so the per-object `oc get` needs `>>`. Truncate first: the output dir is
 # reused across runs, and appending would duplicate every document on a second
@@ -77,6 +100,14 @@ collect_related_objects() {
     | while read -r res name ns; do
         [ -z "$res" ] && continue
         case "$res" in -*|*[!a-z0-9.-]*) continue ;; esac
+        # The jsonpath always joins the two fields with a dot, so a resource
+        # without one is malformed rather than core-group: skip it instead of
+        # reading it as a group-less name.
+        case "$res" in
+          *.*) kind="${res%%.*}"; kind_group="${res#*.}" ;;
+          *) continue ;;
+        esac
+        related_object_allowed "$kind" "$kind_group" || continue
         case "$name" in ''|-*|*[!a-z0-9.-]*) continue ;; esac
         if [ -n "$ns" ]; then
           case "$ns" in -*|*[!a-z0-9.-]*) continue ;; esac
@@ -294,6 +325,61 @@ EOF
       echo "FAIL: stale related-objects.yaml survived a run that collected nothing" >&2
       exit 1
     }
+
+    # Kind allowlist. The reconciler only ever advertises the six kinds
+    # relatedObjectsFromSuites writes, so a status naming anything else is
+    # hand-edited or restored and must not be collected: `secrets` would put a
+    # TLS private key or SA token in a support archive. Each listed kind must
+    # still be collected, or the allowlist has silently broken the gather.
+    oc() {
+      case "$*" in
+        *jsonpath*) printf '%s\n' \
+          'scansettings.compliance.openshift.io baseline openshift-compliance' \
+          'scansettingbindings.compliance.openshift.io baseline-ocp4-cis openshift-compliance' \
+          'deployments.apps baseline-security-console-plugin openshift-baseline-security' \
+          'services. baseline-security-console-plugin openshift-baseline-security' \
+          'poddisruptionbudgets.policy baseline-security-console-plugin openshift-baseline-security' \
+          'consoleplugins.console.openshift.io baseline-security-console-plugin ' \
+          'secrets. baseline-security-console-plugin-cert openshift-baseline-security' \
+          'configmaps. any-configmap openshift-config-managed' \
+          'scansettings.compliance.openshift.io --dash-flags openshift-compliance' \
+          'deployments.apps' ;;
+        *)
+          # Echo the resource actually requested, so an assertion on the
+          # collected file names the kind rather than a constant.
+          req_kind='' req_name='' seen=0
+          for arg in "$@"; do
+            case "$seen" in
+              0) [ "$arg" = "get" ] && seen=1 ;;
+              1) req_kind="$arg"; seen=2 ;;
+              2) req_name="$arg"; break ;;
+            esac
+          done
+          printf 'resource: %s\nname: %s\n' "$req_kind" "$req_name"
+          ;;
+      esac
+    }
+    collect_related_objects "$rel"
+    for kind in scansettings.compliance.openshift.io scansettingbindings.compliance.openshift.io \
+                deployments.apps services. poddisruptionbudgets.policy consoleplugins.console.openshift.io; do
+      grep -qx "resource: $kind" "$rel" || {
+        echo "FAIL: allowlisted kind $kind was not collected" >&2
+        cat "$rel" >&2
+        exit 1
+      }
+    done
+    for kind in secrets. configmaps.; do
+      if grep -qx "resource: $kind" "$rel"; then
+        echo "FAIL: non-allowlisted kind $kind reached related-objects.yaml" >&2
+        cat "$rel" >&2
+        exit 1
+      fi
+    done
+    if grep -q 'name: --dash-flags' "$rel"; then
+      echo "FAIL: a flag-shaped object name reached related-objects.yaml" >&2
+      cat "$rel" >&2
+      exit 1
+    fi
 
     echo "must-gather rerun self-test ok"
   )
