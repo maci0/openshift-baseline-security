@@ -69,6 +69,7 @@ import {
   remediationObjectText,
   REMEDIATION_OBJECT_UNSERIALIZABLE,
 } from '../remediation';
+import { isString, stripFormatChars } from '../parse';
 import BaselineNotConfigured from './BaselineNotConfigured';
 import { regionFocusProps, withDisabledTip } from './DisabledTip';
 import { restoreFocus } from './focus';
@@ -234,7 +235,7 @@ const RemediationsTab: React.FC<{
   // the batchable filter, and the per-row Kind badge so the list is not walked
   // through isNodeRemediation 3-4x per render.
   const nodeNames = React.useMemo(
-    () => new Set(owned.filter(isNodeRemediation).map((r) => r.metadata.name)),
+    () => new Set(owned.filter(isNodeRemediation).map((r) => r.metadata?.name ?? '')),
     [owned],
   );
 
@@ -245,7 +246,7 @@ const RemediationsTab: React.FC<{
   const batchable = React.useMemo(
     () =>
       ordered.filter((r) => {
-        if (r.spec.apply || !nodeNames.has(r.metadata.name)) {
+        if (r.spec.apply || !nodeNames.has(r.metadata?.name ?? "")) {
           return false;
         }
         const state = r.status?.applicationState;
@@ -283,7 +284,7 @@ const RemediationsTab: React.FC<{
     // patch and look like the batch started when nothing was annotated.
     const batchPatch = batchApplyPatch(
       !!baseline.metadata.annotations,
-      batchable.map((r) => r.metadata.name),
+      batchable.map((r) => r.metadata?.name ?? ""),
     );
     if (!batchPatch.length) {
       setError(t('No valid remediations to batch-apply.'));
@@ -767,15 +768,17 @@ const RemediationsTab: React.FC<{
               // tip interpolation on every other row on every render.
               const isBlocked = state === 'MissingDependencies';
               const depsSummary = isBlocked ? missingDependencySummary(rem, i18n.language) : '';
-              const errorDetail = rem.status?.errorMessage?.trim();
+              const rawError = rem.status?.errorMessage;
+              const errorDetail = isString(rawError) ? stripFormatChars(rawError).trim() : undefined;
+              const remName = rem.metadata?.name ?? '';
               return (
-                <Tr key={rem.metadata.name}>
+                <Tr key={remName}>
                   <Td dataLabel={t('Remediation')} modifier="breakWord" dir="auto">
-                    {rem.metadata.name}
+                    {remName}
                   </Td>
                   <Td dataLabel={t('Kind')}>
                     {rem.spec.current?.object?.kind ?? '—'}
-                    {nodeNames.has(rem.metadata.name) && (
+                    {nodeNames.has(remName) && (
                       <Label
                         isCompact
                         color="orange"
@@ -816,7 +819,7 @@ const RemediationsTab: React.FC<{
                     <Button
                       variant="link"
                       isInline
-                      aria-label={t('View object for {{name}}', { name: rem.metadata.name })}
+                      aria-label={t('View object for {{name}}', { name: remName })}
                       onClick={(e) => {
                         returnFocusRef.current = e.currentTarget;
                         setError(null);
@@ -835,7 +838,7 @@ const RemediationsTab: React.FC<{
                           variant="link"
                           isInline
                           isDisabled={applyDisabled}
-                          aria-label={t('Unapply {{name}}', { name: rem.metadata.name })}
+                          aria-label={t('Unapply {{name}}', { name: remName })}
                           onClick={(e) => {
                             returnFocusRef.current = e.currentTarget;
                             setError(null);
@@ -863,7 +866,7 @@ const RemediationsTab: React.FC<{
                           variant="link"
                           isInline
                           isAriaDisabled
-                          aria-label={t('Blocked: {{name}}', { name: rem.metadata.name })}
+                          aria-label={t('Blocked: {{name}}', { name: remName })}
                         >
                           {t('Blocked')}
                         </Button>
@@ -875,7 +878,7 @@ const RemediationsTab: React.FC<{
                           variant="link"
                           isInline
                           isDisabled={applyDisabled}
-                          aria-label={t('Apply {{name}}', { name: rem.metadata.name })}
+                          aria-label={t('Apply {{name}}', { name: remName })}
                           onClick={(e) => {
                             returnFocusRef.current = e.currentTarget;
                             setError(null);

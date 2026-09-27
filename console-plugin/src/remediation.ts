@@ -35,7 +35,7 @@ export const isNodeRemediation = (rem: ComplianceRemediation): boolean => {
   if (rem.spec.current?.object?.kind === 'MachineConfig') {
     return true;
   }
-  const pool = nodePoolFromScanName(rem.metadata.labels?.[SCAN_NAME_LABEL] ?? '');
+  const pool = nodePoolFromScanName(rem.metadata?.labels?.[SCAN_NAME_LABEL] ?? '');
   return pool != null && isValidK8sName(pool);
 };
 
