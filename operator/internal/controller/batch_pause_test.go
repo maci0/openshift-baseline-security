@@ -31,8 +31,17 @@ import (
 func TestSetMCPPausedSkipsInvalidPoolName(t *testing.T) {
 	scheme := testScheme(t)
 	cb := newBatchCB()
+	// Every Get fails with a non-NotFound error, so a name that reached the
+	// apiserver would surface as an error and no skip could hide behind one.
+	gets := 0
 	r := &ClusterBaselineReconciler{
-		Client: fake.NewClientBuilder().WithScheme(scheme).Build(),
+		Client: fake.NewClientBuilder().WithScheme(scheme).
+			WithInterceptorFuncs(interceptor.Funcs{
+				Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+					gets++
+					return apierrors.NewServiceUnavailable("apiserver down")
+				},
+			}).Build(),
 		Scheme: scheme,
 	}
 	for _, name := range []string{"Not_Valid", "has/slash", "-leading-dash", "trailing-", "UPPER"} {
@@ -47,6 +56,9 @@ func TestSetMCPPausedSkipsInvalidPoolName(t *testing.T) {
 	// An empty name is a no-op before the DNS check.
 	if err := r.setMCPPaused(context.Background(), "", true, batchPauseOwner(cb)); err != nil {
 		t.Fatalf("empty pool name must be a no-op, got %v", err)
+	}
+	if gets != 0 {
+		t.Fatalf("issued %d Get calls for names the guard must reject before reading the apiserver", gets)
 	}
 }
 

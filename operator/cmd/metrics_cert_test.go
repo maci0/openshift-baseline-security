@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/tls"
 	"errors"
+	"flag"
 	"net"
 	"os"
 	"path/filepath"
@@ -25,59 +26,50 @@ import (
 // now flips atomically, so a reader sees the whole old file or the whole new one.
 func writeTestPair(t *testing.T, dir string) {
 	t.Helper()
+	if err := stageTestPair(dir); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// stageTestPair is the form for callers that are not the test goroutine:
+// t.Fatal from a spawned goroutine ends only that goroutine, so a disk error
+// there has to travel back as a value.
+func stageTestPair(dir string) error {
 	certPEM, keyPEM, err := certutil.GenerateSelfSignedCertKeyWithFixtures(
 		"localhost", []net.IP{{127, 0, 0, 1}}, nil, "")
 	if err != nil {
-		t.Fatal(err)
+		return err
 	}
-	writeFileAtomic(t, filepath.Join(dir, "tls.crt"), certPEM)
-	writeFileAtomic(t, filepath.Join(dir, "tls.key"), keyPEM)
+	if err := writeFileAtomic(filepath.Join(dir, "tls.crt"), certPEM); err != nil {
+		return err
+	}
+	return writeFileAtomic(filepath.Join(dir, "tls.key"), keyPEM)
 }
 
 // writeFileAtomic stages the bytes in a fresh temp file in the target's directory
 // and renames them over it, so a concurrent reader never observes a partially
 // written file. CreateTemp picks the name atomically: a shared fixed temp name
 // would be the same torn-write race one level down.
-func writeFileAtomic(t *testing.T, path string, data []byte) {
-	t.Helper()
+func writeFileAtomic(path string, data []byte) error {
 	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".*.tmp")
 	if err != nil {
-		t.Fatal(err)
+		return err
 	}
 	name := tmp.Name()
-	// Cleanup covers every failure below and runs after Fatal, so no branch has
-	// to remember to unlink the temp file it just created.
-	t.Cleanup(func() { _ = os.Remove(name) })
+	// Every failure below leaves the staged file behind; the deferred remove
+	// covers them all without each branch having to unlink.
+	defer os.Remove(name)
 	if _, err := tmp.Write(data); err != nil {
-		if cerr := tmp.Close(); cerr != nil {
-			t.Logf("closing %s: %v", name, cerr)
-		}
-		discardTemp(t, name)
-		t.Fatal(err)
+		_ = tmp.Close()
+		return err
 	}
 	if err := tmp.Close(); err != nil {
-		discardTemp(t, name)
-		t.Fatal(err)
+		return err
 	}
 	if err := os.Chmod(name, 0o600); err != nil {
-		discardTemp(t, name)
-		t.Fatal(err)
+		return err
 	}
-	if err := os.Rename(name, path); err != nil {
-		discardTemp(t, name)
-		t.Fatal(err)
-	}
-}
-
-// discardTemp unlinks the staged file on an already-failing path. The test is
-// ending in t.Fatal either way, so an unlink error only decides whether a
-// stray file is left in the test's temp dir; report it and keep the original
-// failure as the cause.
-func discardTemp(t *testing.T, name string) {
-	t.Helper()
-	if err := os.Remove(name); err != nil && !errors.Is(err, os.ErrNotExist) {
-		t.Logf("removing %s: %v", name, err)
-	}
+	return os.Rename(name, path)
 }
 
 func TestMetricsCertProviderSelfSignedWhenMissing(t *testing.T) {
@@ -307,6 +299,16 @@ func TestLookupFlagMissing(t *testing.T) {
 	}
 }
 
+// The setup log reports the zap flags lookupFlag reads, so a registered flag
+// that came back empty would silently log nothing for it.
+func TestLookupFlagRegistered(t *testing.T) {
+	const name = "lookupflag-test"
+	flag.CommandLine.String(name, "zap", "")
+	if got := lookupFlag(name); got != "zap" {
+		t.Fatalf("registered flag %q = %q, want %q", name, got, "zap")
+	}
+}
+
 // A multi-kilobyte junk value must still fail closed and not paste the whole
 // blob into the error (setup logs would balloon).
 func TestParseEnvBoolTruncatesRejectedValue(t *testing.T) {
@@ -526,7 +528,10 @@ func TestMetricsCertProviderConcurrentReload(t *testing.T) {
 			defer wg.Done()
 			if i == n/2 {
 				// Mid-flight rotation while others load/reload.
-				writeTestPair(t, dir)
+				if err := stageTestPair(dir); err != nil {
+					errs[i] = err
+					return
+				}
 			}
 			_, errs[i] = p.GetCertificate(nil)
 		}()
@@ -570,9 +575,17 @@ func TestWriteTestPairIsAtomicUnderConcurrentReads(t *testing.T) {
 	big := bytes.Repeat([]byte("-----BEGIN CERTIFICATE-----\n"), 4096)
 	// Establish the post-rotation size before the reader starts, so every read
 	// is compared against the same length.
-	writeFileAtomic(t, filepath.Join(dir, "tls.crt"), big)
+	if err := writeFileAtomic(filepath.Join(dir, "tls.crt"), big); err != nil {
+		t.Fatalf("seed oversized tls.crt: %v", err)
+	}
 
 	stop := make(chan struct{})
+	// The reader below spins until stop closes. A cleanup close guarantees the
+	// goroutine ends even when a rotation failure calls Fatal and skips the
+	// explicit close; the once keeps the two from double-closing.
+	var stopOnce sync.Once
+	stopReader := func() { stopOnce.Do(func() { close(stop) }) }
+	t.Cleanup(stopReader)
 	var wg sync.WaitGroup
 	var short atomic.Int64
 	wg.Add(1)
@@ -596,9 +609,11 @@ func TestWriteTestPairIsAtomicUnderConcurrentReads(t *testing.T) {
 		}
 	}()
 	for i := 0; i < 50; i++ {
-		writeFileAtomic(t, filepath.Join(dir, "tls.crt"), big)
+		if err := writeFileAtomic(filepath.Join(dir, "tls.crt"), big); err != nil {
+			t.Fatalf("rotation %d: %v", i, err)
+		}
 	}
-	close(stop)
+	stopReader()
 	wg.Wait()
 	if n := short.Load(); n > 0 {
 		t.Fatalf("observed %d truncated reads during rotation", n)

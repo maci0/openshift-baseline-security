@@ -242,6 +242,21 @@ func ocCalls(t *testing.T, logfile string) string {
 	return string(b)
 }
 
+// assertNoClusterWrites fails if the fake oc recorded any verb that mutates the
+// cluster. "apply -f" alone is not enough: restore.sh also reaches the API
+// through `replace --subresource=status`, and a script that validated late
+// could patch, create, or delete its way through the refusal under test and
+// still pass a single-verb check.
+func assertNoClusterWrites(t *testing.T, logfile string) {
+	t.Helper()
+	calls := ocCalls(t, logfile)
+	for _, verb := range []string{"apply ", "replace ", "patch ", "delete ", "create ", "edit "} {
+		if strings.Contains(calls, verb) {
+			t.Errorf("a %q call reached the cluster before the refusal took effect:\n%s", strings.TrimSpace(verb), calls)
+		}
+	}
+}
+
 // sha256Hex digests a file with the standard library. The tests must not
 // shell out to a checksum tool: `sha256sum` is GNU coreutils and absent on
 // macOS, which is a supported host for `make test`.
@@ -541,9 +556,7 @@ func TestRestoreRejectsTamperedArtifact(t *testing.T) {
 			// The refusal must happen before any write: a partial apply would
 			// let the operator reconcile a half-restored object and overwrite
 			// the evidence of what was lost.
-			if calls := ocCalls(t, log); strings.Contains(calls, "apply -f") {
-				t.Errorf("restore wrote to the cluster before validating:\n%s", calls)
-			}
+			assertNoClusterWrites(t, log)
 		})
 	}
 }
@@ -625,9 +638,7 @@ func TestRestoreRefusesToRollBackAMovedOnObject(t *testing.T) {
 	if !strings.Contains(stderr, "--force") {
 		t.Errorf("stderr %q, want the override named", stderr)
 	}
-	if calls := ocCalls(t, log); strings.Contains(calls, "apply -f") {
-		t.Errorf("the refused restore still wrote to the cluster:\n%s", calls)
-	}
+	assertNoClusterWrites(t, log)
 
 	// --force is how an operator says they meant it, and then it proceeds.
 	if _, stderr, code := runScript(t, "restore.sh", work, "--force", dir); code != 0 {
@@ -800,13 +811,11 @@ func TestRestoreRefusesWhenLiveObjectCannotBeRead(t *testing.T) {
 	if !strings.Contains(stderr, "cannot read the live ClusterBaseline") {
 		t.Errorf("stderr %q, want the unreadable live object named", stderr)
 	}
+	assertNoClusterWrites(t, log)
 	// --force does not cover this either: the operator cannot mean to clobber
 	// an object whose current resourceVersion was never read.
 	if _, _, code := runScript(t, "restore.sh", work, "--force", dir); code == 0 {
 		t.Fatal("--force restored over a live object it could not read")
-	}
-	if calls := ocCalls(t, log); strings.Contains(calls, "apply -f") {
-		t.Errorf("the refused restore still wrote to the cluster:\n%s", calls)
 	}
 }
 
@@ -828,9 +837,7 @@ func TestRestoreRefusesAnArtifactTheClusterCannotServe(t *testing.T) {
 	if !strings.Contains(stderr, "does not serve") || !strings.Contains(stderr, "v1beta1") {
 		t.Errorf("stderr %q, want the served versions named", stderr)
 	}
-	if calls := ocCalls(t, log); strings.Contains(calls, "apply -f") {
-		t.Errorf("the refusal came after a write to the cluster; oc calls:\n%s", calls)
-	}
+	assertNoClusterWrites(t, log)
 
 	// An admin who knows the CRD is coming back still gets a way through.
 	_, stderr, code = runScript(t, "restore.sh", work, "--force", dir)

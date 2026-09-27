@@ -1,9 +1,12 @@
 package controller
 
 import (
+	"bytes"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/go-logr/logr/funcr"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
@@ -148,5 +151,35 @@ func TestPostureLogTransitionGate(t *testing.T) {
 	r.postureLog(logger, "notAvailable/NotInstalled", "msg", nil)
 	if r.lastPostureLogSig != "notAvailable/NotInstalled" {
 		t.Fatalf("new posture not recorded: %q", r.lastPostureLogSig)
+	}
+}
+
+// The gate above only proves the bookkeeping field. The behavior it exists for
+// is the verbosity split: a transition is worth an Info line every operator sees,
+// a repeated posture is not. Inverting the two levels, or dropping the V(1) and
+// logging both at Info, leaves the signature assertions green and the log
+// unreadable.
+func TestPostureLogVerbosity(t *testing.T) {
+	var buf bytes.Buffer
+	// Verbosity 1 so the rate-limited repeat is rendered at all; the
+	// level field is what separates it from the transition.
+	logger := funcr.NewJSON(func(obj string) { _, _ = buf.WriteString(obj + "\n") },
+		funcr.Options{Verbosity: 1})
+	r := &ClusterBaselineReconciler{}
+
+	r.postureLog(logger, "degraded/CSVFailed", "first", nil)
+	r.postureLog(logger, "degraded/CSVFailed", "repeat", nil)
+	r.postureLog(logger, "notAvailable/NotInstalled", "recovered", nil)
+	lines := strings.Split(strings.TrimRight(buf.String(), "\n"), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("logged %d records, want 3:\n%s", len(lines), buf.String())
+	}
+	if !strings.Contains(lines[1], `"level":1`) {
+		t.Fatalf("an unchanged posture must drop to V(1), got:\n%s", lines[1])
+	}
+	for i, line := range []string{lines[0], lines[2]} {
+		if !strings.Contains(line, `"level":0`) {
+			t.Fatalf("record %d is a posture transition and must log at Info, got:\n%s", i, line)
+		}
 	}
 }

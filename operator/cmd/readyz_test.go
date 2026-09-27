@@ -76,8 +76,8 @@ func TestCacheSyncReadyz(t *testing.T) {
 	c := &scriptedSyncCache{syncedAfter: 2}
 	check := cacheSyncReadyz(c)
 	req := httptest.NewRequestWithContext(context.Background(), "GET", "/readyz", nil)
-	if err := check(req); err == nil {
-		t.Fatal("readyz before cache sync = nil, want error")
+	if err := check(req); !errors.Is(err, errCacheNotSynced) {
+		t.Fatalf("readyz before cache sync = %v, want %v", err, errCacheNotSynced)
 	}
 	if err := check(req); err != nil {
 		t.Fatalf("readyz after cache sync = %v, want nil", err)

@@ -66,12 +66,30 @@ func TestPrintUsageIncludesEnv(t *testing.T) {
 	}
 }
 
-// The KUBECONFIG env var is only meaningful if --kubeconfig is a real flag:
-// the help documents one precedence, so the flag set must carry both. The flag
-// comes from clientconfig, so pin it rather than trusting the import.
-func TestKubeconfigFlagIsDefined(t *testing.T) {
-	if flag.Lookup(clientconfig.KubeconfigFlagName) == nil {
+// main.go calls clientconfig.RegisterFlags(flag.CommandLine) so the flag set is
+// not at the mercy of a transitive package init. Two properties make that call
+// safe and useful: the flag defaults to empty, so KUBECONFIG stays meaningful,
+// and registering a second time on an already-populated FlagSet is a no-op
+// rather than a duplicate-definition panic. Asserting on flag.CommandLine
+// proves neither, since controller-runtime's own init has already defined the
+// flag there before any test runs.
+func TestKubeconfigFlagRegistration(t *testing.T) {
+	fs := flag.NewFlagSet("fresh", flag.ContinueOnError)
+	clientconfig.RegisterFlags(fs)
+	f := fs.Lookup(clientconfig.KubeconfigFlagName)
+	if f == nil {
 		t.Fatalf("--%s is not registered; the documented KUBECONFIG precedence is unreachable",
+			clientconfig.KubeconfigFlagName)
+	}
+	if f.DefValue != "" {
+		t.Fatalf("--%s defaults to %q; KUBECONFIG would be shadowed",
+			clientconfig.KubeconfigFlagName, f.DefValue)
+	}
+	// The real binary registers on a FlagSet that controller-runtime's init
+	// already populated, so re-registration must not redefine the flag.
+	clientconfig.RegisterFlags(fs)
+	if again := fs.Lookup(clientconfig.KubeconfigFlagName); again != f {
+		t.Fatalf("re-registering --%s replaced the flag; the process flag set would panic at startup",
 			clientconfig.KubeconfigFlagName)
 	}
 }
