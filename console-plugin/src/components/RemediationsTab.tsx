@@ -212,9 +212,11 @@ const RemediationsTab: React.FC<{
 
   // Apply-order: prerequisites (applyable) before MissingDependencies so the
   // table guides the admin to fix blockers first (openspec guided-remediation).
+  // Locale-parameterized comparator, so the name order follows the console
+  // locale like every other sorted list on the page.
   const ordered = React.useMemo(
-    () => [...owned].sort(compareRemediationsForApplyOrder),
-    [owned],
+    () => [...owned].sort(compareRemediationsForApplyOrder(i18n.language)),
+    [owned, i18n.language],
   );
 
   // Node-remediation membership computed once (isNodeRemediation parses the
@@ -748,7 +750,7 @@ const RemediationsTab: React.FC<{
               // split / JSON.parse (missingDependencySummary) and the Blocked
               // tip interpolation on every other row on every render.
               const isBlocked = state === 'MissingDependencies';
-              const depsSummary = isBlocked ? missingDependencySummary(rem) : '';
+              const depsSummary = isBlocked ? missingDependencySummary(rem, i18n.language) : '';
               const errorDetail = rem.status?.errorMessage?.trim();
               return (
                 <Tr key={rem.metadata.name}>
@@ -775,9 +777,12 @@ const RemediationsTab: React.FC<{
                     >
                       {stateDisplayTitle(state, t)}
                     </Label>
+                    {/* dir=auto: both are untrusted CO text (annotation values
+                        and status.errorMessage) and may be RTL. */}
                     {state === 'MissingDependencies' && depsSummary && (
                       <div
                         style={detailStyle}
+                        dir="auto"
                       >
                         {depsSummary}
                       </div>
@@ -785,6 +790,7 @@ const RemediationsTab: React.FC<{
                     {state === 'Error' && errorDetail && (
                       <div
                         style={detailStyle}
+                        dir="auto"
                       >
                         {errorDetail}
                       </div>

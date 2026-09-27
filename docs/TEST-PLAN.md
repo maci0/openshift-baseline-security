@@ -786,6 +786,12 @@ an accepted risk neither inflates nor tanks the score.
       profile pickers match case- and accent-insensitively, keep the Turkish
       dotted and dotless I distinct, and sort by the session locale's
       collation rather than byte order (jest `text.test.ts`).
+- [x] **List punctuation and sort order follow the session locale**: a list of
+      check names, waiver names, or remediation dependencies uses the locale's
+      own separator (German "und", Arabic "، و", none in Japanese) rather than
+      a literal ", ", and the remediation table orders by the console locale's
+      collation rather than the browser default (jest `text.test.ts`,
+      `remediation.test.ts`).
 - [ ] **Narrow viewport**: dashboard cards, donut legend, table filters, and
       remediation modals do not overlap or clip text at common laptop/tablet
       widths.

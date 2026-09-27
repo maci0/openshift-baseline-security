@@ -57,6 +57,7 @@ import { resultsHref } from '../links';
 import { historyContentKey, toTrendData } from '../overviewTrend';
 import { resourceVersionTest, schedulePatch } from '../patches';
 import { changedChecksMany } from '../results';
+import { formatList, listSeparators } from '../text';
 import {
   aggregateCounts,
   effectiveScoringMode,
@@ -522,6 +523,8 @@ const Overview: React.FC<{
   );
   const newlyFailedItems = recentChanges[0];
   const fixedItems = recentChanges[1];
+  // List punctuation for the alert's inline link list of check links.
+  const newlyFailedSeparators = listSeparators(newlyFailedItems.length, locale);
 
   // Main score-trend chart: same CCR-churn stability as MiniTrend (Date objects
   // and Victory path data must not rebuild when history content is unchanged).
@@ -735,8 +738,15 @@ const Overview: React.FC<{
           {newlyFailedItems.length > 0 ? (
             newlyFailedItems.map((c, i) => (
               <React.Fragment key={c.name}>
-                {i > 0 && ', '}
-                <a href={c.href}>{c.title}</a>
+                {/* Locale list punctuation, not a literal ", ": de/fr want
+                    "und"/"et" before the last item, ja/zh use no separator. */}
+                {i > 0 && newlyFailedSeparators[i - 1]}
+                {/* Check titles are untrusted CO text and may be RTL; dir=auto
+                    keeps the surrounding punctuation and separators on the
+                    right side of the title. */}
+                <a href={c.href} dir="auto">
+                  {c.title}
+                </a>
               </React.Fragment>
             ))
           ) : (
@@ -764,7 +774,14 @@ const Overview: React.FC<{
           })}
           style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}
         >
-          {expiring.map((w) => w.name).join(', ')}
+          {/* Locale list punctuation; the waiver name is admin-entered free
+              text, so dir=auto keeps an RTL name's separators on its side. */}
+          <span dir="auto">
+            {formatList(
+              expiring.map((w) => w.name),
+              locale,
+            )}
+          </span>
           <div>
             <a href={resultsHref('WAIVED')}>{t('Review waived checks')}</a>
           </div>
@@ -920,7 +937,9 @@ const Overview: React.FC<{
                             <Icon status="danger" isInline>
                               <ExclamationCircleIcon />
                             </Icon>{' '}
-                            <a href={c.href}>{c.title}</a>
+                            <a href={c.href} dir="auto">
+                              {c.title}
+                            </a>
                           </div>
                         ))}
                       </DescriptionListDescription>
@@ -939,7 +958,9 @@ const Overview: React.FC<{
                             <Icon status="success" isInline>
                               <CheckCircleIcon />
                             </Icon>{' '}
-                            <a href={c.href}>{c.title}</a>
+                            <a href={c.href} dir="auto">
+                              {c.title}
+                            </a>
                           </div>
                         ))}
                       </DescriptionListDescription>

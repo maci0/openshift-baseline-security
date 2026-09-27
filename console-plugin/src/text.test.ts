@@ -1,4 +1,4 @@
-import { compareForDisplay, foldForSearch, matchesSearch, textCollator } from './text';
+import { compareForDisplay, foldForSearch, formatList, listSeparators, matchesSearch, textCollator } from './text';
 
 describe('foldForSearch', () => {
   it('folds case and strips diacritics', () => {
@@ -127,5 +127,55 @@ describe('textCollator', () => {
   // must be built with undefined and cached under the empty key.
   it('caches the runtime-default collator under the empty tag', () => {
     expect(textCollator(undefined)).toBe(textCollator());
+  });
+});
+
+describe('formatList', () => {
+  const ITEMS = ['rule_a', 'rule_b', 'rule_c'];
+
+  it('uses the locale list punctuation, not a literal ", "', () => {
+    expect(formatList(ITEMS, 'en')).toBe('rule_a, rule_b, rule_c');
+    // German conjoins the final item.
+    expect(formatList(['a', 'b', 'c'], 'de')).toBe('a, b und c');
+    // Arabic separates with the Arabic comma, never the ASCII one.
+    expect(formatList(ITEMS, 'ar')).toBe('rule_a، وrule_b، وrule_c');
+    // Japanese and Chinese have no list punctuation: a space, not a comma.
+    expect(formatList(ITEMS, 'ja')).toBe('rule_a rule_b rule_c');
+    expect(formatList(['a', 'b', 'c'], 'zh')).toBe('abc');
+  });
+
+  it('passes empty and single-item lists through unchanged', () => {
+    expect(formatList([], 'en')).toBe('');
+    expect(formatList(['only'], 'en')).toBe('only');
+  });
+
+  it('falls back to the runtime default on an invalid locale tag', () => {
+    expect(formatList(ITEMS, 'not a tag')).toBe(formatList(ITEMS));
+    // Underscore form is the one the console can hand us; it must normalize.
+    expect(formatList(ITEMS, 'en_US')).toBe(formatList(ITEMS, 'en-US'));
+  });
+});
+
+describe('listSeparators', () => {
+  it('returns one fewer literal than items', () => {
+    expect(listSeparators(3, 'en')).toEqual([', ', ', ']);
+    expect(listSeparators(2, 'en')).toEqual([', ']);
+  });
+
+  // The whole point of the helper: German and Hebrew put their conjunction on
+  // the last pair, so a caller that hardcoded ", " got it wrong for those.
+  it('carries the locale conjunction on the final pair', () => {
+    expect(listSeparators(3, 'de')).toEqual([', ', ' und ']);
+    expect(listSeparators(3, 'pl')).toEqual([', ', ' i ']);
+  });
+
+  it('returns no separators for locales that need none, or for < 2 items', () => {
+    expect(listSeparators(3, 'zh')).toEqual([]);
+    expect(listSeparators(1, 'en')).toEqual([]);
+    expect(listSeparators(0, 'en')).toEqual([]);
+  });
+
+  it('falls back to the runtime default on an invalid locale tag', () => {
+    expect(listSeparators(3, 'not a tag')).toEqual(listSeparators(3));
   });
 });

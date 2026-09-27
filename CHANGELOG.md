@@ -211,6 +211,18 @@ depend on those tags.
   reports every bad line at once. `.env.example` also no longer ships a
   placeholder `CONSOLE_URL` that would run the suite against a host that does
   not exist.
+- Console plugin, non-English consoles: the Remediations table sorted
+  remediation names by the browser's default collation rather than the console
+  session's, so a German or Swedish console ordered that list differently from
+  every other sorted list on the page. List separators for the blocked
+  dependency summary, the expiring-waiver alert, and the newly-failing alert
+  were a literal `", "`, which is wrong in every locale that has its own list
+  punctuation (German "und", Arabic "، و") and leaves a stray comma in locales
+  that have none (Japanese, Chinese). Both now follow the session locale.
+- Console plugin, bidirectional text: the Overview alerts and the Remediations
+  dependency and error details render untrusted Compliance Operator text
+  (check titles, waiver names, `status.errorMessage`) without a text direction,
+  so an RTL value reordered the punctuation and links around it.
 - Console plugin, apply-remediation confirmation: the node-remediation warning
   told the admin to batch changes by pausing the target MachineConfigPool under
   Compute and resuming it afterwards, which is exactly what the Remediations tab

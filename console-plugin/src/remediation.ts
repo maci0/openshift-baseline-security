@@ -2,7 +2,7 @@
 import { ComplianceRemediation, nodePoolFromScanName, SCAN_NAME_LABEL } from './models';
 import { isValidK8sName } from './names';
 import { isString, stripFormatChars } from './parse';
-import { textCollator } from './text';
+import { formatList, textCollator } from './text';
 
 // Fields of a compliance-operator depends-on-obj JSON entry; values are
 // untrusted annotation text, so each field is narrowed before use.
@@ -77,7 +77,13 @@ export const remediationObjectText = (rem: ComplianceRemediation): string => {
 // the HTML report: without it a bidirectional override in an annotation name
 // reverses the rendered row, while the same value exported to CSV or the report
 // comes out clean.
-export const missingDependencySummary = (rem: ComplianceRemediation): string | null => {
+// The parts are joined with the locale's list punctuation, not a literal ", ",
+// because the result is interpolated into a translated sentence: in Arabic the
+// separator is "، " and in Japanese the list has none.
+export const missingDependencySummary = (
+  rem: ComplianceRemediation,
+  locale?: string,
+): string | null => {
   const ann = rem.metadata.annotations ?? {};
   const parts: string[] = [];
   // Coerce then strip: an annotation is untyped CR text, and a tampered
@@ -136,7 +142,7 @@ export const missingDependencySummary = (rem: ComplianceRemediation): string | n
   }
 
   if (parts.length) {
-    return parts.join(', ');
+    return formatList(parts, locale);
   }
   const err = rem.status?.errorMessage;
   return isString(err) ? stripFormatChars(err).trim() || null : null;
@@ -147,9 +153,14 @@ export const missingDependencySummary = (rem: ComplianceRemediation): string | n
 // Stable by name within each group. Names are untrusted list-watch data: coerce
 // so a partial/tampered item cannot throw mid-sort. Build one comparator with
 // applyOrderComparator instead of calling localeCompare per comparison.
-export const applyOrderComparator = (collator: Intl.Collator) => (
+export type RemediationOrderComparator = (
   a: ComplianceRemediation,
   b: ComplianceRemediation,
+) => number;
+
+export const applyOrderComparator = (collator: Intl.Collator): RemediationOrderComparator => (
+  a,
+  b,
 ): number => {
   const blocked = (r: ComplianceRemediation) =>
     r.status?.applicationState === 'MissingDependencies' ? 1 : 0;
@@ -162,8 +173,13 @@ export const applyOrderComparator = (collator: Intl.Collator) => (
   return collator.compare(an, bn);
 };
 
-// textCollator, not a bare new Intl.Collator(): the console locale (so a
-// German console orders like the rest of the page, not like the browser's
+// textCollator, not a bare new Intl.Collator(): it carries the console locale
+// (so a German console orders like the rest of the page, not like the browser's
 // default) and numeric:true, so rule_2 sorts before rule_10 as it does in the
-// Profiles catalog. One cached collator per locale, not one per render.
-export const compareRemediationsForApplyOrder = applyOrderComparator(textCollator());
+// Profiles catalog. The locale is a parameter, not a module-load constant:
+// a comparator bound to the default locale at import time keeps ordering by
+// the browser's language for the life of the tab, which disagrees with every
+// other sorted list on the page once the console locale differs.
+export const compareRemediationsForApplyOrder = (
+  locale?: string,
+): RemediationOrderComparator => applyOrderComparator(textCollator(locale));

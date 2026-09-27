@@ -270,8 +270,40 @@ describe('remediation helpers', () => {
       metadata: { name: 'm-ready', namespace: 'ns' },
       status: { applicationState: 'NotApplied' },
     });
-    const sorted = [b, a, c].sort(compareRemediationsForApplyOrder);
+    const sorted = [b, a, c].sort(compareRemediationsForApplyOrder());
     expect(sorted.map((r) => r.metadata.name)).toEqual(['m-ready', 'z-ready', 'a-blocked']);
+  });
+  // The comparator is parameterized by locale so a non-English console orders
+  // by its own collation. Swedish treats 'ä' as a letter of its own after 'z';
+  // under the runtime default (en) it is a variant of 'a' and sorts beside it.
+  it('compareRemediationsForApplyOrder orders names by the given locale', () => {
+    const names = ['zoo', 'alfa', 'älg'];
+    const byLocale = (locale?: string) =>
+      [...names].sort(compareRemediationsForApplyOrder(locale)).join(',');
+    expect(byLocale('en')).toBe('alfa,älg,zoo');
+    expect(byLocale('sv')).toBe('alfa,zoo,älg');
+  });
+  // The dependency summary is interpolated into a translated sentence, so its
+  // separator follows the locale rather than a literal ", ".
+  it('missingDependencySummary joins parts with the locale list punctuation', () => {
+    const blocked = (deps: string) =>
+      rem(undefined, undefined, {
+        metadata: {
+          name: 'r',
+          namespace: 'ns',
+          annotations: { 'compliance.openshift.io/depends-on': deps },
+        },
+      });
+    const three = blocked('rule_a, rule_b, rule_c');
+    expect(missingDependencySummary(three, 'en')).toBe('rule_a, rule_b, rule_c');
+    // Arabic separates with the Arabic comma, never the ASCII one.
+    expect(missingDependencySummary(three, 'ar')).toBe('rule_a، وrule_b، وrule_c');
+    // Japanese has no list punctuation: a space, not a comma.
+    expect(missingDependencySummary(three, 'ja')).toBe('rule_a rule_b rule_c');
+    // An invalid tag falls back to the runtime default rather than throwing.
+    expect(missingDependencySummary(three, 'not a tag')).toBe(
+      missingDependencySummary(three),
+    );
   });
   it('fuzz: returns a string and never throws for arbitrary rendered objects', () => {
     for (let i = 0; i < 1000; i++) {
@@ -350,8 +382,8 @@ describe('remediation helpers', () => {
           applicationState: i % 5 === 0 ? 'MissingDependencies' : 'NotApplied',
         },
       });
-      const ab = compareRemediationsForApplyOrder(a, b);
-      const ba = compareRemediationsForApplyOrder(b, a);
+      const ab = compareRemediationsForApplyOrder()(a, b);
+      const ba = compareRemediationsForApplyOrder()(b, a);
       expect(Number.isFinite(ab)).toBeTruthy();
       expect(Number.isFinite(ba)).toBeTruthy();
       let antisymmetry: string | undefined;
@@ -361,7 +393,7 @@ describe('remediation helpers', () => {
         antisymmetry = `sign(compare(a, b) = ${ab}) != -sign(compare(b, a) = ${ba})`;
       }
       expect(antisymmetry).toBeUndefined();
-      expect(compareRemediationsForApplyOrder(a, a)).toBe(0);
+      expect(compareRemediationsForApplyOrder()(a, a)).toBe(0);
     }
   });
   // Partial list-watch items must not throw mid-sort.
@@ -374,7 +406,7 @@ describe('remediation helpers', () => {
     const b = rem(undefined, undefined, {
       metadata: { name: 'b', namespace: 'ns' },
     });
-    expect(() => compareRemediationsForApplyOrder(a, b)).not.toThrow();
-    expect(Number.isFinite(compareRemediationsForApplyOrder(a, b))).toBeTruthy();
+    expect(() => compareRemediationsForApplyOrder()(a, b)).not.toThrow();
+    expect(Number.isFinite(compareRemediationsForApplyOrder()(a, b))).toBeTruthy();
   });
 });

@@ -77,6 +77,15 @@ double casts are rejected outright.
 - All user-visible text goes through `t()` and lands in
   `locales/en/plugin__baseline-security-console-plugin.json`. Extension titles
   in `console-extensions.json` use the `%key%` form.
+- Numbers, dates, sorted lists, and list punctuation come from `src/dates.ts`
+  and `src/text.ts` (`formatCount`, `formatList`, `listSeparators`,
+  `textCollator`) with the console locale from `i18n.language`. Never a
+  literal `", "`, `toFixed`, or `localeCompare`. A comparator or formatter that
+  binds the runtime default locale at module load ignores the console locale
+  for the life of the tab, so locale is a parameter, not a constant.
+- Untrusted text off a cluster object (check titles, waiver reasons, CO
+  annotation values, `status.errorMessage`) renders with `dir="auto"`, so an
+  RTL value does not reorder the punctuation around it.
 - `'—'` is the rendered placeholder for an absent or unscoreable value, and it
   is distinct from an error state. It is a UI string, not prose: the em-dash
   ban does not reach it.

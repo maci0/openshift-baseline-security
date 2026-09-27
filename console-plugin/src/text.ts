@@ -66,3 +66,47 @@ export const matchesSearch = (haystack: string, needle: string): boolean => {
 // name sorts beside its base letter, and an Arabic list orders by abjad.
 export const compareForDisplay = (a: string, b: string, locale?: string): number =>
   textCollator(locale).compare(a, b);
+
+// List formatters are as expensive to build as collators, so one per locale.
+const listFormatters = new Map<string, Intl.ListFormat>();
+
+// type 'unit' (not 'conjunction'): these lists enumerate peers, so a locale
+// that has no list punctuation joins with a space (ja, zh) rather than
+// inventing an "and" the sentence never said. Never constructed with the empty
+// string, which throws; the empty key is cache-only.
+const listFormatter = (locale?: string): Intl.ListFormat => {
+  const key = safeLocale(locale) ?? '';
+  let formatter = listFormatters.get(key);
+  if (!formatter) {
+    formatter = new Intl.ListFormat(key || undefined, {
+      style: 'long',
+      type: 'unit',
+    });
+    listFormatters.set(key, formatter);
+  }
+  return formatter;
+};
+
+// Join a user-facing list of names with the locale's own list punctuation.
+// A hardcoded ", " is wrong well beyond Arabic: de and fr want "und"/"et"
+// before the last item, ja and zh use no separator at all, and he prefixes the
+// final conjunct. The locale tag is validated the same way as the collator.
+export const formatList = (items: readonly string[], locale?: string): string =>
+  listFormatter(locale).format(items);
+
+// Same punctuation as formatList, for lists whose items are React nodes (links
+// to each check) rather than plain strings. Returns the literals only, in
+// order, so a caller can interleave its own elements: item, literal[0], item,
+// literal[1], ... A locale that needs no separator (ja, zh) returns an empty
+// array and the items simply sit side by side. One fewer element than the item
+// count is guaranteed for count >= 2; the count-0 and count-1 cases return
+// nothing, since there is no pair to separate.
+export const listSeparators = (count: number, locale?: string): string[] => {
+  if (count < 2) {
+    return [];
+  }
+  const parts = listFormatter(locale).formatToParts(
+    Array.from({ length: count }, (_, i) => String(i)),
+  );
+  return parts.filter((p) => p.type === 'literal').map((p) => p.value);
+};
