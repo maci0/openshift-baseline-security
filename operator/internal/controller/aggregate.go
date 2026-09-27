@@ -25,6 +25,19 @@ import (
 // empty so the score is still complete.
 const checkResultListPageSize int64 = 500
 
+// addWeighted accumulates w into the pass or fail side of the bucket named key.
+// Shared by the per-profile and per-tailored weight maps, which have the same
+// value type and differ only in their key type.
+func addWeighted[K comparable](buckets map[K]weightedSum, key K, pass bool, w int64) {
+	s := buckets[key]
+	if pass {
+		s.pass += w
+	} else {
+		s.fail += w
+	}
+	buckets[key] = s
+}
+
 func (r *ClusterBaselineReconciler) aggregateStatus(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline) error {
 	byProfile := map[baselinev1alpha1.ProfileKey]*baselinev1alpha1.ProfileStatus{}
 	for _, key := range cb.Spec.Profiles {
@@ -123,21 +136,9 @@ func (r *ClusterBaselineReconciler) aggregateStatus(ctx context.Context, cb *bas
 			wFail += w
 		}
 		if isTailored {
-			s := weights.tailored[tailoredName]
-			if pass {
-				s.pass += w
-			} else {
-				s.fail += w
-			}
-			weights.tailored[tailoredName] = s
+			addWeighted(weights.tailored, tailoredName, pass, w)
 		} else {
-			s := weights.profiles[profileKey]
-			if pass {
-				s.pass += w
-			} else {
-				s.fail += w
-			}
-			weights.profiles[profileKey] = s
+			addWeighted(weights.profiles, profileKey, pass, w)
 		}
 	}
 	// Index range: avoid copying each Unstructured (map header + metadata) on

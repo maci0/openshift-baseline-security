@@ -228,9 +228,11 @@ const ResultsTab: React.FC<{
 
   // Waiver form onChange: store the edit and drop a stale submit error, so the
   // admin is not still reading the last failed attempt's message mid-typing.
+  // The event is unused; it is typed as the shared base so one handler serves
+  // both the TextInput and TextArea form controls.
   const waiveEdit =
     (set: React.Dispatch<React.SetStateAction<string>>) =>
-    (_e: unknown, value: string) => {
+    (_event: React.FormEvent<HTMLElement>, value: string) => {
       set(value);
       if (waiveError) setWaiveError(null);
     };

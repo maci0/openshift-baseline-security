@@ -248,7 +248,6 @@ func sanitizeStatusTailoredProfiles(cb *baselinev1alpha1.ClusterBaseline) {
 			continue
 		}
 		seen[name] = struct{}{}
-		tp.Name = name
 		tp.History = clampHistory(tp.History, historyMax)
 		clampResultCounts(&tp.ResultCounts)
 		out = append(out, tp)

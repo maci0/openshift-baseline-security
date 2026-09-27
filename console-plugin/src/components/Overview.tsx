@@ -69,6 +69,7 @@ import {
   expiringWaivers,
 } from '../waivers';
 import BaselineNotConfigured from './BaselineNotConfigured';
+import LoadingCards from './LoadingCards';
 import { regionFocusProps } from './DisabledTip';
 import { ChunkError } from './ChunkError';
 import { useChunk } from './chunkLoad';
@@ -579,19 +580,7 @@ const Overview: React.FC<{
   const donutColors = React.useMemo(() => segments.map((s) => s.color), [segments]);
 
   if (!loaded) {
-    return (
-      <PageSection>
-        <Gallery hasGutter minWidths={{ default: '300px' }}>
-          {[0, 1, 2].map((i) => (
-            <Card key={i}>
-              <CardBody>
-                <Skeleton height="180px" screenreaderText={t('Loading compliance data')} />
-              </CardBody>
-            </Card>
-          ))}
-        </Gallery>
-      </PageSection>
-    );
+    return <LoadingCards cardMinWidth="300px" skeletonHeight="180px" />;
   }
   if (!baseline) {
     return (

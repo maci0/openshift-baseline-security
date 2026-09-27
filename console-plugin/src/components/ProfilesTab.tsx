@@ -41,7 +41,6 @@ import {
   Select,
   SelectList,
   SelectOption,
-  Skeleton,
   Spinner,
   Split,
   SplitItem,
@@ -87,11 +86,33 @@ import {
   toggledProfiles,
 } from '../profiles';
 import BaselineNotConfigured from './BaselineNotConfigured';
+import LoadingCards from './LoadingCards';
 import { withDisabledTip } from './DisabledTip';
 import { restoreFocus } from './focus';
 import { useAutoDismiss } from './feedback';
 import { isString } from '../parse';
 import { compareForDisplay, matchesSearch } from '../text';
+
+// Inline danger alert for the tab's single watch / action error, shared by the
+// page-top slot and every modal so the presentation cannot drift per call site.
+const ErrorAlert: React.FC<{ error: string; onClose?: () => void }> = ({ error, onClose }) => {
+  const { t } = useTranslation('plugin__baseline-security-console-plugin');
+
+  return (
+    <Alert
+      variant="danger"
+      isInline
+      isLiveRegion
+      title={error}
+      style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}
+      actionClose={
+        onClose && (
+          <AlertActionCloseButton aria-label={t('Close')} onClose={onClose} />
+        )
+      }
+    />
+  );
+};
 
 // Typeahead multi-select over a (possibly large) rule catalog: type to filter,
 // pick from a checkbox dropdown, selections show as removable chips inline.
@@ -723,19 +744,7 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
   const boundTailored = baseline?.spec.tailoredProfiles ?? [];
 
   if (!loaded) {
-    return (
-      <PageSection>
-        <Gallery hasGutter minWidths={{ default: '330px' }}>
-          {[0, 1, 2].map((i) => (
-            <Card key={i}>
-              <CardBody>
-                <Skeleton height="80px" screenreaderText={t('Loading compliance data')} />
-              </CardBody>
-            </Card>
-          ))}
-        </Gallery>
-      </PageSection>
-    );
+    return <LoadingCards cardMinWidth="330px" skeletonHeight="80px" />;
   }
   if (!baseline) {
     return (
@@ -775,16 +784,7 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
       )}
       {/* Hide page-top error while a modal owns the same message. */}
       {error && !unbinding && !disablingLast && !creating && (
-        <Alert
-          variant="danger"
-          isInline
-          isLiveRegion
-          title={error}
-          style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}
-          actionClose={
-            <AlertActionCloseButton aria-label={t('Close')} onClose={() => setError(null)} />
-          }
-        />
+        <ErrorAlert error={error} onClose={() => setError(null)} />
       )}
       {success && (
         <Alert
@@ -834,15 +834,7 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
           labelId="new-tp-title"
         />
         <ModalBody>
-          {error && (
-            <Alert
-              variant="danger"
-              isInline
-              isLiveRegion
-              title={error}
-              style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}
-            />
-          )}
+          {error && <ErrorAlert error={error} />}
           <Content
             component="p"
             style={{
@@ -1095,15 +1087,7 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
               profile: disablingLast ? t(profileTitle(disablingLast)) : '',
             },
           )}
-          {error && (
-            <Alert
-              variant="danger"
-              isInline
-              isLiveRegion
-              title={error}
-              style={{ marginTop: 'var(--pf-t--global--spacer--md)' }}
-            />
-          )}
+          {error && <ErrorAlert error={error} />}
         </ModalBody>
         <ModalFooter>
           <Button
@@ -1222,15 +1206,7 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
                 {t('Scheduled scans and rescan will stop until you enable a profile again.')}
               </Alert>
             )}
-          {error && (
-            <Alert
-              variant="danger"
-              isInline
-              isLiveRegion
-              title={error}
-              style={{ marginTop: 'var(--pf-t--global--spacer--md)' }}
-            />
-          )}
+          {error && <ErrorAlert error={error} />}
         </ModalBody>
         <ModalFooter>
           <Button
