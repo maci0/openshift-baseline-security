@@ -69,6 +69,8 @@ import {
   TAILORED_PROFILE_MAX_ITEMS,
   TailoredProfileModel,
   TailoredProfileResource,
+  tailoredProfileCreateAccess,
+  tailoredProfileUpdateAccess,
   scanningDisabled,
 } from '../models';
 import { formatCount } from '../dates';
@@ -249,12 +251,8 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
   const [error, setError] = React.useState<string | null>(null);
   const [success, setSuccess] = React.useState<string | null>(null);
   const [canEdit, canEditLoading] = useAccessReview(clusterBaselinePatchAccess);
-  const [canAuthor, canAuthorLoading] = useAccessReview({
-    group: 'compliance.openshift.io',
-    resource: 'tailoredprofiles',
-    verb: 'create',
-    namespace: COMPLIANCE_NAMESPACE,
-  });
+  const [canAuthor, canAuthorLoading] = useAccessReview(tailoredProfileCreateAccess);
+  const [canUpdate, canUpdateLoading] = useAccessReview(tailoredProfileUpdateAccess);
   // Profile/Rule catalog is only for TailoredProfile authoring. Viewers lack
   // those verbs; listing them would 403 the Profiles tab. Skip until SAR
   // resolves so the watch does not flash a denial for readers.
@@ -380,6 +378,9 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
   // the base profile and disabled rules from its spec.
   const openEdit = async (name: string, trigger: HTMLElement | null) => {
     if (pendingRef.current) return;
+    // Same gate the Edit control carries: the save path is a k8sUpdate on the
+    // TailoredProfile, so a denied review must not fetch and pre-fill it.
+    if (!canUpdate) return;
     setError(null);
     setSuccess(null);
     try {
@@ -591,6 +592,24 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
       editDisabledReason = t('Checking permissions…');
     } else if (!canEdit) {
       editDisabledReason = t('You do not have permission to edit the baseline.');
+    }
+  }
+
+  // Editing a bound profile is a k8sUpdate on the TailoredProfile itself and
+  // needs the Profile/Rule catalog to pre-fill the form, so the baseline patch
+  // alone is not enough. The Unbind control next to it only patches the
+  // baseline and keeps editDisabled.
+  const tailoredEditDisabled = editDisabled || !authoring || !canUpdate || canUpdateLoading;
+  let tailoredEditDisabledReason: string | undefined;
+  if (!pending) {
+    if (canEditLoading || canAuthorLoading || canUpdateLoading) {
+      tailoredEditDisabledReason = t('Checking permissions…');
+    } else if (!canEdit) {
+      tailoredEditDisabledReason = t('You do not have permission to edit the baseline.');
+    } else if (!canUpdate) {
+      tailoredEditDisabledReason = t('You do not have permission to update tailored profiles.');
+    } else if (!canAuthor) {
+      tailoredEditDisabledReason = t('You do not have permission to create tailored profiles.');
     }
   }
 
@@ -1124,13 +1143,13 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
                 <CardHeader
                   actions={{
                     actions: withDisabledTip(
-                      editDisabledReason,
+                      tailoredEditDisabledReason,
                       <Split hasGutter>
                         <SplitItem>
                           <Button
                             variant="link"
                             isInline
-                            isDisabled={editDisabled}
+                            isDisabled={tailoredEditDisabled}
                             aria-label={t('Edit tailored profile {{name}}', { name })}
                             onClick={(e) => void openEdit(name, e.currentTarget)}
                           >

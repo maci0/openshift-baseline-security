@@ -1,8 +1,12 @@
 import {
+  canDelegateRemediationApply,
   checkProfileLabel,
   CLUSTER_BASELINE_NAME,
   clusterBaselinePatchAccess,
   ClusterBaseline,
+  COMPLIANCE_NAMESPACE,
+  complianceRemediationPatchAccess,
+  complianceScanPatchAccess,
   isOwnedByBaseline,
   isProfileKey,
   nodePoolFromScanName,
@@ -16,6 +20,8 @@ import {
   suiteFilterKey,
   suiteFilterKeyTitle,
   profileTitle,
+  tailoredProfileCreateAccess,
+  tailoredProfileUpdateAccess,
 } from './models';
 import { randomString } from './testing/fuzz';
 
@@ -44,6 +50,48 @@ describe('clusterBaselinePatchAccess', () => {
     expect(clusterBaselinePatchAccess.name).toBe(CLUSTER_BASELINE_NAME);
     expect(clusterBaselinePatchAccess.verb).toBe('patch');
     expect(clusterBaselinePatchAccess.resource).toBe('clusterbaselines');
+  });
+});
+
+// The namespaced writes are reviewed per namespace: without it the SubjectAccessReview
+// is not the check the subsequent k8sPatch is authorized against.
+describe('Compliance Operator SARs', () => {
+  it('scans and remediations are patched in the compliance namespace', () => {
+    expect(complianceScanPatchAccess).toEqual({
+      group: 'compliance.openshift.io',
+      resource: 'compliancescans',
+      verb: 'patch',
+      namespace: COMPLIANCE_NAMESPACE,
+    });
+    expect(complianceRemediationPatchAccess).toEqual({
+      group: 'compliance.openshift.io',
+      resource: 'complianceremediations',
+      verb: 'patch',
+      namespace: COMPLIANCE_NAMESPACE,
+    });
+  });
+  it('authoring and editing tailored profiles review their own verbs', () => {
+    expect(tailoredProfileCreateAccess.verb).toBe('create');
+    expect(tailoredProfileUpdateAccess.verb).toBe('update');
+    for (const access of [tailoredProfileCreateAccess, tailoredProfileUpdateAccess]) {
+      expect(access.resource).toBe('tailoredprofiles');
+      expect(access.namespace).toBe(COMPLIANCE_NAMESPACE);
+    }
+  });
+});
+
+describe('canDelegateRemediationApply', () => {
+  // Deny side: the annotation reaches the remediation write through the operator,
+  // so a baseline patch alone must not authorize a rolling node reboot.
+  it('denies when the remediation patch is missing', () => {
+    expect(canDelegateRemediationApply(true, false)).toBe(false);
+  });
+  it('denies when the baseline patch is missing', () => {
+    expect(canDelegateRemediationApply(false, true)).toBe(false);
+    expect(canDelegateRemediationApply(false, false)).toBe(false);
+  });
+  it('allows only with both permissions', () => {
+    expect(canDelegateRemediationApply(true, true)).toBe(true);
   });
 });
 

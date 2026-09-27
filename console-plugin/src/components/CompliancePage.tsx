@@ -28,6 +28,7 @@ import {
   ComplianceScan,
   ComplianceScanGVK,
   ComplianceScanModel,
+  complianceScanPatchAccess,
   ownedSuiteSelector,
   scanningDisabled,
 } from '../models';
@@ -112,12 +113,7 @@ const CompliancePage: React.FC = () => {
   // Auto-dismiss non-error banners so rescan/export feedback does not stick.
   useAutoDismiss(rescanStarted, !!rescanError, () => setRescanStarted(false));
   useAutoDismiss(exportNotice, exportNotice?.variant === 'danger', () => setExportNotice(null));
-  const [canRescan, canRescanLoading] = useAccessReview({
-    group: 'compliance.openshift.io',
-    resource: 'compliancescans',
-    verb: 'patch',
-    namespace: COMPLIANCE_NAMESPACE,
-  });
+  const [canRescan, canRescanLoading] = useAccessReview(complianceScanPatchAccess);
   const rescanWatchError = errorMessage(baselineError) ?? errorMessage(scansError);
   const watchError = rescanWatchError ?? errorMessage(checkResultsError);
 

@@ -206,6 +206,8 @@
   "You do not have permission to waive checks.": "You do not have permission to waive checks.",
   "You do not have permission to edit the baseline.": "You do not have permission to edit the baseline.",
   "You do not have permission to apply remediations.": "You do not have permission to apply remediations.",
+  "You do not have permission to create tailored profiles.": "You do not have permission to create tailored profiles.",
+  "You do not have permission to update tailored profiles.": "You do not have permission to update tailored profiles.",
   "No results to export.": "No results to export.",
   "Waiver removed. The check counts toward the score again.": "Waiver removed. The check counts toward the score again.",
   "Check waived. It is excluded from the score.": "Check waived. It is excluded from the score.",

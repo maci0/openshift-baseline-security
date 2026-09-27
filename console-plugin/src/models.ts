@@ -177,6 +177,48 @@ export const ComplianceScanModel = model(ComplianceScanGVK, 'compliancescans', t
 export const ComplianceRemediationModel = model(ComplianceRemediationGVK, 'complianceremediations', true);
 export const TailoredProfileModel = model(TailoredProfileGVK, 'tailoredprofiles', true);
 
+// SAR specs for the namespaced Compliance Operator writes the console performs.
+// Group, plural, and namespace come from the model / namespace constant so a
+// rename cannot desynchronize a gate from the resource the plugin patches.
+export const complianceScanPatchAccess = {
+  group: ComplianceScanModel.apiGroup,
+  resource: ComplianceScanModel.plural,
+  verb: 'patch',
+  namespace: COMPLIANCE_NAMESPACE,
+} as const;
+export const complianceRemediationPatchAccess = {
+  group: ComplianceRemediationModel.apiGroup,
+  resource: ComplianceRemediationModel.plural,
+  verb: 'patch',
+  namespace: COMPLIANCE_NAMESPACE,
+} as const;
+export const tailoredProfileCreateAccess = {
+  group: TailoredProfileModel.apiGroup,
+  resource: TailoredProfileModel.plural,
+  verb: 'create',
+  namespace: COMPLIANCE_NAMESPACE,
+} as const;
+// Editing a bound TailoredProfile is a k8sUpdate on that object, not the
+// ClusterBaseline bind/unbind patch the other Profiles controls gate on, so it
+// needs its own review of the verb it actually spends.
+export const tailoredProfileUpdateAccess = {
+  ...tailoredProfileCreateAccess,
+  verb: 'update',
+} as const;
+
+/**
+ * Batch apply and auto-apply write only the ClusterBaseline (an annotation, or
+ * spec.remediation.apply), but the operator then patches spec.apply on the
+ * remediations, which rolls a node reboot. A caller who cannot patch
+ * remediations can still reach that write through the baseline, so the request
+ * needs both permissions. The per-row Apply action spends the remediation patch
+ * alone and is gated on it.
+ */
+export const canDelegateRemediationApply = (
+  baselinePatch: boolean,
+  remediationPatch: boolean,
+): boolean => baselinePatch && remediationPatch;
+
 // Compliance Operator Profile object (subset): name + the rule names it contains.
 export type ComplianceProfile = {
   metadata?: { name?: string };

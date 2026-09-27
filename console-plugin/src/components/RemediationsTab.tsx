@@ -40,6 +40,7 @@ import {
   MinusCircleIcon,
 } from '@patternfly/react-icons';
 import {
+  canDelegateRemediationApply,
   ClusterBaseline,
   clusterBaselinePatchAccess,
   ClusterBaselineModel,
@@ -47,6 +48,7 @@ import {
   ComplianceRemediation,
   ComplianceRemediationGVK,
   ComplianceRemediationModel,
+  complianceRemediationPatchAccess,
   ownedSuiteSelector,
   scanningDisabled,
 } from '../models';
@@ -177,12 +179,7 @@ const RemediationsTab: React.FC<{
   const [success, setSuccess] = React.useState<string | null>(null);
   // Auto-dismiss success so the banner does not stick after the user moves on.
   useAutoDismiss(success, false, () => setSuccess(null));
-  const [canApply, canApplyLoading] = useAccessReview({
-    group: 'compliance.openshift.io',
-    resource: 'complianceremediations',
-    verb: 'patch',
-    namespace: COMPLIANCE_NAMESPACE,
-  });
+  const [canApply, canApplyLoading] = useAccessReview(complianceRemediationPatchAccess);
   const [canEditBaseline, canEditBaselineLoading] = useAccessReview(clusterBaselinePatchAccess);
   const watchError = errorMessage(loadError);
   // status.remediationBatch is the live batch; the annotation is the one-shot
@@ -264,6 +261,12 @@ const RemediationsTab: React.FC<{
 
   const doBatchApply = () => {
     if (!baseline || batchInProgress || batchable.length === 0) return;
+    // Same gate the button carries, so a stale click cannot spend the annotation
+    // after the review flipped to denied.
+    if (!canDelegateRemediationApply(canEditBaseline, canApply)) {
+      setError(t('You do not have permission to apply remediations.'));
+      return;
+    }
     // Empty patch (all names invalid/filtered) would succeed as a no-op RV-only
     // patch and look like the batch started when nothing was annotated.
     const batchPatch = batchApplyPatch(
@@ -314,6 +317,14 @@ const RemediationsTab: React.FC<{
 
   const toggleAutoApply = async (checked: boolean): Promise<boolean> => {
     if (!baseline) return false;
+    // Same gate the confirm button carries: turning auto-apply on hands the
+    // operator permission to apply remediations the caller may not apply
+    // themselves. Turning it off only stops future reboots, so it stays on the
+    // baseline patch alone.
+    if (checked && !canDelegateRemediationApply(canEditBaseline, canApply)) {
+      setError(t('You do not have permission to apply remediations.'));
+      return false;
+    }
     return run(
       () =>
         k8sPatch({
@@ -384,6 +395,32 @@ const RemediationsTab: React.FC<{
       applyDisabledReason = t('Checking permissions…');
     } else if (!canApply) {
       applyDisabledReason = t('You do not have permission to apply remediations.');
+    }
+  }
+
+  // Batch apply and auto-apply both reach the remediation write through the
+  // operator, so they need the remediation patch the per-row Apply action
+  // already requires. Without it a caller holding only the baseline patch could
+  // still roll a node reboot.
+  const delegatedApplyDisabled =
+    !baselineLoaded ||
+    !baseline ||
+    !canDelegateRemediationApply(canEditBaseline, canApply) ||
+    canEditBaselineLoading ||
+    canApplyLoading ||
+    busy;
+  let delegatedApplyDisabledReason: string | undefined;
+  if (!busy) {
+    if (!baselineLoaded) {
+      delegatedApplyDisabledReason = t('Waiting for compliance data to load.');
+    } else if (canEditBaselineLoading || canApplyLoading) {
+      delegatedApplyDisabledReason = t('Checking permissions…');
+    } else if (!canEditBaseline) {
+      delegatedApplyDisabledReason = t('You do not have permission to edit the baseline.');
+    } else if (!baseline) {
+      delegatedApplyDisabledReason = t('Baseline not configured');
+    } else if (!canApply) {
+      delegatedApplyDisabledReason = t('You do not have permission to apply remediations.');
     }
   }
 
@@ -474,10 +511,10 @@ const RemediationsTab: React.FC<{
             </div>
           ) : batchable.length > 0 ? (
             withDisabledTip(
-              baselineEditDisabledReason,
+              delegatedApplyDisabledReason,
               <Button
                 variant="secondary"
-                isDisabled={baselineEditDisabled}
+                isDisabled={delegatedApplyDisabled}
                 onClick={(e) => {
                   returnFocusRef.current = e.currentTarget;
                   setError(null);
@@ -546,7 +583,7 @@ const RemediationsTab: React.FC<{
         <ModalFooter>
           <Button
             variant="danger"
-            isDisabled={busy || !canEditBaseline || canEditBaselineLoading}
+            isDisabled={delegatedApplyDisabled}
             isLoading={busy}
             onClick={() => {
               void toggleAutoApply(true).then((ok) => {
@@ -621,7 +658,7 @@ const RemediationsTab: React.FC<{
             // by auto-apply / another admin) while this modal is open; without
             // this the button stays enabled but doBatchApply early-returns (a dead
             // button with no feedback).
-            isDisabled={busy || !canEditBaseline || canEditBaselineLoading || batchable.length === 0}
+            isDisabled={delegatedApplyDisabled || batchable.length === 0}
             isLoading={busy}
             onClick={doBatchApply}
           >

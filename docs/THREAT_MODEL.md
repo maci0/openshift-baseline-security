@@ -115,7 +115,7 @@ Named boundaries:
 
 Privilege transitions the model must keep:
 
-1. **Batch-apply confused deputy.** A client with only `ClusterBaseline` patch sets `baselinesecurity.openshift.io/batch-apply`. The operator then `get`/`patch`es MachineConfigPools and `patch`es ComplianceRemediations (`batch_apply.go`, `batch_reconcile.go`). The user typically cannot pause MCPs themselves.
+1. **Batch-apply confused deputy.** A client with only `ClusterBaseline` patch sets `baselinesecurity.openshift.io/batch-apply`. The operator then `get`/`patch`es MachineConfigPools and `patch`es ComplianceRemediations (`batch_apply.go`, `batch_reconcile.go`). The user typically cannot pause MCPs themselves. The console reviews for batch apply and auto-apply cover both the baseline patch and the remediation patch (`canDelegateRemediationApply`), so the UI does not offer a request the caller could not make per item; the API is still the real gate for anyone who edits the CR directly.
 2. **Auto-apply.** `spec.remediation.apply: Automatic` is reconciled onto `ScanSetting.autoApplyRemediations` (`scanconfig.go`). Subsequent CO remediations apply without a per-item UI confirm.
 3. **Console registration.** Operator patches `consoles.operator.openshift.io/cluster` `spec.plugins` (`plugin.go`).
 4. **Default CR.** Leader creates `ClusterBaseline/cluster` (`default_cr.go`), which starts CIS scanning.

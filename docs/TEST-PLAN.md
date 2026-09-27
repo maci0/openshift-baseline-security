@@ -820,6 +820,16 @@ stale Available or eternal Progressing.
 ## U. Security & tenancy
 
 - [x] CSV export formula hardening (jest).
+- [x] **Enabling batch or auto-apply needs the remediation patch, not just the
+      baseline patch**: the baseline write reaches the ComplianceRemediation
+      write through the operator, so `canDelegateRemediationApply` denies when
+      either review is missing (jest, `models.test.ts`); the per-row Apply
+      already gates on the remediation review, and turning auto-apply off stays
+      on the baseline patch so a revoked permission cannot pin it on.
+- [x] **Tailored profile edit reviews `update`, not the baseline patch**: the
+      Edit control and `openEdit` require `tailoredprofiles update` in
+      openshift-compliance, the verb the save actually spends (jest pins both
+      tailored SARs to their own verb and namespace).
 - [x] Plugin pods: non-root, drop ALL caps, no automount SA token, optional
       serving-cert volume (unit asserts on Deployment mutate).
 - [x] Metrics: authn/authz filter + non-loopback insecure refuse.
