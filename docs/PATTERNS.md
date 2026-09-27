@@ -130,14 +130,16 @@ provides correctness, the second is warm standby).
   writes the user cannot perform, and `mayWrite` in each mutation to refuse
   them at the request boundary.
 - Serving: ubi9/nginx-120 base, document root `/opt/app-root/src`, checked-in
-  `nginx.conf` (TLS + HTTP/2 on 9443, no plaintext 8080, gzip for JS/JSON
-  with `Vary: Accept-Encoding`) with the service-serving certificate
+  `nginx.conf` (TLS + HTTP/2 on 9443, no plaintext 8080, gzip level 9 for
+  JS/JSON with `Vary: Accept-Encoding`; the assets are content-hashed and
+  immutable, so the compression effort is spent once per client per version)
+  with the service-serving certificate
   (`service.beta.openshift.io/serving-cert-secret-name`); ConsolePlugin CR
   points at the Service; plugin name appended to
   `consoles.operator.openshift.io/cluster` `spec.plugins` (and removed on
   uninstall). Default Overview tab is in the page chunk; Victory charts and
   the other tabs are async chunks with a Retry alert if a GET fails.
-  The `console-plugin` CI job prints each `dist` asset raw and `gzip -5`
+  The `console-plugin` CI job prints each `dist` asset raw and `gzip -9`
   bytes after the build, so bundle growth is a number in the run log
   instead of a slower page.
 

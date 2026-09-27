@@ -96,6 +96,19 @@ depend on those tags.
   override it, since the operator cannot have meant to clobber an object whose
   current resourceVersion was never read.
 
+### Changed
+
+- The console plugin now gzips its assets at level 9 instead of level 5. Every
+  file it serves is content-hashed and marked immutable for a year, so the
+  bytes are compressed once at image build and each browser pays the cost at
+  most once per plugin version; the extra effort is spent on a cache miss and
+  the bytes it saves are spent on every cold fill. The build-time size report
+  and the CI size step already measured at level 9, so the number in the run
+  log is now the number on the wire. Precompressed files plus `gzip_static`
+  are not available here (the UBI module set has no `gzip_static`), and
+  brotli and zstd are extra module builds, so gzip stays the served encoding
+  and the level is the lever.
+
 ### Fixed
 
 - On a single-node cluster the console plugin rolled out with

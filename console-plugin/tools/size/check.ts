@@ -1,10 +1,10 @@
 // Print and gate the transferred size of the built plugin.
 //
-// Runs after webpack in `yarn build` and from `yarn ci`. Gzip level 9, not the
-// nginx serving level 5: the number must be a property of the build alone, so
-// the same tree reports the same figure on every runner regardless of the web
-// server in front of it. Level 9 is at or below level 5 for every asset here,
-// so the report is the conservative end of the range the server may send.
+// Runs after webpack in `yarn build` and from `yarn ci`. Gzip level 9, which
+// is what nginx.conf serves at (gzip_comp_level 9): the printed figure is the
+// number on the wire, not an estimate of it. The level is fixed here so the
+// same tree reports the same figure on every runner regardless of the web
+// server in front of it; raise it there and here together.
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as zlib from 'node:zlib';
