@@ -8,7 +8,7 @@ over the cluster-scoped singleton `ClusterBaseline/cluster`.
 ```sh
 make test          # fmt-check, vet, mod-verify, go test ./..., must-gather --self-test
 make test-race     # the same unit suite under the race detector
-make lint          # golangci-lint, shellcheck hack/*.sh, ruff hack/*.py; 0 issues required
+make lint          # golangci-lint, shellcheck hack/*.sh, ruff check + format --check on hack/
 make ci            # local replica of the GHA operator job (needs docker)
 make fuzz          # short timed fuzz per target; run before a release cut
 make govulncheck
@@ -29,10 +29,10 @@ graph, and commit the result.
 ## Generated files
 
 `controller-gen` writes `config/crd/bases/`, `config/rbac/role.yaml` (the
-manager ClusterRole), `api/v1alpha1/zz_generated.deepcopy.go`, and the CRD
-copy under `bundle/manifests/`. Never hand-edit those; run
-`make generate manifests` and commit the output. CI fails on
-`git diff --exit-code` after that command.
+manager ClusterRole), and `api/v1alpha1/zz_generated.deepcopy.go`; `make bundle`
+copies the CRD to `bundle/manifests/`. Never hand-edit those; run
+`make generate manifests` (plus `make bundle` for the CRD copy) and commit the
+output. CI fails on `git diff --exit-code` after that command.
 
 The rest of `config/rbac/` (user_roles, leader-election, metrics, SA) is
 hand-maintained. The CSV (`bundle/manifests/*.clusterserviceversion.yaml`)
