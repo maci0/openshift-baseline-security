@@ -29,9 +29,9 @@ GHA `operator` job (also build, the reproducible-binary check, `govulncheck`,
 `mod-tidy-check`, alert tests, generated-file drift, `make bundle`; needs
 docker), and `console-plugin` `yarn ci`, the replica of the GHA
 `console-plugin` job except `yarn npm audit`. The required `images` and
-`catalog` jobs have no local replica beyond `make bundle` and
-`make catalog-prepare` (both need docker); a Dockerfile, bundle, or CSV change
-should have run those first. The required `portability` job runs
+`catalog` jobs have no local replica beyond `make -C operator bundle` and
+`make -C operator catalog-prepare` (both need docker); a Dockerfile, bundle, or
+CSV change should have run those first. The required `portability` job runs
 `gmake test` and `gmake lint-shell` on `macos-14`, so a change to `hack/*.sh`
 or to anything the suite drives has to stay portable to a host with no GNU
 coreutils; there is no local replica of it beyond the commands themselves.
@@ -50,19 +50,19 @@ tags in the install snippets), and the `ARG VERSION=` default in each of the
 five Dockerfiles (`operator/Dockerfile`, `operator/Dockerfile.ci`,
 `operator/bundle.Dockerfile`, `operator/catalog.Dockerfile`,
 `console-plugin/Dockerfile`). `operator/catalog/package.yaml` is rendered
-from `VERSION` by `make catalog-prepare`; never hand-edit it. `make
-verify-versions` enforces all of it; run it after any bump rather than
-eyeballing the diff.
+from `VERSION` by `make -C operator catalog-prepare`; never hand-edit it.
+`make -C operator verify-versions` enforces all of it; run it after any bump
+rather than eyeballing the diff.
 
 Cutting a release:
 
 1. Land the work with `[Unreleased]` entries in `CHANGELOG.md`.
 2. Bump all ten; promote `[Unreleased]` to `## [X.Y.Z] - <date>` and
    leave a fresh empty `[Unreleased]` above it.
-3. `make bundle` (regenerates the CRD copy, runs every verify target, and
-   validates the bundle in operator-sdk).
-4. `RELEASE_GATE=1 make verify-versions`, which fails if `[Unreleased]` still has
-   entries.
+3. `make -C operator bundle` (regenerates the CRD copy, runs every verify
+   target, and validates the bundle in operator-sdk).
+4. `make -C operator RELEASE_GATE=1 verify-versions`, which fails if
+   `[Unreleased]` still has entries.
 5. Tag `vX.Y.Z`. `REQUIRE_GIT_TAGS=1` adds the tag's existence to the check.
    The release workflow runs both gates and the tagged commit's own
    `make -C operator test` plus the console plugin's `yarn typecheck` and
@@ -86,8 +86,8 @@ verifies all four images before pushing any, then moves the `:latest`
 pointers, so a failed build never leaves a partial release. No `replaces`
 upgrade graph exists pre-1.0: every bundle is a standalone channel head, so
 there is no `PREV_VERSION` anywhere. CSV `capabilities` is `Basic Install`
-(`make verify-versions` rejects `spec.replaces` / `spec.skipRange` and any
-other capability).
+(`make -C operator verify-versions` rejects `spec.replaces` /
+`spec.skipRange` and any other capability).
 
 ## Docs that must move with the code
 
