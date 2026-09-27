@@ -148,6 +148,17 @@ depend on those tags.
   truncated mid-character in the resulting startup error, so the operator logged
   a mojibake fragment of a value the admin had set in full. The value is now cut
   on a rune boundary.
+- `hack/restore.sh` refused a second run against an object the first run had
+  just restored. Both writes bump the live `resourceVersion`, so the staleness
+  guard fired on the restore's own write, printed a warning claiming waiver
+  edits made since the backup would be discarded (the ones that run had just
+  put there), and pointed at `--force`, whose status replace is an
+  unconditional overwrite of state an operator reads as current. The script now
+  also compares the live object's `spec` with the artifact's. The operator
+  never writes `spec`, so a match means the object is already at this backup
+  and the run is a re-run: it is announced and allowed, sending the status
+  without the captured `resourceVersion` that its own previous write staled. A
+  spec that differs in any way is an admin's edit and the guard is unchanged.
 - A failed `CatalogSource` read while auto-detecting the Compliance Operator
   catalog was discarded with no log. Detection then fails safe to "assume the
   catalog is present", so a persistent RBAC denial or apiserver error left the

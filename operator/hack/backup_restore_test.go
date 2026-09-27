@@ -95,8 +95,92 @@ status:
     pauseOwner: "6f0b1c2a-7d3e-4a55-9b21-0c8e5f1d4a90"
 `
 
+// liveAfterWaiverEdit is the same object baselineYAML captured, at a later
+// resourceVersion, with a second waiver added and a batch annotation moved on.
+// It is what the live object looks like when an admin has worked on it since
+// the backup: the spec differs, so restoring over it would discard that work.
+// A bare resourceVersion bump is not enough to say so, which is why the fake
+// serves this rather than only FAKE_OC_RESOURCE_VERSION.
+const liveAfterWaiverEdit = `apiVersion: baselinesecurity.openshift.io/v1alpha1
+kind: ClusterBaseline
+metadata:
+  name: cluster
+  resourceVersion: "41999"
+  uid: 6f0b1c2a-7d3e-4a55-9b21-0c8e5f1d4a90
+  annotations:
+    baselinesecurity.openshift.io/batch-apply: api-check,file-permission
+    baselinesecurity.openshift.io/batch-started-at: "2026-09-21T10:04:11Z"
+    baselinesecurity.openshift.io/batch-pools: worker
+    baselinesecurity.openshift.io/batch-pause-owner: "6f0b1c2a-7d3e-4a55-9b21-0c8e5f1d4a90"
+    baselinesecurity.openshift.io/history-scoring-mode: Flat
+spec:
+  schedule: "0 3 * * *"
+  scoringMode: Flat
+  waivers:
+    - name: legacy-tls
+      reason: upstream not migrated
+      expiresAt: "2027-01-01T00:00:00Z"
+      requestedBy: alice
+      approvedBy: bob
+    - name: node-debug
+      reason: debugging the CNI outage
+      requestedBy: alice
+      approvedBy: carol
+status:
+  lastScanTime: "2026-09-21T03:02:44Z"
+  score: 84
+  history:
+    - scanTime: "2026-09-21T03:02:44Z"
+      score: 84
+`
+
+// liveAfterThisRestore is the object the first run of a restore leaves behind:
+// the artifact's own spec and status, at a higher resourceVersion, because both
+// writes bumped it. Nothing has been edited, so the second run is a re-run and
+// must converge rather than refuse.
+const liveAfterThisRestore = `apiVersion: baselinesecurity.openshift.io/v1alpha1
+kind: ClusterBaseline
+metadata:
+  name: cluster
+  resourceVersion: "41999"
+  uid: 6f0b1c2a-7d3e-4a55-9b21-0c8e5f1d4a90
+  annotations:
+    baselinesecurity.openshift.io/batch-apply: api-check,file-permission
+    baselinesecurity.openshift.io/batch-started-at: "2026-09-20T10:04:11Z"
+    baselinesecurity.openshift.io/batch-pools: worker
+    baselinesecurity.openshift.io/batch-pause-owner: "6f0b1c2a-7d3e-4a55-9b21-0c8e5f1d4a90"
+    baselinesecurity.openshift.io/history-scoring-mode: Flat
+spec:
+  schedule: "0 3 * * *"
+  scoringMode: Flat
+  waivers:
+    - name: legacy-tls
+      reason: upstream not migrated
+      expiresAt: "2027-01-01T00:00:00Z"
+      requestedBy: alice
+      approvedBy: bob
+status:
+  lastScanTime: "2026-09-20T03:02:44Z"
+  score: 87
+  history:
+    - scanTime: "2026-09-20T03:02:44Z"
+      score: 87
+  conditions:
+    - type: Available
+      status: "True"
+      reason: ScanComplete
+      message: score 87 of 100
+  remediationBatch:
+    startedAt: "2026-09-20T10:04:11Z"
+    pools:
+      - worker
+    pauseOwner: "6f0b1c2a-7d3e-4a55-9b21-0c8e5f1d4a90"
+`
+
 // fakeOC installs a stub `oc` on PATH for the duration of the test. get
-// returns captured; a get that asks for a jsonpath field returns
+// returns captured, or FAKE_OC_LIVE_YAML when set (a live object that has
+// moved on since the capture, which captured alone can never express); a get
+// that asks for a jsonpath field returns
 // FAKE_OC_RESOURCE_VERSION (empty by default, which reads as "no live object",
 // the case a restore onto a recovered cluster is in),
 // FAKE_OC_GET_FAIL (makes that jsonpath get fail, the way an expired token or
@@ -124,6 +208,7 @@ func fakeOC(t *testing.T, dir, captured string) (logfile string) {
 		"        jsonpath=*) if [ -n \"${FAKE_OC_GET_FAIL:-}\" ]; then echo 'Forbidden: token expired' >&2; exit 1; fi; printf '%s' \"${FAKE_OC_RESOURCE_VERSION:-}\"; exit 0 ;;\n" +
 		"      esac\n" +
 		"    done\n" +
+		"    if [ -n \"${FAKE_OC_LIVE_YAML:-}\" ]; then printf '%s\\n' \"$FAKE_OC_LIVE_YAML\"; exit 0 ; fi\n" +
 		"    cat <<'CAPTURED'\n" + captured + "CAPTURED\nexit 0 ;;\n" +
 		"esac\n" +
 		"printf '%s\\n' \"$*\" >> " + filepath.Join(dir, "oc.log") + "\n" +
@@ -175,11 +260,9 @@ func sha256Hex(t *testing.T, path string) string {
 		}
 	}()
 	h := sha256.New()
+	// A single drain and a single close: the deferred close above is the one
+	// that reports, so the copy path must not close the handle a second time.
 	if _, err := io.Copy(h, f); err != nil {
-		_ = f.Close()
-		t.Fatal(err)
-	}
-	if err := f.Close(); err != nil {
 		t.Fatal(err)
 	}
 	return hex.EncodeToString(h.Sum(nil))
@@ -522,8 +605,13 @@ func TestRestoreRefusesToRollBackAMovedOnObject(t *testing.T) {
 	bin := t.TempDir()
 	log := fakeOC(t, bin, baselineYAML)
 	// The live object carries waiver edits made after the backup. Applying
-	// the artifact discards them, and nothing else records them.
+	// the artifact discards them, and nothing else records them. The spec
+	// difference is the signal, so the live object has to differ in more
+	// than its resourceVersion: a bare bump is what this script's own write
+	// looks like, and treating that as an edit is what used to make a
+	// re-run refuse.
 	t.Setenv("FAKE_OC_RESOURCE_VERSION", "41999")
+	t.Setenv("FAKE_OC_LIVE_YAML", liveAfterWaiverEdit)
 	work := t.TempDir()
 	dir := backupDir(t, work, "bdir", "2026-09-20T03:00:00Z")
 
@@ -548,6 +636,73 @@ func TestRestoreRefusesToRollBackAMovedOnObject(t *testing.T) {
 	calls := ocCalls(t, log)
 	if !strings.Contains(calls, "apply -f") || !strings.Contains(calls, "replace --subresource=status -f") {
 		t.Errorf("--force did not complete the restore; oc calls:\n%s", calls)
+	}
+}
+
+// A restore is run twice for one incident as often as it is run once, and the
+// ordinary path (no --force) has to converge too, not only the forced one.
+//
+// It refused. The first run's own apply and status replace bumped the live
+// resourceVersion, so the second run's staleness guard fired on the write the
+// first run had just made. It printed a warning that was false (the waiver
+// edits it offered to protect were the ones that run had just put there) and
+// pointed at --force, whose status replace is an unconditional clobber of
+// state an operator reads as current.
+func TestRestoreConvergesOnRerunWithoutForce(t *testing.T) {
+	bin := t.TempDir()
+	log := fakeOC(t, bin, baselineYAML)
+	// What the first run leaves behind: this artifact's own spec and status,
+	// one resourceVersion on. Nothing has been edited since.
+	t.Setenv("FAKE_OC_RESOURCE_VERSION", "41999")
+	t.Setenv("FAKE_OC_LIVE_YAML", liveAfterThisRestore)
+	t.Setenv("FAKE_OC_COPY_SENT", "1")
+	work := t.TempDir()
+	dir := backupDir(t, work, "bdir", "2026-09-20T03:00:00Z")
+
+	for run := 1; run <= 2; run++ {
+		_, stderr, code := runScript(t, "restore.sh", work, dir)
+		if code != 0 {
+			t.Fatalf("restore.sh run %d: exit %d, want 0; stderr=%s", run, code, stderr)
+		}
+		if run == 1 && !strings.Contains(stderr, "re-run of a restore that landed") {
+			t.Errorf("run 1 did not report a converged re-run:\n%s", stderr)
+		}
+		// The refusal message must not appear: nothing has moved on.
+		if strings.Contains(stderr, "has moved on") {
+			t.Errorf("run %d refused an object it had itself just written:\n%s", run, stderr)
+		}
+	}
+
+	calls := ocCalls(t, log)
+	for _, want := range []string{"apply -f", "replace --subresource=status -f"} {
+		if got := strings.Count(calls, want); got != 2 {
+			t.Errorf("wanted %q twice, one per run, got %d; oc calls:\n%s", want, got, calls)
+		}
+	}
+	// Both writes must have gone out without the captured resourceVersion:
+	// the second run's precondition is stale by the first run's own write,
+	// and a stale one is refused with a conflict.
+	sent, err := os.ReadFile(filepath.Join(bin, "sent.log"))
+	if err != nil {
+		t.Fatalf("no record of what the restore sent: %v", err)
+	}
+	if strings.Contains(string(sent), "resourceVersion") {
+		t.Errorf("the re-run sent a resourceVersion precondition:\n%s", sent)
+	}
+	// Stripping it must not cost a field: a spec or status silently dropped
+	// is a restore that half happened.
+	for _, want := range []string{"score: 87", "schedule:", "requestedBy: alice", "lastScanTime:"} {
+		if !strings.Contains(string(sent), want) {
+			t.Errorf("the re-run dropped %q from what it sent:\n%s", want, sent)
+		}
+	}
+	// The artifact is the evidence; neither run may consume it.
+	artifact, err := os.ReadFile(filepath.Join(dir, "clusterbaseline.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(artifact) != baselineYAML {
+		t.Errorf("the restore modified the backup artifact:\n%s", artifact)
 	}
 }
 

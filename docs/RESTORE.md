@@ -122,6 +122,16 @@ soft-delete window behind that. The script refuses, naming both versions, and
 takes `--force` to proceed anyway. On a cluster where the CR is gone, there is
 nothing to compare against and the restore goes ahead.
 
+A `resourceVersion` the restore moved itself is not a moved-on object, so the
+script also compares the live object's `spec` against the artifact's. The
+operator never writes `spec` (it patches annotations and the status subresource
+only), so a live object already carrying the artifact's spec is either a
+restore that has already been applied or a hand-apply of the same spec, not an
+admin's work. That case is a re-run, and it is announced and allowed rather
+than refused: the version guard would otherwise fire on the previous run's own
+write and offer to protect waiver edits that run had just put there. A spec
+that differs in any way is an edit, and the version guard applies unchanged.
+
 An absent object and an unreadable one are different states, and only the first
 makes that comparison unnecessary. A read that fails (an expired token
 mid-incident, an apiserver blip) is not an absent object, so the script stops
@@ -162,9 +172,12 @@ two writes are sent from a copy of the artifact with `metadata.resourceVersion`
 removed, because that field is a precondition on both: it is what the staleness
 guard above compares, and once the operator has accepted the rollback there is
 no live `resourceVersion` left that could satisfy it. The writes are then
-unconditional, so a re-run converges instead of conflicting. Without `--force`
-the artifact is sent as captured, and the guard above and the write agree. The
-artifact on disk is never modified.
+unconditional, so a re-run converges instead of conflicting. A re-run that
+recognises its own previous write (the `spec` match above) takes the same
+unconditional path, for the same reason: the captured `resourceVersion` is
+stale by the write that applied it. Otherwise the artifact is sent as
+captured, and the guard above and the write agree. The artifact on disk is
+never modified.
 
 Watch it converge with
 `oc get clusterbaseline cluster -o yaml --watch`.
@@ -224,6 +237,9 @@ on every `make test`, and pins the behavior that matters:
   refusal cannot be dismissed as checksum damage;
 - a restore over a live object that has moved on is refused before any write,
   names both resourceVersions, and proceeds under `--force`;
+- a restore run twice with no `--force`, against an object the first run left
+  holding the artifact's own spec, converges on the second run instead of
+  refusing, and sends both writes without the stale `resourceVersion`;
 - a live object that cannot be read is refused before any write, and
   `--force` does not override it;
 - the artifact age is reported, and a backup older than a week says so;

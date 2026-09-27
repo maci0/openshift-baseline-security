@@ -14,6 +14,11 @@
 #
 # Usage: hack/restore.sh [--force] [backup-dir]   (defaults to ./baseline-backup)
 #        hack/restore.sh --help
+#
+# Running it twice reaches the same state as running it once: a re-run that
+# finds the live object already carrying the artifact's spec re-sends the
+# status without the captured resourceVersion, which its own previous write
+# made stale, instead of refusing a clobber that would change nothing.
 set -euo pipefail
 
 # shellcheck source-path=SCRIPTDIR
@@ -182,6 +187,20 @@ fi
 
 oc() { command oc --request-timeout=30s "$@"; }
 
+# spec_block reads an object as YAML on stdin and prints its `spec` section:
+# from the `spec:` key to the next top-level key. `oc get -o yaml` prints object
+# YAML with sorted keys and two-space indents, so two captures of the same spec
+# are byte-identical and a plain string compare is a real equality test rather
+# than an approximation. Input with no `spec:` key prints nothing, which never
+# equals a non-empty live spec.
+spec_block() {
+  awk '
+    !started { if ($0 ~ /^spec:[[:space:]]*$/) started = 1; next }
+    $0 ~ /^[A-Za-z]/ { exit }
+    { print }
+  '
+}
+
 if ! oc whoami >/dev/null 2>&1; then
   echo "restore.sh: oc is not authenticated (oc whoami failed); nothing was changed" >&2
   exit 1
@@ -210,20 +229,50 @@ if ! LIVE_RESOURCE_VERSION="$(oc get clusterbaseline cluster --ignore-not-found 
   echo "restore.sh: no --force and no warning. Fix the API access and re-run." >&2
   exit 1
 fi
-if [[ -n "$BACKUP_RESOURCE_VERSION" && -n "$LIVE_RESOURCE_VERSION" &&
-  "$LIVE_RESOURCE_VERSION" != "$BACKUP_RESOURCE_VERSION" ]]; then
-  if [[ "$FORCE" == true ]]; then
+
+# A second run of a restore that already landed has to reach the same state as
+# the first, not refuse. It used to refuse: the first run's own apply and
+# status replace both bumped the live resourceVersion, so the guard below fired
+# on the run's own write and printed a warning that was false (the waiver edits
+# it offered to protect were the ones the previous run had just put there), and
+# pointed at --force, whose status replace is an unconditional clobber.
+#
+# The spec is the part of the object that says whether anyone edited it. The
+# operator never writes spec (it patches annotations and the status
+# subresource only), so a live object already carrying this artifact's spec is
+# a restore that has already been applied, or a hand-apply of the same spec,
+# not a moved-on object. Compare it, and when it matches, take the same
+# unconditional write path --force takes, minus the warning.
+SPEC_CONVERGED=false
+if [[ -n "$LIVE_RESOURCE_VERSION" ]]; then
+  LIVE_SPEC="$(oc get clusterbaseline cluster -o yaml 2>/dev/null | spec_block || true)"
+  ARTIFACT_SPEC="$(spec_block < "$ARTIFACT")"
+  if [[ -n "$ARTIFACT_SPEC" && "$LIVE_SPEC" == "$ARTIFACT_SPEC" ]]; then
+    SPEC_CONVERGED=true
+  fi
+fi
+
+if [[ "$FORCE" == true ]]; then
+  if [[ -n "$BACKUP_RESOURCE_VERSION" && -n "$LIVE_RESOURCE_VERSION" &&
+    "$LIVE_RESOURCE_VERSION" != "$BACKUP_RESOURCE_VERSION" ]]; then
     echo "restore.sh: note: --force; restoring over live object at resourceVersion" >&2
     echo "restore.sh: $LIVE_RESOURCE_VERSION with a backup taken at $BACKUP_RESOURCE_VERSION" >&2
-  else
-    echo "restore.sh: the live object has moved on since this backup was taken:" >&2
-    echo "restore.sh:   live   resourceVersion $LIVE_RESOURCE_VERSION" >&2
-    echo "restore.sh:   backup resourceVersion $BACKUP_RESOURCE_VERSION" >&2
-    echo "restore.sh: restoring discards every waiver edit and batch annotation" >&2
-    echo "restore.sh: made since. Nothing was changed. To restore anyway:" >&2
-    echo "restore.sh:   hack/restore.sh --force $DIR" >&2
-    exit 1
   fi
+elif [[ "$SPEC_CONVERGED" == true ]]; then
+  echo "restore.sh: the live object already carries this backup's spec, so this is a" >&2
+  echo "restore.sh: re-run of a restore that landed (or of a hand-apply of the same" >&2
+  echo "restore.sh: spec). Re-sending the status from the artifact, without a" >&2
+  echo "restore.sh: resourceVersion precondition: the captured one is stale by the write" >&2
+  echo "restore.sh: that already applied it." >&2
+elif [[ -n "$BACKUP_RESOURCE_VERSION" && -n "$LIVE_RESOURCE_VERSION" &&
+  "$LIVE_RESOURCE_VERSION" != "$BACKUP_RESOURCE_VERSION" ]]; then
+  echo "restore.sh: the live object has moved on since this backup was taken:" >&2
+  echo "restore.sh:   live   resourceVersion $LIVE_RESOURCE_VERSION" >&2
+  echo "restore.sh:   backup resourceVersion $BACKUP_RESOURCE_VERSION" >&2
+  echo "restore.sh: restoring discards every waiver edit and batch annotation" >&2
+  echo "restore.sh: made since. Nothing was changed. To restore anyway:" >&2
+  echo "restore.sh:   hack/restore.sh --force $DIR" >&2
+  exit 1
 fi
 
 # A backup is only restorable into a cluster that serves the version it was
@@ -263,10 +312,14 @@ fi
 # So under --force the restore is sent from a copy of the artifact with
 # metadata.resourceVersion removed: the writes become unconditional, the
 # restore completes, and a second run reaches the same state as the first
-# instead of failing on a precondition nobody can meet. Without --force the
-# artifact is sent as captured, so the guard above and the write agree.
+# instead of failing on a precondition nobody can meet. A converged spec (the
+# re-run case above) takes the same path for the same reason: the live object
+# is already past the captured resourceVersion because this restore put it
+# there, so the precondition is stale by definition, not by somebody's edit.
+# Otherwise the artifact is sent as captured, so the guard above and the write
+# agree.
 WRITE_ARTIFACT="$ARTIFACT"
-if [[ "$FORCE" == true && -n "$BACKUP_RESOURCE_VERSION" ]]; then
+if [[ ( "$FORCE" == true || "$SPEC_CONVERGED" == true ) && -n "$BACKUP_RESOURCE_VERSION" ]]; then
   if ! WRITE_ARTIFACT="$(mktemp -- "$DIR/.restore.XXXXXX")"; then
     echo "restore.sh: cannot write a temporary copy of the artifact in $DIR;" >&2
     echo "restore.sh: nothing was changed." >&2

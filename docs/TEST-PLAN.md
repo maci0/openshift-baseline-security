@@ -1527,7 +1527,10 @@ resourceVersion without `--force`, the refusal when the live object cannot be
 read at all (an unreadable object is not an absent one, and `--force` does not
 override it), a repeated `--force` restore converging on the state the first
 one reached (both writes go out without the captured `resourceVersion`, which
-is what made the second run conflict forever), the reported artifact age, the
+is what made the second run conflict forever), and a repeated restore **without**
+`--force` against an object the first run left holding the artifact's own spec
+converging too, rather than refusing its own previous write as an admin's edit,
+the reported artifact age, the
 future-`lastScanTime` recovery hint, the deletion warning that names the
 unrecoverable waivers, `verify-backup.sh` against a good directory and every
 way a scheduled backup fails quietly, the same round trip on a PATH with
