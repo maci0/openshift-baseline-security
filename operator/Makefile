@@ -93,7 +93,7 @@ help:
 	@echo "Operator contributor targets:"
 	@echo "  make test          fmt-check, vet, mod-verify, go test ./..., must-gather --self-test"
 	@echo "  make test-race     the same unit suite under the race detector"
-	@echo "  make lint          golangci-lint $(GOLANGCI_LINT_VERSION), shellcheck hack/*.sh, ruff $(RUFF_VERSION) hack/"
+	@echo "  make lint          golangci-lint $(GOLANGCI_LINT_VERSION), shellcheck hack/*.sh, ruff $(RUFF_VERSION) hack/, yamllint $(YAMLLINT_VERSION) .github operator/config"
 	@echo "  make ci            local replica of the CI operator job (needs docker)"
 	@echo "  make fuzz          short seed-corpus fuzz (run before a release)"
 	@echo "  make govulncheck   vulnerability scan (pinned)"
@@ -250,8 +250,15 @@ GOLANGCI_LINT_VERSION ?= v2.12.2
 SHELLCHECK ?= shellcheck
 # Pin ruff like every other tool here (single source; never a floating latest).
 RUFF_VERSION ?= 0.16.4
+# yamllint covers the hand-maintained YAML: the GitHub workflows and the
+# kustomize manifests. Generated output is excluded in ../.yamllint.yaml, not
+# reformatted here. uvx is already a lint dependency (see lint-python).
+YAMLLINT_VERSION ?= 1.38.0
+# Paths are repo-root-relative, matching the ignore globs in .yamllint.yaml,
+# so the target runs from the root rather than from this directory.
+YAML_PATHS ?= operator/config .github
 .PHONY: lint
-lint: lint-go lint-shell lint-python
+lint: lint-go lint-shell lint-python lint-yaml
 
 .PHONY: lint-go
 lint-go:
@@ -267,6 +274,12 @@ lint-python:
 	@command -v uvx >/dev/null || { echo "uvx not on PATH (install uv, then: uvx ruff@$(RUFF_VERSION) --version)" >&2; exit 1; }
 	uvx ruff@$(RUFF_VERSION) check --no-cache hack/
 	uvx ruff@$(RUFF_VERSION) format --no-cache --check hack/
+
+.PHONY: lint-yaml
+lint-yaml:
+	@command -v uvx >/dev/null || { echo "uvx not on PATH (install uv, then: uvx yamllint@$(YAMLLINT_VERSION) --version)" >&2; exit 1; }
+	@test -f ../.yamllint.yaml || { echo "../.yamllint.yaml missing; run make from operator/ or its own tree" >&2; exit 1; }
+	cd .. && uvx yamllint@$(YAMLLINT_VERSION) -c .yamllint.yaml $(YAML_PATHS)
 
 # Pin govulncheck for local and CI (single source; do not `go run ...@latest`).
 GOVULNCHECK_VERSION ?= v1.6.0

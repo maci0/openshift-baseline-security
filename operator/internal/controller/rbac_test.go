@@ -46,10 +46,15 @@ func assertRoleResourceUpdate(t *testing.T, text, resource string) {
 	// The scope is per rule: a create-only rule elsewhere in the file must not
 	// satisfy this, and dropping resourceNames from the rule that does carry
 	// update must fail even if some other rule mentions the name.
-	if !ruleGrantsNameScopedWrite(rules, "compliance-operator") {
+	if !ruleGrantsNameScopedWrite(rules) {
 		t.Fatalf("%s RBAC missing name-scoped get/update/patch (resourceNames: compliance-operator)", resource)
 	}
 }
+
+// complianceOperatorName is the object every name-scoped write rule in role.yaml
+// and the CSV must pin. Naming it once keeps the guards below and the RBAC they
+// read in step, and keeps the helper free of a parameter with one call value.
+const complianceOperatorName = "compliance-operator"
 
 // policyRule mirrors one entry of a ClusterRole's rules list. The json tags are
 // what sigs.k8s.io/yaml decodes, because it routes YAML through JSON.
@@ -109,9 +114,9 @@ func ruleGrantsVerb(rules []policyRule, verb string) bool {
 }
 
 // ruleGrantsNameScopedWrite requires one rule to carry both the write verbs
-// and the resourceNames entry, so a name-scoped rule and a write rule cannot
-// come from two different blocks.
-func ruleGrantsNameScopedWrite(rules []policyRule, name string) bool {
+// and the complianceOperatorName resourceNames entry, so a name-scoped rule and
+// a write rule cannot come from two different blocks.
+func ruleGrantsNameScopedWrite(rules []policyRule) bool {
 	for _, rule := range rules {
 		writes := false
 		for _, v := range rule.Verbs {
@@ -124,7 +129,7 @@ func ruleGrantsNameScopedWrite(rules []policyRule, name string) bool {
 			continue
 		}
 		for _, n := range rule.ResourceNames {
-			if n == name || n == "*" {
+			if n == complianceOperatorName || n == "*" {
 				return true
 			}
 		}
@@ -158,7 +163,7 @@ func TestRoleRulesAreScopedToTheResource(t *testing.T) {
 		if !ruleGrantsVerb(rules, "create") || !ruleGrantsVerb(rules, "update") {
 			t.Fatalf("well formed role rejected: %+v", rules)
 		}
-		if !ruleGrantsNameScopedWrite(rules, "compliance-operator") {
+		if !ruleGrantsNameScopedWrite(rules) {
 			t.Fatal("well formed role lost its name-scoped write rule")
 		}
 	})
@@ -177,7 +182,7 @@ func TestRoleRulesAreScopedToTheResource(t *testing.T) {
 		if !ruleGrantsVerb(rules, "update") {
 			t.Fatal("setup: the unscoped write rule should still grant update")
 		}
-		if ruleGrantsNameScopedWrite(rules, "compliance-operator") {
+		if ruleGrantsNameScopedWrite(rules) {
 			t.Error("an unscoped write rule was accepted as name-scoped")
 		}
 	})
@@ -267,7 +272,7 @@ func assertCSVResourceUpdate(t *testing.T, text, resource string) {
 			t.Fatalf("CSV %s rules missing %s", resource, verb)
 		}
 	}
-	if !ruleGrantsNameScopedWrite(rules, "compliance-operator") {
+	if !ruleGrantsNameScopedWrite(rules) {
 		t.Fatalf("CSV %s missing name-scoped get/update/patch (resourceNames: compliance-operator)", resource)
 	}
 }
@@ -296,7 +301,7 @@ func csvRulesGrantingResource(t *testing.T, text, resource string) []policyRule 
 	}
 	var out []policyRule
 	for _, perm := range csv.Spec.Install.Spec.ClusterPermissions {
-		out = append(out, rulesGrantingResource(t, clusterRole{Rules: perm.Rules}, resource)...) //nolint:gocritic //nolint
+		out = append(out, rulesGrantingResource(t, clusterRole{Rules: perm.Rules}, resource)...)
 	}
 	return out
 }

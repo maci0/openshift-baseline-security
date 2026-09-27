@@ -36,7 +36,10 @@ misspell, unconvert, unparam, nilerr, errorlint, copyloopvar, noctx,
 bodyclose, unused, bidichk, gocheckcompilerdirectives, usestdlibvars,
 goprintffuncname, nosprintfhostport, gomoddirectives, promlinter +
 gofmt/goimports; issue caps disabled so nothing is truncated),
-`make lint`, CI drift check for generated files.
+`make lint`, CI drift check for generated files. The same target runs
+shellcheck over `hack/*.sh`, ruff over `hack/`, and yamllint over the
+hand-maintained YAML (`.github/`, `operator/config/`) under the repo-root
+`.yamllint.yaml`; generated output is excluded there rather than reformatted.
 
 ## API design conventions
 

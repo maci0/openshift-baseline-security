@@ -1,0 +1,53 @@
+# yamllint for the hand-maintained YAML: the GitHub workflows and the kustomize
+# manifests in operator/config/. Generated output is excluded, never reformatted.
+# Rule choices below are the ones this tree already passes; a rule that fights a
+# real convention here is disabled with its reason rather than papered over with
+# per-line suppressions.
+extends: default
+
+ignore: |
+  # operator-sdk/kustomize output: rewritten by `make bundle` and
+  # `make catalog-prepare`, so a finding is regenerated, not fixed.
+  operator/bundle/
+  operator/catalog/
+  # controller-gen output: `make manifests` rewrites it, and CI already fails on
+  # drift with `git diff --exit-code`.
+  operator/config/crd/bases/
+  # Alert-expression fixtures, one long PromQL string per line by construction;
+  # `make test-alerts` is the gate that reads them.
+  operator/config/prometheus/testdata/
+  node_modules/
+  .yarn/
+
+rules:
+  # role.yaml and user_roles.yaml put their `rules:` sequence at the parent's
+  # indentation (kubebuilder's layout); the workflows indent every sequence.
+  # yamllint has no per-file rule sets, so the rule that cannot pass both is
+  # off. Nesting depth is still caught by the syntax and key rules.
+  indentation: disable
+  # Same reason: the comment columns in manager.yaml and the workflows follow
+  # the surrounding block, not the sequence indent.
+  comments-indentation: disable
+  # 160 is the longest line the tree already has; nothing was rewrapped to get
+  # here, and a longer PromQL/label value stays readable on one line.
+  line-length:
+    max: 160
+    allow-non-breakable-words: true
+    allow-non-breakable-inline-mappings: true
+  # Kustomize and GHA both write `# text` with a single space.
+  comments:
+    min-spaces-from-content: 1
+  # Kubernetes manifests quote booleans and the workflows use `on:`.
+  truthy:
+    allowed-values: ['true', 'false', 'on']
+  # Kubernetes resources are not documents in a stream; a leading `---` on
+  # every single-object manifest is noise, and role.yaml legitimately uses `---`
+  # to separate documents.
+  document-start: disable
+  braces:
+    max-spaces-inside: 1
+  # Kubernetes tolerates 0644-style octal; forbidding it would be a style fight.
+  octal-values:
+    forbid-implicit-octal: false
+  empty-lines:
+    max: 2
