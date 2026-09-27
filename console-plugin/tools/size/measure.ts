@@ -5,12 +5,15 @@
 // counted out of the totals below, and the served non-JS files (manifest,
 // locales) are added to the initial JS to report what a first paint waits on.
 //
-// The class of a JS file comes from the two webpack output name templates in
-// webpack.config.ts: entry bundles are `[name]-bundle-[contenthash].min.js` and
-// async chunks are `[name]-chunk-[contenthash].min.js`. A `.js` file matching
-// neither is a build-config change the budget does not understand, so it is
-// reported as unclassified and fails the gate rather than slipping past the
-// initial-JS ceiling.
+// The class of a JS file comes from the name webpack gives it. The plugin's
+// remote entry is named by the SDK's module federation plugin
+// (`plugin-entry.[fullhash].min.js`, ConsoleRemotePlugin.js), so the
+// `[name]-bundle-[contenthash].min.js` template in webpack.config.ts never
+// applies to it; everything else that is not a source map is an async chunk,
+// `[name]-chunk-[contenthash].min.js`. A `.js` file matching none of those is a
+// build-config change the budget does not understand, so it is reported as
+// unclassified and fails the gate rather than slipping past the initial-JS
+// ceiling.
 import type { SizeBudget } from './budget';
 
 export type AssetClass = 'initial-js' | 'async-js';
@@ -45,6 +48,10 @@ export interface BudgetBreach {
 }
 
 const ENTRY_MARKER = '-bundle-';
+// The SDK names the remote entry itself, so this is the production entry's name
+// (`plugin-entry.[fullhash].min.js`); the unflagged `plugin-entry.js` is the
+// development build.
+const SDK_ENTRY_MARKER = 'plugin-entry';
 const CHUNK_MARKER = '-chunk-';
 const JS_SUFFIX = '.js';
 // The one file in dist/ no browser ever requests. `yarn licenses` writes it
@@ -65,7 +72,7 @@ export function classifyAsset(relativePath: string): AssetClass | undefined {
 		return undefined;
 	}
 	const base = relativePath.slice(relativePath.lastIndexOf('/') + 1);
-	if (base.includes(ENTRY_MARKER)) {
+	if (base.includes(ENTRY_MARKER) || base.startsWith(SDK_ENTRY_MARKER)) {
 		return 'initial-js';
 	}
 	if (base.includes(CHUNK_MARKER)) {
