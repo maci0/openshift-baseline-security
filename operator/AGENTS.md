@@ -47,7 +47,9 @@ Each has its own target and its own failure message; read the message rather
 than guessing.
 
 - `verify-versions`: release version, toolchain pins, image-build flags, the
-  `ARG VERSION=` default in every Dockerfile, CSV
+  `ARG VERSION=` default in every Dockerfile, an `ARG SOURCE_DATE_EPOCH` in
+  every stage of every Dockerfile, the `Dockerfile.ci` builder tag against the
+  `.ci-operator.yaml` build root, CSV
   `capabilities: Basic Install` with no `spec.replaces` / `spec.skipRange`.
 - `verify-product-lockstep`: score weights, caps, the `ProfileKey` set, and
   annotation keys shared between Go and the console plugin (ADR-024). Adding a

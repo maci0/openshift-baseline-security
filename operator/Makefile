@@ -358,6 +358,11 @@ CATALOG_IMG ?= quay.io/openshift-baseline-security/baseline-security-operator-ca
 # disconnected installs; a mutable :VERSION tag there lets a registry-side swap
 # substitute a different image undetected. The :VERSION tags above are for the
 # pre-publish CSV only.
+#
+# Also checks, in every one of the five Dockerfiles, that each stage declares
+# ARG SOURCE_DATE_EPOCH: BuildKit clamps a stage's layer timestamps only where
+# the ARG is declared, so a stage that drops it re-embeds host build time and
+# two builds of one source stop matching.
 .PHONY: verify-versions
 verify-versions:
 	@csv=bundle/manifests/baseline-security-operator.clusterserviceversion.yaml; \
@@ -434,6 +439,12 @@ verify-versions:
 		|| { echo "Dockerfile.ci builder FROM must be golang-$(GO_MINOR)- (matches go.mod); CI toolchain would drift"; fail=1; }; \
 	grep -qE "GOTOOLCHAIN=go$(GO_VERSION_RE)" Dockerfile.ci \
 		|| { echo "Dockerfile.ci GOTOOLCHAIN must be go$(GO_VERSION) (matches go.mod)"; fail=1; }; \
+	ci_tag=$$(sed -n 's/^  tag: //p' ../.ci-operator.yaml | head -1); \
+	ci_tag_re=$$(printf '%s' "$$ci_tag" | sed 's/[.[\*^$()+?{|]/\\&/g'); \
+	test -n "$$ci_tag" \
+		|| { echo "../.ci-operator.yaml declares no build_root_image tag; Dockerfile.ci and the ci-operator build root cannot be compared"; fail=1; }; \
+	grep -qE "^FROM registry\.ci\.openshift\.org/ocp/builder:$${ci_tag_re}([[:space:]]|$$)" Dockerfile.ci \
+		|| { echo "Dockerfile.ci builder FROM must be the exact .ci-operator.yaml build_root tag ($$ci_tag); ci-operator metadata and the image build would otherwise pick different builders"; fail=1; }; \
 	grep -qE "golang-$(GO_MINOR)-" ../.ci-operator.yaml \
 		|| { echo ".ci-operator.yaml build_root tag must be golang-$(GO_MINOR)- (matches go.mod)"; fail=1; }; \
 	grep -qE 'USER 65532:65532' Dockerfile.ci \
@@ -444,12 +455,6 @@ verify-versions:
 		|| { echo "Dockerfile.ci go build flags must match the release Dockerfile (reproducibility parity)"; fail=1; }; \
 	grep -qE -- '-trimpath -buildvcs=false -mod=readonly -buildmode=pie' Makefile \
 		|| { echo "Makefile GO_BUILD_FLAGS must match the image go build flags (trimpath, no VCS, readonly, PIE)"; fail=1; }; \
-	test "$$(grep -c '^ARG SOURCE_DATE_EPOCH' Dockerfile)" -eq 2 \
-		|| { echo "release Dockerfile must declare ARG SOURCE_DATE_EPOCH in both stages (BuildKit clamps timestamps per stage)"; fail=1; }; \
-	test "$$(grep -c '^ARG SOURCE_DATE_EPOCH' Dockerfile.ci)" -eq 2 \
-		|| { echo "Dockerfile.ci must declare ARG SOURCE_DATE_EPOCH in both stages (parity with the release Dockerfile)"; fail=1; }; \
-	test "$$(grep -c '^ARG SOURCE_DATE_EPOCH' ../console-plugin/Dockerfile)" -eq 2 \
-		|| { echo "console-plugin Dockerfile must declare ARG SOURCE_DATE_EPOCH in both stages (BuildKit clamps timestamps per stage)"; fail=1; }; \
 	grep -qE -- '--chmod=0755.*/usr/bin/manager' Dockerfile \
 		|| { echo "release Dockerfile must COPY the manager with --chmod=0755 so host umask cannot change the image digest"; fail=1; }; \
 	grep -qE -- '--chown=0:0 --chmod=0755.*/usr/bin/manager' Dockerfile \
@@ -479,6 +484,8 @@ verify-versions:
 			|| { echo "$$df ARG VERSION must be $(VERSION) (matches Makefile; image label would drift)"; fail=1; }; \
 		grep -qF 'org.opencontainers.image.version="$${VERSION}"' "$$df" \
 			|| { echo "$$df must set org.opencontainers.image.version from ARG VERSION"; fail=1; }; \
+		test "$$(grep -c '^ARG SOURCE_DATE_EPOCH' "$$df")" -eq "$$(grep -c '^FROM ' "$$df")" \
+			|| { echo "$$df must declare ARG SOURCE_DATE_EPOCH in every stage (found $$(grep -c '^ARG SOURCE_DATE_EPOCH' "$$df") for $$(grep -c '^FROM ' "$$df") stages)"; fail=1; }; \
 	done; \
 	nvm=$$(tr -d '[:space:]' < ../console-plugin/.nvmrc); \
 	grep -qE "Node in this digest is $${nvm}" ../console-plugin/Dockerfile \

@@ -119,5 +119,14 @@ export default defineConfig({
     storageState: 'e2e/.auth/state.json',
     viewport: { width: 1600, height: 900 },
     screenshot: 'only-on-failure',
+    // docs/screenshots/ holds committed build outputs, so a capture must not
+    // depend on the runner: freeze CSS/Web animations and transitions, hide the
+    // text caret, and force reduced motion so a spinner or fade caught mid-frame
+    // cannot make two runs of the same page differ. deviceScaleFactor 1 pins the
+    // pixel density instead of inheriting the host display's.
+    animations: 'disabled',
+    caret: 'hide',
+    reducedMotion: 'reduce',
+    deviceScaleFactor: 1,
   },
 });

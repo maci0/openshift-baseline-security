@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Assert the image metadata every published baseline-security image must carry:
-# a non-root USER (where the image is executed) and the OCI source/license
-# labels consumers and scanners read.
+# a non-root USER (where the image is executed), a version label, and the OCI
+# source/license labels consumers and scanners read.
 #
 #   Usage: hack/verify-image-metadata.sh <image> [--allow-scratch-user]
 #
@@ -21,7 +21,8 @@ usage() {
 Usage: ${prog} <image> [--allow-scratch-user]
 
 Asserts that <image> declares a non-root USER (unless --allow-scratch-user)
-and carries the expected org.opencontainers.image licenses and source labels.
+and carries the expected org.opencontainers.image source, license, and
+version labels.
 --allow-scratch-user is for FROM scratch bundles: OLM unpacks them, no process
 runs, so no USER is required, but a declared root USER is still rejected.
 EOF
@@ -90,3 +91,20 @@ echo "${prog}: org.opencontainers.image.source=${src}" >&2
   echo "${prog}: ${image} OCI source label is ${src}, want ${EXPECTED_SOURCE}" >&2
   exit 1
 }
+
+# Every Dockerfile sets the version label from ARG VERSION, so a published image
+# that lost it (an unexpanded ARG, a dropped LABEL line) still builds and still
+# passes the checks above: only the built artifact shows it.
+ver=$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.version"}}' "$image")
+echo "org.opencontainers.image.version=${ver}"
+[ -n "$ver" ] || {
+  echo "${image} has no org.opencontainers.image.version label" >&2
+  exit 1
+}
+case "$ver" in
+[0-9]*.[0-9]*.[0-9]*) ;;
+*)
+  echo "${image} OCI version label is ${ver}, want X.Y.Z (matches Makefile VERSION)" >&2
+  exit 1
+  ;;
+esac
