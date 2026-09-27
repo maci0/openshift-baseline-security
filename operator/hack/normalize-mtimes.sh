@@ -22,6 +22,11 @@
 # reading it as a path would report "no such path" for a typo'd flag.
 set -euo pipefail
 
+# `stamp` is computed with `date -u` but `touch -t` reads it in the local zone,
+# so a caller in any other TZ stamps every file at the wrong instant and the
+# image digest follows the builder's offset. Pin the zone the stamp is read in.
+export TZ=UTC
+
 prog="$(basename "$0")"
 
 usage() {
@@ -43,23 +48,19 @@ case "${1:-}" in
   usage
   exit 0
   ;;
--?*)
-  # A path never starts with a dash, so this is a mistyped flag, not a tree the
-  # build produced. Failing as a usage error keeps it from reading as the
-  # "path does not exist" failure it is not.
-  echo "${prog}: unknown option: ${1}" >&2
-  usage >&2
-  exit 2
-  ;;
 esac
 
-# A flag-shaped argument is a usage error, not a path. It used to fall through
-# to the existence check and report "no such path: --typo" with exit 1, which
-# reads as a missing tree on a build that has one, and points at the wrong fix.
+# This script takes no options, so a flag-shaped argument is a bad invocation
+# rather than a path. Without this the flag falls through to the existence check
+# and comes back as "no such path: --foo" with exit 1, which reads as a missing
+# tree rather than the typo it is. It would also reach `find` unparsed by option
+# handling, where a flag like -exec is an instruction rather than a filename.
+# Checked before the argument count so `--typo` with no path reads as the flag
+# it is; with no arguments at all the loop is empty and the count check fires.
 for arg in "$@"; do
   case "$arg" in
-  - | -*)
-    echo "${prog}: unknown option: $arg" >&2
+  -?*)
+    echo "${prog}: unknown option: ${arg}" >&2
     usage >&2
     exit 2
     ;;
@@ -71,21 +72,6 @@ if [ "$#" -eq 0 ]; then
   usage >&2
   exit 2
 fi
-
-# This script takes no options, so a leading `-` is a bad invocation rather
-# than a path. Without this the flag falls through to the path loop and comes
-# back as "no such path: --foo" with exit 1, which reads as a missing tree
-# rather than the typo it is. It would also reach `find` unparsed by option
-# handling, where a flag like -exec is an instruction rather than a filename.
-for arg in "$@"; do
-  case "$arg" in
-  -*)
-    echo "${prog}: unknown option: ${arg}" >&2
-    usage >&2
-    exit 2
-    ;;
-  esac
-done
 
 epoch="${SOURCE_DATE_EPOCH:-0}"
 case "$epoch" in
