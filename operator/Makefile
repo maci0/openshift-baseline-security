@@ -554,7 +554,7 @@ bundle: manifests
 	# DOCKER_RUN_FLAGS: pure filesystem I/O (no registry pulls, ro mount).
 	# Ensure the tool image is local first (network=none cannot pull).
 	@$(call ensure_image,$(OPERATOR_SDK_IMAGE))
-	docker run $(DOCKER_RUN_FLAGS) -v $(CURDIR)/bundle:/bundle:ro,Z $(OPERATOR_SDK_IMAGE) bundle validate /bundle
+	docker run $(DOCKER_RUN_FLAGS) -v "$(CURDIR)/bundle:/bundle:ro,Z" $(OPERATOR_SDK_IMAGE) bundle validate /bundle
 
 # uniqueItems is forbidden on CRD OpenAPI schemas (kube rejects it at apply time,
 # but operator-sdk bundle-validate does not); use x-kubernetes-list-type: set.
@@ -667,7 +667,7 @@ catalog-prepare: bundle
 	# Ensure opm is local before --network=none (cannot pull with network disabled).
 	@$(call ensure_image,$(OPM_IMAGE))
 	# DOCKER_RUN_FLAGS: read local bundle only; inject BUNDLE_IMG (dir render leaves image: "").
-	docker run $(DOCKER_RUN_FLAGS) -v $(CURDIR)/bundle:/bundle:ro,Z $(OPM_IMAGE) \
+	docker run $(DOCKER_RUN_FLAGS) -v "$(CURDIR)/bundle:/bundle:ro,Z" $(OPM_IMAGE) \
 		render /bundle --output=yaml \
 		| sed 's|^image: ""$$|image: $(BUNDLE_IMG)|' > catalog/bundle.yaml
 	@grep -qE '^image: .+' catalog/bundle.yaml \
@@ -682,7 +682,7 @@ catalog-prepare: bundle
 		ts=$$(date -u -d "@$$epoch" +%Y%m%d%H%M.%S 2>/dev/null || date -u -r "$$epoch" +%Y%m%d%H%M.%S); \
 		find catalog -exec touch -t "$$ts" {} +; \
 	fi
-	docker run $(DOCKER_RUN_FLAGS) -v $(CURDIR)/catalog:/catalog:ro,Z $(OPM_IMAGE) validate /catalog
+	docker run $(DOCKER_RUN_FLAGS) -v "$(CURDIR)/catalog:/catalog:ro,Z" $(OPM_IMAGE) validate /catalog
 
 .PHONY: catalog-build
 catalog-build: catalog-prepare

@@ -1,4 +1,9 @@
-import { BLOB_TAB_REVOKE_MS, downloadBlob, openBlobInTab } from './download';
+import {
+  BLOB_TAB_REVOKE_MS,
+  downloadBlob,
+  openBlobInTab,
+  WINDOWS_RESERVED_STEMS,
+} from './download';
 import { randomString } from './testing/fuzz';
 import { isString } from './parse';
 
@@ -151,6 +156,19 @@ describe('downloadBlob', () => {
       ['x\uFEFFy.csv', 'x_y.csv'],
       // Word joiner (Cf) must not hide an extension swap.
       ['ok\u2060.exe.csv', 'ok_.exe.csv'],
+      // Windows drops trailing dots and spaces and reserves the device names
+      // whatever the extension is, so such a name saves as nothing or under a
+      // different one: cut the tail, prefix a reserved stem.
+      ['report.csv.', 'report.csv'],
+      ['report.csv  ', 'report.csv'],
+      ['...', '_'],
+      ['NUL', '_NUL'],
+      ['con.csv', '_con.csv'],
+      ['COM1', '_COM1'],
+      ['LPT9.html', '_LPT9.html'],
+      // Only the stem counts, so ordinary names starting with "con" stay.
+      ['console.csv', 'console.csv'],
+      ['conduit.html', 'conduit.html'],
     ];
     for (const [input, want] of cases) {
       const dom = installDom();
@@ -244,6 +262,8 @@ describe('downloadBlob', () => {
       `${'a'.repeat(199)}👍`,
       'report\0.csv',
       'ok.csv',
+      'CON.txt',
+      'nul ',
     ];
     for (let i = 0; i < 500; i++) {
       const name =
@@ -262,6 +282,10 @@ describe('downloadBlob', () => {
         expect(d).not.toContain('..');
         expect(d).not.toMatch(/\p{Cc}/u);
         expect(d).not.toMatch(/\p{Cf}/u);
+        // A Windows save must not silently rename or lose the file.
+        expect(d.endsWith('.')).toBeFalsy();
+        expect(d.endsWith(' ')).toBeFalsy();
+        expect(WINDOWS_RESERVED_STEMS.has(d.split('.')[0]?.toLowerCase() ?? '')).toBeFalsy();
         expect(dom.anchor.rel).toBe('noopener noreferrer');
         expect(dom.revokeObjectURL).toHaveBeenCalledWith('blob:mock-url');
       } finally {

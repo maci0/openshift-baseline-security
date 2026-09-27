@@ -1,10 +1,37 @@
+// Device names Windows reserves whatever the extension is (CON, NUL, COM1,
+// LPT1). Saving one as-is lands the report in the filesystem root or nowhere.
+// Matched on the stem, the part before the first dot, case-insensitively.
+export const WINDOWS_RESERVED_STEMS: ReadonlySet<string> = new Set([
+  'con',
+  'prn',
+  'aux',
+  'nul',
+  ...Array.from({ length: 9 }, (_, i) => `com${i + 1}`),
+  ...Array.from({ length: 9 }, (_, i) => `lpt${i + 1}`),
+]);
+
+// Cap length so a huge CR-derived name cannot create an oversized
+// Content-Disposition path, without ever ending on half a surrogate pair.
+const MAX_DOWNLOAD_NAME = 200;
+
+const capName = (name: string): string => {
+  if (name.length <= MAX_DOWNLOAD_NAME) {
+    return name;
+  }
+  const cut = name.slice(0, MAX_DOWNLOAD_NAME);
+  const last = cut.charCodeAt(MAX_DOWNLOAD_NAME - 1);
+  // High surrogate with no room for its pair: drop it so a.download is
+  // well-formed UTF-16 (199 'a's + 👍 is 201 units; a 200-unit slice
+  // would leave an unpaired surrogate).
+  return last >= 0xd800 && last <= 0xdbff ? cut.slice(0, MAX_DOWNLOAD_NAME - 1) : cut;
+};
+
 // Strip path separators, control characters, relative segments, and bidirectional
 // overrides so a hostile filename cannot bias the browser save path or spoof
 // extensions via RTL (defense in depth; callers use fixed names today).
-// Leading dots become underscores (no hidden-file names). Cap length so a huge
-// CR-derived name cannot create an oversized Content-Disposition path.
+// Leading dots become underscores (no hidden-file names).
 const safeDownloadName = (filename: string): string => {
-  let cleaned = filename
+  const cleaned = filename
     // Path separators, C0/C1 controls, format characters (BIDI, zero-width,
     // BOM, word joiner) that can spoof extensions or hide path segments, and
     // unpaired surrogates: \p{Cs} matches a lone surrogate only, so a
@@ -14,17 +41,13 @@ const safeDownloadName = (filename: string): string => {
     .replace(/\.\./g, '_')
     .replace(/^\.+/, '_')
     .trim();
-  if (cleaned.length > 200) {
-    cleaned = cleaned.slice(0, 200);
-    const last = cleaned.charCodeAt(199);
-    // High surrogate with no room for its pair: drop it so a.download is
-    // well-formed UTF-16 (199 'a's + 👍 is 201 units; a 200-unit slice
-    // would leave an unpaired surrogate).
-    if (last >= 0xd800 && last <= 0xdbff) {
-      cleaned = cleaned.slice(0, 199);
-    }
+  // Windows drops trailing dots and spaces, so "report.csv." saves as
+  // "report.csv" and a name made only of them saves as nothing.
+  const trimmed = capName(cleaned).replace(/[. ]+$/u, '');
+  if (WINDOWS_RESERVED_STEMS.has(trimmed.split('.')[0]?.toLowerCase() ?? '')) {
+    return capName(`_${trimmed}`);
   }
-  return cleaned || 'download';
+  return trimmed || 'download';
 };
 
 // Trigger a browser download of an in-memory blob via a detached anchor.
