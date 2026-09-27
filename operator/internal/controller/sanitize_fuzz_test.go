@@ -40,10 +40,10 @@ import (
 //
 // For well-formed input the model is byte-exact, and that is asserted, because
 // the escape arithmetic (\u00XX, two-byte forms, U+2028/U+2029) is the part this
-// function actually owns. For ill-formed input the two are allowed to differ:
-// how the encoder spells a bad byte is a toolchain detail, and it has changed
-// (Go 1.27 writes the raw three-byte U+FFFD where earlier releases wrote the
-// six-byte \ufffd escape, which is what the six-byte branch below counts).
+// function actually owns. For ill-formed input only the one-sided bound is
+// asserted: how the encoder spells a bad byte is a toolchain detail, and it has
+// changed (Go 1.27 writes the raw three-byte U+FFFD where earlier releases wrote
+// the six-byte \ufffd escape), so the model counts whichever is wider.
 func FuzzJSONStringLenMatchesMarshal(f *testing.F) {
 	for _, seed := range []string{
 		"", "rule_1",

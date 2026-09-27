@@ -181,8 +181,12 @@ spec:
           secret:
             secretName: baseline-security-operator-metrics-cert
             optional: true
-            # Private key must not be group/world-readable inside the pod.
-            defaultMode: 0400
+            # The manager runs as 65532:65532 (image USER) and the kubelet
+            # projects secret files root-owned, so a root-only mode makes the
+            # service-ca cert permanently unreadable: the metrics server falls
+            # back to its self-signed pair and the service-ca-annotated
+            # Service can no longer be verified by the metrics stack.
+            defaultMode: 0644
         - name: tmp
           emptyDir:
             sizeLimit: 64Mi

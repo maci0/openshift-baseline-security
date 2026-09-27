@@ -26,8 +26,11 @@ COPY tsconfig.json webpack.config.ts console-extensions.json ./
 COPY src/ src/
 COPY locales/ locales/
 # `yarn licenses` runs from here and writes dist/THIRD-PARTY-NOTICES.txt, which
-# must be generated after webpack: output.clean wipes dist first.
+# must be generated after webpack: output.clean wipes dist first. `tools/size`
+# is the second `yarn build` step (the transferred-byte gate), so the build
+# stage needs it too; both are re-included in .dockerignore.
 COPY tools/attribution/ tools/attribution/
+COPY tools/size/ tools/size/
 # --network=none: webpack must not fetch packages (install already locked them in).
 RUN --network=none yarn build
 

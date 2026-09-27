@@ -44,6 +44,9 @@ func writeFileAtomic(t *testing.T, path string, data []byte) {
 		t.Fatal(err)
 	}
 	name := tmp.Name()
+	// Cleanup covers every failure below and runs after Fatal, so no branch has
+	// to remember to unlink the temp file it just created.
+	t.Cleanup(func() { _ = os.Remove(name) })
 	if _, err := tmp.Write(data); err != nil {
 		if cerr := tmp.Close(); cerr != nil {
 			t.Logf("closing %s: %v", name, cerr)

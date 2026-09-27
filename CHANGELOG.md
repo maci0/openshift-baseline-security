@@ -218,6 +218,24 @@ depend on those tags.
   put it where the grammar needs it, and the empty-state link pair is joined
   with the locale's own list punctuation instead of a hardcoded middle dot.
 
+- The metrics endpoint serves the service-ca certificate again. The manager
+  Deployment projected the service-ca Secret with `defaultMode: 0400`, and the
+  kubelet writes secret-volume files root-owned while the manager runs at the
+  image UID 65532 with no `fsGroup` (OLM owns the pod spec), so the projected
+  `tls.crt` and `tls.key` were never readable. The metrics server fell back to
+  its self-signed pair, permanently, and the `serving-cert-secret-name`
+  annotation on the metrics Service means the cluster metrics stack verified
+  against the service CA, so the ServiceMonitor had no working target and the
+  bundled PrometheusRule alerts could not fire. The mode is now 0644: the
+  serving certificate is published in the cluster service CA bundle anyway, and
+  a projected volume cannot be tightened past what the process UID can read.
+
+- The console plugin image builds again. `yarn build` runs the transferred-byte
+  size gate, but `.dockerignore` excluded `tools/*` and re-included only
+  `tools/attribution`, so `tools/size` was missing from the build context and
+  the build stage failed on the `ts-node tools/size/check.ts` step. The size
+  generator is now copied into the build stage alongside the attribution one.
+
 - `restore.sh` no longer restores a backup over a live `ClusterBaseline` that
   has moved on since it was taken. The MANIFEST records the `resourceVersion`
   the backup holds, and the script now reads the live one before writing: a

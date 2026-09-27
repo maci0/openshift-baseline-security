@@ -411,6 +411,10 @@ CATALOG_IMG ?= quay.io/openshift-baseline-security/baseline-security-operator-ca
 # ARG SOURCE_DATE_EPOCH: BuildKit clamps a stage's layer timestamps only where
 # the ARG is declared, so a stage that drops it re-embeds host build time and
 # two builds of one source stop matching.
+#
+# The recipe is one shell: every line ends in a backslash, so no shell comment
+# may sit inside it. A comment line without one ends make's continuation and
+# the rest of the target runs in a fresh shell with `fail` unset.
 .PHONY: verify-versions
 verify-versions:
 	@csv=bundle/manifests/baseline-security-operator.clusterserviceversion.yaml; \
@@ -548,6 +552,14 @@ verify-versions:
 	nvm=$$(tr -d '[:space:]' < ../console-plugin/.nvmrc); \
 	grep -qE "Node in this digest is $${nvm}" ../console-plugin/Dockerfile \
 		|| { echo "console-plugin Dockerfile must document Node $${nvm} (matches .nvmrc); image/node would drift"; fail=1; }; \
+	for tdir in $$(grep -oE 'tools/[a-z0-9-]+' "$$pkg" | sort -u); do \
+		grep -qE "^COPY $${tdir}/ $${tdir}/" ../console-plugin/Dockerfile \
+			|| { echo "console-plugin Dockerfile must COPY $${tdir}/ into the build stage; \`yarn build\` runs it and .dockerignore excludes tools/*"; fail=1; }; \
+		grep -qE "^!$${tdir}/" ../console-plugin/.dockerignore \
+			|| { echo "console-plugin .dockerignore must re-include $${tdir}/; it excludes tools/*, so the Dockerfile COPY would find nothing and \`yarn build\` would fail"; fail=1; }; \
+	done; \
+	grep -qE '^ *defaultMode: 0*[0-7]([4-7][0-7]|[0-3][4-7])$$' config/manager/manager.yaml \
+		|| { echo "config/manager/manager.yaml metrics-certs defaultMode must carry a group or other read bit; the manager runs at uid 65532 (no fsGroup, OLM owns the pod spec) against a root-owned projection, so an owner-only mode leaves the service-ca cert unreadable and metrics fall back to self-signed"; fail=1; }; \
 	if [ "$${REQUIRE_GIT_TAGS:-}" = 1 ]; then \
 		git -C .. rev-parse -q --verify "refs/tags/v$(VERSION)" >/dev/null \
 			|| { echo "git tag v$(VERSION) missing; CHANGELOG compare URLs and release immutability require it (create after cutting, never force-move)"; fail=1; }; \
