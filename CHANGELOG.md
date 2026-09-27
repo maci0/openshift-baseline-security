@@ -2165,6 +2165,17 @@ depend on those tags.
 
 ### Security
 
+- `hack/must-gather.sh` collected the Compliance Operator objects with their
+  scanner output intact. The account-related CIS and CCSR rules return what
+  they checked, so `compliance.yaml` could carry a `/etc/passwd` or
+  `/etc/shadow` listing, `getent` output, or an audit line naming a real
+  account, into an archive that is built to be attached to a support case. The
+  scanner prose (`details`, `standardOutput`, `summary`, `checkError`, and a
+  `ComplianceCheckResult`'s `status.result`) is now dropped from the dump.
+  Control identity, the compliant flag, the scan verdict, and the timestamps
+  stay, so a scan-failure triage is unaffected. `hack/backup.sh` is unchanged
+  and still writes the unredacted object, as `docs/RESTORE.md` says.
+
 - `hack/must-gather.sh` no longer dumps a Secret into a support archive. It
   collected every object named in `status.relatedObjects`, and the only filter
   on that list was a character check, so a hand-edited or etcd-restored

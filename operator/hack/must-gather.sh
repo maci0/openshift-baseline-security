@@ -8,29 +8,25 @@ set -euo pipefail
 # Every diagnostic is prefixed with the script name, as in the other hack/ scripts.
 prog="$(basename "$0")"
 
-# spec.waivers[].requestedBy and approvedBy identify cluster users (audit
-# attribution). kubectl last-applied-configuration can embed the same fields
-# as a JSON blob. Strip both from a ClusterBaseline YAML dump so those
-# identities do not leave the cluster in a support archive. Waiver name and
-# reason stay: they are required to debug scoring.
-redact_clusterbaseline_dump() {
-  local f="$1"
+# The redaction program lives beside this script, so the dumps are rewritten by
+# the same rules whether they come from the collector or from --self-test.
+script_dir="$(cd "$(dirname "$0")" && pwd)"
+redactor="$script_dir/redact-yaml.awk"
+
+# Redact a YAML dump in place, under one of redact-yaml.awk's policies. awk
+# reads the dump by path, so the unredacted copy only ever exists in a temp file
+# this function owns. GNU sed -i is not an option: BSD sed (macOS) treats the
+# next argument as a required backup suffix.
+#
+# The rewrite runs in a subshell that owns the temp file, whose EXIT trap
+# removes it on every exit. Hand-written rm calls covered only the two failure
+# paths and the success path, so an interrupted must-gather left the
+# pre-redaction copy behind in TMPDIR, still carrying the identities these
+# redactions exist to strip. The signal traps turn a signal into an ordinary
+# exit so the EXIT trap still runs.
+_redact_yaml_dump() {
+  local f="$1" policy="$2"
   [ -s "$f" ] || return 0
-  # kubectl emits each mapping key on its own line, and a value containing a
-  # newline (allowed: the CRD caps length only) as a literal/folded block, with
-  # the text on the following more-indented lines. Deleting the key line alone
-  # would leave that text in the dump, so a dropped key also swallows its
-  # continuation. last-applied-configuration is a single JSON blob per key, so
-  # its continuation is kept and the JSON substitutions redact it instead.
-  # Rewrite via a temp file: GNU sed -i is not accepted by BSD sed (macOS),
-  # which treats the next argument as a required backup suffix.
-  #
-  # The rewrite runs in a subshell that owns the temp file, whose EXIT trap
-  # removes it on every exit. Hand-written rm calls covered only the two failure
-  # paths and the success path, so an interrupted must-gather left the
-  # pre-redaction copy behind in TMPDIR, still carrying the requestedBy /
-  # approvedBy identities this function exists to strip. The signal traps turn a
-  # signal into an ordinary exit so the EXIT trap still runs.
   (
     local tmp
     tmp="$(mktemp)"
@@ -38,29 +34,32 @@ redact_clusterbaseline_dump() {
     trap 'exit 129' HUP
     trap 'exit 130' INT
     trap 'exit 143' TERM
-    awk '
-      function indent(s) { match(s, /^[ \t]*/); return RLENGTH }
-      # -1 is "not dropping": an uninitialized variable compares as 0 and would
-      # swallow the first indented line of the dump.
-      BEGIN { dropping = -1 }
-      {
-        if (dropping >= 0) {
-          # Blank lines inside a block scalar belong to it; a line at or left of
-          # the key indent is the next sibling and must be kept.
-          if ($0 ~ /^[ \t]*$/) next
-          if (indent($0) > dropping) next
-          dropping = -1
-        }
-        if ($0 ~ /^[ \t]*(requestedBy|approvedBy):/) { dropping = indent($0); next }
-        if ($0 ~ /kubectl\.kubernetes\.io\/last-applied-configuration:/) next
-        gsub(/"(requestedBy|approvedBy)"[ \t]*:[ \t]*"[^"]*"[ \t]*,?[ \t]*/, "", $0)
-        print
-      }
-    ' "$f" > "$tmp" || exit 1
+    awk -v policy="$policy" -f "$redactor" "$f" > "$tmp" || exit 1
     # The subshell's exit status is the function's return value, so a failed
     # cat still fails the caller under set -e exactly as `return 1` did.
     cat "$tmp" > "$f"
   )
+}
+
+# spec.waivers[].requestedBy and approvedBy identify cluster users (audit
+# attribution), which must not leave the cluster in a support archive. Waiver
+# name and reason stay: they are required to debug scoring.
+redact_clusterbaseline_dump() {
+  _redact_yaml_dump "$1" clusterbaseline
+}
+
+# Scanner output from the Compliance Operator, redacted out of the compliance
+# dump. The account-related CIS and CCSR rules return what they found verbatim:
+# /etc/passwd and /etc/shadow listings, `getent` output, audit entries naming a
+# user. Those names and hashes are personal data, and this archive is built to
+# be attached to a support case, so that text must not leave the cluster the
+# way waiver attribution must not. Control identity, the compliant flag, the
+# scan verdict, and the timestamps stay, which is what a scan-failure triage
+# reads. Nothing in this repo consumes the dropped fields: the console plugin
+# renders the ClusterBaseline status and links out to OpenShift for check
+# detail, so the redaction costs the support bundle nothing.
+redact_compliance_dump() {
+  _redact_yaml_dump "$1" compliance
 }
 
 # True when a status.relatedObjects entry names a kind the operator actually
@@ -201,10 +200,15 @@ collect_all() {
   oc -n openshift-baseline-security describe deploy/baseline-security-console-plugin \
     > "$out/console-plugin-deploy-describe.txt" 2>/dev/null || true
 
-  # Compliance Operator objects (scans, results, remediations).
-  oc -n openshift-compliance get scansettings,scansettingbindings,tailoredprofiles,compliancesuites,compliancescans,compliancecheckresults,complianceremediations -o yaml \
-    > "$out/compliance.yaml" 2>/dev/null \
-    || warn_fail compliance.yaml
+  # Compliance Operator objects (scans, results, remediations). The scanner
+  # output they carry is redacted below: account-related rules return user
+  # listings verbatim, and this archive is meant to be attached to a support case.
+  if oc -n openshift-compliance get scansettings,scansettingbindings,tailoredprofiles,compliancesuites,compliancescans,compliancecheckresults,complianceremediations -o yaml \
+    > "$out/compliance.yaml" 2>/dev/null; then
+    redact_compliance_dump "$out/compliance.yaml"
+  else
+    warn_fail compliance.yaml
+  fi
   oc -n openshift-compliance get events --sort-by='.lastTimestamp' \
     > "$out/compliance-events.txt" 2>/dev/null \
     || warn_fail compliance-events.txt
@@ -347,6 +351,68 @@ EOF
     grep -q 'reason: still here' "$block" || {
       echo "FAIL: block-scalar sibling waiver dropped" >&2
       cat "$block" >&2
+      exit 1
+    }
+    # Scanner output in the compliance dump. An account rule returns the
+    # /etc/shadow listing it checked, and that text must not reach a support
+    # case. The per-check ComplianceCheckResult message carries the same text
+    # under a different key, and the ComplianceScan verdict does not: it is the
+    # OK/FAILED enum triage reads.
+    compliance="$work/compliance.yaml"
+    cat > "$compliance" <<'EOF'
+apiVersion: compliance.openshift.io/v1alpha1
+kind: ComplianceScan
+metadata:
+  name: worker-scan
+  namespace: openshift-compliance
+status:
+  result: FAILED
+  summary: |
+    Scan Summary
+    2 rules failed
+  results:
+    - id: x
+      check: accounts_no_empty_password
+      title: Ensure no accounts have empty passwords
+      compliant: false
+      details: |-
+        root:$6$abcdef$hash:19000:0:99999:7:::
+        jsmith:$6$ghijkl$hash:19000:0:99999:7:::
+      summary: rule output naming jsmith
+    - id: y
+      check: audit_rules_enabled
+      compliant: true
+---
+apiVersion: compliance.openshift.io/v1alpha1
+kind: ComplianceCheckResult
+metadata:
+  name: accounts_no_empty_password-worker
+status:
+  result: |-
+    jsmith has an empty password
+  checkError: scan error naming jsmith
+  timestamp: "2026-01-01T00:00:00Z"
+EOF
+    redact_compliance_dump "$compliance"
+    # jsmith is the account name the scanner reported; the title is the
+    # benchmark's own control text and stays.
+    for leaked in jsmith 'Scan Summary' 'rule output naming' details summary checkError; do
+      if grep -q "$leaked" "$compliance"; then
+        echo "FAIL: scanner output survived redaction: $leaked" >&2
+        cat "$compliance" >&2
+        exit 1
+      fi
+    done
+    for kept in 'kind: ComplianceScan' 'result: FAILED' 'check: accounts_no_empty_password' 'compliant: false' 'kind: ComplianceCheckResult' 'check: audit_rules_enabled'; do
+      if ! grep -q "$kept" "$compliance"; then
+        echo "FAIL: redaction dropped triage data: $kept" >&2
+        cat "$compliance" >&2
+        exit 1
+      fi
+    done
+    grep -q 'timestamp: "2026-01-01T00:00:00Z"' "$compliance" || {
+      echo "FAIL: redaction dropped the check timestamp" >&2
+      cat "$compliance" >&2
       exit 1
     }
     # The redaction temp file holds the unredacted dump (it still carries the
@@ -609,7 +675,8 @@ if [[ "$OUT" == -* ]]; then
 fi
 mkdir -p -- "$OUT"
 # Owner-only: dumps include logs/events that may carry cluster-sensitive data.
-# Waiver requestedBy/approvedBy are stripped from clusterbaseline.yaml below.
+# Waiver requestedBy/approvedBy are stripped from clusterbaseline.yaml and the
+# scanner output from compliance.yaml below.
 chmod 700 -- "$OUT"
 
 # Bound every API call. must-gather is run precisely when the cluster is

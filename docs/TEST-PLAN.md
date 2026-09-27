@@ -1070,6 +1070,11 @@ stale Available or eternal Progressing.
       `requestedBy`/`approvedBy` (including a value dumped as a multi-line
       block, whose continuation lines would otherwise survive) and
       `last-applied-configuration` (`hack/must-gather.sh --self-test`).
+- [x] **Must-gather scanner-output redaction**: the compliance dump drops
+      `details`, `standardOutput`, `summary`, `checkError`, and a
+      `ComplianceCheckResult`'s `status.result` (the account name the rule
+      reported), while the scan verdict, control identity, compliant flag, and
+      timestamps survive (`hack/must-gather.sh --self-test`).
 - [x] **Support-archive output stays out of git**: the default output
       directory of `hack/backup.sh` and `hack/must-gather.sh` is ignored, so
       the waiver attribution a backup carries cannot be committed with

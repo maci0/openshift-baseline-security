@@ -93,7 +93,8 @@ fi
 for path in "$@"; do
   if [ ! -e "$path" ]; then
     echo "${prog}: no such path: ${path}" >&2
-    exit 1
+    usage >&2
+    exit 2
   fi
   # `find <path>` covers the path itself, so a directory's own mtime is clamped
   # too and a later `cp` into it does not reintroduce build time.
