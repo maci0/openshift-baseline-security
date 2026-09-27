@@ -91,6 +91,138 @@ depend on those tags.
   library pulled back into the entry bundle accreted silently. The numbers
   print into the CI log beside the commit that produced them.
 
+### Changed
+
+- `yarn size` reports the first-paint download (entry bundles plus the manifest
+  and locale the console fetches ahead of them) and no longer counts
+  `THIRD-PARTY-NOTICES.txt` in the dist total. No page links that file, so it
+  was inflating the ceiling that stands for what a browser actually
+  downloads, and the locale bundle the first paint waits on was invisible to
+  the report. No shipped bytes changed.
+
+- `docs/THREAT_MODEL.md` brought back in line with the code. The commit stamp
+  and eleven line citations across `role.yaml`, `cmd/main.go`, `plugin.go`,
+  `plugin_pod.go`, `nginx.conf`, both Dockerfiles, `CompliancePage.tsx`,
+  `RemediationsTab.tsx`, and the e2e dotenv loader were stale, and two surfaces
+  the model never named are now covered: the leader-election Lease and its
+  separate Role, and the operator's cluster-wide RBAC grants. No shipped
+  behavior changed.
+
+### Fixed
+
+- A waiver reason, a remediation error message, and the text in the printable
+  report lost their zero-width joiners and non-joiners on the way in and out.
+  The invisible-character filter dropped every Unicode format character, so a
+  family emoji was stored as three separate emoji and a Persian or Arabic
+  compound lost the joiner that carries its meaning. Free text now keeps those
+  two joiners while still dropping the characters that only exist to hide the
+  next one (BIDI controls, zero-width space, BOM, word joiner). The waiver
+  `requestedBy` / `approvedBy` fields keep the full filter, where a joiner in
+  front of a name is a spoof and no identity needs one. CSV export is
+  unchanged: a hidden character in front of a formula sigil is still neutralized
+  there.
+- A failed ClusterBaseline watch rendered the Overview, Profiles, and
+  Remediations tabs as "Baseline not configured" with a **Create default
+  baseline** button. A 403 on `clusterbaselines.compliance.openshift.io`, or a
+  missing CRD, was indistinguishable from an absent CR, so the page told the
+  admin a resource the operator may already have created did not exist. The
+  tabs now render a danger state naming the read failure. The **Create default
+  baseline** button also stays silent when it loses the create race, which on a
+  broken watch left the click with no output at all; it now says the CR exists.
+- Two failing watches showed only the first message in the page banner, and the
+  second one's text was never rendered anywhere. The banner now carries every
+  watch error.
+- A failed async-chunk load and a failed report-exporter load both reported one
+  fixed sentence and discarded the rejection, so a stale chunk id after a
+  console upgrade was indistinguishable from an unreachable CDN. The reason is
+  now shown.
+- A report download whose `click()` threw left its hidden anchor element in the
+  page, one per failed export.
+- `baseline_security_scan_interval_seconds` could report a value that depended
+  on which process published it first. The walk behind the gauge started at the
+  publisher's clock, so an annual schedule crossing a leap year reported 365d
+  from one phase of the year and 366d from another, and the per-process memo
+  froze whichever phase arrived first under a key that carries the schedule
+  alone. The walk is now anchored to a fixed epoch, so the value is a function
+  of `spec.schedule` and nothing else. The `ComplianceScanStale` threshold moves
+  by at most one day, and only for annual schedules.
+- `manager --help` documented the `KUBECONFIG` fallback without pinning the
+  `--kubeconfig` flag it sits behind. The flag was registered by a transitive
+  package's `init`, which upstream marks for removal, so the documented
+  precedence could have outlived the flag. It is now registered by the binary
+  itself, the help names the full resolution order, the start-up
+  `configuration` log records whether a kubeconfig was passed (not its path),
+  and a test fails if the flag ever goes missing again.
+- Release images stamped `org.opencontainers.image.version` from the
+  `ARG VERSION` default in each Dockerfile rather than the version being
+  published. The release job replaced `DOCKER_BUILD_FLAGS` to drop the
+  buildx-only `--provenance`/`--sbom`, and the replacement also dropped
+  `--build-arg VERSION`, so all four images fell back to the default. The two
+  values were kept equal by `verify-versions`, so nothing shipped mislabeled,
+  but the label depended on that gate rather than on what was built. The flags
+  are now assembled after `resolve-release-version.sh` has resolved the
+  version, so every image is built with it explicitly.
+- Operator pod termination skipped the drain window. The manager Deployment's
+  `preStop` hook was `exec: /bin/sh -c "sleep 5"`, but the runtime image is
+  `ubi9/ubi-micro`, which ships no shell and no `sleep`. The hook could not run,
+  so SIGTERM reached the process immediately and a pod being removed from the
+  Service could still receive scrapes or hold the leader lease during its final
+  seconds. Both the manager Deployment (kustomize and CSV) and the console
+  plugin container now use the kubelet's native `preStop.sleep` handler, which
+  needs no binary in the image. Requires Kubernetes 1.29+; the CSV already
+  declares `minKubeVersion: 1.35.0`.
+- Console plugin image failed to build. The `COPY` that places
+  `THIRD-PARTY-NOTICES.txt` in `/licenses/` named a path from the build stage
+  without `--from=build`, so it resolved against the build context instead,
+  where `dist/` is excluded by `.dockerignore`. The file the build stage
+  generated was never reachable from the runtime stage.
+
+### Security
+
+- Results CSV export hardened against a formula sigil hidden behind a leading
+  control character. `csvCell` dropped NULs and Unicode format characters, then
+  checked the cell for a formula starter, so a cell such as `\u0001=cmd` kept a
+  control prefix that a spreadsheet trims before deciding whether the cell is a
+  formula. A tampered `ComplianceCheckResult` name, description first line, or
+  `check-severity` label could therefore reach a downloaded export as an
+  evaluated formula. Export rows now drop the controls a spreadsheet trims
+  (tab, CR, and LF stay, since RFC 4180 quoting needs them). Cells that held a
+  control character other than a delimiter lose it from the export.
+- Console write controls were gated on `useAccessReview` through their
+  `isDisabled` prop alone. A tab holding an open confirm modal, a stopped
+  editor, or a pending form across a permission revocation would still send the
+  patch the button had already admitted. Every mutation now re-checks the
+  reviewed permission at the request boundary through one chokepoint
+  (`console-plugin/src/permissions.ts`), and an unresolved review denies rather
+  than defaulting to allow. Covered: rescan, profile toggle, schedule save,
+  waiver add and remove, TailoredProfile create, update, and bind, tailored
+  profile unbind, default baseline create, and every remediation path
+  (per-row apply, unapply, auto-apply, batch apply).
+
+### Changed
+
+- Console plugin built a fresh `Intl.NumberFormat` / `Intl.DateTimeFormat` on
+  every count, date label, and chart tick. A console session sets an explicit
+  locale, and the engine only caches the runtime default, so each card, waiver
+  row, remediation row, and axis label paid a formatter construction on the
+  main thread. `formatCount`, `formatLocalDate`, and `formatChartDate` now hold
+  one formatter per locale tag, matching how the display collator is already
+  cached. Output is unchanged, including the fallback for an invalid tag.
+- Console plugin re-canonicalized the console locale on every count, date label,
+  collator comparison, and list join: `safeLocale` ran `Intl.getCanonicalLocales`
+  per call, and `compareForDisplay` calls it once per comparison, so sorting the
+  rule catalog canonicalized the tag thousands of times per sort. `safeLocale`
+  now holds one entry per locale tag, like the formatters above it. Output is
+  unchanged, including the invalid-tag fallback.
+- Profiles typeahead re-folded the whole rule catalog, plus the query once per
+  option, on every keystroke, so typing in the enable-rules picker redid a
+  thousand NFD normalizations per character over unchanged names. The catalog
+  is now folded when it changes and the query when it is typed, leaving a
+  substring test per option. Matching is unchanged, including diacritic and
+  Turkish dotted/dotless i handling.
+
+### Added
+
 - Observe dashboard gained a Reconcile loop row (reconcile errors against total
   reconciles, and p50/p99 reconcile duration). The operator's own failure rate
   and loop latency were visible only in pod logs, so a reconcile loop slowing

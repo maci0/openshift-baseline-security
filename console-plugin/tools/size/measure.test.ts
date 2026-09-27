@@ -1,6 +1,15 @@
 import type { SizeBudget } from './budget';
-import type { AssetSize } from './measure';
-import { breaches, classifyAsset, distGzip, kib, largestAsyncChunk, summarize } from './measure';
+import type { AssetSize, DistFile } from './measure';
+import {
+	breaches,
+	classifyAsset,
+	distGzip,
+	isServedToBrowser,
+	kib,
+	largestAsyncChunk,
+	servedNonJsGzip,
+	summarize,
+} from './measure';
 
 const asset = (assetPath: string, gzipBytes: number): AssetSize => ({
 	path: assetPath,
@@ -48,14 +57,39 @@ describe('summarize', () => {
 		expect(largestAsyncChunk(report)).toBe(200);
 	});
 
-	it('keeps the whole dist tree in the total', () => {
+	it('keeps the served tree in the total', () => {
 		expect(report.distGzipBytes).toBe(700);
 	});
 
-	it('totals every file, JS or not', () => {
+	it('adds the served non-JS a first paint waits on', () => {
+		const withLocales = summarize([asset('plugin-entry-bundle-1.min.js', 300)], 700, [], 40);
+		expect(withLocales.criticalPathGzipBytes).toBe(340);
+		expect(report.criticalPathGzipBytes).toBe(300);
+	});
+
+	it('totals every served file, JS or not', () => {
 		expect(
 			distGzip([asset('plugin-entry-bundle-1.min.js', 10), { path: 'x.json', rawBytes: 20, gzipBytes: 5 }]),
 		).toBe(15);
+	});
+
+	it('leaves the license notice out of the served total', () => {
+		expect(isServedToBrowser('THIRD-PARTY-NOTICES.txt')).toBe(false);
+		expect(isServedToBrowser('locales/en/plugin__baseline-security-console-plugin.json')).toBe(true);
+		const files: readonly DistFile[] = [
+			{ path: 'plugin-entry-bundle-1.min.js', rawBytes: 30, gzipBytes: 10 },
+			{ path: 'THIRD-PARTY-NOTICES.txt', rawBytes: 3000, gzipBytes: 900 },
+		];
+		expect(distGzip(files)).toBe(10);
+	});
+
+	it('counts the manifest and locales as first-paint bytes, the notice as neither', () => {
+		const files: readonly DistFile[] = [
+			{ path: 'plugin-manifest.json', rawBytes: 20, gzipBytes: 6 },
+			{ path: 'locales/en/plugin__baseline-security-console-plugin.json', rawBytes: 80, gzipBytes: 14 },
+			{ path: 'THIRD-PARTY-NOTICES.txt', rawBytes: 3000, gzipBytes: 900 },
+		];
+		expect(servedNonJsGzip(files)).toBe(20);
 	});
 });
 
@@ -72,7 +106,7 @@ describe('breaches', () => {
 	it('names the ceiling an oversized entry bundle broke', () => {
 		const report = summarize([asset('plugin-entry-bundle-1.min.js', 1001)], 1001, []);
 		expect(breaches(report, TIGHT).map((breach) => breach.label)).toEqual([
-			'initial JS (critical path)',
+			'initial JS',
 		]);
 	});
 

@@ -11,11 +11,19 @@ import * as zlib from 'node:zlib';
 
 import { SIZE_BUDGET } from './budget';
 import type { AssetSize, DistFile } from './measure';
-import { breaches, classifyAsset, distGzip, kib, largestAsyncChunk, summarize } from './measure';
+import {
+	breaches,
+	classifyAsset,
+	distGzip,
+	isJs,
+	kib,
+	largestAsyncChunk,
+	servedNonJsGzip,
+	summarize,
+} from './measure';
 
 const DIST_RELATIVE_PATH = 'dist';
 const GZIP_LEVEL = 9;
-const JS_SUFFIX = '.js';
 
 function findProjectRoot(start: string): string | undefined {
 	let dir = path.resolve(start);
@@ -51,10 +59,6 @@ function collect(dir: string, prefix: string): readonly DistFile[] {
 		});
 	}
 	return files;
-}
-
-function isJs(relativePath: string): boolean {
-	return relativePath.endsWith(JS_SUFFIX);
 }
 
 function measureAssets(files: readonly DistFile[]): {
@@ -107,13 +111,18 @@ function main(): void {
 	}
 	const files = collect(distDir, '');
 	const { assets, unclassifiedJs } = measureAssets(files);
-	const report = summarize(assets, distGzip(files), unclassifiedJs);
+	const report = summarize(assets, distGzip(files), unclassifiedJs, servedNonJsGzip(files));
 
 	// The printed table is the record: it lands in the CI log next to the
 	// commit that produced it, and nothing is written into dist/ (the image
 	// ships every file under there).
 	printTable(assets, [
 		budgetLine('initial JS', report.initialJsGzipBytes, SIZE_BUDGET.initialJsGzipBytes),
+		// No ceiling of its own: the dist total already bounds it. Printed
+		// because it is the number a first paint waits on (entry bundles plus
+		// the manifest and locale the console fetches first), and the JS
+		// figure above cannot show a locale file doubling.
+		`first paint: ${kib(report.criticalPathGzipBytes)} (initial JS + manifest + locales)`,
 		budgetLine('largest async chunk', largestAsyncChunk(report), SIZE_BUDGET.asyncChunkGzipBytes),
 		budgetLine('dist total', report.distGzipBytes, SIZE_BUDGET.distGzipBytes),
 	]);

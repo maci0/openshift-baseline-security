@@ -1,5 +1,10 @@
 // Measure what the browser downloads from dist/.
 //
+// Every file webpack or `yarn licenses` leaves in dist/ is served by nginx out
+// of the document root, except the license notice, which nothing links: it is
+// counted out of the totals below, and the served non-JS files (manifest,
+// locales) are added to the initial JS to report what a first paint waits on.
+//
 // The class of a JS file comes from the two webpack output name templates in
 // webpack.config.ts: entry bundles are `[name]-bundle-[contenthash].min.js` and
 // async chunks are `[name]-chunk-[contenthash].min.js`. A `.js` file matching
@@ -24,6 +29,11 @@ export interface SizeReport {
 	readonly assets: readonly AssetSize[];
 	readonly initialJsGzipBytes: number;
 	readonly asyncJsGzipBytes: number;
+	// What a cold cache downloads before the first frame paints: the entry
+	// bundles plus what the console fetches ahead of them, the plugin manifest
+	// and the locale bundle. A growing locale file is a first-paint regression
+	// the JS-only figure above cannot see.
+	readonly criticalPathGzipBytes: number;
 	readonly distGzipBytes: number;
 	readonly unclassifiedJs: readonly string[];
 }
@@ -37,6 +47,18 @@ export interface BudgetBreach {
 const ENTRY_MARKER = '-bundle-';
 const CHUNK_MARKER = '-chunk-';
 const JS_SUFFIX = '.js';
+// The one file in dist/ no browser ever requests. `yarn licenses` writes it
+// next to the bundles, and the Dockerfile serves the same bytes from
+// /licenses/; nothing in the page, the manifest, or the console's plugin loader
+// links it. Counting it would let the tree grow on license text alone and push
+// the real ceilings out of reach.
+const UNSERVED_FILE = 'THIRD-PARTY-NOTICES.txt';
+
+export const isJs = (relativePath: string): boolean => relativePath.endsWith(JS_SUFFIX);
+
+// Served by nginx out of the document root (every other file webpack or the
+// license step leaves in dist/).
+export const isServedToBrowser = (relativePath: string): boolean => relativePath !== UNSERVED_FILE;
 
 export function classifyAsset(relativePath: string): AssetClass | undefined {
 	if (!relativePath.endsWith(JS_SUFFIX)) {
@@ -57,18 +79,34 @@ function sumGzip(assets: readonly AssetSize[], matches: (asset: AssetSize) => bo
 }
 
 export function distGzip(files: readonly DistFile[]): number {
-	return files.reduce((total, file) => total + file.gzipBytes, 0);
+	return files.reduce(
+		(total, file) => (isServedToBrowser(file.path) ? total + file.gzipBytes : total),
+		0,
+	);
+}
+
+// Served non-JS: the manifest and the locale bundles the console fetches
+// before it executes an entry bundle.
+export function servedNonJsGzip(files: readonly DistFile[]): number {
+	return files.reduce(
+		(total, file) =>
+			isServedToBrowser(file.path) && !isJs(file.path) ? total + file.gzipBytes : total,
+		0,
+	);
 }
 
 export function summarize(
 	assets: readonly AssetSize[],
 	distGzipBytes: number,
 	unclassifiedJs: readonly string[],
+	servedNonJsGzipBytes = 0,
 ): SizeReport {
+	const initialJsGzipBytes = sumGzip(assets, (asset) => asset.class === 'initial-js');
 	return {
 		assets,
-		initialJsGzipBytes: sumGzip(assets, (asset) => asset.class === 'initial-js'),
+		initialJsGzipBytes,
 		asyncJsGzipBytes: sumGzip(assets, (asset) => asset.class === 'async-js'),
+		criticalPathGzipBytes: initialJsGzipBytes + servedNonJsGzipBytes,
 		distGzipBytes,
 		unclassifiedJs,
 	};
@@ -76,7 +114,7 @@ export function summarize(
 
 export function breaches(report: SizeReport, budget: SizeBudget): readonly BudgetBreach[] {
 	const checks: readonly [string, number, number][] = [
-		['initial JS (critical path)', report.initialJsGzipBytes, budget.initialJsGzipBytes],
+		['initial JS', report.initialJsGzipBytes, budget.initialJsGzipBytes],
 		['largest async chunk', largestAsyncChunk(report), budget.asyncChunkGzipBytes],
 		['dist total', report.distGzipBytes, budget.distGzipBytes],
 	];

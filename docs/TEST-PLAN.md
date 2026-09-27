@@ -1160,7 +1160,7 @@ These are product contracts, not just "hope it's fast".
 |---|---|---|
 | Reconcile happy path (fake client, 1k check results) | < 200ms CPU | Go benchmark / unit timer |
 | Reconcile 10k check results | < 2s CPU; no O(n²) label maps; List Limit=500 | unit with generated list; paging in `TestAggregateStatusPagesCheckResults` |
-| Console plugin initial JS (critical path) | within the gzip ceilings in `console-plugin/tools/size/budget.ts` | `make size` (in `yarn build` and `yarn ci`); `tools/size/measure.test.ts` covers the classification and the gate |
+| Console plugin initial JS (critical path) | within the gzip ceilings in `console-plugin/tools/size/budget.ts`; the printed `first paint` line (initial JS + manifest + locales) recorded per build | `make size` (in `yarn build` and `yarn ci`); `tools/size/measure.test.ts` covers the classification, the served/non-served split, and the gate |
 | Console Results first paint with 5k rows | interactive filters < 100ms after load | Playwright performance marks or manual |
 | CSV export 5k rows | < 3s in Chromium; no tab freeze dialog | Playwright |
 | History ring | max 30 points; status JSON stays small | unit size assert |

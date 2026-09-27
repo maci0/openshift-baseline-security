@@ -15,8 +15,9 @@ export interface SizeBudget {
 	// charts load after the first paint, so they get their own ceiling instead
 	// of counting against the critical path.
 	readonly asyncChunkGzipBytes: number;
-	// Everything in dist/, compressed: the whole download a cold cache pays
-	// across every tab of the page.
+	// Everything nginx serves out of dist/, compressed (the license notice is
+	// excluded: no page links it): the whole download a cold cache pays across
+	// every tab of the page.
 	readonly distGzipBytes: number;
 }
 

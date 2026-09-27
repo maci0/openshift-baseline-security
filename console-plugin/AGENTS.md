@@ -38,8 +38,12 @@ that ships no license text. It runs after webpack in `yarn build` (webpack's
 `yarn size` is a build step for the same reason: it walks `dist/`, gzips every
 file, prints the transferred size, and fails over the ceilings in
 `tools/size/budget.ts`. What it measures is the initial JS (every
-`*-bundle-*.min.js`, the critical path before CompliancePage paints), the
-largest async chunk, and the whole tree. A `.js` file that matches neither
+`*-bundle-*.min.js`), the first-paint download (initial JS plus the manifest
+and locale the console fetches ahead of it, printed without its own ceiling),
+the largest async chunk, and the whole served tree. `THIRD-PARTY-NOTICES.txt`
+is counted out of the totals: it lives in `dist/` because the build writes it
+there, no page links it, and the Dockerfile serves the same bytes from
+`/licenses/`. A `.js` file that matches neither
 output name template fails the gate rather than escaping the initial-JS
 ceiling, so renaming a webpack output template breaks the check instead of
 silently voiding it. Raising a ceiling is a deliberate edit carrying the reason;
