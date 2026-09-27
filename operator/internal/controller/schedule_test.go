@@ -5,6 +5,12 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	// The DST cases below need a real IANA zone. Embed the database so the test
+	// does not depend on the host shipping one: a Windows dev box, an Alpine
+	// image, or a scratch-based builder has no /usr/share/zoneinfo, and without
+	// this import time.LoadLocation fails and the test dies before asserting.
+	_ "time/tzdata"
 )
 
 // TestNormalizedScheduleTable pins the five-field robfig parser's accept/reject
