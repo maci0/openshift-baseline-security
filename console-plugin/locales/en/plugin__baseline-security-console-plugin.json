@@ -204,6 +204,7 @@
   "Invalid base profile name.": "Invalid base profile name.",
   "Profile": "Profile",
   "Loading remediations": "Loading remediations",
+  "Loading tailored profile…": "Loading tailored profile…",
   "No remediations": "No remediations",
   "The Compliance Operator generates remediations only for failing checks that can be auto-fixed. None are available for the current results.": "The Compliance Operator generates remediations only for failing checks that can be auto-fixed. None are available for the current results.",
   "The rendered object could not be displayed.": "The rendered object could not be displayed.",

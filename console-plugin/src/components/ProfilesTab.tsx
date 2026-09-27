@@ -216,7 +216,13 @@ const RuleMultiSelect: React.FC<{
               placeholder={placeholder}
               aria-label={ariaLabel}
               innerRef={inputRef}
-              onClick={() => setIsOpen(true)}
+              onClick={(e) => {
+                // The MenuToggle around this input toggles on any click that
+                // reaches it, so without stopping the bubble a click in the
+                // field closed the option list the user had just opened.
+                e.stopPropagation();
+                setIsOpen(true);
+              }}
               onChange={(_e, v) => {
                 setInput(v);
                 setIsOpen(true);
@@ -251,7 +257,11 @@ const RuleMultiSelect: React.FC<{
                   variant="plain"
                   aria-label={clearLabel}
                   icon={<TimesIcon />}
-                  onClick={() => {
+                  onClick={(e) => {
+                    // Same reason the chip close above stops: clearing the
+                    // selection must not also toggle the list open over a
+                    // thousand-rule catalog.
+                    e.stopPropagation();
                     onChange([]);
                     setInput('');
                     inputRef.current?.focus();
@@ -354,6 +364,10 @@ const ProfilesTab: React.FC<{
     [authoring],
   );
   const [creating, setCreating] = React.useState(false);
+  // Name of the tailored profile whose openEdit GET is in flight. The form only
+  // opens once that fetch resolves, so without a loading state the click looks
+  // dead and every other row's Edit stays live meanwhile.
+  const [editLoading, setEditLoading] = React.useState<string | null>(null);
   // The existing TailoredProfile being edited (fetched object, for the update),
   // or null when the form is in create mode. Reuses the create modal.
   const [editing, setEditing] = React.useState<{ name: string; obj: TailoredProfileResource } | null>(
@@ -460,6 +474,7 @@ const ProfilesTab: React.FC<{
     const token = editSeq.current;
     setError(null);
     setSuccess(null);
+    setEditLoading(name);
     try {
       // SAFETY: k8sGet resolves TailoredProfileModel; the edit form reads only
       // spec.extends / spec.disableRules / spec.enableRules, each narrowed first.
@@ -471,6 +486,7 @@ const ProfilesTab: React.FC<{
       // A newer openEdit (or a form the user already moved on from) won: drop
       // this response rather than overwrite the form with the wrong profile.
       if (token !== editSeq.current) return;
+      setEditLoading(null);
       setEditing({ name, obj });
       setTpName(name);
       setTpExtends(obj.spec?.extends || DEFAULT_BASE_PROFILE);
@@ -488,6 +504,7 @@ const ProfilesTab: React.FC<{
       // Same fence: a failure for a superseded profile must not surface inside
       // the modal the newer openEdit opened.
       if (token !== editSeq.current) return;
+      setEditLoading(null);
       setError(errorMessage(e) ?? t('Failed to load tailored profile.'));
     }
   };
@@ -547,6 +564,7 @@ const ProfilesTab: React.FC<{
     // A write owns the form: supersede any openEdit fetch still in flight, so a
     // late response cannot pre-fill the modal out from under this call.
     editSeq.current += 1;
+    setEditLoading(null);
     setError(null);
     // Same normalization as tailoredProfileManifest (trim, drop invalid names,
     // dedupe, disable wins) so update and create payloads cannot drift.
@@ -685,6 +703,7 @@ const ProfilesTab: React.FC<{
     // Cancel supersedes an in-flight openEdit: its response must not reopen the
     // form the admin just dismissed.
     editSeq.current += 1;
+    setEditLoading(null);
     setCreating(false);
     setEditing(null);
     setTpName('');
@@ -718,10 +737,15 @@ const ProfilesTab: React.FC<{
   // needs the Profile/Rule catalog to pre-fill the form, so the baseline patch
   // alone is not enough. The Unbind control next to it only patches the
   // baseline and keeps editDisabled.
-  const tailoredEditDisabled = editDisabled || !authoring || !canUpdate || canUpdateLoading;
+  const tailoredEditDisabled =
+    editDisabled || !authoring || !canUpdate || canUpdateLoading || editLoading !== null;
   let tailoredEditDisabledReason: string | undefined;
   if (!pending) {
-    if (canEditLoading || canAuthorLoading || canUpdateLoading) {
+    if (editLoading !== null) {
+      // The button carries the spinner, so the sibling rows read as "one is
+      // loading", not "these are broken". Same pattern the profile switches use.
+      tailoredEditDisabledReason = t('Loading tailored profile…');
+    } else if (canEditLoading || canAuthorLoading || canUpdateLoading) {
       tailoredEditDisabledReason = t('Checking permissions…');
     } else if (!canEdit) {
       tailoredEditDisabledReason = t('You do not have permission to edit the baseline.');
@@ -819,6 +843,7 @@ const ProfilesTab: React.FC<{
     // deleted, so its response would resolve successfully and pre-fill the modal
     // for a profile no scan includes any more. Supersede it before the patch.
     editSeq.current += 1;
+    setEditLoading(null);
     setError(null);
     setSuccess(null);
     try {
@@ -1253,6 +1278,7 @@ const ProfilesTab: React.FC<{
                             variant="link"
                             isInline
                             isDisabled={tailoredEditDisabled}
+                            isLoading={editLoading === name}
                             aria-label={t('Edit tailored profile {{name}}', { name })}
                             onClick={(e) => void openEdit(name, e.currentTarget)}
                           >

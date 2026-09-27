@@ -58,7 +58,11 @@ const ClusterScoreItem: React.FC = () => {
   const scoreText = formatCount(score, i18n.language);
   const maxText = formatCount(100, i18n.language);
   return (
-    <a
+    // ConsoleLink, like the unavailable and not-scanned branches above: a bare
+    // href to a console route leaves the SPA and reboots the whole shell, so a
+    // click that starts on the cluster Overview page cost a full page load and
+    // dropped every watch this card and the Compliance page hold open.
+    <ConsoleLink
       href="/baseline-security"
       aria-label={t('Compliance score {{score}} of {{max}}', {
         score: scoreText,

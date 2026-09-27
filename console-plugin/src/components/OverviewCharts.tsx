@@ -21,6 +21,7 @@ import { formatChartDate, formatCount, safeLocale } from '../dates';
 import { resultsHref } from '../links';
 import { historyContentKey, toTrendData } from '../overviewTrend';
 import { scoreColor } from '../scoring';
+import ConsoleLink from './ConsoleLink';
 
 // The neutral for a chart that has nothing to score yet: the empty ring, and
 // the trend area when the current score is missing. Segment colors live on
@@ -153,13 +154,16 @@ export const CompositionDonut = React.memo<{
               />
               {/* Same deep-link as profile CountRow so the primary
                   score card drills into Results on click/tap (touch
-                  devices cannot hover Victory slices). */}
-              <a
+                  devices cannot hover Victory slices). ConsoleLink so the
+                  drill-down stays in the SPA like the identical CountRow
+                  link; a bare href reboots the whole console shell and
+                  drops every watch the page holds open. */}
+              <ConsoleLink
                 href={resultsHref(s.filter)}
                 aria-label={t('{{label}}: {{value}}', { label: s.label, value: num })}
               >
                 {text}
-              </a>
+              </ConsoleLink>
             </li>
           );
         })}
