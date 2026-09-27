@@ -49,7 +49,10 @@ LABEL org.opencontainers.image.description="OpenShift console plugin for baselin
 LABEL org.opencontainers.image.source="https://github.com/maci0/openshift-baseline-security"
 LABEL org.opencontainers.image.licenses="Apache-2.0"
 LABEL org.opencontainers.image.version="${VERSION}"
-USER 1001
+# Pin the group with the uid: the /etc/passwd entry for 1001 in the base image
+# carries its own primary group, and an implicit GID 0 would hand the worker
+# root-group membership it never needs.
+USER 1001:1001
 # Document the only listen port (TLS; no plaintext 8080).
 EXPOSE 9443
 # Graceful worker drain on pod stop (default SIGTERM is hard-stop for nginx).

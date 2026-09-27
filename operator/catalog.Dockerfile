@@ -16,8 +16,10 @@ COPY --chown=1001:1001 --chmod=0755 catalog /configs
 COPY --chmod=0755 LICENSE /licenses/
 COPY --chmod=0644 LICENSE /licenses/LICENSE
 # Pin non-root before cache generation so /tmp/cache is always owned by 1001
-# (do not rely on the base image USER for the RUN that writes the cache).
-USER 1001
+# (do not rely on the base image USER for the RUN that writes the cache). The
+# group is pinned with the uid so the result does not depend on the base image
+# passwd entry for 1001.
+USER 1001:1001
 # Precompute the cache; opm's runtime integrity check crash-loops without it.
 # --network=none: cache is local FBC only; do not pull the bundle image at build.
 RUN --network=none ["/bin/opm", "serve", "/configs", "--cache-dir=/tmp/cache", "--cache-only"]

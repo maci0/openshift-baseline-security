@@ -89,6 +89,12 @@ depend on those tags.
 - Operator `/readyz` reported ready for the whole drain. A SIGTERM now flips
   the readiness check to failing, so the pod leaves the Service endpoints as
   soon as the process starts shutting down.
+- Operator images shipped `/usr/bin/manager` owned by the runtime UID (65532),
+  so the process could rewrite the binary it executes wherever the root
+  filesystem is not read-only. The binary is now root-owned, matching
+  `/licenses` and the rest of the image. The console-plugin and catalog images
+  pinned the uid but not the group, leaving the primary group to the base
+  image's passwd entry; both now run as `1001:1001`.
 - `operator/hack/must-gather.sh` appended to `related-objects.yaml` instead of
   rewriting it, and the output directory is never cleared. Collecting a second
   must-gather into the same directory duplicated every object document, and when

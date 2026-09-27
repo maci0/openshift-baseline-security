@@ -31,10 +31,10 @@ FROM registry.access.redhat.com/ubi9/ubi-micro@sha256:f332c99eb8f798a8486821c919
 ARG SOURCE_DATE_EPOCH=0
 # Default matches Makefile VERSION; make docker-build passes --build-arg VERSION.
 ARG VERSION=0.6.1
-# Own the binary as the runtime UID (non-root cannot rewrite a root-owned path
-# under a read-only rootfs anyway; keeps ownership consistent with USER).
+# Root-owned like every other file in the image: the runtime UID must not be
+# able to rewrite the executable it runs. /licenses/ is copied root-owned too.
 # --chmod: host umask must not change the shipped layer digest.
-COPY --from=build --chown=65532:65532 --chmod=0755 /tmp/manager /usr/bin/manager
+COPY --from=build --chown=0:0 --chmod=0755 /tmp/manager /usr/bin/manager
 # Apache-2.0 requires redistributing the license with the binary.
 # Two COPYs on purpose: --chmod also stamps the parent dir BuildKit creates,
 # so a single 0644 copy leaves /licenses non-traversable for the non-root USER.

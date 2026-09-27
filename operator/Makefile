@@ -427,8 +427,16 @@ verify-versions:
 		|| { echo "console-plugin Dockerfile must declare ARG SOURCE_DATE_EPOCH in both stages (BuildKit clamps timestamps per stage)"; fail=1; }; \
 	grep -qE -- '--chmod=0755.*/usr/bin/manager' Dockerfile \
 		|| { echo "release Dockerfile must COPY the manager with --chmod=0755 so host umask cannot change the image digest"; fail=1; }; \
+	grep -qE -- '--chown=0:0 --chmod=0755.*/usr/bin/manager' Dockerfile \
+		|| { echo "release Dockerfile must COPY the manager root-owned (--chown=0:0); the runtime UID must not be able to rewrite its own executable"; fail=1; }; \
 	grep -qE -- '--chmod=0755.*/usr/bin/manager' Dockerfile.ci \
 		|| { echo "Dockerfile.ci must COPY the manager with --chmod=0755 (parity with the release Dockerfile)"; fail=1; }; \
+	grep -qE -- '--chown=0:0 --chmod=0755.*/usr/bin/manager' Dockerfile.ci \
+		|| { echo "Dockerfile.ci must COPY the manager root-owned (parity with the release Dockerfile)"; fail=1; }; \
+	grep -qE '^USER 1001:1001$$' ../console-plugin/Dockerfile \
+		|| { echo "console-plugin Dockerfile must pin USER 1001:1001; a bare uid leaves the primary group to the base image passwd entry"; fail=1; }; \
+	grep -qE '^USER 1001:1001$$' catalog.Dockerfile \
+		|| { echo "catalog.Dockerfile must pin USER 1001:1001; a bare uid leaves the primary group to the base image passwd entry"; fail=1; }; \
 	grep -qE 'YARN_ENABLE_SCRIPTS=false' ../console-plugin/Dockerfile \
 		|| { echo "console-plugin Dockerfile must set YARN_ENABLE_SCRIPTS=false so yarn install cannot run registry lifecycle scripts"; fail=1; }; \
 	grep -qE 'PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1' ../console-plugin/Dockerfile \
