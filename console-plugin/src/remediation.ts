@@ -1,7 +1,8 @@
 // Remediation kind detection, object rendering, dependency summaries, apply order.
 import { ComplianceRemediation, nodePoolFromScanName, SCAN_NAME_LABEL } from './models';
 import { isValidK8sName } from './names';
-import { isString } from './parse';
+import { isString, stripFormatChars } from './parse';
+import { textCollator } from './text';
 
 // Fields of a compliance-operator depends-on-obj JSON entry; values are
 // untrusted annotation text, so each field is narrowed before use.
@@ -72,18 +73,28 @@ export const remediationObjectText = (rem: ComplianceRemediation): string => {
 // Falls back to status.errorMessage when annotations are empty so Error and
 // MissingDependencies with only a status message still surface something.
 // Untrusted cluster data: never throws on malformed JSON / hostile strings.
+// Format characters are stripped from every part, matching the CSV export and
+// the HTML report: without it a bidirectional override in an annotation name
+// reverses the rendered row, while the same value exported to CSV or the report
+// comes out clean.
 export const missingDependencySummary = (rem: ComplianceRemediation): string | null => {
   const ann = rem.metadata.annotations ?? {};
   const parts: string[] = [];
+  // Coerce then strip: an annotation is untyped CR text, and a tampered
+  // non-string must not throw .split on it.
+  const read = (key: string): string => {
+    const v = ann[key];
+    return stripFormatChars(isString(v) ? v : '');
+  };
 
-  for (const raw of (ann[dependsOnAnn] ?? '').split(',')) {
+  for (const raw of read(dependsOnAnn).split(',')) {
     const id = raw.trim();
     if (id) {
       parts.push(id);
     }
   }
 
-  const rawObj = (ann[dependsOnObjAnn] ?? '').trim();
+  const rawObj = read(dependsOnObjAnn).trim();
   if (rawObj) {
     try {
       // SAFETY: JSON.parse validated the array shape; each element is narrowed to
@@ -94,9 +105,13 @@ export const missingDependencySummary = (rem: ComplianceRemediation): string | n
           if (!isDependencyRef(d)) {
             continue;
           }
-          const name = isString(d.name) ? d.name.trim() : '';
-          const kind = isString(d.kind) ? d.kind.trim() : '';
-          const ns = isString(d.namespace) ? d.namespace.trim() : '';
+          // Narrow, then strip: JSON.parse yields whatever the annotation held,
+          // so a name is arbitrary untrusted text on this path.
+          const field = (v: unknown): string =>
+            stripFormatChars(isString(v) ? v.trim() : '');
+          const name = field(d.name);
+          const kind = field(d.kind);
+          const ns = field(d.namespace);
           if (!name && !kind) {
             continue;
           }
@@ -113,7 +128,7 @@ export const missingDependencySummary = (rem: ComplianceRemediation): string | n
     }
   }
 
-  for (const raw of (ann[unsetValueAnn] ?? '').split(',')) {
+  for (const raw of read(unsetValueAnn).split(',')) {
     const v = raw.trim();
     if (v) {
       parts.push(`value:${v}`);
@@ -123,8 +138,8 @@ export const missingDependencySummary = (rem: ComplianceRemediation): string | n
   if (parts.length) {
     return parts.join(', ');
   }
-  const err = rem.status?.errorMessage?.trim();
-  return err || null;
+  const err = rem.status?.errorMessage;
+  return isString(err) ? stripFormatChars(err).trim() || null : null;
 };
 
 // Sort key for guided remediation: applyable remediations first so prerequisite
@@ -147,6 +162,8 @@ export const applyOrderComparator = (collator: Intl.Collator) => (
   return collator.compare(an, bn);
 };
 
-export const compareRemediationsForApplyOrder = applyOrderComparator(
-  new Intl.Collator(),
-);
+// textCollator, not a bare new Intl.Collator(): the console locale (so a
+// German console orders like the rest of the page, not like the browser's
+// default) and numeric:true, so rule_2 sorts before rule_10 as it does in the
+// Profiles catalog. One cached collator per locale, not one per render.
+export const compareRemediationsForApplyOrder = applyOrderComparator(textCollator());

@@ -5,9 +5,12 @@
 // CR-derived name cannot create an oversized Content-Disposition path.
 const safeDownloadName = (filename: string): string => {
   let cleaned = filename
-    // Path separators, C0/C1 controls, and format characters (BIDI, zero-width,
-    // BOM, word joiner) that can spoof extensions or hide path segments.
-    .replace(/[/\\:\p{Cc}\p{Cf}]/gu, '_')
+    // Path separators, C0/C1 controls, format characters (BIDI, zero-width,
+    // BOM, word joiner) that can spoof extensions or hide path segments, and
+    // unpaired surrogates: \p{Cs} matches a lone surrogate only, so a
+    // well-formed astral character (an emoji, say) survives intact while
+    // "a<D800>b.csv" cannot reach a.download as malformed UTF-16.
+    .replace(/[/\\:\p{Cc}\p{Cf}\p{Cs}]/gu, '_')
     .replace(/\.\./g, '_')
     .replace(/^\.+/, '_')
     .trim();

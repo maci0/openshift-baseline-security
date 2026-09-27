@@ -190,6 +190,33 @@ describe('downloadBlob', () => {
     }
   });
 
+  // A lone surrogate can arrive from a half-decoded cluster value. The 200-unit
+  // cap already guards the truncation end; this guards the input end, so the
+  // name handed to a.download is always well-formed UTF-16.
+  it('replaces an unpaired surrogate already present in the name', () => {
+    const dom = installDom();
+    try {
+      downloadBlob(new Blob(['x']), 'a\uD800b.csv');
+      const d = dom.anchor.download;
+      expect(d).not.toMatch(/[\uD800-\uDFFF]/);
+      expect(d).toBe('a_b.csv');
+    } finally {
+      dom.restore();
+    }
+  });
+
+  // The counterpart: a well-formed astral character is not \p{Cs} and must
+  // survive, or the filter would mangle every emoji filename.
+  it('keeps a well-formed astral character intact', () => {
+    const dom = installDom();
+    try {
+      downloadBlob(new Blob(['x']), 'report 👍 世界.csv');
+      expect(dom.anchor.download).toBe('report 👍 世界.csv');
+    } finally {
+      dom.restore();
+    }
+  });
+
   it('revokes the object URL even when click throws', () => {
     const dom = installDom();
     dom.anchor.click.mockImplementation(() => {

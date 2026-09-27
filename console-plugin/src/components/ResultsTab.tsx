@@ -86,8 +86,8 @@ import {
   formatCount,
   formatLocalDate,
   localDateInputValue,
-  safeLocale,
 } from '../dates';
+import { textCollator } from '../text';
 import {
   activeWaivedNames,
   findWaiver,
@@ -497,11 +497,12 @@ const ResultsTab: React.FC<{
     (keyOf: (r: ComplianceCheckResult) => string) =>
       (data: ComplianceCheckResult[], sortDirection: string): ComplianceCheckResult[] => {
         const mul = sortDirection === 'desc' ? -1 : 1;
-        // Match profile-chip sort: console locale, never throw on a bad i18n tag.
-        const locale = safeLocale(i18n.language);
-        // One collator, not a fresh one per localeCompare call: sorting thousands
-        // of CCRs pays collator setup on every one of the O(n log n) comparisons.
-        const collator = new Intl.Collator(locale);
+        // textCollator, not a bare new Intl.Collator(locale): it validates the
+        // i18n tag (never throws on a bad one), caches one collator per locale
+        // instead of paying setup on every one of the O(n log n) comparisons,
+        // and carries numeric:true so rule_2 sorts before rule_10 here exactly
+        // as it does in the Profiles catalog. Same data, one order.
+        const collator = textCollator(i18n.language);
         return (
           data
             // Decorate once so each comparison reads a precomputed key and the
@@ -635,9 +636,9 @@ const ResultsTab: React.FC<{
     // Keep the id as the filter key (reducer + resultsHref depend on it) but
     // show tailored profiles by their clean name and built-ins by localized title.
     // Sort by display title (console locale) so chip order matches what users read,
-    // not the English-ish profile key / tp- prefix. One collator for the sort,
-    // not safeLocale + a fresh localeCompare per comparison.
-    const collator = new Intl.Collator(safeLocale(i18n.language));
+    // not the English-ish profile key / tp- prefix. Same cached, numeric-aware
+    // collator as the Profiles catalog and the results table.
+    const collator = textCollator(i18n.language);
     return [...keys]
       .map((k) => ({
         id: k,

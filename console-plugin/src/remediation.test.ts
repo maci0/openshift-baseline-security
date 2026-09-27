@@ -116,6 +116,46 @@ describe('remediation helpers', () => {
     );
   });
   // openspec guided-remediation: MissingDependencies must name the dependency.
+  // Parity with the CSV export and the HTML report, which both strip format
+  // characters: a bidirectional override in an annotation must not reverse the
+  // rendered row while the same value exports clean.
+  it('missingDependencySummary strips format characters from annotation text', () => {
+    const summary = missingDependencySummary(
+      rem(undefined, undefined, {
+        metadata: {
+          name: 'r',
+          namespace: 'openshift-compliance',
+          annotations: {
+            // U+202E RLO, U+200B ZWSP, U+FEFF BOM.
+            'compliance.openshift.io/depends-on': 'rule_a‮gnp.exe',
+            'compliance.openshift.io/depends-on-obj': JSON.stringify([
+              { kind: 'ConfigMap', name: 'foo‮bar', namespace: 'ns' },
+            ]),
+            'compliance.openshift.io/unset-value': 'va‌lue﻿',
+          },
+        },
+      }),
+    );
+    expect(summary).toBe('rule_agnp.exe, ConfigMap ns/foobar, value:value');
+  });
+
+  it('missingDependencySummary coerces a non-string annotation instead of throwing', () => {
+    const bogus: unknown = { not: 'a string' };
+    expect(
+      missingDependencySummary(
+        rem(undefined, undefined, {
+          metadata: {
+            name: 'r',
+            namespace: 'openshift-compliance',
+            // SAFETY: annotation values are untrusted CR text; a tampered
+            // non-string must not throw .split on it.
+            annotations: { 'compliance.openshift.io/depends-on': bogus as string },
+          },
+        }),
+      ),
+    ).toBeNull();
+  });
+
   it('missingDependencySummary reads depends-on, depends-on-obj, and unset-value', () => {
     expect(missingDependencySummary(rem())).toBeNull();
     expect(

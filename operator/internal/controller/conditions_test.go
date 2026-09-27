@@ -405,6 +405,83 @@ func TestCondTrue(t *testing.T) {
 	}
 }
 
+// TestJSONStringLenMatchesMarshal pins the hand-rolled size estimate to the
+// real encoder. Every escape class json.Marshal applies is exercised, plus
+// multi-byte runes and the CRD-legal failure-name shapes. An ASCII-only corpus
+// would pass with a plain len(s)+2 and hide the 6x under-count the budget fix
+// exists to close.
+func TestJSONStringLenMatchesMarshal(t *testing.T) {
+	cases := []string{
+		"",
+		"rule_1",
+		strings.Repeat("a", 253),
+		// HTML-escaped by json.Marshal into the 6-byte \u00XX form: the case
+		// that made a raw byte-length budget 6x wrong.
+		"a&b<c>d",
+		strings.Repeat("&", 253),
+		`quote"backslash\`,
+		"tab\tnewline\ncr\rff\fbs\b",
+		"nul\x00bell\x07esc\x1b",
+		// Valid JSON, escaped because they end a JavaScript line.
+		"sep\u2028para\u2029",
+		// Multi-byte runes are copied verbatim: a byte-length estimate that
+		// added per-rune overhead here would over-count instead.
+		"世界",
+		"caf\u00e9",        // NFC, 2 bytes
+		"cafe\u0301",       // NFD, 3 bytes, canonically equal to the NFC form
+		"emoji \U0001F600", // 4 bytes
+		"zwj \U0001F469\u200D\U0001F4BB",
+		"ascii-with-\u00e7-\u4e16",
+		strings.Repeat("\u2028", 100),
+	}
+	for _, s := range cases {
+		b, err := json.Marshal(s)
+		if err != nil {
+			t.Fatalf("marshal %q: %v", s, err)
+		}
+		if got, want := jsonStringLen(s), len(b); got != want {
+			t.Errorf("jsonStringLen(%q) = %d, json.Marshal wrote %d (%q)", s, got, want, b)
+		}
+	}
+}
+
+// TestClampFailureListsToBudgetEscaping pins the budget to the escaped size: a
+// list of '&'-bearing names is 6x its byte length once marshaled, and the budget
+// must be computed from the escaped size or it admits a status write that
+// overshoots failureListsSizeBudget by the same factor.
+func TestClampFailureListsToBudgetEscaping(t *testing.T) {
+	escaped := strings.Repeat("&", failureNameMaxLen)
+	plain := strings.Repeat("a", failureNameMaxLen)
+
+	// Both lists marshal to the same number of bytes only if the estimate
+	// accounts for escaping; the trimmed result must match that budget.
+	for _, name := range []string{plain, escaped} {
+		l := make([]string, 0, 128)
+		for i := 0; i < 128; i++ {
+			l = append(l, name)
+		}
+		clampFailureListsToBudget(&l)
+
+		actual := 0
+		for _, n := range l {
+			b, err := json.Marshal(n)
+			if err != nil {
+				t.Fatalf("marshal: %v", err)
+			}
+			actual += len(b) + 1
+		}
+		if actual > failureListsSizeBudget {
+			t.Fatalf("trimmed list still exceeds budget: %d > %d (kept %d of 128)",
+				actual, failureListsSizeBudget, len(l))
+		}
+		// A tail entry is kept whenever dropping one more would not help;
+		// assert the estimate did not over-trim to nothing.
+		if len(l) == 0 {
+			t.Fatal("budget trim emptied the list")
+		}
+	}
+}
+
 func TestCondMessage(t *testing.T) {
 	if condMessage("short") != "short" {
 		t.Fatal("short message unchanged")

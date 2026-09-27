@@ -136,6 +136,19 @@ describe('isValidCron throw-safety (fuzz sweep)', () => {
     }
   });
 
+  // names is an object literal, so an inherited member must not be reachable
+  // through it. The schedule is rejected either way (an inherited value fails
+  // the range comparison), so this guards the return contract rather than a
+  // user-visible difference: cronNumber resolves to a number or null, never to
+  // Object.prototype.constructor.
+  it('rejects inherited Object.prototype keys as field values', () => {
+    for (const key of ['constructor', 'toString', 'valueOf', 'hasOwnProperty', '__proto__']) {
+      expect(isValidCron(`0 0 * ${key} ${key}`)).toBe(false);
+      // The real name still works, so the rejection is about the key, not the shape.
+      expect(isValidCron('0 0 * * *')).toBe(true);
+    }
+  });
+
   it('never accepts anything other than exactly five whitespace fields', () => {
     for (const s of HOSTILE) {
       if (!isValidCron(s)) continue;

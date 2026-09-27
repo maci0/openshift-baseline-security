@@ -21,8 +21,17 @@ const cronNumber = <T extends Record<string, number>>(
   value: string,
   names?: T,
 ): number | null => {
-  const named = names?.[value.toLowerCase()];
-  if (named != null) return named;
+  // hasOwnProperty, not a bare index: names is an object literal, so a schedule
+  // field reading "constructor" or "toString" would otherwise pick up the
+  // inherited member and return a function where the signature promises a
+  // number. The comparison below would then be false for every range, so the
+  // field is rejected for the wrong reason and the number contract is a lie.
+  // Called off Object.prototype, not via the instance, so a name key that
+  // shadows hasOwnProperty on the object cannot disarm the check.
+  const key = value.toLowerCase();
+  if (names && Object.prototype.hasOwnProperty.call(names, key)) {
+    return names[key];
+  }
   if (!/^\d+$/.test(value)) return null;
   return Number(value);
 };

@@ -448,21 +448,56 @@ func clampFailureList(in []string) []string {
 // conditions, spec, and metadata.
 const failureListsSizeBudget = 768 * 1024
 
+// jsonStringLen returns the exact number of bytes encoding/json writes for the
+// string s, without allocating. It must stay equal to len(json.Marshal(s)) for
+// a string (TestJSONStringLenMatchesMarshal pins that against the real encoder
+// over every escape class below).
+//
+// An additive len(name)+constant estimate is wrong by up to 6x on names full of
+// '&', '<', '>' or control characters, which are exactly the names a hostile or
+// buggy upstream status carries: json.Marshal escapes them to the 6-byte
+// \u00XX form, so a budget computed from raw byte length admits a list up to
+// 6x over the limit, which is the apiserver-freeze case the budget exists to
+// prevent. The same reasoning is spelled out for conditions in condSize.
+func jsonStringLen(s string) int {
+	n := len(s) + 2 // surrounding quotes
+	for i := 0; i < len(s); i++ {
+		switch c := s[i]; {
+		case c == '"' || c == '\\' || c == '\n' || c == '\r' || c == '\t' || c == '\f' || c == '\b':
+			// Two-byte escape form (\", \\, \n, \r, \t, \f, \b) replaces one byte.
+			// Every other control character takes the 6-byte \u00XX form below.
+			n++
+		case c < 0x20 || c == '<' || c == '>' || c == '&':
+			// \u00XX: six bytes replace one.
+			n += 5
+		case c == 0xE2 && i+2 < len(s) && s[i+1] == 0x80 && (s[i+2] == 0xA8 || s[i+2] == 0xA9):
+			// U+2028 / U+2029 LINE SEPARATOR, PARAGRAPH SEPARATOR: valid JSON,
+			// escaped by encoding/json because they terminate a JavaScript line.
+			// Three bytes in, six out.
+			n += 3
+			i += 2
+		}
+		// Every other byte, including all multi-byte runes, is copied verbatim.
+	}
+	return n
+}
+
 // clampFailureListsToBudget trims the given failure-name lists together so their
-// combined serialized size (name + JSON quoting/comma overhead) stays under
-// failureListsSizeBudget. It repeatedly drops the tail of whichever list is
-// currently largest, so no single list dominates and the whole status cannot
-// exceed the apiserver object-size limit and freeze Status().Update. Truncating
-// the tails degrades the diff on an extreme cluster (some regressions/fixes drop
-// out) but keeps reconcile alive, which a frozen status write would not.
+// combined serialized size (each name as json.Marshal would write it, plus the
+// separating comma) stays under failureListsSizeBudget. It repeatedly drops the
+// tail of whichever list is currently largest, so no single list dominates and
+// the whole status cannot exceed the apiserver object-size limit and freeze
+// Status().Update. Truncating the tails degrades the diff on an extreme cluster
+// (some regressions/fixes drop out) but keeps reconcile alive, which a frozen
+// status write would not.
 func clampFailureListsToBudget(lists ...*[]string) {
-	const perEntryOverhead = 3 // two quotes + a comma
+	const perEntryOverhead = 1 // the comma separating entries
 	sizes := make([]int, len(lists))
 	total := 0
 	for i, l := range lists {
 		s := 0
 		for _, name := range *l {
-			s += len(name) + perEntryOverhead
+			s += jsonStringLen(name) + perEntryOverhead
 		}
 		sizes[i] = s
 		total += s
