@@ -116,7 +116,8 @@ provides correctness, the second is warm standby).
   `useListPageFilter`) instead of hand-rolled tables and fetches.
 - No backend: all data via the console's k8s API proxy with the logged-in
   user's token, so RBAC is the user's own. `useAccessReview` to disable
-  writes the user cannot perform.
+  writes the user cannot perform, and `mayWrite` in each mutation to refuse
+  them at the request boundary.
 - Serving: ubi9/nginx-120 base, document root `/opt/app-root/src`, checked-in
   `nginx.conf` (TLS + HTTP/2 on 9443, no plaintext 8080, gzip for JS/JSON
   with `Vary: Accept-Encoding`) with the service-serving certificate
@@ -131,7 +132,8 @@ provides correctness, the second is warm standby).
 
 **Here**: all of the above, including `useAccessReview` gating on rescan,
 profile/schedule/scoring/waiver patches, TailoredProfile authoring,
-remediation apply/unapply/batch, and the auto-apply toggle.
+remediation apply/unapply/batch, and the auto-apply toggle, and the
+`mayWrite` re-check in each of those mutations.
 
 ## 6. Security posture
 

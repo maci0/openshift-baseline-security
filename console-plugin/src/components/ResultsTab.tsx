@@ -58,6 +58,7 @@ import { Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table';
 import { downloadBlob } from '../download';
 import { errorMessage } from '../errors';
 import { stripControlAndFormat } from '../parse';
+import { AccessGate, mayWrite } from '../permissions';
 import { checkResultHref, machineConfigPoolHref } from '../links';
 import {
   addWaiverPatch,
@@ -195,6 +196,7 @@ const ResultsTab: React.FC<{
   // Auto-dismiss success so the banner does not stick after the user moves on.
   useAutoDismiss(waiveSuccess, false, () => setWaiveSuccess(null));
   const [canWaive, canWaiveLoading] = useAccessReview(clusterBaselinePatchAccess);
+  const waiveGate: AccessGate = { allowed: canWaive, loading: canWaiveLoading };
   const waivers = baseline?.spec.waivers;
   // Active waivers are time-sensitive: membership alone is not enough. A waiver
   // can expire with no CR edit, and operator status-only updates do not change
@@ -252,6 +254,12 @@ const ResultsTab: React.FC<{
     successMsg: string,
   ): Promise<void> => {
     if (!baseline || busyRef.current) return;
+    // Same gate the waiver controls carry, so a modal opened while permitted
+    // cannot spend the patch after the review flipped to denied.
+    if (!mayWrite(waiveGate)) {
+      setWaiveError(t('You do not have permission to waive checks.'));
+      return;
+    }
     // Empty mutation ops: a bare resourceVersion test would succeed without
     // changing waivers and look like a real add/remove. Callers should already
     // refuse empty patches; guard here so success is never a silent no-op.

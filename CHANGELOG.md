@@ -54,6 +54,16 @@ depend on those tags.
   evaluated formula. Export rows now drop the controls a spreadsheet trims
   (tab, CR, and LF stay, since RFC 4180 quoting needs them). Cells that held a
   control character other than a delimiter lose it from the export.
+- Console write controls were gated on `useAccessReview` through their
+  `isDisabled` prop alone. A tab holding an open confirm modal, a stopped
+  editor, or a pending form across a permission revocation would still send the
+  patch the button had already admitted. Every mutation now re-checks the
+  reviewed permission at the request boundary through one chokepoint
+  (`console-plugin/src/permissions.ts`), and an unresolved review denies rather
+  than defaulting to allow. Covered: rescan, profile toggle, schedule save,
+  waiver add and remove, TailoredProfile create, update, and bind, tailored
+  profile unbind, default baseline create, and every remediation path
+  (per-row apply, unapply, auto-apply, batch apply).
 
 ### Changed
 

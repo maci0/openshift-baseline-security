@@ -72,8 +72,11 @@ double casts are rejected outright.
 
 ## UI conventions
 
-- Every write is gated on `useAccessReview`. The plugin never patches
-  `spec.scoring.mode`; that is an out-of-band CR edit.
+- Every write is gated on `useAccessReview`, and the gate is the write itself,
+  not the control that launched it: each mutation calls `mayWrite` from
+  `src/permissions.ts` before it sends, so a modal opened while permitted
+  cannot spend the request after a revocation. An unresolved review denies. The
+  plugin never patches `spec.scoring.mode`; that is an out-of-band CR edit.
 - All user-visible text goes through `t()` and lands in
   `locales/en/plugin__baseline-security-console-plugin.json`. Extension titles
   in `console-extensions.json` use the `%key%` form.

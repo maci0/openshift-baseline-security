@@ -378,8 +378,11 @@ per-node annotation) when nodes disagree.
 - [x] **HTML report blob URL**: `openBlobInTab` revokes immediately when the
       popup is blocked or `window.open` throws, after the load-grace timeout
       when the tab opens, and dispose is idempotent (jest `openBlobInTab`).
+- [x] **Write chokepoint deny side**: `mayWrite` allows a confirmed review and
+      denies a revoked one and an unresolved one (jest `permissions`).
 - [ ] **RBAC read-only user**: profile toggles + apply + rescan disabled
-      (`useAccessReview` false path); assert disabled state in Playwright.
+      (`useAccessReview` false path); assert disabled state in Playwright, and
+      that a control opened before revocation does not send the write.
 - [ ] **List error / RBAC denied on ClusterBaseline**: Overview item falls back
       to "—" (the `error` branch), no thrown error.
 - [ ] **List error / RBAC denied on ComplianceCheckResult**: Results tab shows

@@ -75,6 +75,7 @@ import {
 import { formatCount } from '../dates';
 import { errorMessage, isAlreadyExists } from '../errors';
 import { isValidK8sName, isValidTailoredProfileName } from '../names';
+import { AccessGate, mayWrite } from '../permissions';
 import { resourceVersionTest, tailoredProfileBindingPatch } from '../patches';
 import {
   cleanRuleSelection,
@@ -277,6 +278,12 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
   const [canEdit, canEditLoading] = useAccessReview(clusterBaselinePatchAccess);
   const [canAuthor, canAuthorLoading] = useAccessReview(tailoredProfileCreateAccess);
   const [canUpdate, canUpdateLoading] = useAccessReview(tailoredProfileUpdateAccess);
+  const baselineGate: AccessGate = { allowed: canEdit, loading: canEditLoading };
+  const createGate: AccessGate = {
+    allowed: canAuthor && canEdit,
+    loading: canAuthorLoading || canEditLoading,
+  };
+  const updateGate: AccessGate = { allowed: canUpdate, loading: canUpdateLoading };
   // Profile/Rule catalog is only for TailoredProfile authoring. Viewers lack
   // those verbs; listing them would 403 the Profiles tab. Skip until SAR
   // resolves so the watch does not flash a denial for readers.
@@ -453,6 +460,17 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
   const createTailored = async () => {
     const name = tpName.trim();
     if (!baseline || pendingRef.current) return;
+    // Same gate the form carries, so a modal opened while permitted cannot
+    // create the profile or bind it after the review flipped to denied. Edit
+    // mode spends the update verb alone; create mode also binds the baseline.
+    if (!mayWrite(editing ? updateGate : createGate)) {
+      setError(
+        !canEdit
+          ? t('You do not have permission to edit the baseline.')
+          : t('You do not have permission to create tailored profiles.'),
+      );
+      return;
+    }
     // Enter key can fire while the primary button is disabled; surface validation
     // instead of a silent no-op so the form never looks broken.
     if (!isValidTailoredProfileName(name)) {
@@ -648,6 +666,12 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
 
   const toggle = async (key: string, checked: boolean) => {
     if (!baseline || pendingRef.current) return;
+    // Same gate the switch carries, so a click after the review flipped to denied
+    // does not spend the profile patch.
+    if (!mayWrite(baselineGate)) {
+      setError(t('You do not have permission to edit the baseline.'));
+      return;
+    }
     // Empty is allowed: clearing every profile disables scanning.
     const current = baseline.spec.profiles;
     const profiles = toggledProfiles(current ?? [], key, checked);
@@ -700,6 +724,12 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
   // TailoredProfile CR in openshift-compliance is left in place (unbind ≠ delete).
   const unbindTailored = async (name: string) => {
     if (!baseline || pendingRef.current) return;
+    // Same gate the Unbind control carries, so a confirm modal opened while
+    // permitted cannot spend the patch after the review flipped to denied.
+    if (!mayWrite(baselineGate)) {
+      setError(t('You do not have permission to edit the baseline.'));
+      return;
+    }
     const current = baseline.spec.tailoredProfiles;
     if (!current?.includes(name)) {
       setUnbinding(null);

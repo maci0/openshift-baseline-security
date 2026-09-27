@@ -51,6 +51,7 @@ import {
   suiteFilterKey,
 } from '../models';
 import { isValidCron } from '../cron';
+import { AccessGate, mayWrite } from '../permissions';
 import { formatCount, safeLocale } from '../dates';
 import { errorMessage } from '../errors';
 import { resultsHref } from '../links';
@@ -122,6 +123,7 @@ const ScheduleEditor: React.FC<{ baseline: ClusterBaseline }> = ({ baseline }) =
   // Auto-clear "Schedule updated" so success feedback matches other tabs.
   useAutoDismiss(saved, false, () => setSaved(false));
   const [canEdit, canEditLoading] = useAccessReview(clusterBaselinePatchAccess);
+  const editGate: AccessGate = { allowed: canEdit, loading: canEditLoading };
   const valid = isValidCron(value);
 
   // Move focus into the field when opening edit; return it to Edit when closing.
@@ -179,6 +181,12 @@ const ScheduleEditor: React.FC<{ baseline: ClusterBaseline }> = ({ baseline }) =
   }
   const save = async () => {
     if (!valid || busyRef.current) return;
+    // Same gate the Edit control carries, so an edit form opened while permitted
+    // cannot spend the patch after the review flipped to denied.
+    if (!mayWrite(editGate)) {
+      setErr(t('You do not have permission to edit the baseline.'));
+      return;
+    }
     // Presence is != null (not !!): empty string is still a present field.
     // Empty schedule ops would leave only an RV test: a successful no-op that
     // looks like the schedule was updated when nothing changed.

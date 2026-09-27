@@ -35,6 +35,7 @@ import {
 import { formatCount } from '../dates';
 import { downloadBlob, openBlobInTab } from '../download';
 import { errorMessage } from '../errors';
+import { AccessGate, mayWrite } from '../permissions';
 import { rescanPatch, rescanToken } from '../patches';
 import { withDisabledTip } from './DisabledTip';
 import { useAutoDismiss } from './useAutoDismiss';
@@ -114,6 +115,7 @@ const CompliancePage: React.FC = () => {
   useAutoDismiss(rescanStarted, !!rescanError, () => setRescanStarted(false));
   useAutoDismiss(exportNotice, exportNotice?.variant === 'danger', () => setExportNotice(null));
   const [canRescan, canRescanLoading] = useAccessReview(complianceScanPatchAccess);
+  const rescanGate: AccessGate = { allowed: canRescan, loading: canRescanLoading };
   const rescanWatchError = errorMessage(baselineError) ?? errorMessage(scansError);
   const watchError = rescanWatchError ?? errorMessage(checkResultsError);
 
@@ -133,6 +135,12 @@ const CompliancePage: React.FC = () => {
 
   const rescan = async () => {
     if (rescanningRef.current) return;
+    // Same gate the Rescan control carries, so a click after the review flipped
+    // to denied does not fan out one patch per owned scan.
+    if (!mayWrite(rescanGate)) {
+      setRescanError(t('You do not have permission to rescan.'));
+      return;
+    }
     // Button is disabled when there are no scans; still refuse a no-op path so a
     // race (scans unmounted mid-click) does not look like a successful rescan.
     if (!ownedScans.length) {

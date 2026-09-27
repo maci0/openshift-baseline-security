@@ -19,6 +19,7 @@ import {
   defaultClusterBaselineManifest,
 } from '../models';
 import { errorMessage, isAlreadyExists } from '../errors';
+import { mayWrite } from '../permissions';
 
 const BaselineNotConfigured: React.FC<{ style?: React.CSSProperties }> = ({ style }) => {
   const { t } = useTranslation('plugin__baseline-security-console-plugin');
@@ -29,6 +30,12 @@ const BaselineNotConfigured: React.FC<{ style?: React.CSSProperties }> = ({ styl
 
   const create = async () => {
     if (busyRef.current) return;
+    // Same gate the button carries, so a click after the review flipped to denied
+    // does not spend the create.
+    if (!mayWrite({ allowed: canCreate, loading: canCreateLoading })) {
+      setErr(t('You do not have permission to create the baseline.'));
+      return;
+    }
     busyRef.current = true;
     setBusy(true);
     setErr(null);

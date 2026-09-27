@@ -335,7 +335,9 @@ compliance report, and the Overview scoring-mode readout (`Flat` |
 changes are an out-of-band CR edit.
 
 All writes go through the user's token; a read-only user gets disabled
-buttons (SDK `useAccessReview`), not errors.
+buttons (SDK `useAccessReview`), not errors. Each mutation re-checks the
+reviewed permission before it sends (`mayWrite`, `console-plugin/src/permissions.ts`),
+so a control opened before a revocation does not spend the write.
 
 ## 5. Reused vs built
 

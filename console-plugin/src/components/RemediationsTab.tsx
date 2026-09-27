@@ -52,6 +52,7 @@ import {
   ownedSuiteSelector,
   scanningDisabled,
 } from '../models';
+import { AccessGate, mayWrite } from '../permissions';
 import { formatCount } from '../dates';
 import { errorMessage } from '../errors';
 import {
@@ -181,6 +182,15 @@ const RemediationsTab: React.FC<{
   useAutoDismiss(success, false, () => setSuccess(null));
   const [canApply, canApplyLoading] = useAccessReview(complianceRemediationPatchAccess);
   const [canEditBaseline, canEditBaselineLoading] = useAccessReview(clusterBaselinePatchAccess);
+  // Batch and auto-apply patch the baseline, but the operator then patches the
+  // remediations, so both reviews gate the request. The per-row Apply action
+  // spends the remediation patch alone.
+  const remediationGate: AccessGate = {
+    allowed: canDelegateRemediationApply(canEditBaseline, canApply),
+    loading: canEditBaselineLoading || canApplyLoading,
+  };
+  const applyGate: AccessGate = { allowed: canApply, loading: canApplyLoading };
+  const deniedMessage = t('You do not have permission to apply remediations.');
   const watchError = errorMessage(loadError);
   // status.remediationBatch is the live batch; the annotation is the one-shot
   // request (may exist before status persists). Empty/comma-only values do not
@@ -265,8 +275,8 @@ const RemediationsTab: React.FC<{
     if (!baseline || batchInProgress || batchable.length === 0) return;
     // Same gate the button carries, so a stale click cannot spend the annotation
     // after the review flipped to denied.
-    if (!canDelegateRemediationApply(canEditBaseline, canApply)) {
-      setError(t('You do not have permission to apply remediations.'));
+    if (!mayWrite(remediationGate)) {
+      setError(deniedMessage);
       return;
     }
     // Empty patch (all names invalid/filtered) would succeed as a no-op RV-only
@@ -297,6 +307,12 @@ const RemediationsTab: React.FC<{
   };
 
   const setApply = (rem: ComplianceRemediation, apply: boolean) => {
+    // Same gate the row controls carry, so a modal opened while permitted cannot
+    // spend the write after the review flipped to denied.
+    if (!mayWrite(applyGate)) {
+      setError(deniedMessage);
+      return Promise.resolve(false);
+    }
     // Re-resolve from the live watch: the modal snapshots the row at click
     // time, so after any concurrent write (operator status update, another
     // admin) the snapshot's resourceVersion is stale and an in-modal retry
@@ -323,8 +339,8 @@ const RemediationsTab: React.FC<{
     // operator permission to apply remediations the caller may not apply
     // themselves. Turning it off only stops future reboots, so it stays on the
     // baseline patch alone.
-    if (checked && !canDelegateRemediationApply(canEditBaseline, canApply)) {
-      setError(t('You do not have permission to apply remediations.'));
+    if (checked && !mayWrite(remediationGate)) {
+      setError(deniedMessage);
       return false;
     }
     return run(
