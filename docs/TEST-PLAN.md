@@ -608,6 +608,11 @@ an accepted risk neither inflates nor tanks the score.
 - [x] **Download anchor is removed on both paths**, including when `click()`
       throws (jest `downloadBlob`): a throw used to leave one hidden node in
       `document.body` per failed export.
+- [x] **A render throw in a tab or in the page shell is captured, named, and
+      reported** instead of blanking the route (jest
+      `console-plugin/src/components/renderError.test.ts`): the message names
+      the view and the reason, the error object reaches the browser console so
+      the stack survives, and a throw with no message is still reported.
 - [x] **History never rewinds** when the newest suite is dropped
       (`TestRecordHistoryDoesNotRewind`).
 - [x] **Late score for the same endTimestamp** appends/refreshes history

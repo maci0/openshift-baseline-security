@@ -110,6 +110,16 @@ cluster-scoped CR, so `name` plus `generation` and the log timestamp identify
 the pass. `generation` is the pivot back to the CR: it tells you which spec
 version a failure belongs to.
 
+The console plugin has no server-side log surface: it is a static bundle served
+by nginx and rendered in the browser tab, so its only sink is the browser
+console. A failed `ComplianceCheckResult` watch is already an on-page Alert; a
+throw *while rendering* is caught by `TabErrorBoundary` on every tab route and
+on the page shell, which names the view, reports the reason and the error object
+to the browser console, and offers Retry. So a blank Compliance page is either a
+watch failure named in the banner or a render throw with a line in the browser
+console; a blank page with neither is a plugin bundle that failed to load at
+all, which is the nginx access log.
+
 ## Tracing
 
 There is deliberately no OpenTelemetry tracing. The operator serves no inbound

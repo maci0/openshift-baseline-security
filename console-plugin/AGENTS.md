@@ -128,6 +128,13 @@ double casts are rejected outright.
   cards paint. Results, Remediations, and Profiles are async chunks. A failed
   chunk GET must show Retry (`ChunkError`), not a blank tab, and must name the
   rejection reason: a stale chunk id and an unreachable CDN need different fixes.
+- The console mounts an extension page with no error boundary, so a render
+  throw used to blank the route with nothing in the browser console. Every tab
+  route and the page shell are wrapped in `TabErrorBoundary`, which names the
+  view, reports through `reportRenderError` (the browser console is the only
+  sink a dynamic plugin has), and offers Retry so a bad object an operator
+  fixes does not need a full page reload. Add the wrap to a new tab route
+  rather than a second boundary elsewhere.
 - `CompliancePage` forces `loaded` true when the baseline watch errors, so a
   missing `baseline` no longer means "no CR". Every tab that gates on `baseline`
   reads `baselineError` off `BaselineContext` and renders

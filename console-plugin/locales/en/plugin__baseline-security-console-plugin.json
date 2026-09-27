@@ -336,5 +336,7 @@
   "Failed to read the compliance baseline.": "Failed to read the compliance baseline.",
   "The ClusterBaseline resource could not be read, so this view cannot tell whether the baseline exists.": "The ClusterBaseline resource could not be read, so this view cannot tell whether the baseline exists.",
   "ClusterBaseline/cluster already exists; this page updates when the watch sees it.": "ClusterBaseline/cluster already exists; this page updates when the watch sees it.",
-  "Failed to load the report exporter: {{detail}}": "Failed to load the report exporter: {{detail}}"
+  "Failed to load the report exporter: {{detail}}": "Failed to load the report exporter: {{detail}}",
+  "This view failed to render.": "This view failed to render.",
+  "No reason was reported.": "No reason was reported."
 }

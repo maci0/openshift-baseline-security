@@ -99,6 +99,14 @@ depend on those tags.
   alert and the group headings still report the full totals. The compliance
   score card on the cluster Overview also passed a fresh watch options object
   on every render, re-subscribing to the `ClusterBaseline` list each time.
+- A render failure in Administration → Compliance left a blank page. The
+  console mounts an extension page with no error boundary, so a throw while
+  rendering a tab or the page shell unmounted the whole route, and the browser
+  console carried no record of what threw. Every tab route and the page shell
+  now sit behind an error boundary that names the view, reports the reason and
+  the error object to the browser console, and offers Retry, so a bad
+  `ClusterBaseline` or Compliance Operator object an admin fixes no longer
+  needs a full page reload to recover from.
 - The same check status was drawn in different colors depending on which view
   read it. `MANUAL` was the icon-token amber on the console composition donut
   and a brighter yellow in the Observe dashboard; `WAIVED` was teal on the

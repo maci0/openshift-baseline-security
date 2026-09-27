@@ -13,6 +13,8 @@
 //   BaselineNotConfigured.tsx - empty state when no ClusterBaseline exists
 //   BaselineUnavailable.tsx - danger state when the baseline watch failed
 //   ChunkError.tsx       - ChunkGate, renders ChunkError + Retry on a failed GET
+//   TabErrorBoundary.tsx - per-tab boundary: reports a render throw, keeps the nav
+//   renderError.ts       - the browser-console report a render throw produces
 //   DisabledTip.tsx      - tooltip wrapper for disabled controls
 //   useAutoDismiss.ts    - shared success-banner dismiss timing
 //   useWaiverExpiryClock.ts - ticking clock driving waiver-expiry countdowns
@@ -22,6 +24,7 @@ import * as React from 'react';
 import { ClusterBaseline, ComplianceCheckResult } from '../models';
 import Overview from './Overview';
 import { ChunkGate } from './ChunkError';
+import { TabErrorBoundary } from './TabErrorBoundary';
 
 type BaselineContextValue = {
   baseline?: ClusterBaseline;
@@ -54,12 +57,14 @@ const loadProfilesTab = () =>
 export function OverviewRoute() {
   const { baseline, loaded, baselineError, checkResults } = React.useContext(BaselineContext);
   return (
-    <Overview
-      baseline={baseline}
-      loaded={loaded}
-      baselineError={baselineError}
-      checkResults={checkResults}
-    />
+    <TabErrorBoundary name="Overview">
+      <Overview
+        baseline={baseline}
+        loaded={loaded}
+        baselineError={baselineError}
+        checkResults={checkResults}
+      />
+    </TabErrorBoundary>
   );
 }
 
@@ -67,51 +72,57 @@ export function ResultsRoute() {
   const { baseline, baselineError, checkResults, checkResultsLoaded, checkResultsError } =
     React.useContext(BaselineContext);
   return (
-    <ChunkGate load={loadResultsTab}>
-      {(m) => {
-        const ResultsTab = m.default;
-        return (
-          <ResultsTab
-            baseline={baseline}
-            baselineError={baselineError}
-            results={checkResults}
-            resultsLoaded={checkResultsLoaded}
-            resultsError={checkResultsError}
-          />
-        );
-      }}
-    </ChunkGate>
+    <TabErrorBoundary name="Results">
+      <ChunkGate load={loadResultsTab}>
+        {(m) => {
+          const ResultsTab = m.default;
+          return (
+            <ResultsTab
+              baseline={baseline}
+              baselineError={baselineError}
+              results={checkResults}
+              resultsLoaded={checkResultsLoaded}
+              resultsError={checkResultsError}
+            />
+          );
+        }}
+      </ChunkGate>
+    </TabErrorBoundary>
   );
 }
 
 export function RemediationsRoute() {
   const { baseline, loaded, baselineError } = React.useContext(BaselineContext);
   return (
-    <ChunkGate load={loadRemediationsTab}>
-      {(m) => {
-        const RemediationsTab = m.default;
-        return (
-          <RemediationsTab
-            baseline={baseline}
-            baselineLoaded={loaded}
-            baselineError={baselineError}
-          />
-        );
-      }}
-    </ChunkGate>
+    <TabErrorBoundary name="Remediations">
+      <ChunkGate load={loadRemediationsTab}>
+        {(m) => {
+          const RemediationsTab = m.default;
+          return (
+            <RemediationsTab
+              baseline={baseline}
+              baselineLoaded={loaded}
+              baselineError={baselineError}
+            />
+          );
+        }}
+      </ChunkGate>
+    </TabErrorBoundary>
   );
 }
 
 export function ProfilesRoute() {
   const { baseline, loaded, baselineError } = React.useContext(BaselineContext);
   return (
-    <ChunkGate load={loadProfilesTab}>
-      {(m) => {
-        const ProfilesTab = m.default;
-        return (
-          <ProfilesTab baseline={baseline} loaded={loaded} baselineError={baselineError} />
-        );
-      }}
-    </ChunkGate>
+    <TabErrorBoundary name="Profiles">
+      <ChunkGate load={loadProfilesTab}>
+        {(m) => {
+          const ProfilesTab = m.default;
+          return (
+            <ProfilesTab baseline={baseline} loaded={loaded} baselineError={baselineError} />
+          );
+        }}
+      </ChunkGate>
+    </TabErrorBoundary>
   );
 }

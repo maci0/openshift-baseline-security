@@ -41,6 +41,7 @@ import { AccessGate, mayWrite } from '../permissions';
 import { encodeKeyList } from '../contentKey';
 import { rescanPatch, rescanToken } from '../patches';
 import { withDisabledTip } from './DisabledTip';
+import { TabErrorBoundary } from './TabErrorBoundary';
 import { useAutoDismiss } from './useAutoDismiss';
 import {
   BaselineContext,
@@ -465,4 +466,13 @@ const CompliancePage: React.FC = () => {
   );
 };
 
-export default CompliancePage;
+export default function BaselineSecurityPage(): React.ReactElement {
+  // The console mounts this route with no error boundary of its own, so the
+  // boundary wraps the page and not only the tabs: a throw in the header or in
+  // a watch helper would otherwise blank the route with no record of it.
+  return (
+    <TabErrorBoundary name="Compliance">
+      <CompliancePage />
+    </TabErrorBoundary>
+  );
+}
