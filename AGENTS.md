@@ -67,7 +67,9 @@ Cutting a release:
    The release workflow runs both gates and the tagged commit's own
    `make -C operator test` plus the console plugin's `yarn typecheck` and
    `yarn test` before pushing images, and refuses to publish a version from a
-   commit other than `vX.Y.Z`. Version resolution lives in
+   commit other than `vX.Y.Z`. A re-dispatch of an already published version
+   fails at the pre-build tag check rather than overwriting it. Version
+   resolution lives in
    `operator/hack/resolve-release-version.sh`; the publish and SBOM jobs both
    call it so they cannot disagree about what is being released. Its
    `INPUT_VERSION` env is the `workflow_dispatch` `version` input, so a manual
@@ -77,10 +79,15 @@ Cutting a release:
 
 Published image, tag, and CSV version strings are immutable: never re-push,
 re-tag, or force-move one. OLM unpack caches serve stale content on a same-tag
-republish. No `replaces` upgrade graph exists pre-1.0: every bundle is a
-standalone channel head, so there is no `PREV_VERSION` anywhere. CSV
-`capabilities` is `Basic Install` (`make verify-versions` rejects
-`spec.replaces` / `spec.skipRange` and any other capability).
+republish. The publish job checks each `:VERSION` tag with
+`docker manifest inspect` before building and refuses the cut if one already
+exists, so a re-run cannot overwrite what consumers resolved. It builds and
+verifies all four images before pushing any, then moves the `:latest`
+pointers, so a failed build never leaves a partial release. No `replaces`
+upgrade graph exists pre-1.0: every bundle is a standalone channel head, so
+there is no `PREV_VERSION` anywhere. CSV `capabilities` is `Basic Install`
+(`make verify-versions` rejects `spec.replaces` / `spec.skipRange` and any
+other capability).
 
 ## Docs that must move with the code
 

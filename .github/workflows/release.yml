@@ -112,20 +112,42 @@ jobs:
           username: ${{ secrets.QUAY_USERNAME }}
           password: ${{ secrets.QUAY_TOKEN }}
 
-      # push_tags builds VERSION then retags + pushes :latest as a convenience
-      # pointer. :VERSION is the immutable one the CSV pins. Each image is
-      # verified between build and push: a published tag is immutable, so a
-      # metadata regression (root USER, missing version label) must fail here
-      # rather than be discovered by a consumer.
+      # The project never re-pushes a published tag, so a re-run of this
+      # workflow must not overwrite one. quay does not enforce tag immutability
+      # here, and `docker push` would silently replace the manifest that
+      # consumers already resolved. Refuse before the (slow) builds if any
+      # :VERSION tag already exists. --output json keeps the check quiet on
+      # success; a non-zero exit is the only thing that matters.
+      - name: refuse to overwrite a published tag
+        run: |
+          set -euo pipefail
+          for name in \
+            baseline-security-operator \
+            baseline-security-console-plugin \
+            baseline-security-operator-bundle \
+            baseline-security-operator-catalog; do
+            img="$REGISTRY/$name:$VERSION"
+            if docker manifest inspect "$img" >/dev/null 2>&1; then
+              echo "$img is already published; a published tag is immutable." >&2
+              echo "Cut a new version instead of re-publishing $VERSION." >&2
+              exit 1
+            fi
+          done
+
+      # A published tag is immutable and this project never re-pushes one, so a
+      # release must be all-or-nothing: every image is built and verified before
+      # the first push. Building and pushing per image (build, push, build,
+      # push) meant a failure in a later build left earlier :VERSION tags
+      # already on quay with no operator/CSV counterpart, and the documented
+      # remedy for that state is a new version, not a retry. Verification is the
+      # same gate as before (root USER, version, source, license labels), just
+      # run once per image against the local store.
       - name: operator image
         run: |
           set -euo pipefail
           img="$REGISTRY/baseline-security-operator:$VERSION"
           make -C operator docker-build IMG="$img"
           operator/hack/verify-image-metadata.sh "$img"
-          make -C operator docker-push IMG="$img"
-          docker tag "$img" "$REGISTRY/baseline-security-operator:latest"
-          docker push "$REGISTRY/baseline-security-operator:latest"
 
       - name: console-plugin image
         run: |
@@ -136,9 +158,6 @@ jobs:
           # before the (slow) build starts.
           make -C console-plugin docker-build IMG="$img"
           operator/hack/verify-image-metadata.sh "$img"
-          make -C console-plugin docker-push IMG="$img"
-          docker tag "$img" "$REGISTRY/baseline-security-console-plugin:latest"
-          docker push "$REGISTRY/baseline-security-console-plugin:latest"
 
       - name: bundle image
         run: |
@@ -147,11 +166,8 @@ jobs:
           make -C operator bundle-build BUNDLE_IMG="$img"
           # FROM scratch: OLM unpacks it, so no USER is required (but no root either).
           operator/hack/verify-image-metadata.sh "$img" --allow-scratch-user
-          make -C operator bundle-push BUNDLE_IMG="$img"
-          docker tag "$img" "$REGISTRY/baseline-security-operator-bundle:latest"
-          docker push "$REGISTRY/baseline-security-operator-bundle:latest"
 
-      # Catalog references the bundle pullspec, so build it after the bundle push.
+      # The catalog references the bundle pullspec, so it builds last.
       - name: catalog image
         run: |
           set -euo pipefail
@@ -160,9 +176,34 @@ jobs:
             BUNDLE_IMG="$REGISTRY/baseline-security-operator-bundle:$VERSION" \
             CATALOG_IMG="$img"
           operator/hack/verify-image-metadata.sh "$img"
-          make -C operator catalog-push CATALOG_IMG="$img"
-          docker tag "$img" "$REGISTRY/baseline-security-operator-catalog:latest"
-          docker push "$REGISTRY/baseline-security-operator-catalog:latest"
+
+      # Everything above built and verified; publish. Two phases so a consumer
+      # pulling :latest never sees a mixture of two versions: every immutable
+      # :VERSION tag (the one the CSV pins) lands first, then the convenience
+      # pointers move together.
+      - name: push versioned images
+        run: |
+          set -euo pipefail
+          for name in \
+            baseline-security-operator \
+            baseline-security-console-plugin \
+            baseline-security-operator-bundle \
+            baseline-security-operator-catalog; do
+            docker push "$REGISTRY/$name:$VERSION"
+          done
+
+      - name: push latest pointers
+        run: |
+          set -euo pipefail
+          for name in \
+            baseline-security-operator \
+            baseline-security-console-plugin \
+            baseline-security-operator-bundle \
+            baseline-security-operator-catalog; do
+            img="$REGISTRY/$name:$VERSION"
+            docker tag "$img" "$REGISTRY/$name:latest"
+            docker push "$REGISTRY/$name:latest"
+          done
 
   # CycloneDX SBOM for every pushed image, attached to the GitHub release so
   # consumers and vuln scanners have an inventory of what shipped. Kept out of

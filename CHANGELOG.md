@@ -364,7 +364,19 @@ depend on those tags.
   value, so an accented name sorted after every plain letter and embedded
   numbers ordered `rule_10` before `rule_2`. They now sort by the session
   locale's collation.
+
 ### Changed
+
+- The console plugin now gzips its assets at level 9 instead of level 5. Every
+  file it serves is content-hashed and marked immutable for a year, so the
+  bytes are compressed once at image build and each browser pays the cost at
+  most once per plugin version; the extra effort is spent on a cache miss and
+  the bytes it saves are spent on every cold fill. The build-time size report
+  and the CI size step already measured at level 9, so the number in the run
+  log is now the number on the wire. Precompressed files plus `gzip_static`
+  are not available here (the UBI module set has no `gzip_static`), and
+  brotli and zstd are extra module builds, so gzip stays the served encoding
+  and the level is the lever.
 
 - The two OpenTelemetry OTLP trace exporter modules move from v1.40.0 to
   v1.44.0, onto the same version as the `go.opentelemetry.io/otel` core
@@ -545,7 +557,26 @@ depend on those tags.
   loses the Author button and the Edit control (the Unbind control beside Edit
   still patches only the baseline and is unchanged). This closes a path where
   a baseline-only patch created and rewrote objects the operator then consumed.
+
 ### Fixed
+
+- A failed `CatalogSource` read while auto-detecting the Compliance Operator
+  catalog was discarded with no log. Detection then fails safe to "assume the
+  catalog is present", so a persistent RBAC denial or apiserver error left the
+  `compliance-operator` Subscription pinned to a source that was never
+  verified, and the Subscription sync path declined to correct it for the same
+  reason. The only symptom was a `ScanConfigured` / `ComplianceOperatorReady`
+  stuck on `Installing` with nothing in the operator logs. The read failure is
+  now logged at Error (rate-limited to one line per 30m, V(1) in between) with
+  the CatalogSource name and the underlying cause, and the Subscription create
+  records when the source it wrote came from an unverified guess.
+
+- On a single-node cluster the console plugin rolled out with
+  `maxUnavailable: 1` against a one-replica Deployment, so a plugin upgrade
+  could take the only pod down and blank Administration → Compliance until its
+  replacement was ready. The plugin Deployment now pins `maxUnavailable: 0`
+  whenever it runs a single replica; two-replica clusters keep `1`, which is
+  what keeps the Deployment Available while a node is drained.
 
 - The Overview tab rendered one link per newly failing and per fixed check on
   first paint, and `status.newlyFailed` / `status.fixed` hold up to 4096 names
@@ -637,35 +668,6 @@ depend on those tags.
   at the version; the refusal names the artifact's version and the served
   ones, and `--force` overrides it. A cluster whose CRD cannot be read (an
   etcd restore still in progress) is left to the apply.
-
-- The same check status was drawn in different colors depending on which view
-  read it. `MANUAL` was the icon-token amber on the console composition donut
-  and a brighter yellow in the Observe dashboard; `WAIVED` was teal on the
-  console (donut wedge and Results status chip) and the same grey as
-  not-applicable in the dashboard, which stacks the two adjacent. The dashboard
-  now paints both from the same PatternFly 6 tokens the console reads, and the
-  exported HTML report's score and severity type now uses the text status
-  tokens it claimed to use (the warning amber and the success green were
-  hand-picked values that matched no token), so a status is one color across
-  the console, the report, and the dashboard. `TestDashboardUsesStatusPalette`
-  pins the widened set.
-
-- `hack/verify-backup.sh` computed the backup age with `date -u -d`, which is
-  GNU coreutils only. On a host with BSD `date` (macOS, which `hack/backup.sh`
-  and `hack/restore.sh` already support for the digest) the conversion failed,
-  the age check was skipped with a note on stderr, and the script exited 0: a
-  backup that had not been refreshed in a year verified as restorable, which
-  is the one failure it exists to catch. The age is now read off the stamp
-  itself (`hack/lib-timestamp.sh`, no external `date` call), and a MANIFEST
-  whose `takenAt` is missing or unparseable fails the check instead of
-  passing it, so an unmeasurable age can no longer be alerted on as a healthy
-  one. `hack/restore.sh` reports the same case as an unknown RPO rather than
-  printing no age at all.
-
-- `hack/verify-backup.sh` digested the artifact with `sha256sum` directly,
-  where the other two scripts go through `hack/lib-sha256.sh`, so the check
-  could not run at all on a host without GNU coreutils, which is the host the
-  doc tells an admin to pull the off-cluster copy back onto.
 
 - `hack/restore.sh --force` restores again. The artifact carries the
   `resourceVersion` it was captured at, and that field is a precondition on
@@ -1103,7 +1105,23 @@ depend on those tags.
   the other profile; a clipboard copy that resolved late reported a failure, or
   a success, for a copy the admin had already replaced. Both paths fence on a
   monotonic token and drop a result that a later action superseded.
+
 ### Security
+
+- `hack/must-gather.sh` no longer dumps a Secret into a support archive. It
+  collected every object named in `status.relatedObjects`, and the only filter
+  on that list was a character check, so a hand-edited or etcd-restored
+  `relatedObjects` entry naming `secrets` was collected like any other object,
+  putting the metrics TLS private key and the scraper service-account token
+  into an attachment the operator can no longer redact. Collection is now
+  pinned to the six kinds the reconciler actually writes.
+
+- The operator built against `google.golang.org/grpc` v1.82.1, which is
+  affected by GO-2026-6348 (heap exhaustion from HTTP/2 DATA frame
+  fragmentation) and is fixed in v1.83.1. `govulncheck` reaches it from
+  `cmd/main.go` through the manager start, so an API server that fragments its
+  responses could drive the operator out of memory. Pinned to v1.83.1, which
+  brings the `go.opentelemetry.io/otel` core modules to v1.44.0 with it.
 
 - The operator namespace now ships a `NetworkPolicy`. Any pod in the cluster
   could previously open a TCP connection to the operator's metrics port 8443;
@@ -1151,24 +1169,6 @@ depend on those tags.
   override it, since the operator cannot have meant to clobber an object whose
   current resourceVersion was never read.
 
-- The operator namespace now ships a `NetworkPolicy`. Any pod in the cluster
-  could previously open a TCP connection to the operator's metrics port 8443;
-  the bearer token was the only control. Ingress is now denied on every
-  operator port except 8443, and only for `openshift-monitoring` (the
-  platform Prometheus scrape) and the service-ca operator (which mints the
-  serving cert the scrape verifies against). Egress is deliberately left
-  unrestricted so the policy cannot intersect the platform's own policies and
-  cut the operator off from the API server.
-
-- The serialized-size budget that trims `status` failure lists under-counted
-  a string carrying ill-formed UTF-8 by up to 4 bytes per bad byte, because it
-  counted the three-byte replacement rune where `encoding/json` writes the
-  six-byte escape. A `ClusterBaseline` whose failure names came back from a
-  protobuf restore with lone continuation bytes could therefore exceed the
-  size bound and fail every subsequent status write, wedging conditions,
-  score, and phase. The count now uses the wider of the two forms, which can
-  only trim a list early.
-
 - Results CSV export hardened against a formula sigil hidden behind a leading
   control character. `csvCell` dropped NULs and Unicode format characters, then
   checked the cell for a formula starter, so a cell such as `\u0001=cmd` kept a
@@ -1189,6 +1189,7 @@ depend on those tags.
   waiver add and remove, TailoredProfile create, update, and bind, tailored
   profile unbind, default baseline create, and every remediation path
   (per-row apply, unapply, auto-apply, batch apply).
+
 ### Migration notes
 
 - The operator namespace now ships a default-deny ingress `NetworkPolicy` (see
