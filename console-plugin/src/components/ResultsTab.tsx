@@ -299,10 +299,15 @@ const ResultsTab: React.FC<{
   // severity, and waiver state stay current while the dialog is open.
   // Index by name once when the modal is open (avoids O(n) find per update).
   const selectedLive = React.useMemo(() => {
-    if (!selected) return null;
-    const want = selected.metadata.name;
+    // A partial or tampered list item can reach the row (the row itself
+    // optional-chains metadata so it renders), so a click on it hands us an
+    // object with no name. The modal keys everything on the name (header,
+    // waiver lookup, live refresh), so leave it closed rather than dereference
+    // metadata here and take down the whole tab.
+    const want = selected?.metadata?.name;
+    if (!want) return null;
     for (const r of ownedResults) {
-      if (r.metadata.name === want) {
+      if (r.metadata?.name === want) {
         return r;
       }
     }

@@ -502,6 +502,32 @@ func TestEnsureComplianceOperatorGroupScopesTargetNamespaces(t *testing.T) {
 
 // TestEnsureComplianceOperatorSyncsCatalogSource: createIfMissing only writes
 // the Subscription once; a later change to spec.complianceCatalogSource must
+// A CO deleted out from under us (namespace and CSVs gone) must not leave the
+// previously installed version published next to ComplianceOperatorReady=False
+// / Installing: every other not-installed path clears the field, so this one
+// showing a version for a CO that does not exist misleads the console.
+func TestEnsureComplianceOperatorClearsVersionOnSubscriptionCreate(t *testing.T) {
+	scheme := testScheme(t)
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).Build(),
+		Scheme: scheme,
+	}
+	cb := newCB("cis")
+	cb.Spec.InstallComplianceOperator = baselinev1alpha1.InstallAutomatic
+	cb.Status.ComplianceOperatorVersion = "1.6.0"
+	if err := r.ensureComplianceOperator(context.Background(), cb); err != nil {
+		t.Fatal(err)
+	}
+	if cb.Status.ComplianceOperatorVersion != "" {
+		t.Fatalf("complianceOperatorVersion = %q, want empty while CO is installing",
+			cb.Status.ComplianceOperatorVersion)
+	}
+	c := meta.FindStatusCondition(cb.Status.Conditions, "ComplianceOperatorReady")
+	if c == nil || c.Reason != "Installing" {
+		t.Fatalf("ComplianceOperatorReady = %v, want reason Installing", c)
+	}
+}
+
 // still update spec.source (OKD / disconnected catalog moves).
 func TestEnsureComplianceOperatorSyncsCatalogSource(t *testing.T) {
 	scheme := testScheme(t)
@@ -1364,6 +1390,42 @@ func TestFindComplianceOperatorCSVListErrorPaths(t *testing.T) {
 		if got == nil || got.GetName() != "compliance-operator.v1.10.0" || got.GetNamespace() != complianceNamespace {
 			t.Fatalf("fallback CSV = %v/%v, want %s/compliance-operator.v1.10.0",
 				got.GetNamespace(), got.GetName(), complianceNamespace)
+		}
+	})
+
+	// A server (or a proxy in front of it) that echoes the same continue token
+	// would otherwise make the cluster-wide walk spin until reconcileTimeout
+	// expires, so the singleton worker is stuck with no diagnostic. The walk has
+	// to stop and degrade to the same "no CSV" answer every other exit returns.
+	t.Run("stalled continue token stops the cluster-wide walk", func(t *testing.T) {
+		scheme := testScheme(t)
+		csvs := 0
+		r := &ClusterBaselineReconciler{
+			Client: fake.NewClientBuilder().WithScheme(scheme).
+				WithInterceptorFuncs(interceptor.Funcs{
+					List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+						if gvk := list.GetObjectKind().GroupVersionKind(); gvk.Kind == csvGVK.Kind+"List" && !inComplianceNS(opts) {
+							csvs++
+							if csvs > 10 {
+								t.Fatalf("cluster-wide CSV walk issued %d lists, want it to stop on a stalled token", csvs)
+							}
+							list.SetContinue("stalled-token")
+							return nil
+						}
+						return c.List(ctx, list, opts...)
+					},
+				}).Build(),
+			Scheme: scheme,
+		}
+		got, err := r.findComplianceOperatorCSV(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != nil {
+			t.Fatalf("CSV = %v/%v, want nil (nothing observed, no hang)", got.GetNamespace(), got.GetName())
+		}
+		if csvs != 2 {
+			t.Fatalf("cluster-wide lists = %d, want 2 (one page, then the stalled-token guard)", csvs)
 		}
 	})
 }

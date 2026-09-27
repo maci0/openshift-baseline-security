@@ -17,19 +17,22 @@ const ClusterScoreItem: React.FC = () => {
     isList: true,
   });
 
-  if (!loaded) {
-    return (
-      <span aria-busy="true" aria-label={t('Loading compliance data')}>
-        —
-      </span>
-    );
-  }
+  // Error first: a watch that fails before its first successful list never sets
+  // loaded, so checking !loaded ahead of error would strand the card on the
+  // loading "—" forever. Matches the loaded || !!error guard in CompliancePage.
   if (error) {
     // Distinct from loading "—": API/watch failures must not look like an empty score.
     return (
       <a href="/baseline-security" aria-label={t('Compliance score unavailable')}>
         {t('Unavailable')}
       </a>
+    );
+  }
+  if (!loaded) {
+    return (
+      <span aria-busy="true" aria-label={t('Loading compliance data')}>
+        —
+      </span>
     );
   }
   const score = clusterScore(baselines);

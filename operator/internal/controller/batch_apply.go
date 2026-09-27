@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -210,10 +211,17 @@ func (r *ClusterBaselineReconciler) openRemediationBatch(
 // page caps what a single response pins while the batch polls every 15s.
 const remediationListPageSize int64 = 500
 
+// errComplianceCRDsAbsent reports that the ComplianceRemediation CRD is no
+// longer registered, so the batch cannot observe any of its names. The caller
+// still treats every name as terminal (that is what unblocks the pools), but it
+// must not log the same line as a per-name NotFound: the real cause is the CRD
+// disappearing mid-batch, and on-call needs to see which one happened.
+var errComplianceCRDsAbsent = errors.New("ComplianceRemediation CRD is not registered")
+
 // listRemediationsForBatch returns the named ComplianceRemediations from the
 // compliance namespace, indexed by name. want must be the batch's capped name
-// list. A nil map with a nil error means the CRD is absent: every name is then
-// missing, which the caller treats as terminal.
+// list. An errComplianceCRDsAbsent error means the CRD is absent: every name is
+// then missing, which the caller treats as terminal.
 func (r *ClusterBaselineReconciler) listRemediationsForBatch(
 	ctx context.Context, want []string,
 ) (map[string]*unstructured.Unstructured, error) {
@@ -242,7 +250,7 @@ func (r *ClusterBaselineReconciler) listRemediationsForBatch(
 		}
 		if err := r.List(ctx, list, opts...); err != nil {
 			if meta.IsNoMatchError(err) {
-				return nil, nil
+				return nil, errComplianceCRDsAbsent
 			}
 			return nil, fmt.Errorf("listing ComplianceRemediations in %s: %w", complianceNamespace, err)
 		}
@@ -253,12 +261,19 @@ func (r *ClusterBaselineReconciler) listRemediationsForBatch(
 				found[item.GetName()] = item
 			}
 		}
-		cont = list.GetContinue()
+		next := list.GetContinue()
 		// Every name is present: stop paging rather than walk the rest of the
 		// namespace's remediations.
-		if cont == "" || len(found) == len(needed) {
+		if next == "" || len(found) == len(needed) {
 			return found, nil
 		}
+		// A token that does not advance means the next List would replay this
+		// page until the reconcile deadline. Stop with what is found; the
+		// missing names take the same terminal path as a NotFound.
+		if next == cont {
+			return found, nil
+		}
+		cont = next
 	}
 }
 
@@ -288,7 +303,17 @@ func (r *ClusterBaselineReconciler) finishRemediationBatch(
 	// (unstructured reads bypass the manager cache) just to read apply and
 	// applicationState. Paging stops as soon as every listed name is found.
 	rems, lerr := r.listRemediationsForBatch(ctx, names)
-	if lerr != nil {
+	// Compliance CRDs uninstalled mid-batch: every name is unknowable, but the
+	// pools must still be released, so take the same terminal path as a NotFound
+	// rather than holding them paused until the grace deadline. Logged once with
+	// its own cause so the finish reason=applied is not attributed to individual
+	// remediations that were in fact never observed again.
+	crdsAbsent := errors.Is(lerr, errComplianceCRDsAbsent)
+	if crdsAbsent {
+		log.FromContext(ctx).Error(lerr,
+			"ComplianceRemediation CRD gone while waiting for batch; treating every remediation as done",
+			"name", cb.Name, "remediationCount", len(names))
+	} else if lerr != nil {
 		// Transient read failure: keep the pools paused and let the grace
 		// deadline below decide, exactly as a per-name Get failure did.
 		getErr = lerr
@@ -304,7 +329,7 @@ func (r *ClusterBaselineReconciler) finishRemediationBatch(
 			missing = append(missing, name)
 			continue
 		}
-		if lerr != nil {
+		if lerr != nil && !crdsAbsent {
 			// State is unknown for every name this cycle.
 			continue
 		}
@@ -313,8 +338,9 @@ func (r *ClusterBaselineReconciler) finishRemediationBatch(
 			// Info: silent skip leaves on-call unable to explain why a batch
 			// finished as applied/cancelled while listed remediations vanished
 			// (UI delete, GC, or compliance CRDs removed mid-batch).
+			// notFound is false when the CRD is gone: nothing was looked up.
 			log.FromContext(ctx).Info("remediation missing while waiting for batch; treating as done",
-				"remediation", name, "name", cb.Name, "notFound", true)
+				"remediation", name, "name", cb.Name, "notFound", !crdsAbsent)
 			missing = append(missing, name)
 			continue
 		}

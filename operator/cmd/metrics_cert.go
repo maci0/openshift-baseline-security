@@ -70,21 +70,22 @@ func (p *metricsCertProvider) GetCertificate(_ *tls.ClientHelloInfo) (*tls.Certi
 	// One retry when disk rotates between read and install so a slow parse of an
 	// older pair cannot overwrite a newer cert installed by a concurrent handshake.
 	for attempt := 0; attempt < 2; attempt++ {
-		var (
-			certPEM, keyPEM []byte
-			fingerprint     [sha256.Size]byte
-			readErr         error
-		)
-		if p.certDir != "" {
-			certPath := filepath.Join(p.certDir, "tls.crt")
-			keyPath := filepath.Join(p.certDir, "tls.key")
-			certPEM, keyPEM, fingerprint, readErr = p.loadCertPair(certPath, keyPath)
-			if readErr != nil {
-				// A set-but-unreadable dir (wrong mount, Secret never projected)
-				// otherwise falls back to self-signed with no breadcrumb while
-				// service-ca scrapers fail TLS trust. Log once per episode.
-				p.logMissingOnce(readErr)
-			}
+		// No cert dir configured: there is nothing on disk to read or parse, so
+		// skip straight to the self-signed fallback below. Parsing the zero-length
+		// pair would only produce a "failed to parse metrics TLS cert/key" error
+		// for a configuration that is self-signed by design, and that false
+		// alarm would consume the once-per-episode corrupt-Secret log slot.
+		if p.certDir == "" {
+			break
+		}
+		certPath := filepath.Join(p.certDir, "tls.crt")
+		keyPath := filepath.Join(p.certDir, "tls.key")
+		certPEM, keyPEM, fingerprint, readErr := p.loadCertPair(certPath, keyPath)
+		if readErr != nil {
+			// A set-but-unreadable dir (wrong mount, Secret never projected)
+			// otherwise falls back to self-signed with no breadcrumb while
+			// service-ca scrapers fail TLS trust. Log once per episode.
+			p.logMissingOnce(readErr)
 		}
 
 		// Cache hit: same on-disk content as last successful load.

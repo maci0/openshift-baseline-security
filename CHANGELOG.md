@@ -156,6 +156,33 @@ depend on those tags.
   failure) was never logged. The transition guard compared against the
   condition entry that `SetStatusCondition` had already overwritten in place,
   so it always compared the new value with itself.
+- Operator `/readyz` still reported ready for the whole drain on a replica that
+  was not the leader. The runnable that flips readiness on SIGTERM did not
+  declare itself non-leader-elected, so controller-runtime only started it after
+  winning the lease; the shipped Deployment has 2 replicas, so a terminating
+  standby kept reporting Ready and stayed in the Service endpoints.
+- Operator `status.complianceOperatorVersion` kept the previously installed
+  version when the Compliance Operator was uninstalled and the Subscription had
+  to be re-created. The field is documented as empty while CO is not installed,
+  and every other not-installed path clears it, so the console showed a version
+  for an operator that was not there.
+- Operator metrics logs: a pod started with an empty `--metrics-cert-dir`
+  (self-signed metrics identity by design) logged `failed to parse metrics TLS
+  cert/key` on the first scrape, because the parse path ran on a pair of
+  zero-length buffers. The false error was indistinguishable from a corrupt
+  projected Secret and consumed the once-per-episode log slot a real corruption
+  needs.
+- Operator batch: when the Compliance CRDs were uninstalled while a remediation
+  batch was applying, the operator resumed the paused MachineConfigPools and
+  finished the batch as `applied`, but logged each remediation as individually
+  `notFound`. The real cause (the CRD disappeared mid-batch) left no trace.
+- Console plugin: the cluster Overview "Compliance score" item stayed on the
+  loading placeholder forever when the `ClusterBaseline` watch failed before its
+  first successful list, instead of showing the distinct "Unavailable" state the
+  rest of the page shows for the same failure.
+- Console plugin: opening the check detail dialog on a list item that arrived
+  without `metadata` threw during render and took down the whole Results tab,
+  even though the row itself was written to survive such an item.
 
 ## [0.6.1] - 2026-09-02
 

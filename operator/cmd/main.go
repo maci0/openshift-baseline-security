@@ -31,7 +31,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
-	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
@@ -49,6 +48,22 @@ var errShuttingDown = errors.New("shutting down")
 // shuttingDown is set by a manager runnable when the signal handler cancels the
 // manager context, so readyz reports 503 while the process drains.
 var shuttingDown atomic.Bool
+
+// shutdownFlag sets shuttingDown the moment the manager context is cancelled.
+// It must run on every replica, not only the leader: a bare manager.RunnableFunc
+// does not implement LeaderElectionRunnable, so controller-runtime files it in
+// the leader-election runnable group and a standby replica never starts it.
+// The Deployment ships 2 replicas, so a terminating standby would keep reporting
+// Ready through the whole drain and stay in Service endpoints.
+type shutdownFlag struct{}
+
+func (*shutdownFlag) NeedLeaderElection() bool { return false }
+
+func (*shutdownFlag) Start(ctx context.Context) error {
+	<-ctx.Done()
+	shuttingDown.Store(true)
+	return nil
+}
 
 var scheme = runtime.NewScheme()
 
@@ -243,11 +258,7 @@ func main() {
 	utilruntime.Must(mgr.AddReadyzCheck("cache-sync", cacheSyncReadyz(mgr.GetCache())))
 	// Flip the flag as soon as the signal handler cancels the manager context,
 	// before the graceful drain runs, so the first probe after SIGTERM is 503.
-	utilruntime.Must(mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
-		<-ctx.Done()
-		shuttingDown.Store(true)
-		return nil
-	})))
+	utilruntime.Must(mgr.Add(&shutdownFlag{}))
 
 	// Zero-config default: create ClusterBaseline/cluster if none exists.
 	// Opt out with BASELINE_SECURITY_SKIP_DEFAULT_CR=true. Leader-only so

@@ -142,6 +142,32 @@ func TestMetricsCertProviderMissingFilesEpisodeLifecycle(t *testing.T) {
 	}
 }
 
+// An empty --metrics-cert-dir is a supported configuration that means
+// "self-signed, no service-ca". It must not take the parse path (there is
+// nothing on disk to parse) and must not consume the once-per-corrupt-content
+// log slot with a false "failed to parse" error.
+func TestMetricsCertProviderEmptyCertDirSkipsParse(t *testing.T) {
+	p := &metricsCertProvider{certDir: ""}
+	c, err := p.GetCertificate(nil)
+	if err != nil {
+		t.Fatalf("empty certDir: %v", err)
+	}
+	if c == nil {
+		t.Fatal("empty certDir must still serve a certificate")
+	}
+	if c2, err := p.GetCertificate(nil); err != nil || c2 != c {
+		t.Fatal("expected the cached self-signed pair on the second handshake")
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.loggedBad {
+		t.Fatal("empty certDir must not be reported as a corrupt cert/key pair")
+	}
+	if p.cert != nil {
+		t.Fatal("empty certDir must not install a cached service certificate")
+	}
+}
+
 func TestIsLoopbackMetricsAddr(t *testing.T) {
 	for _, a := range []string{"0", "127.0.0.1:8080", "localhost:8443", "[::1]:8443"} {
 		if !isLoopbackMetricsAddr(a) {

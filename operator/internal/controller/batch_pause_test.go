@@ -2,6 +2,8 @@ package controller
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -289,5 +291,55 @@ func TestResumeBatchPoolsOnDeleteBlocksOnPoolResumeFailure(t *testing.T) {
 	}
 	if err := r.resumeBatchPoolsOnDelete(context.Background(), cb); err == nil {
 		t.Fatal("a failed pool resume must block finalizer removal")
+	}
+}
+
+// Compliance CRDs uninstalled mid-batch must be distinguishable from a
+// remediation that individually 404s. Both take the same terminal path (every
+// name counts as done, so the pools are released rather than held to the grace
+// deadline), but the batch is about to be finished as reason=applied: on-call
+// needs the CRD-gone cause in the log, not N copies of "notFound".
+func TestListRemediationsForBatchReportsCRDsAbsent(t *testing.T) {
+	scheme := testScheme(t)
+	noMatch := &meta.NoKindMatchError{
+		GroupKind: schema.GroupKind{Group: remediationGVK.Group, Kind: remediationGVK.Kind},
+	}
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).
+			WithInterceptorFuncs(interceptor.Funcs{
+				List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+					if gvk := list.GetObjectKind().GroupVersionKind(); gvk.Kind == remediationGVK.Kind+"List" {
+						return noMatch
+					}
+					return c.List(ctx, list, opts...)
+				},
+			}).Build(),
+		Scheme: scheme,
+	}
+	got, err := r.listRemediationsForBatch(context.Background(), []string{"fix-a"})
+	if !errors.Is(err, errComplianceCRDsAbsent) {
+		t.Fatalf("err = %v, want errComplianceCRDsAbsent", err)
+	}
+	if got != nil {
+		t.Fatalf("rems = %v, want nil so every name takes the terminal path", got)
+	}
+
+	// A transient failure must stay distinct: it holds the pools until grace.
+	boom := apierrors.NewServiceUnavailable("apiserver blip")
+	r.Client = fake.NewClientBuilder().WithScheme(scheme).
+		WithInterceptorFuncs(interceptor.Funcs{
+			List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+				if gvk := list.GetObjectKind().GroupVersionKind(); gvk.Kind == remediationGVK.Kind+"List" {
+					return boom
+				}
+				return c.List(ctx, list, opts...)
+			},
+		}).Build()
+	_, err = r.listRemediationsForBatch(context.Background(), []string{"fix-a"})
+	if err == nil || errors.Is(err, errComplianceCRDsAbsent) {
+		t.Fatalf("transient err = %v, want a wrapped apiserver error, not the CRD sentinel", err)
+	}
+	if !strings.Contains(err.Error(), complianceNamespace) {
+		t.Fatalf("transient err = %q, want the namespace in the wrap", err)
 	}
 }

@@ -73,6 +73,10 @@ func (r *ClusterBaselineReconciler) ensureComplianceOperator(ctx context.Context
 	sub = u(subscriptionGVK)
 	sub.SetName("compliance-operator")
 	sub.SetNamespace(complianceNamespace)
+	// No CSV exists yet, so no version is installed: clear it on this path too so
+	// a stale version from a previous install cannot survive alongside
+	// ComplianceOperatorReady=False/Installing (a CO deleted out from under us).
+	cb.Status.ComplianceOperatorVersion = ""
 	// Create uses the best-guess source even if detection was unconfident: a wrong
 	// first guess surfaces as InstallStalled and self-corrects once the sync path
 	// re-resolves confidently.
@@ -234,6 +238,14 @@ func (r *ClusterBaselineReconciler) syncComplianceSubscriptionSource(
 // one response pins in the reconciler.
 const csvListPageSize int64 = 100
 
+// csvListMaxPages bounds the cluster-wide fallback walk. A repeat token or an
+// apiserver that never stops handing pages back would otherwise burn the whole
+// reconcileTimeout on a path that only needs a few pages to answer the question.
+// Stopping early degrades to the same "no CSV found" result the other exits use,
+// which the caller turns into a NotInstalled condition, rather than wedging the
+// singleton worker.
+const csvListMaxPages = 50
+
 func (r *ClusterBaselineReconciler) findComplianceOperatorCSV(ctx context.Context) (*unstructured.Unstructured, error) {
 	// Priority (newest version within each tier):
 	//  1. Succeeded in openshift-compliance (where we install / Get installedCSV)
@@ -267,7 +279,7 @@ func (r *ClusterBaselineReconciler) findComplianceOperatorCSV(ctx context.Contex
 	var clusterItems []unstructured.Unstructured
 	cluster := uList(csvGVK)
 	cont := ""
-	for {
+	for page := 0; ; page++ {
 		opts := []client.ListOption{client.Limit(csvListPageSize)}
 		if cont != "" {
 			opts = append(opts, client.Continue(cont))
@@ -280,9 +292,18 @@ func (r *ClusterBaselineReconciler) findComplianceOperatorCSV(ctx context.Contex
 			return nil, fmt.Errorf("listing CSVs cluster-wide: %w", err)
 		}
 		clusterItems = append(clusterItems, cluster.Items...)
-		cont = cluster.GetContinue()
-		if cont == "" {
+		next := cluster.GetContinue()
+		if next == "" {
 			break
+		}
+		// The request token must advance or the next List would return the same
+		// page for as long as the reconcile deadline holds.
+		if next == cont {
+			return pickComplianceOperatorCSV(local.Items, complianceNamespace, false), nil
+		}
+		cont = next
+		if page+1 >= csvListMaxPages {
+			return pickComplianceOperatorCSV(local.Items, complianceNamespace, false), nil
 		}
 	}
 	csvs := clusterItems
