@@ -5,6 +5,14 @@ Folder layout and module boundaries are out of scope here; see
 [PATTERNS.md](PATTERNS.md) and [SPEC.md](SPEC.md) for architecture and API shape.
 Each record ends with its git creation date; new records must carry one.
 
+Every record here is a decision already made, so every record is current: there
+are no proposed, superseded, or deprecated entries. `**Status:** Keep` means
+accepted and active; the sentence after it names the condition that would
+reopen the decision. A record that stops matching the code is corrected in
+place, and a reversed decision is a new ADR that names the record it replaces
+(here: `Supersedes ADR-NNN`) while the old one is retitled with its
+`Superseded by ADR-MMM` status.
+
 ## ADR-001: Orchestration wrapper, not a scanner
 
 **Decision:** Reuse the Red Hat Compliance Operator (OpenSCAP + content) for

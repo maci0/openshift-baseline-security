@@ -9,6 +9,10 @@ e2e suites green.
 
 Legend: `[x]` done · `[ ]` planned · **(H/M/L)** rough value.
 
+Milestone-by-milestone status is canonical in
+[SPEC.md §10](SPEC.md#10-roadmap); the sections below track work items, not
+shipped releases.
+
 ## Done
 
 ### Core
@@ -113,8 +117,9 @@ Legend: `[x]` done · `[ ]` planned · **(H/M/L)** rough value.
 ## Planned
 
 ### Next up
-- [ ] **(H)** Push versioned images + bundle + catalog to quay.io; submit to
-      community-operators once stable. Needs a quay robot token.
+- [ ] **(H)** Submit to community-operators once stable (images, bundle, and
+      catalog are already published to
+      `quay.io/openshift-baseline-security/*` since 0.5.9).
 
 ## Productization
 

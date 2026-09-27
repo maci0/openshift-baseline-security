@@ -90,7 +90,7 @@ without adding a signal that metrics plus logs do not already carry.
 
 | Alert | Fires when |
 |---|---|
-| `ComplianceScoreLow` | Score below the warning threshold. |
+| `ComplianceScoreLow` | Score below 80 for 30m, on a real score only (the `-1` "no score" sentinel is excluded; threshold is above the console color bands, ADR-017). |
 | `ComplianceChecksFailing` | Failing checks present. |
 | `ComplianceChecksInError` | Checks in ERROR (scan/content problem). |
 | `ComplianceChecksInconsistent` | Checks INCONSISTENT across nodes. |

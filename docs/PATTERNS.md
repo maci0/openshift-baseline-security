@@ -28,9 +28,14 @@ standalone channel head, and there is no `PREV_VERSION` anywhere (see the
 name/version/containerImage/image tags), `console-plugin/package.json`
 (`version` and `consolePlugin.version`), `CHANGELOG.md` (`## [VERSION]`,
 `## [Unreleased]`, and the `[VERSION]:` / `[Unreleased]: ...vVERSION...HEAD`
-compare footers), root `README.md` (**Current release**), and
-`operator/catalog/package.yaml` channel entry when that file is present after
-`make catalog-build`. `make verify-versions` (also run from `make bundle` and
+compare footers), root `README.md` (**Current release**), the
+`ARG VERSION=` default in each of the five Dockerfiles (`operator/Dockerfile`,
+`operator/Dockerfile.ci`, `operator/bundle.Dockerfile`,
+`operator/catalog.Dockerfile`, `console-plugin/Dockerfile`, which feed the
+`org.opencontainers.image.version` label), and the
+`operator/catalog/package.yaml` channel entry when that file is
+present (`operator/catalog/` is gitignored; `make catalog-prepare` renders it).
+`make verify-versions` (also run from `make bundle` and
 CI) enforces that single-version consistency.
 Never reuse a published CSV/image tag; OLM unpack caches make same-tag
 republishes serve stale content. Breaking behavior in 0.x is allowed in
