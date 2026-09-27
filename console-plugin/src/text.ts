@@ -49,8 +49,12 @@ export const textCollator = (locale?: string): Intl.Collator => {
 // so a keystroke over a ~1k-rule catalog cannot afford to redo it per option
 // (nor redo the query per option). Split the search into a once-per-catalog
 // fold and a once-per-keystroke fold, then a pure substring test over the two.
+// Module-level, like the CSV and report patterns: the catalog fold runs once
+// per option over ~1k rules, and a fresh RegExp per call is a throwaway the
+// folded names never keep.
+const markRe = /\p{M}/gu;
 export const foldForSearch = (value: string): string =>
-  value.toLowerCase().normalize('NFD').replace(/\p{M}/gu, '');
+  value.toLowerCase().normalize('NFD').replace(markRe, '');
 
 // The query half: folded and trimmed once, then matched against every
 // pre-folded option. Trimming happens here, so a whitespace-only query is empty

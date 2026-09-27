@@ -468,7 +468,8 @@ const failureListShareBudget = failureListsSizeBudget / 4
 // string s, without allocating. It must stay equal to len(json.Marshal(s)) for
 // a string under the Go toolchain go.mod pins, and
 // FuzzJSONStringLenMatchesMarshal pins that against the real encoder over
-// every escape class below, including ill-formed UTF-8.
+// every escape class below, including ill-formed UTF-8, which the encoder
+// coerces to U+FFFD rather than failing.
 //
 // An additive len(name)+constant estimate is wrong by up to 6x on names full of
 // '&', '<', '>' or control characters, which are exactly the names a hostile or
@@ -496,13 +497,13 @@ func jsonStringLen(s string) int {
 		case c >= utf8.RuneSelf:
 			// A well-formed rune is copied verbatim, so skip its trailing bytes.
 			// An ill-formed one is one byte in and the three-byte U+FFFD
-			// replacement character out: the encoder coerces rather than
-			// failing, and a status restored from a protobuf backup can carry
-			// lone continuation bytes. encoding/json used to escape these as
-			// the six-byte \ufffd form; FuzzJSONStringLenMatchesMarshal pins
-			// this branch against the real encoder, so a toolchain that
-			// changes the form again fails here rather than under-budgeting
-			// the clamp by 3x.
+			// replacement rune out: the encoder coerces rather than failing, and
+			// a status restored from a protobuf backup can carry lone
+			// continuation bytes, which a one-byte count under-budgets.
+			// encoding/json used to escape these as the six-byte \ufffd form;
+			// FuzzJSONStringLenMatchesMarshal pins this branch against the real
+			// encoder, so a toolchain that changes the form again fails here
+			// rather than under-budgeting the clamp by 3x.
 			_, size := utf8.DecodeRuneInString(s[i:])
 			if size == 1 {
 				n += 2

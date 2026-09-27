@@ -238,7 +238,9 @@ func (r *ClusterBaselineReconciler) syncComplianceSubscriptionSource(
 // csvListPageSize bounds one apiserver List of ClusterServiceVersions. A CSV
 // carries the whole install spec and the alm-examples annotation, so an unpaged
 // cluster-wide List can hold hundreds of MB of decoded JSON; paging caps what
-// one response pins in the reconciler.
+// one response pins in the reconciler. Pages are folded into a running best and
+// released (see foldComplianceOperatorCSVs), so the bound holds across the walk
+// and not just within one response.
 const csvListPageSize int64 = 100
 
 // csvListMaxPages bounds the cluster-wide fallback walk. A repeat token or an
@@ -279,7 +281,13 @@ func (r *ClusterBaselineReconciler) findComplianceOperatorCSV(ctx context.Contex
 	// multi-operator cluster decodes tens to hundreds of MB into maps on a
 	// path the steady-state never takes (the local Succeeded lookup above
 	// already answered it). Only name, namespace and status.phase are read.
-	var clusterItems []unstructured.Unstructured
+	//
+	// Each page is folded into a running best per tier and then released: the
+	// page is reused by the next List, and accumulating pages would restore the
+	// whole-cluster footprint paging exists to avoid. Held across the walk are
+	// two objects (the newest Succeeded and the newest non-Succeeded), not every
+	// CSV on the cluster.
+	var bestSucceeded, bestOther *unstructured.Unstructured
 	cluster := uList(csvGVK)
 	cont := ""
 	for page := 0; ; page++ {
@@ -294,7 +302,7 @@ func (r *ClusterBaselineReconciler) findComplianceOperatorCSV(ctx context.Contex
 			}
 			return nil, fmt.Errorf("listing CSVs cluster-wide: %w", err)
 		}
-		clusterItems = append(clusterItems, cluster.Items...)
+		bestSucceeded, bestOther = foldComplianceOperatorCSVs(cluster.Items, bestSucceeded, bestOther)
 		next := cluster.GetContinue()
 		if next == "" {
 			break
@@ -309,14 +317,45 @@ func (r *ClusterBaselineReconciler) findComplianceOperatorCSV(ctx context.Contex
 			return pickComplianceOperatorCSV(local.Items, complianceNamespace, false), nil
 		}
 	}
-	csvs := clusterItems
-	if csv := pickComplianceOperatorCSV(csvs, "", true); csv != nil {
-		return csv, nil
+	if bestSucceeded != nil {
+		return bestSucceeded, nil
 	}
 	if csv := pickComplianceOperatorCSV(local.Items, complianceNamespace, false); csv != nil {
 		return csv, nil
 	}
-	return pickComplianceOperatorCSV(csvs, "", false), nil
+	return bestOther, nil
+}
+
+// foldComplianceOperatorCSVs returns the newest compliance-operator CSV of each
+// tier (Succeeded / not Succeeded) across items, preferring the incumbents
+// already held. It is the streaming form of pickComplianceOperatorCSV: callers
+// paged through a cluster-wide List cannot keep every page resident, so each
+// page is folded in and dropped. Ties go to the incumbent, so the winner does
+// not depend on how the pages were split. Only the winners are DeepCopied, and
+// only when one actually replaces the incumbent.
+func foldComplianceOperatorCSVs(
+	items []unstructured.Unstructured,
+	bestSucceeded, bestOther *unstructured.Unstructured,
+) (*unstructured.Unstructured, *unstructured.Unstructured) {
+	for i := range items {
+		csv := &items[i]
+		if !strings.HasPrefix(csv.GetName(), csvNamePrefix) {
+			continue
+		}
+		phase, _, _ := unstructured.NestedString(csv.Object, "status", "phase")
+		if phase == "Succeeded" {
+			if bestSucceeded == nil ||
+				compareComplianceCSVVersion(csv.GetName(), bestSucceeded.GetName()) > 0 {
+				bestSucceeded = csv.DeepCopy()
+			}
+			continue
+		}
+		if bestOther == nil ||
+			compareComplianceCSVVersion(csv.GetName(), bestOther.GetName()) > 0 {
+			bestOther = csv.DeepCopy()
+		}
+	}
+	return bestSucceeded, bestOther
 }
 
 // pickComplianceOperatorCSV chooses the newest compliance-operator CSV among items.
