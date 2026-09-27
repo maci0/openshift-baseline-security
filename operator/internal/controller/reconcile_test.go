@@ -95,7 +95,7 @@ func TestReconcileDeletionDeregistersAndRemovesFinalizer(t *testing.T) {
 	stale.Status.Profiles = []baselinev1alpha1.ProfileStatus{
 		{Key: "cis", ResultCounts: baselinev1alpha1.ResultCounts{Fail: 2}},
 	}
-	publishMetrics(stale)
+	publishMetrics(stale, metricsTestNow)
 
 	cb := newCB("cis")
 	cb.Finalizers = []string{finalizerName}
@@ -1103,7 +1103,7 @@ func TestReconcileNotFound(t *testing.T) {
 	stale.Status.Profiles = []baselinev1alpha1.ProfileStatus{
 		{Key: "cis", ResultCounts: baselinev1alpha1.ResultCounts{Fail: 9}},
 	}
-	publishMetrics(stale)
+	publishMetrics(stale, metricsTestNow)
 
 	r := &ClusterBaselineReconciler{
 		Client: fake.NewClientBuilder().WithScheme(scheme).Build(),

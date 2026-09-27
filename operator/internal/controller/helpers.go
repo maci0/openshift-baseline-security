@@ -14,17 +14,13 @@ import (
 	baselinev1alpha1 "github.com/maci0/baseline-security-operator/api/v1alpha1"
 )
 
-// requeueAfter picks the poll cadence. Steady state is 1m; any Progressing
+// requeueAfterAt picks the poll cadence. Steady state is 1m; any Progressing
 // rollup and an in-flight remediation batch use 15s so cancel/grace/Applied are
 // not stuck behind a full minute when the dynamic informer is lagging or not yet up.
 // Active waiver expiry also shortens the poll so accepted-risk drops from the
-// score without waiting for the full steady interval (ADR-005).
-func requeueAfter(cb *baselinev1alpha1.ClusterBaseline) time.Duration {
-	return requeueAfterAt(cb, time.Now())
-}
-
-// requeueAfterAt is requeueAfter with an injected clock so unit tests can pin
-// waiver-expiry shortening without wall-clock lag under load.
+// score without waiting for the full steady interval (ADR-005). The caller
+// passes its clock reading, so the cadence is a function of reconciled state
+// and the injected clock, not of when the reconcile happened to run.
 func requeueAfterAt(cb *baselinev1alpha1.ClusterBaseline, now time.Time) time.Duration {
 	const fast = 15 * time.Second
 	const slow = time.Minute

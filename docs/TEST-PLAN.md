@@ -623,6 +623,11 @@ an accepted risk neither inflates nor tanks the score.
       (`TestEnsureScanConfigCreatesAndPrunes`).
 - [x] **NextScanTime parsing**: valid cron advances; invalid yields nil
       (`TestNextScanTime`).
+- [x] **Clock is injected, not read from the wall**: a virtual clock drives
+      `status.nextScanTime` and the requeue cadence, and advancing simulated
+      time alone shortens the poll toward a waiver expiry
+      (`TestReconcileReadsTheInjectedClock`,
+      `TestWaiverExpiryShortensThePollOnSimulatedTime`).
 - [ ] **Two rapid spec edits**: optimistic-lock conflict on status update is
       retried via requeue, not left as permanent Degraded.
 - [ ] **Reconcile during an in-progress scan**: score is the last completed

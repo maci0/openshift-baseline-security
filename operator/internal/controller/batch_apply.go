@@ -7,7 +7,6 @@ import (
 	"maps"
 	"slices"
 	"strings"
-	"time"
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -370,7 +369,7 @@ func (r *ClusterBaselineReconciler) finishRemediationBatch(
 	// Cancelled only when we saw every remediation cleanly (no transient error hid
 	// an apply=true one), so a flaky Get never triggers an early resume.
 	cancelled := !anyApplying && getErr == nil
-	pastGrace := batchPastGrace(batch.StartedAt, time.Now())
+	pastGrace := batchPastGrace(batch.StartedAt, r.now())
 	if applied || pastGrace || cancelled {
 		for _, p := range batch.Pools {
 			if err := r.setMCPPaused(ctx, p, false, batch.PauseOwner); err != nil {

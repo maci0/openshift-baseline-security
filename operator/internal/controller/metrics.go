@@ -114,21 +114,23 @@ func init() {
 // (score -1, no check series, batch inactive, conditions 0). Keeps a fresh
 // observation timestamp so ComplianceStatusStale does not page for an
 // intentional delete while the operator process is still healthy.
-func clearPublishedMetrics() {
-	publishMetrics(&baselinev1alpha1.ClusterBaseline{})
+func clearPublishedMetrics(now time.Time) {
+	publishMetrics(&baselinev1alpha1.ClusterBaseline{}, now)
 }
 
 // publishMetrics reflects the aggregated status onto the Prometheus gauges.
 // Call after setRollupConditions (and on the reconcile-error Degraded path) so
-// condition gauges match the status about to be (or just) written.
-func publishMetrics(cb *baselinev1alpha1.ClusterBaseline) {
+// condition gauges match the status about to be (or just) written. now is the
+// caller's clock reading, so the scan interval and the freshness gauge come
+// from the same injected clock as the status they describe.
+func publishMetrics(cb *baselinev1alpha1.ClusterBaseline, now time.Time) {
 	// Walk the cron horizon before metricsMu: a per-minute schedule's first
 	// compute is ~0.3s, and holding the gauges lock across it would stall every
 	// concurrent publisher (tests, or a future raise of MaxConcurrentReconciles).
 	scanning := len(cb.Spec.Profiles) > 0 || len(cb.Spec.TailoredProfiles) > 0
 	var interval float64
 	if scanning {
-		interval = scanIntervalSeconds(cb.Spec.Schedule, time.Now())
+		interval = scanIntervalSeconds(cb.Spec.Schedule, now)
 	}
 
 	metricsMu.Lock()
@@ -200,7 +202,7 @@ func publishMetrics(cb *baselinev1alpha1.ClusterBaseline) {
 
 	// Publish freshness last so a concurrent scrape cannot select this replica as
 	// newest before its score and check gauges have been refreshed.
-	statusObservedTimestamp.Set(float64(time.Now().UnixNano()) / 1e9)
+	statusObservedTimestamp.Set(float64(now.UnixNano()) / 1e9)
 }
 
 func setCheckCounts(profile string, c baselinev1alpha1.ResultCounts, desired map[[2]string]struct{}) {

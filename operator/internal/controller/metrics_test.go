@@ -11,11 +11,15 @@ import (
 	"k8s.io/utils/ptr"
 )
 
+// metricsTestNow is the clock reading every publish in this file sees, so the
+// freshness gauge assert does not depend on when the test runs.
+var metricsTestNow = time.Date(2024, 3, 1, 12, 0, 0, 0, time.UTC)
+
 // resetMetrics clears package gauges so tests do not depend on execution order
 // under `go test -shuffle=on` (shared Prometheus state across Test* in this file).
 func resetMetrics(t *testing.T) {
 	t.Helper()
-	clearPublishedMetrics()
+	clearPublishedMetrics(metricsTestNow)
 }
 
 // The gauge must read the -1 sentinel before any publish, so a pre-aggregation
@@ -24,7 +28,7 @@ func TestComplianceScoreSeededSentinel(t *testing.T) {
 	resetMetrics(t)
 	// init() seeds -1; publishMetrics with a nil score keeps it there.
 	cb := &baselinev1alpha1.ClusterBaseline{}
-	publishMetrics(cb)
+	publishMetrics(cb, metricsTestNow)
 	if got := testutil.ToFloat64(complianceScore); got != -1 {
 		t.Fatalf("unpublished score gauge = %v, want -1 sentinel", got)
 	}
@@ -55,13 +59,15 @@ func TestPublishMetrics(t *testing.T) {
 	scanAt := metav1.NewTime(time.Unix(1_700_000_000, 0))
 	cb.Status.LastScanTime = &scanAt
 	cb.Status.NewlyFailed = []string{"check-a", "check-b"}
-	publishMetrics(cb)
+	publishMetrics(cb, metricsTestNow)
 
 	if got := testutil.ToFloat64(complianceScore); got != 87 {
 		t.Fatalf("score gauge = %v, want 87", got)
 	}
-	if got := testutil.ToFloat64(statusObservedTimestamp); got <= 0 || time.Now().Unix()-int64(got) > 60 {
-		t.Fatalf("status observation timestamp = %v, want ~now Unix time (a stale constant must not pass)", got)
+	// Freshness comes from the injected clock, so the gauge must be exactly the
+	// reading this publish saw: a hardcoded constant would leave StatusStale paging.
+	if got := testutil.ToFloat64(statusObservedTimestamp); got != float64(metricsTestNow.UnixNano())/1e9 {
+		t.Fatalf("status observation timestamp = %v, want the clock reading %v", got, float64(metricsTestNow.UnixNano())/1e9)
 	}
 	if got := testutil.ToFloat64(remediationBatchActive); got != 1 {
 		t.Fatalf("batch active gauge = %v, want 1", got)
@@ -84,7 +90,7 @@ func TestPublishMetrics(t *testing.T) {
 	setCond(cb, "Available", metav1.ConditionTrue, "AsExpected", "")
 	setCond(cb, "Progressing", metav1.ConditionFalse, "AsExpected", "")
 	setCond(cb, "Degraded", metav1.ConditionTrue, "InvalidSchedule", "bad cron")
-	publishMetrics(cb)
+	publishMetrics(cb, metricsTestNow)
 	if got := testutil.ToFloat64(conditionStatus.WithLabelValues("Available")); got != 1 {
 		t.Fatalf("Available condition gauge = %v, want 1", got)
 	}
@@ -118,7 +124,7 @@ func TestPublishMetrics(t *testing.T) {
 	cb.Status.Conditions = nil
 	cb.Status.LastScanTime = nil
 	cb.Status.NewlyFailed = nil
-	publishMetrics(cb)
+	publishMetrics(cb, metricsTestNow)
 	if got := testutil.ToFloat64(complianceScore); got != -1 {
 		t.Fatalf("score gauge = %v, want -1", got)
 	}
@@ -130,7 +136,7 @@ func TestPublishMetrics(t *testing.T) {
 	cb.Spec.Profiles = nil
 	cb.Spec.TailoredProfiles = nil
 	cb.Status.LastScanTime = &scanAt
-	publishMetrics(cb)
+	publishMetrics(cb, metricsTestNow)
 	if got := testutil.ToFloat64(lastScanTimestamp); got != 0 {
 		t.Fatalf("last scan timestamp while scanning disabled = %v, want 0", got)
 	}
@@ -167,7 +173,7 @@ func TestPublishMetricsDetailConditions(t *testing.T) {
 	setCond(cb, "ScanConfigured", metav1.ConditionTrue, "BindingsCreated", "")
 	setCond(cb, "ScanStorageReady", metav1.ConditionTrue, "AsExpected", "")
 	setCond(cb, "ConsolePluginReady", metav1.ConditionFalse, "ImageMissing", "RELATED_IMAGE unset")
-	publishMetrics(cb)
+	publishMetrics(cb, metricsTestNow)
 
 	if got := testutil.ToFloat64(conditionStatus.WithLabelValues("ComplianceOperatorReady")); got != 1 {
 		t.Fatalf("ComplianceOperatorReady = %v, want 1", got)
@@ -184,7 +190,7 @@ func TestPublishMetricsDetailConditions(t *testing.T) {
 	}
 
 	setCond(cb, "ConsolePluginReady", metav1.ConditionTrue, "Deployed", "")
-	publishMetrics(cb)
+	publishMetrics(cb, metricsTestNow)
 	if got := testutil.ToFloat64(conditionStatus.WithLabelValues("ConsolePluginReady")); got != 1 {
 		t.Fatalf("ConsolePluginReady Deployed = %v, want 1", got)
 	}
@@ -219,7 +225,7 @@ func TestPublishMetricsBatchStartedTimestamp(t *testing.T) {
 		Phase:     baselinev1alpha1.RemediationBatchPhaseApplying,
 		StartedAt: started,
 	}
-	publishMetrics(cb)
+	publishMetrics(cb, metricsTestNow)
 	if got := testutil.ToFloat64(remediationBatchActive); got != 1 {
 		t.Fatalf("batch active = %v, want 1", got)
 	}
@@ -227,7 +233,7 @@ func TestPublishMetricsBatchStartedTimestamp(t *testing.T) {
 		t.Fatalf("batch started timestamp = %v, want 1700000100", got)
 	}
 	cb.Status.RemediationBatch = nil
-	publishMetrics(cb)
+	publishMetrics(cb, metricsTestNow)
 	if got := testutil.ToFloat64(remediationBatchStartedTimestamp); got != 0 {
 		t.Fatalf("batch started timestamp after finish = %v, want 0", got)
 	}
@@ -247,7 +253,7 @@ func TestPublishMetricsDropsRemovedProfile(t *testing.T) {
 	cb.Status.TailoredProfiles = []baselinev1alpha1.TailoredProfileStatus{
 		{Name: "custom", ResultCounts: baselinev1alpha1.ResultCounts{Pass: 3, Fail: 0}},
 	}
-	publishMetrics(cb)
+	publishMetrics(cb, metricsTestNow)
 	// Two built-ins + one tailored × eight statuses = 24 series.
 	if got := testutil.CollectAndCount(complianceChecks); got != 24 {
 		t.Fatalf("check series before drop = %d, want 24", got)
@@ -264,7 +270,7 @@ func TestPublishMetricsDropsRemovedProfile(t *testing.T) {
 		{Key: "pci-dss", ResultCounts: baselinev1alpha1.ResultCounts{Pass: 8, Fail: 2}},
 	}
 	cb.Status.TailoredProfiles = nil
-	publishMetrics(cb)
+	publishMetrics(cb, metricsTestNow)
 
 	// CollectAndCount is the only safe stale-label check: WithLabelValues on a
 	// deleted series would recreate it at 0 and pollute subsequent tests.
@@ -305,9 +311,9 @@ func TestPublishMetricsConcurrent(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			if i%2 == 0 {
-				publishMetrics(a)
+				publishMetrics(a, metricsTestNow)
 			} else {
-				publishMetrics(b)
+				publishMetrics(b, metricsTestNow)
 			}
 		}()
 	}
@@ -331,7 +337,7 @@ func TestPublishMetricsConcurrent(t *testing.T) {
 		t.Fatalf("score after concurrent publish = %v, want 90 or 80", score)
 	}
 	// Leave package gauges in the same cleared state as TestPublishMetrics end.
-	clearPublishedMetrics()
+	clearPublishedMetrics(metricsTestNow)
 }
 
 // clearPublishedMetrics must drop score/fail series so alerts cannot stick after
@@ -345,9 +351,9 @@ func TestClearPublishedMetrics(t *testing.T) {
 	}
 	cb.Status.RemediationBatch = &baselinev1alpha1.RemediationBatchStatus{Phase: "Applying"}
 	setCond(cb, "Degraded", metav1.ConditionTrue, "ReconcileError", "boom")
-	publishMetrics(cb)
+	publishMetrics(cb, metricsTestNow)
 
-	clearPublishedMetrics()
+	clearPublishedMetrics(metricsTestNow)
 
 	if got := testutil.ToFloat64(complianceScore); got != -1 {
 		t.Fatalf("score after clear = %v, want -1", got)
@@ -370,7 +376,7 @@ func TestClearPublishedMetrics(t *testing.T) {
 	if got := testutil.ToFloat64(newlyFailedCount); got != 0 {
 		t.Fatalf("newly failed after clear = %v, want 0", got)
 	}
-	if got := testutil.ToFloat64(statusObservedTimestamp); got <= 0 || time.Now().Unix()-int64(got) > 60 {
-		t.Fatalf("observation timestamp after clear = %v, want ~now (avoid StatusStale; stale constant must not pass)", got)
+	if got := testutil.ToFloat64(statusObservedTimestamp); got != float64(metricsTestNow.UnixNano())/1e9 {
+		t.Fatalf("observation timestamp after clear = %v, want the clock reading %v (avoid StatusStale; a stale constant must not pass)", got, float64(metricsTestNow.UnixNano())/1e9)
 	}
 }

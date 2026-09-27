@@ -4,7 +4,6 @@ import (
 	"context"
 	_ "embed"
 	"maps"
-	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -71,8 +70,8 @@ func (r *ClusterBaselineReconciler) ensureComplianceDashboard(ctx context.Contex
 		logger := log.FromContext(ctx)
 		logger.V(1).Info("compliance dashboard configmap not reconciled",
 			"namespace", dashboardNS, "name", dashboardName, "error", err)
-		if r.lastDashboardErrLog.IsZero() || time.Since(r.lastDashboardErrLog) >= historyStallLogInterval {
-			r.lastDashboardErrLog = time.Now()
+		if r.lastDashboardErrLog.IsZero() || r.elapsed(r.lastDashboardErrLog) >= historyStallLogInterval {
+			r.lastDashboardErrLog = r.now()
 			logger.Error(err, "compliance dashboard configmap not reconciled",
 				"namespace", dashboardNS, "name", dashboardName)
 		}

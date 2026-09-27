@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"maps"
 	"slices"
-	"time"
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -67,7 +66,7 @@ func (r *ClusterBaselineReconciler) aggregateStatus(ctx context.Context, cb *bas
 	// and reported in the Waived bucket, keyed by ComplianceCheckResult name.
 	// Skip empty names so a corrupt entry cannot match every empty-named object.
 	// An expired waiver no longer applies: the check is scored by its raw status.
-	nowT := time.Now()
+	nowT := r.now()
 	waived := make(map[string]bool, len(cb.Spec.Waivers))
 	for _, w := range cb.Spec.Waivers {
 		if w.Name == "" {
@@ -311,6 +310,6 @@ func (r *ClusterBaselineReconciler) aggregateStatus(ctx context.Context, cb *bas
 		cb.Status.Fixed = nil
 		return nil
 	}
-	cb.Status.NextScanTime = nextScanTime(cb.Spec.Schedule, time.Now())
+	cb.Status.NextScanTime = nextScanTime(cb.Spec.Schedule, r.now())
 	return r.recordHistory(ctx, cb, cb.Status.Score, currentFails, weights, suites)
 }

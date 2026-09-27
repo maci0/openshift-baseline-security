@@ -3,7 +3,6 @@ package controller
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -34,7 +33,7 @@ func (r *ClusterBaselineReconciler) ensureScanConfig(ctx context.Context, cb *ba
 	// because its scan interval is 0, suppress the ComplianceScanStale alert.
 	// Treat it as invalid so the last-good cron is kept and the CR Degrades (which
 	// ClusterBaselineDegraded covers), instead of failing silently.
-	if schedErr == nil && nextScanTime(cb.Spec.Schedule, time.Now()) == nil {
+	if schedErr == nil && nextScanTime(cb.Spec.Schedule, r.now()) == nil {
 		schedErr = errScheduleNeverFires
 	}
 

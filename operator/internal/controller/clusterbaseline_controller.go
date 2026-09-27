@@ -99,6 +99,11 @@ type ClusterBaselineReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
 
+	// Clock is the reconcile loop's only source of wall-clock time. Nil reads
+	// the real clock; a deterministic simulation sets a virtual one so a whole
+	// run replays from a seed. See clock.go.
+	Clock clock
+
 	// lastHistoryStallLog rate-limits default-level Info when history cannot
 	// advance after a completed scan (suite missing / incomplete endTimestamps).
 	// V(1) alone leaves production logs silent until ComplianceScanStale (36h).
@@ -184,7 +189,7 @@ type ClusterBaselineReconciler struct {
 
 func (r *ClusterBaselineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
-	started := time.Now()
+	started := r.now()
 
 	cb := &baselinev1alpha1.ClusterBaseline{}
 	if err := r.Get(ctx, req.NamespacedName, cb); err != nil {
@@ -196,7 +201,7 @@ func (r *ClusterBaselineReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 				logger.Info("ClusterBaseline gone; cleared published metrics", "name", req.Name)
 				r.goneLogged = true
 			}
-			clearPublishedMetrics()
+			clearPublishedMetrics(r.now())
 			// Re-enqueue so the freshness heartbeat keeps ticking while the operator
 			// is healthy but the singleton is gone (no watch event will fire on an
 			// absent object). Stops when the CR is recreated or the process exits.
@@ -204,7 +209,7 @@ func (r *ClusterBaselineReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		}
 		// API/timeout failures: CRT also logs the reconcile error, but without
 		// the object name or that metrics were intentionally left unchanged.
-		logger.Error(err, "get ClusterBaseline failed", "name", req.Name, "duration", time.Since(started))
+		logger.Error(err, "get ClusterBaseline failed", "name", req.Name, "duration", r.elapsed(started))
 		return ctrl.Result{}, err
 	}
 	// CR exists again: re-arm the gone-transition log for the next deletion.
@@ -216,30 +221,30 @@ func (r *ClusterBaselineReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		if err := r.resumeBatchPoolsOnDelete(ctx, cb); err != nil {
 			// Structured context: finalizer stays until resume succeeds; without
 			// this log on-call only sees a generic reconcile error.
-			logger.Error(err, "resume batch pools on delete failed", "name", cb.Name, "duration", time.Since(started))
+			logger.Error(err, "resume batch pools on delete failed", "name", cb.Name, "duration", r.elapsed(started))
 			return ctrl.Result{}, err
 		}
 		if err := r.deregisterConsolePlugin(ctx); err != nil {
 			logger.Error(err, "deregister console plugin on delete failed",
-				"name", cb.Name, "duration", time.Since(started))
+				"name", cb.Name, "duration", r.elapsed(started))
 			return ctrl.Result{}, err
 		}
 		if controllerutil.RemoveFinalizer(cb, finalizerName) {
 			if err := r.Update(ctx, cb); err != nil {
-				logger.Error(err, "remove finalizer failed", "name", cb.Name, "duration", time.Since(started))
+				logger.Error(err, "remove finalizer failed", "name", cb.Name, "duration", r.elapsed(started))
 				return ctrl.Result{}, err
 			}
 			// Finalizer gone: object is about to GC. Clear gauges now; a later
 			// NotFound reconcile may never run if nothing re-enqueues.
 			logger.Info("finalizer removed; cleared published metrics", "name", cb.Name)
-			clearPublishedMetrics()
+			clearPublishedMetrics(r.now())
 			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, nil
 	}
 	if controllerutil.AddFinalizer(cb, finalizerName) {
 		if err := r.Update(ctx, cb); err != nil {
-			logger.Error(err, "add finalizer failed", "name", cb.Name, "duration", time.Since(started))
+			logger.Error(err, "add finalizer failed", "name", cb.Name, "duration", r.elapsed(started))
 			return ctrl.Result{}, err
 		}
 		return ctrl.Result{}, nil // update requeues
@@ -259,7 +264,7 @@ func (r *ClusterBaselineReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		// Structured Error before return: controller-runtime also logs the error,
 		// but without the CR name or that Degraded was attempted.
 		logger.Error(err, "reconcile failed",
-			"name", cb.Name, "generation", cb.Generation, "duration", time.Since(started))
+			"name", cb.Name, "generation", cb.Generation, "duration", r.elapsed(started))
 		// Snapshot BEFORE the status write: a real apiserver's /status response
 		// carries the STORED metadata, and the client decodes it back into cb,
 		// resetting the in-memory stamp to the old persisted value. Reading the
@@ -269,7 +274,7 @@ func (r *ClusterBaselineReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 			// Error, not V(1): without this log the CR can look healthy while
 			// every reconcile fails and the Degraded condition never sticks.
 			logger.Error(serr, "status update after reconcile error failed",
-				"name", cb.Name, "generation", cb.Generation, "duration", time.Since(started))
+				"name", cb.Name, "generation", cb.Generation, "duration", r.elapsed(started))
 		} else if stamped != preReconcileMode {
 			// The best-effort write above persisted any ring point recordHistory
 			// advanced under a just-flipped mode; keep the durable stamp aligned so
@@ -277,12 +282,12 @@ func (r *ClusterBaselineReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 			// stamp lagging the rings and fire a spurious historyScoringModeMismatch.
 			if perr := r.persistHistoryScoringMode(ctx, cb); perr != nil {
 				logger.Error(perr, "persist history scoring-mode stamp after reconcile error failed",
-					"name", cb.Name, "generation", cb.Generation, "duration", time.Since(started))
+					"name", cb.Name, "generation", cb.Generation, "duration", r.elapsed(started))
 			}
 		}
 		// Publish after Degraded is set so ClusterBaselineDegraded can fire even
 		// when aggregation never ran (API blip, batch apply failure, etc.).
-		publishMetrics(cb)
+		publishMetrics(cb, r.now())
 		return ctrl.Result{}, err
 	}
 	// OpenShift-style rollup conditions (Available / Progressing / Degraded).
@@ -299,10 +304,10 @@ func (r *ClusterBaselineReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	stamped := cb.Annotations[historyScoringModeAnn]
 	if err := r.Status().Update(ctx, cb); err != nil {
 		logger.Error(err, "status update failed",
-			"name", cb.Name, "generation", cb.Generation, "duration", time.Since(started))
+			"name", cb.Name, "generation", cb.Generation, "duration", r.elapsed(started))
 		return ctrl.Result{}, err
 	}
-	publishMetrics(cb)
+	publishMetrics(cb, r.now())
 	// Persist the history scoring-mode stamp only now that the rings it guards are
 	// durable. Only when recordHistory advanced it this reconcile, so the no-scan
 	// window between a mode flip and the next scan keeps the stamp (and the
@@ -310,7 +315,7 @@ func (r *ClusterBaselineReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	if stamped != preReconcileMode {
 		if err := r.persistHistoryScoringMode(ctx, cb); err != nil {
 			logger.Error(err, "persist history scoring-mode stamp failed",
-				"name", cb.Name, "generation", cb.Generation, "duration", time.Since(started))
+				"name", cb.Name, "generation", cb.Generation, "duration", r.elapsed(started))
 			return ctrl.Result{}, err
 		}
 	}
@@ -358,7 +363,7 @@ func (r *ClusterBaselineReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		"progressing", progressing,
 		"degraded", degraded,
 		"batchActive", cb.Status.RemediationBatch != nil,
-		"duration", time.Since(started),
+		"duration", r.elapsed(started),
 	}
 	// Log the Degraded / not-Available summary at Info only when the posture first
 	// enters this (state, reason); a steady failing state at the 1m poll drops to
@@ -382,7 +387,7 @@ func (r *ClusterBaselineReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		r.lastPostureLogSig = "" // healthy: re-entering a failing state logs again
 		logger.V(1).Info("reconciled", keysAndValues...)
 	}
-	return ctrl.Result{RequeueAfter: requeueAfter(cb)}, nil
+	return ctrl.Result{RequeueAfter: requeueAfterAt(cb, r.now())}, nil
 }
 
 // postureLog logs a Degraded / not-Available summary at Info the first time this
@@ -448,6 +453,7 @@ func (r *ClusterBaselineReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		ctrl:   c,
 		cache:  mgr.GetCache(),
 		mapper: mgr.GetRESTMapper(),
+		clock:  r.Clock,
 		gvks:   []schema.GroupVersionKind{suiteGVK, scanGVK, remediationGVK, checkResultGVK},
 	})
 }
@@ -499,7 +505,10 @@ type lazyComplianceWatch struct {
 	ctrl   controller.Controller
 	cache  cache.Cache
 	mapper meta.RESTMapper
-	gvks   []schema.GroupVersionKind
+	// clock mirrors the reconciler's, so the watch-retry log rate limit is
+	// driven by the same virtual time as the reconcile loop it feeds.
+	clock clock
+	gvks  []schema.GroupVersionKind
 
 	// loggedWaitingCRDs gates the RESTMapping-miss Info to the first wait: CRDs
 	// absent at startup is expected and would otherwise log every 30s per kind
@@ -557,8 +566,8 @@ func (l *lazyComplianceWatch) Start(ctx context.Context) error {
 				// would bury other signals. V(1) keeps the full cadence.
 				still = append(still, gvk)
 				logger.V(1).Info("watch not established yet; will retry", "kind", gvk.Kind, "error", err)
-				if l.lastWatchErrLog.IsZero() || time.Since(l.lastWatchErrLog) >= historyStallLogInterval {
-					l.lastWatchErrLog = time.Now()
+				if l.lastWatchErrLog.IsZero() || l.now().Sub(l.lastWatchErrLog) >= historyStallLogInterval {
+					l.lastWatchErrLog = l.now()
 					logger.Error(err, "watch not established yet; will retry", "kind", gvk.Kind)
 				}
 				continue

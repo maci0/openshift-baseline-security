@@ -227,7 +227,7 @@ func (r *ClusterBaselineReconciler) recordHistory(
 		}
 		return err
 	}
-	now := time.Now()
+	now := r.now()
 	var latest time.Time
 	completedSuites := make(map[string]completedSuiteRun, len(expectedSuites))
 	for _, name := range slices.Sorted(maps.Keys(expectedSuites)) {
@@ -393,9 +393,9 @@ const historyStallLogInterval = 30 * time.Minute
 func (r *ClusterBaselineReconciler) logHistoryStall(ctx context.Context, msg string, keysAndValues ...any) {
 	logger := log.FromContext(ctx)
 	logger.V(1).Info(msg, keysAndValues...)
-	if !r.lastHistoryStallLog.IsZero() && time.Since(r.lastHistoryStallLog) < historyStallLogInterval {
+	if !r.lastHistoryStallLog.IsZero() && r.elapsed(r.lastHistoryStallLog) < historyStallLogInterval {
 		return
 	}
-	r.lastHistoryStallLog = time.Now()
+	r.lastHistoryStallLog = r.now()
 	logger.Info(msg, keysAndValues...)
 }

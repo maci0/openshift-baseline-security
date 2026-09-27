@@ -39,10 +39,6 @@ func TestRequeueAfter(t *testing.T) {
 	if got := requeueAfterAt(batching, now); got != 15*time.Second {
 		t.Fatalf("batch Applying = %v, want 15s", got)
 	}
-	// Production entry point matches requeueAfterAt(now) for a steady CR.
-	if got := requeueAfter(steady); got != time.Minute {
-		t.Fatalf("requeueAfter(steady) = %v, want 1m", got)
-	}
 }
 
 func TestNearestWaiverExpiry(t *testing.T) {

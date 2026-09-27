@@ -6,7 +6,6 @@ import (
 	"os"
 	"slices"
 	"strings"
-	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -157,8 +156,8 @@ func (r *ClusterBaselineReconciler) infrastructureSingleReplica(ctx context.Cont
 // and a persistent denial must surface without streaming an unbounded Error log.
 func (r *ClusterBaselineReconciler) logInfraReadErr(ctx context.Context, err error) {
 	logger := log.FromContext(ctx)
-	if r.lastInfraErrLog.IsZero() || time.Since(r.lastInfraErrLog) >= historyStallLogInterval {
-		r.lastInfraErrLog = time.Now()
+	if r.lastInfraErrLog.IsZero() || r.elapsed(r.lastInfraErrLog) >= historyStallLogInterval {
+		r.lastInfraErrLog = r.now()
 		logger.Error(err, "cannot read cluster Infrastructure topology; assuming multi-node plugin layout",
 			"name", clusterBaselineName)
 		return
