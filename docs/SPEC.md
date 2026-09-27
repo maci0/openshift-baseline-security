@@ -262,7 +262,10 @@ status:
   relatedObjects: []           # owned/driven resources for must-gather
   # remediationBatch: optional in-flight MCP-paused batch apply
   # previousFailures / diffBaseFailures / diffBaseScanTime: internal scan-diff
-  # bookkeeping retained across reconciles (not user-facing knobs)
+  # bookkeeping retained across reconciles (not user-facing knobs). The FAIL set
+  # is trimmed to a quarter of the status failure-list size budget before it is
+  # diffed or stored, so all four lists stay under the apiserver object limit
+  # and the diff never reports a check the trim dropped as a new regression.
 ```
 
 **Scoring note.** `status.score` is a single **pooled** ratio across every selected

@@ -220,6 +220,15 @@ func (r *ClusterBaselineReconciler) recordHistory(
 	if len(expectedSuites) == 0 {
 		return nil
 	}
+	// Trim the current FAIL set to the per-list size share BEFORE it is diffed or
+	// stored as the baseline. The apiserver object-size budget (sanitize.go) can
+	// only keep a prefix of each of the four failure lists, so an untrimmed set
+	// here would persist a shorter PreviousFailures than the one the next scan
+	// diffs against: every name the budget hid would come back as a permanent
+	// "new regression" on every subsequent scan. Trimming once here makes all
+	// four lists subsets of one set the budget already admits, so the diff can
+	// only ever under-report, never invent.
+	clampFailureListToShare(&currentFails)
 	fetched, err := r.listOwnedSuites(ctx, expectedSuites)
 	if fetched == nil {
 		// CRDs absent mid-history (partial CO uninstall). The CCR list may

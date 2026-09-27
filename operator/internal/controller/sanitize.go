@@ -456,6 +456,14 @@ func clampFailureList(in []string) []string {
 // conditions, spec, and metadata.
 const failureListsSizeBudget = 768 * 1024
 
+// failureListShareBudget is failureListsSizeBudget split four ways, the share
+// one failure-name list may use without the other three pushing the status over
+// the limit. The current FAIL set is truncated to it BEFORE it is diffed and
+// stored as the baseline (see recordHistory): all four lists are subsets of that
+// one truncated set, so the budget holds by construction and the scan diff can
+// never report a check as a regression that the budget simply hid.
+const failureListShareBudget = failureListsSizeBudget / 4
+
 // jsonStringLen returns the exact number of bytes encoding/json writes for the
 // string s, without allocating. It must stay equal to len(json.Marshal(s)) for
 // a string under the Go toolchain go.mod pins (FuzzJSONStringLenMatchesMarshal
@@ -504,14 +512,28 @@ func jsonStringLen(s string) int {
 }
 
 // clampFailureListsToBudget trims the given failure-name lists together so their
-// combined serialized size (each name as json.Marshal would write it, plus the
-// separating comma) stays under failureListsSizeBudget. It repeatedly drops the
-// tail of whichever list is currently largest, so no single list dominates and
-// the whole status cannot exceed the apiserver object-size limit and freeze
-// Status().Update. Truncating the tails degrades the diff on an extreme cluster
-// (some regressions/fixes drop out) but keeps reconcile alive, which a frozen
-// status write would not.
+// combined serialized size stays under failureListsSizeBudget.
 func clampFailureListsToBudget(lists ...*[]string) {
+	trimFailureListsToBudget(failureListsSizeBudget, lists...)
+}
+
+// clampFailureListToShare trims one failure-name list to the per-list share of
+// failureListsSizeBudget. The scan-diff baseline is trimmed with this before it
+// is used, so every list the diff writes is a subset of one already-trimmed set
+// and the shared-budget trim above never has to drop a name the diff reported.
+func clampFailureListToShare(list *[]string) {
+	trimFailureListsToBudget(failureListShareBudget, list)
+}
+
+// trimFailureListsToBudget trims the given failure-name lists together so their
+// combined serialized size (each name as json.Marshal would write it, plus the
+// separating comma) stays under budget. It repeatedly drops the tail of whichever
+// list is currently largest, so no single list dominates and the whole status
+// cannot exceed the apiserver object-size limit and freeze Status().Update.
+// Truncating the tails degrades the diff on an extreme cluster (some
+// regressions/fixes drop out) but keeps reconcile alive, which a frozen status
+// write would not.
+func trimFailureListsToBudget(budget int, lists ...*[]string) {
 	const perEntryOverhead = 1 // the comma separating entries
 	sizes := make([]int, len(lists))
 	total := 0
@@ -523,7 +545,7 @@ func clampFailureListsToBudget(lists ...*[]string) {
 		sizes[i] = s
 		total += s
 	}
-	for total > failureListsSizeBudget {
+	for total > budget {
 		largest := -1
 		for i := range lists {
 			if len(*lists[i]) > 0 && (largest < 0 || sizes[i] > sizes[largest]) {

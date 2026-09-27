@@ -2672,6 +2672,75 @@ func TestRecordHistoryRegression(t *testing.T) {
 	}
 }
 
+// TestRecordHistoryOversizedFailureSetNoPhantomRegressions: the apiserver object
+// size budget can only keep a prefix of each failure list. Trimming the FAIL set
+// inside recordHistory keeps the persisted baseline the same set the next scan
+// diffs against, so a name the budget drops stays invisible instead of coming
+// back as a regression on every subsequent scan.
+func TestRecordHistoryOversizedFailureSetNoPhantomRegressions(t *testing.T) {
+	scheme := testScheme(t)
+	// Sorted, 253-byte names (CRD items:MaxLength) at the MaxItems cap: several
+	// times the per-list size share, so the budget is the binding constraint.
+	fails := make([]string, failureListMax)
+	for i := range fails {
+		fails[i] = fmt.Sprintf("%0253d", i)
+	}
+	listSize := func(l []string) int {
+		total := 0
+		for _, name := range l {
+			total += jsonStringLen(name) + 1
+		}
+		return total
+	}
+	// One reconciler per generation: the suite endTimestamp has to move forward
+	// for recordHistory to take the new-scan path instead of the equal-time
+	// late-refresh path.
+	runScan := func(end metav1.Time, cb *baselinev1alpha1.ClusterBaseline) {
+		t.Helper()
+		r := &ClusterBaselineReconciler{
+			Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(
+				completedSuite("baseline-cis", end.Time),
+			).Build(),
+			Scheme: scheme,
+		}
+		if err := r.recordHistory(context.Background(), cb, ptr.To(int32(80)), slices.Clone(fails), nil, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	first := metav1.NewTime(time.Date(2026, 7, 10, 1, 0, 0, 0, time.UTC))
+	second := metav1.NewTime(time.Date(2026, 7, 11, 1, 0, 0, 0, time.UTC))
+	third := metav1.NewTime(time.Date(2026, 7, 12, 1, 0, 0, 0, time.UTC))
+	cb := &baselinev1alpha1.ClusterBaseline{
+		Spec: baselinev1alpha1.ClusterBaselineSpec{Profiles: []baselinev1alpha1.ProfileKey{"cis"}},
+		Status: baselinev1alpha1.ClusterBaselineStatus{
+			LastScanTime: &first, PreviousFailures: nil,
+		},
+	}
+	runScan(second, cb)
+
+	// The baseline that reaches the apiserver already fits its share, so the
+	// round trip through the object-size budget is lossless.
+	if size := listSize(cb.Status.PreviousFailures); size > failureListShareBudget {
+		t.Fatalf("previousFailures serializes to %d bytes, over the %d share", size, failureListShareBudget)
+	}
+	kept := len(cb.Status.PreviousFailures)
+	sanitizeStatusForUpdate(cb)
+	if got := len(cb.Status.PreviousFailures); got != kept {
+		t.Fatalf("the status write dropped %d of %d baseline entries; the next scan reads back a shorter base", kept-got, kept)
+	}
+
+	// Same failures, newer generation: nothing regressed and nothing was fixed.
+	cb.Status.LastScanTime = &second
+	runScan(third, cb)
+	if len(cb.Status.NewlyFailed) != 0 {
+		t.Fatalf("unchanged oversized fail set reported %d regressions (first %q)", len(cb.Status.NewlyFailed), cb.Status.NewlyFailed[0])
+	}
+	if len(cb.Status.Fixed) != 0 {
+		t.Fatalf("unchanged oversized fail set reported %d fixes (first %q)", len(cb.Status.Fixed), cb.Status.Fixed[0])
+	}
+}
+
 func TestRecordHistoryFirstScanHasNoFalseRegressions(t *testing.T) {
 	scheme := testScheme(t)
 	suite := completedSuite("baseline-cis", time.Date(2026, 7, 11, 1, 0, 0, 0, time.UTC))

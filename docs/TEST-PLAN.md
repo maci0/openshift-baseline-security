@@ -188,6 +188,10 @@ silently turn it into a mean of per-profile scores.
 - [x] **Per-profile card vs global score mismatch is intentional**: large failing
       profile dominates pool while a small perfect profile stays 100%
       (`TestAggregateStatusLargeBenchmarkDominance`).
+- [x] **Oversized fail set reports no phantom regressions**: a FAIL set past the
+      status object-size budget is trimmed to the per-list share before it is
+      diffed or stored, so the persisted baseline is never shorter than the set
+      the next scan diffs against (`TestRecordHistoryOversizedFailureSetNoPhantomRegressions`).
 
 ## A2. Multi-node behavior (>1 node in a MachineConfigPool)
 

@@ -606,6 +606,15 @@ depend on those tags.
   waiver add and remove, TailoredProfile create, update, and bind, tailored
   profile unbind, default baseline create, and every remediation path
   (per-row apply, unapply, auto-apply, batch apply).
+- `newlyFailed` reported long-standing failures as new regressions on a
+  heavily-failing cluster. The apiserver object-size budget can only keep a
+  prefix of `previousFailures` and `diffBaseFailures`, but the scan diff was
+  computed against the full in-memory FAIL set, so the check names the budget
+  dropped came back as regressions on every subsequent scan. The FAIL set is now
+  trimmed to the per-list size share before it is diffed or stored, which makes
+  all four failure lists subsets of one set the budget already admits. Checks
+  past the share are now invisible rather than permanently reported; a cluster
+  whose failing-check names exceed the share reports a bounded, stable subset.
 
 ## [0.6.1] - 2026-09-02
 
