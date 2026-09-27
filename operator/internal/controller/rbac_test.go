@@ -1,11 +1,14 @@
 package controller
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+
+	"sigs.k8s.io/yaml"
 )
 
 // TestSubscriptionRBACAllowsUpdate guards the production path that patches an
@@ -26,22 +29,170 @@ func TestOperatorGroupRBACAllowsUpdate(t *testing.T) {
 
 func assertRoleResourceUpdate(t *testing.T, text, resource string) {
 	t.Helper()
-	if !strings.Contains(text, resource) {
-		t.Fatalf("role.yaml has no %s resource entry", resource)
+	rules := rulesGrantingResource(t, mustParseClusterRole(t, text), resource)
+	if len(rules) == 0 {
+		t.Fatalf("role.yaml has no rule for resource %q", resource)
 	}
-	if !roleHasResourceVerb(text, resource, "create") {
+	if !ruleGrantsVerb(rules, "create") {
 		t.Fatalf("%s RBAC missing create", resource)
 	}
 	for _, verb := range []string{"get", "update", "patch"} {
-		if !roleHasResourceVerb(text, resource, verb) {
+		if !ruleGrantsVerb(rules, verb) {
 			t.Fatalf("%s RBAC missing verb %q", resource, verb)
 		}
 	}
-	// Name-scope must pin the CO object so a compromised SA cannot rewrite
-	// arbitrary Subscriptions / OperatorGroups cluster-wide.
-	if !strings.Contains(text, "compliance-operator") {
-		t.Fatalf("%s RBAC missing resourceNames compliance-operator", resource)
+	// Name-scoped get/update/patch must pin the CO object so a compromised SA
+	// cannot rewrite arbitrary Subscriptions / OperatorGroups cluster-wide.
+	// The scope is per rule: a create-only rule elsewhere in the file must not
+	// satisfy this, and dropping resourceNames from the rule that does carry
+	// update must fail even if some other rule mentions the name.
+	if !ruleGrantsNameScopedWrite(rules, "compliance-operator") {
+		t.Fatalf("%s RBAC missing name-scoped get/update/patch (resourceNames: compliance-operator)", resource)
 	}
+}
+
+// policyRule mirrors one entry of a ClusterRole's rules list. The json tags are
+// what sigs.k8s.io/yaml decodes, because it routes YAML through JSON.
+type policyRule struct {
+	APIGroups     []string `json:"apiGroups"`
+	Resources     []string `json:"resources"`
+	Verbs         []string `json:"verbs"`
+	ResourceNames []string `json:"resourceNames"`
+}
+
+type clusterRole struct {
+	Rules []policyRule `json:"rules"`
+}
+
+type multiDocRole struct {
+	Items []clusterRole `json:"items"`
+}
+
+func mustParseClusterRole(t *testing.T, text string) clusterRole {
+	t.Helper()
+	var role clusterRole
+	if err := yaml.Unmarshal([]byte(text), &role); err != nil {
+		t.Fatalf("parse ClusterRole: %v", err)
+	}
+	var list multiDocRole
+	if err := yaml.Unmarshal([]byte(text), &list); err == nil && list.Items != nil {
+		role.Rules = append(role.Rules, list.Items[0].Rules...)
+	}
+	return role
+}
+
+// rulesGrantingResource returns every rule naming resource (or the wildcard),
+// regardless of verb, so a caller can check the full verb set for it.
+func rulesGrantingResource(t *testing.T, role clusterRole, resource string) []policyRule {
+	t.Helper()
+	var out []policyRule
+	for _, rule := range role.Rules {
+		for _, r := range rule.Resources {
+			if r == resource || r == "*" {
+				out = append(out, rule)
+				break
+			}
+		}
+	}
+	return out
+}
+
+func ruleGrantsVerb(rules []policyRule, verb string) bool {
+	for _, rule := range rules {
+		for _, v := range rule.Verbs {
+			if v == verb || v == "*" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// ruleGrantsNameScopedWrite requires one rule to carry both the write verbs
+// and the resourceNames entry, so a name-scoped rule and a write rule cannot
+// come from two different blocks.
+func ruleGrantsNameScopedWrite(rules []policyRule, name string) bool {
+	for _, rule := range rules {
+		writes := false
+		for _, v := range rule.Verbs {
+			if v == "update" || v == "patch" || v == "*" {
+				writes = true
+				break
+			}
+		}
+		if !writes {
+			continue
+		}
+		for _, n := range rule.ResourceNames {
+			if n == name || n == "*" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// TestRoleRulesAreScopedToTheResource pins the scoping the RBAC guards above
+// depend on: verbs and resourceNames are read from the rule that names the
+// resource, so a create-only rule elsewhere in the file cannot stand in for a
+// missing name-scoped write rule. Each case is a whole role document that must
+// satisfy (or not) the same predicates the file-based guards use.
+func TestRoleRulesAreScopedToTheResource(t *testing.T) {
+	t.Parallel()
+	const writeRule = `
+- apiGroups: [operators.coreos.com]
+  resourceNames: [compliance-operator]
+  resources: [%s]
+  verbs: [get, patch, update]
+- apiGroups: [operators.coreos.com]
+  resources: [%s]
+  verbs: [create]
+`
+	role := func(rules string) clusterRole {
+		t.Helper()
+		return mustParseClusterRole(t, "kind: ClusterRole\nrules:"+rules)
+	}
+	t.Run("well formed role passes", func(t *testing.T) {
+		t.Parallel()
+		rules := rulesGrantingResource(t, role(fmt.Sprintf(writeRule, "subscriptions", "subscriptions")), "subscriptions")
+		if !ruleGrantsVerb(rules, "create") || !ruleGrantsVerb(rules, "update") {
+			t.Fatalf("well formed role rejected: %+v", rules)
+		}
+		if !ruleGrantsNameScopedWrite(rules, "compliance-operator") {
+			t.Fatal("well formed role lost its name-scoped write rule")
+		}
+	})
+	t.Run("dropping resourceNames from the write rule fails", func(t *testing.T) {
+		t.Parallel()
+		doc := `
+- apiGroups: [operators.coreos.com]
+  resources: [subscriptions]
+  verbs: [get, patch, update, create]
+- apiGroups: [operators.coreos.com]
+  resources: [operatorgroups]
+  resourceNames: [compliance-operator]
+  verbs: [update]
+`
+		rules := rulesGrantingResource(t, role(doc), "subscriptions")
+		if !ruleGrantsVerb(rules, "update") {
+			t.Fatal("setup: the unscoped write rule should still grant update")
+		}
+		if ruleGrantsNameScopedWrite(rules, "compliance-operator") {
+			t.Error("an unscoped write rule was accepted as name-scoped")
+		}
+	})
+	t.Run("resource from another rule is not borrowed", func(t *testing.T) {
+		t.Parallel()
+		doc := `
+- apiGroups: [operators.coreos.com]
+  resources: [configmaps]
+  resourceNames: [compliance-operator]
+  verbs: [update, patch, get, create]
+`
+		if rules := rulesGrantingResource(t, role(doc), "subscriptions"); len(rules) != 0 {
+			t.Errorf("configmaps rule matched subscriptions: %+v", rules)
+		}
+	})
 }
 
 func mustReadRepoFile(t *testing.T, rel ...string) string {
@@ -74,16 +225,6 @@ func mustReadCSV(t *testing.T) string {
 		"baseline-security-operator.clusterserviceversion.yaml")
 }
 
-// roleHasResourceVerb is true when role.yaml lists verb as a YAML list item
-// and the resource name appears (create may be on a separate block from
-// name-scoped get/update/patch).
-func roleHasResourceVerb(roleYAML, resourceName, verb string) bool {
-	if !strings.Contains(roleYAML, resourceName) {
-		return false
-	}
-	return rbacVerbListed(roleYAML, verb)
-}
-
 // rbacVerbListed reports whether block contains a YAML list item for verb
 // ("- update" as its own list entry), not a bare substring match.
 func rbacVerbListed(block, verb string) bool {
@@ -107,19 +248,57 @@ func TestCSVSubscriptionRBACAllowsUpdate(t *testing.T) {
 	assertCSVResourceUpdate(t, mustReadCSV(t), "subscriptions")
 }
 
+// assertCSVResourceUpdate checks the CSV's own clusterPermissions entry, not
+// merely that the resource and its verbs appear somewhere in the document: the
+// create rule, the name-scoped write rule and unrelated rules are separate
+// blocks, and only the block that names the resource may satisfy the check.
 func assertCSVResourceUpdate(t *testing.T, text, resource string) {
 	t.Helper()
-	if !strings.Contains(text, "resources: ["+resource+"]") {
+	rules := csvRulesGrantingResource(t, text, resource)
+	if len(rules) == 0 {
 		t.Fatalf("CSV has no %s permission entry", resource)
 	}
 	// Create is unscoped; get/update/patch are on the resourceNames block.
-	// Scan the full CSV so either form is accepted.
-	if !csvVerbsInclude(text, "update") || !csvVerbsInclude(text, "patch") {
-		t.Fatalf("CSV %s rules missing update/patch", resource)
+	if !ruleGrantsVerb(rules, "create") {
+		t.Fatalf("CSV %s rules missing create", resource)
 	}
-	if !strings.Contains(text, "resourceNames: [compliance-operator]") {
-		t.Fatalf("CSV %s missing resourceNames compliance-operator", resource)
+	for _, verb := range []string{"get", "update", "patch"} {
+		if !ruleGrantsVerb(rules, verb) {
+			t.Fatalf("CSV %s rules missing %s", resource, verb)
+		}
 	}
+	if !ruleGrantsNameScopedWrite(rules, "compliance-operator") {
+		t.Fatalf("CSV %s missing name-scoped get/update/patch (resourceNames: compliance-operator)", resource)
+	}
+}
+
+// csvPermission is one entry of the CSV's spec.install.spec.clusterPermissions.
+type csvPermission struct {
+	ServiceAccountName string       `json:"serviceAccountName"`
+	Rules              []policyRule `json:"rules"`
+}
+
+type csvSpec struct {
+	Spec struct {
+		Install struct {
+			Spec struct {
+				ClusterPermissions []csvPermission `json:"clusterPermissions"`
+			} `json:"spec"`
+		} `json:"install"`
+	} `json:"spec"`
+}
+
+func csvRulesGrantingResource(t *testing.T, text, resource string) []policyRule {
+	t.Helper()
+	var csv csvSpec
+	if err := yaml.Unmarshal([]byte(text), &csv); err != nil {
+		t.Fatalf("parse CSV: %v", err)
+	}
+	var out []policyRule
+	for _, perm := range csv.Spec.Install.Spec.ClusterPermissions {
+		out = append(out, rulesGrantingResource(t, clusterRole{Rules: perm.Rules}, resource)...) //nolint:gocritic //nolint
+	}
+	return out
 }
 
 // clusterRoleDoc returns the YAML document whose metadata.name is name.

@@ -54,7 +54,6 @@ const HOSTILE = [
   '2026-00-00',
   '9999-99-99',
   '0000-01-01',
-  '-000001-01-01',
   '2026-2-3', // single digits: not YYYY-MM-DD
   '2026-02-03',
   '2026-02-03T23:59:59.999Z',
@@ -77,6 +76,30 @@ const HOSTILE = [
 ];
 
 const NUMBERS = [0, -0, 1, -1, 1e21, -1e21, Number.MAX_SAFE_INTEGER, 0.5, NaN, Infinity, -Infinity];
+
+// Subset of HOSTILE that neither the date-only branch nor `new Date` can turn
+// into a Date, so the fallback contract for them is exact: the input is
+// returned verbatim. Listed explicitly rather than derived, so the assertion
+// states the expectation instead of re-running the parse it checks.
+const UNPARSEABLE = [
+  '',
+  ' ',
+  '\0',
+  '\u0000\u0001\u0002',
+  '\uFFFF',
+  'not-a-date',
+  '2026-13-01',
+  '2026-00-00',
+  '9999-99-99',
+  '+275760-09-14',
+  '2026-02-03T25:61:61Z',
+  '275760-09-13T00:00:00.000Z',
+  '..-..',
+  'true',
+  'NaN',
+  'Infinity',
+  'x'.repeat(1000),
+];
 
 describe('dates throw-safety (fuzz sweep)', () => {
   for (const s of HOSTILE) {
@@ -137,11 +160,26 @@ describe('dates throw-safety (fuzz sweep)', () => {
       for (const fmt of [formatLocalDate, formatLocalDateTime]) {
         const out = fmt(s, 'en-US');
         expect(out).not.toContain('Invalid Date');
-        // parseLocalDateOnly / new Date rejection path returns the input
-        // verbatim; otherwise the localized output must be a non-empty string.
-        expect(out === s || out.length > 0).toBeTruthy();
+        // The exact fallback contract for input the runtime cannot parse at
+        // all: the string comes back verbatim rather than as a locale format
+        // of some other date.
+        if (UNPARSEABLE.includes(s)) {
+          expect(out).toBe(s);
+        }
       }
     }
+  });
+
+  it('a strict YYYY-MM-DD is formatted, and an impossible one is echoed', () => {
+    // The date-only branch parses a local calendar day, so a real one formats.
+    expect(formatLocalDate('2026-02-03', 'en-US')).not.toBe('2026-02-03');
+    expect(formatLocalDate('2026-02-03', 'en-US')).not.toContain('Invalid Date');
+    // A day that is not on the calendar is not a date. new Date('2026-02-31')
+    // would overflow it to 3 March; the date-only branch must not.
+    expect(formatLocalDate('2026-02-31', 'en-US')).toBe('2026-02-31');
+    expect(formatLocalDate('2026-13-01', 'en-US')).toBe('2026-13-01');
+    expect(formatLocalDate('2026-00-00', 'en-US')).toBe('2026-00-00');
+    expect(formatLocalDate('9999-99-99', 'en-US')).toBe('9999-99-99');
   });
 
   it('formatCount never throws for non-finite numbers or hostile locales', () => {

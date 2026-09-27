@@ -7,9 +7,15 @@ describe('foldForSearch', () => {
   });
 
   // NFD-normalized input must fold to the same string as its composed form,
-  // or a name that reached the catalog decomposed matches nothing.
+  // or a name that reached the catalog decomposed matches nothing. The second
+  // literal is written as explicit combining escapes so it really is NFD and
+  // not a second copy of the composed form.
   it('normalizes decomposed and composed input to the same form', () => {
-    expect(foldForSearch('Sécurité')).toBe(foldForSearch('Sécurité'));
+    const composed = 'Sécurité';
+    const decomposed = 'Se\u0301curite\u0301';
+    expect(decomposed).not.toBe(composed);
+    expect(foldForSearch(composed)).toBe('securite');
+    expect(foldForSearch(decomposed)).toBe('securite');
   });
 
   // The distinction toLocaleLowerCase would collapse: in a search box 'I' and

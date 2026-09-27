@@ -124,12 +124,11 @@ describe('downloadBlob', () => {
       expect(dom.anchor.download).not.toContain('..');
       // Defense in depth when a browser ignores the download attribute.
       expect(dom.anchor.rel).toBe('noopener noreferrer');
-      // Exactly once, spelled as two bounds: the preset bans both
-      // toHaveBeenCalledTimes(1) and toHaveBeenCalledOnce().
-      expect(dom.createObjectURL).toHaveBeenCalled();
-      expect(dom.createObjectURL).not.toHaveBeenCalledTimes(2);
-      expect(dom.anchor.click).toHaveBeenCalled();
-      expect(dom.anchor.click).not.toHaveBeenCalledTimes(2);
+      // Exactly once: the preset bans toHaveBeenCalledTimes(1) and
+      // toHaveBeenCalledOnce(), and "called" plus "not twice" would also pass
+      // on three calls, so count the recorded calls.
+      expect(dom.createObjectURL.mock.calls).toHaveLength(1);
+      expect(dom.anchor.click.mock.calls).toHaveLength(1);
       expect(dom.revokeObjectURL).toHaveBeenCalledWith('blob:mock-url');
     } finally {
       dom.restore();
@@ -287,12 +286,11 @@ describe('openBlobInTab', () => {
       expect(dom.revokeObjectURL).toHaveBeenCalledWith('blob:mock-url');
       expect(dom.pendingTimers.size).toBe(0);
       handle.dispose();
-      expect(dom.revokeObjectURL).toHaveBeenCalled();
-      expect(dom.revokeObjectURL).not.toHaveBeenCalledTimes(2);
+      expect(dom.revokeObjectURL.mock.calls).toHaveLength(1);
       if (id !== undefined) {
         dom.fireTimer(id);
       }
-      expect(dom.revokeObjectURL).not.toHaveBeenCalledTimes(2);
+      expect(dom.revokeObjectURL.mock.calls).toHaveLength(1);
     } finally {
       dom.restore();
     }
@@ -311,7 +309,7 @@ describe('openBlobInTab', () => {
       dom.fireTimer(id);
       expect(dom.revokeObjectURL).toHaveBeenCalledWith('blob:mock-url');
       handle.dispose();
-      expect(dom.revokeObjectURL).not.toHaveBeenCalledTimes(2);
+      expect(dom.revokeObjectURL.mock.calls).toHaveLength(1);
     } finally {
       dom.restore();
     }
@@ -326,7 +324,7 @@ describe('openBlobInTab', () => {
       expect(dom.revokeObjectURL).toHaveBeenCalledWith('blob:mock-url');
       expect(dom.pendingTimers.size).toBe(0);
       handle.dispose();
-      expect(dom.revokeObjectURL).not.toHaveBeenCalledTimes(2);
+      expect(dom.revokeObjectURL.mock.calls).toHaveLength(1);
     } finally {
       dom.restore();
     }

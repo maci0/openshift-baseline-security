@@ -42,10 +42,10 @@ describe('restoreFocus', () => {
   it('focuses the trigger when it is still connected', () => {
     const { el, focus } = fakeEl(true);
     restoreFocus(el);
-    // Exactly once, spelled as two bounds: the preset bans both
-    // toHaveBeenCalledTimes(1) and toHaveBeenCalledOnce().
-    expect(focus).toHaveBeenCalled();
-    expect(focus).not.toHaveBeenCalledTimes(2);
+    // Exactly once: the preset bans toHaveBeenCalledTimes(1) and
+    // toHaveBeenCalledOnce(), and "called" plus "not twice" would also pass on
+    // three calls, so count the recorded calls.
+    expect(focus.mock.calls).toHaveLength(1);
   });
 
   it('focuses the fallback (not the detached trigger) when the trigger is gone', () => {
@@ -62,8 +62,7 @@ describe('restoreFocus', () => {
     const fallback = { current };
     restoreFocus(el, fallback);
     expect(triggerFocus).not.toHaveBeenCalled();
-    expect(fbFocus).toHaveBeenCalled();
-    expect(fbFocus).not.toHaveBeenCalledTimes(2);
+    expect(fbFocus.mock.calls).toHaveLength(1);
   });
 
   it('does nothing and does not throw when detached with no fallback', () => {
