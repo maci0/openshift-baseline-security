@@ -42,13 +42,19 @@ func relatedImageConsolePlugin() string {
 	return strings.TrimSpace(os.Getenv(EnvRelatedImageConsolePlugin))
 }
 
+// relatedImageRefMax is the longest image reference accepted. A ref this long
+// is already far past any real registry, port, path, digest, and tag
+// combination, so the bound is a ceiling on operator input, not a protocol
+// limit the image spec imposes.
+const relatedImageRefMax = 1024
+
 // ValidRelatedImage rejects refs that cannot be a container image, so a
 // mis-set RELATED_IMAGE_CONSOLE_PLUGIN fails with ImageInvalid instead of
 // creating a Deployment that ImagePullBackOff forever.
 // Deliberately loose: registries with ports, digests, and short names are OK.
 // Also used by cmd for startup logging (single source of truth).
 func ValidRelatedImage(ref string) bool {
-	if ref == "" || len(ref) > 1024 {
+	if ref == "" || len(ref) > relatedImageRefMax {
 		return false
 	}
 	for _, r := range ref {

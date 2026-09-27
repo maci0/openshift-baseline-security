@@ -83,6 +83,13 @@ import { useAutoDismiss } from './useAutoDismiss';
 // Stable empty list when the suite-scoped watch is inactive.
 const EMPTY_REMEDIATIONS: ComplianceRemediation[] = [];
 
+// The apply and unapply confirms differ only in wording and in the direction
+// written, so one modal takes the pair; separate state let the two drift.
+interface ApplyTarget {
+  rem: ComplianceRemediation;
+  apply: boolean;
+}
+
 // Sub-row detail text (MissingDependencies summary / Error detail).
 const detailStyle: React.CSSProperties = {
   marginTop: 2,
@@ -170,8 +177,7 @@ const RemediationsTab: React.FC<{
   }, [profilesKey, tailoredKey]);
   const [remediations, loaded, loadError] =
     useK8sWatchResource<ComplianceRemediation[]>(remediationsWatch);
-  const [confirming, setConfirming] = React.useState<ComplianceRemediation | null>(null);
-  const [unapplying, setUnapplying] = React.useState<ComplianceRemediation | null>(null);
+  const [applyTarget, setApplyTarget] = React.useState<ApplyTarget | null>(null);
   const [autoApplyConfirming, setAutoApplyConfirming] = React.useState(false);
   const [batchConfirming, setBatchConfirming] = React.useState(false);
   const [viewing, setViewing] = React.useState<ComplianceRemediation | null>(null);
@@ -419,8 +425,19 @@ const RemediationsTab: React.FC<{
 
   // Include viewing so page-top alerts stay behind the object modal and errors
   // (clipboard, etc.) render inside the open modal instead of under the backdrop.
+  // Reboot warning + confirm severity for the remediation the modal is holding.
+  const applyTargetIsNode =
+    applyTarget !== null && nodeNames.has(applyTarget.rem.metadata?.name ?? '');
+  // Danger when the write reboots nodes, in either direction; the idle button
+  // keeps each direction's own emphasis.
+  const applyConfirmVariant = applyTargetIsNode
+    ? ('danger' as const)
+    : applyTarget?.apply
+      ? ('primary' as const)
+      : ('secondary' as const);
+
   const anyModalOpen =
-    !!confirming || !!unapplying || batchConfirming || autoApplyConfirming || !!viewing;
+    applyTarget !== null || batchConfirming || autoApplyConfirming || !!viewing;
 
   // Restore focus to the trigger when every remediations modal has closed.
   React.useEffect(() => {
@@ -965,7 +982,7 @@ const RemediationsTab: React.FC<{
                             returnFocusRef.current = e.currentTarget;
                             setError(null);
                             setSuccess(null);
-                            setUnapplying(rem);
+                            setApplyTarget({ rem, apply: false });
                           }}
                         >
                           {t('Unapply')}
@@ -1010,7 +1027,7 @@ const RemediationsTab: React.FC<{
                             returnFocusRef.current = e.currentTarget;
                             setError(null);
                             setSuccess(null);
-                            setConfirming(rem);
+                            setApplyTarget({ rem, apply: true });
                           }}
                         >
                           {t('Apply')}
@@ -1029,33 +1046,46 @@ const RemediationsTab: React.FC<{
       )}
       <Modal
         variant="small"
-        isOpen={!!confirming}
+        isOpen={applyTarget !== null}
         onClose={() => {
           if (busyRef.current) return;
-          setConfirming(null);
+          setApplyTarget(null);
         }}
         aria-labelledby="apply-remediation-title"
       >
-        <ModalHeader title={t('Apply remediation?')} labelId="apply-remediation-title" />
+        <ModalHeader
+          title={applyTarget?.apply ? t('Apply remediation?') : t('Unapply remediation?')}
+          labelId="apply-remediation-title"
+        />
         <ModalBody>
           {/* The remediation name is a CR name, so it is its own element: an
               embedded {{name}} in a translated sentence leaves an RTL name
               free to reorder the sentence's own punctuation around it. */}
-          <span dir="auto">{confirming?.metadata.name}</span>{' '}
-          {t(
-            'will be applied to the cluster. A rescan is required afterwards for results to reflect the change.',
-          )}
-          {confirming && isNodeRemediation(confirming) && (
+          <span dir="auto">{applyTarget?.rem.metadata.name}</span>{' '}
+          {applyTarget?.apply
+            ? t(
+                'will be applied to the cluster. A rescan is required afterwards for results to reflect the change.',
+              )
+            : t(
+                'will stop being applied. A rescan is required afterwards for results to reflect the change.',
+              )}
+          {applyTargetIsNode && (
             <Alert
               variant="warning"
               isInline
               title={t('This is a node remediation')}
               style={{ marginTop: 'var(--pf-t--global--spacer--md)' }}
             >
-              {/* Point at this tab's own Batch apply control, which automates
-                  the manual Compute -> MachineConfigPools dance. */}
-              {t(
-                'It renders into a MachineConfig; applying it reboots the affected nodes one by one. Use Batch apply above instead to apply node remediations together, so the pool reboots once.',
+              {applyTarget?.apply ? (
+                /* Point at this tab's own Batch apply control, which automates
+                    the manual Compute -> MachineConfigPools dance. */
+                t(
+                  'It renders into a MachineConfig; applying it reboots the affected nodes one by one. Use Batch apply above instead to apply node remediations together, so the pool reboots once.',
+                )
+              ) : (
+                t(
+                  'It renders into a MachineConfig; unapplying it reboots the affected nodes one by one.',
+                )
               )}
             </Alert>
           )}
@@ -1071,105 +1101,32 @@ const RemediationsTab: React.FC<{
         </ModalBody>
         <ModalFooter>
           <Button
-            // Danger only when apply reboots nodes; platform remediations are not destructive.
-            variant={
-              confirming && isNodeRemediation(confirming) ? 'danger' : 'primary'
-            }
+            variant={applyConfirmVariant}
             isDisabled={busy || !canApply || canApplyLoading}
             isLoading={busy}
             onClick={() => {
-              if (!confirming) return;
-              const rem = confirming;
+              if (!applyTarget) return;
+              const { rem, apply } = applyTarget;
               void (async () => {
-                if (await setApply(rem, true)) {
-                  setConfirming(null);
+                if (await setApply(rem, apply)) {
+                  setApplyTarget(null);
                   setSuccess(
-                    t('Remediation applied. Use Rescan now above to refresh results.'),
+                    apply
+                      ? t('Remediation applied. Use Rescan now above to refresh results.')
+                      : t('Remediation unapplied. Use Rescan now above to refresh results.'),
                   );
                 }
               })();
             }}
           >
-            {t('Apply')}
+            {applyTarget?.apply ? t('Apply') : t('Unapply')}
           </Button>
           <Button
             variant="link"
             isDisabled={busy}
             onClick={() => {
               if (busyRef.current) return;
-              setConfirming(null);
-            }}
-          >
-            {t('Cancel')}
-          </Button>
-        </ModalFooter>
-      </Modal>
-      <Modal
-        variant="small"
-        isOpen={!!unapplying}
-        onClose={() => {
-          if (busyRef.current) return;
-          setUnapplying(null);
-        }}
-        aria-labelledby="unapply-remediation-title"
-      >
-        <ModalHeader title={t('Unapply remediation?')} labelId="unapply-remediation-title" />
-        <ModalBody>
-          <span dir="auto">{unapplying?.metadata.name}</span>{' '}
-          {t(
-            'will stop being applied. A rescan is required afterwards for results to reflect the change.',
-          )}
-          {unapplying && isNodeRemediation(unapplying) && (
-            <Alert
-              variant="warning"
-              isInline
-              title={t('This is a node remediation')}
-              style={{ marginTop: 'var(--pf-t--global--spacer--md)' }}
-            >
-              {t(
-                'It renders into a MachineConfig; unapplying it reboots the affected nodes one by one.',
-              )}
-            </Alert>
-          )}
-          {error && (
-            <Alert
-              variant="danger"
-              isInline
-              isLiveRegion
-              title={<span dir="auto">{error}</span>}
-              style={{ marginTop: 'var(--pf-t--global--spacer--md)' }}
-            />
-          )}
-        </ModalBody>
-        <ModalFooter>
-          <Button
-            // Node unapply can reboot; match apply severity so the confirm is not understated.
-            variant={
-              unapplying && isNodeRemediation(unapplying) ? 'danger' : 'secondary'
-            }
-            isDisabled={busy || !canApply || canApplyLoading}
-            isLoading={busy}
-            onClick={() => {
-              if (!unapplying) return;
-              const rem = unapplying;
-              void (async () => {
-                if (await setApply(rem, false)) {
-                  setUnapplying(null);
-                  setSuccess(
-                    t('Remediation unapplied. Use Rescan now above to refresh results.'),
-                  );
-                }
-              })();
-            }}
-          >
-            {t('Unapply')}
-          </Button>
-          <Button
-            variant="link"
-            isDisabled={busy}
-            onClick={() => {
-              if (busyRef.current) return;
-              setUnapplying(null);
+              setApplyTarget(null);
             }}
           >
             {t('Cancel')}

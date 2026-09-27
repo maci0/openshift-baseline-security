@@ -113,12 +113,13 @@ func (r *ClusterBaselineReconciler) openRemediationBatch(
 			continue
 		}
 		if err := validateBatchTarget(rem); err != nil {
-			if isPermanentBatchTargetReject(err) {
-				log.FromContext(ctx).Info("remediation batch: permanent target reject, skipping",
-					"name", cb.Name, "remediation", name, "error", err.Error())
-				continue
-			}
-			return err
+			// validateBatchTarget raises only permanent rejects, so skipping is
+			// not a choice here; isPermanentBatchTargetReject is needed at
+			// getBatchRemediation's other call site, which also wraps transient
+			// Get errors.
+			log.FromContext(ctx).Info("remediation batch: permanent target reject, skipping",
+				"name", cb.Name, "remediation", name, "error", err.Error())
+			continue
 		}
 		keep = append(keep, name)
 		if p := poolFromRemediation(rem); p != "" {

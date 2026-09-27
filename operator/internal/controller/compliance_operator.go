@@ -313,6 +313,10 @@ func (r *ClusterBaselineReconciler) findComplianceOperatorCSV(ctx context.Contex
 	if csv := pickComplianceOperatorCSV(local.Items, complianceNamespace, true); csv != nil {
 		return csv, nil
 	}
+	// Answer for every walk exit below that found no Succeeded CSV: the best
+	// non-Succeeded one in our own namespace. Computed once; the walk lists
+	// into its own object, so local.Items never changes under it.
+	localFallback := pickComplianceOperatorCSV(local.Items, complianceNamespace, false)
 
 	// Cluster-wide fallback. Paged: a CSVCatalog CR carries the full install
 	// spec plus the alm-examples annotation, so one unpaged List of a
@@ -336,7 +340,7 @@ func (r *ClusterBaselineReconciler) findComplianceOperatorCSV(ctx context.Contex
 		if err := r.List(ctx, cluster, opts...); err != nil {
 			if meta.IsNoMatchError(err) {
 				// CRD still present for namespaced list; only non-Succeeded local remains.
-				return pickComplianceOperatorCSV(local.Items, complianceNamespace, false), nil
+				return localFallback, nil
 			}
 			return nil, fmt.Errorf("listing CSVs cluster-wide: %w", err)
 		}
@@ -345,21 +349,19 @@ func (r *ClusterBaselineReconciler) findComplianceOperatorCSV(ctx context.Contex
 		if next == "" {
 			break
 		}
-		// The request token must advance or the next List would return the same
-		// page for as long as the reconcile deadline holds.
-		if next == cont {
-			return pickComplianceOperatorCSV(local.Items, complianceNamespace, false), nil
+		// Two ways to stop with what is in hand: the request token must advance
+		// or the next List would replay this page for as long as the reconcile
+		// deadline holds, and the page cap stops a walk the apiserver never ends.
+		if next == cont || page+1 >= csvListMaxPages {
+			return localFallback, nil
 		}
 		cont = next
-		if page+1 >= csvListMaxPages {
-			return pickComplianceOperatorCSV(local.Items, complianceNamespace, false), nil
-		}
 	}
 	if bestSucceeded != nil {
 		return bestSucceeded, nil
 	}
-	if csv := pickComplianceOperatorCSV(local.Items, complianceNamespace, false); csv != nil {
-		return csv, nil
+	if localFallback != nil {
+		return localFallback, nil
 	}
 	return bestOther, nil
 }

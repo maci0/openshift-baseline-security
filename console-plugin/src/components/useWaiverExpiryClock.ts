@@ -30,8 +30,14 @@ export const useWaiverExpiryClock = (
 ) => {
   // Memoized on the array identity: status-only CR updates reallocate
   // spec.waivers, and the key must still be rebuilt for them, but a re-render
-  // driven by anything else must not re-join up to 256 encoded pairs.
-  const key = React.useMemo(() => waiversContentKey(waivers), [waivers]);
+  // driven by anything else must not re-join up to 256 encoded pairs. The
+  // offsets ride along in the key so the effect below, which reads them, is
+  // rescheduled when they change rather than pinning the values from whichever
+  // render last moved the key.
+  const key = React.useMemo(
+    () => waiversContentKey(waivers) + offsetsMs.map(encodeKeyPart).join(''),
+    [waivers, offsetsMs],
+  );
   const [tick, setTick] = React.useState(0);
   React.useEffect(() => {
     const now = nowMs();
@@ -41,8 +47,8 @@ export const useWaiverExpiryClock = (
     }
     const id = window.setTimeout(() => setTick((c) => c + 1), delay);
     return () => window.clearTimeout(id);
-    // waivers/offsets read when the content key or tick changes
-    // (content-stable + expiry).
+    // waivers/offsets read when the content key or tick changes; the key
+    // encodes both.
     // eslint-disable-next-line react-hooks/exhaustive-deps -- content key + tick
   }, [key, tick]);
   return { key, tick };

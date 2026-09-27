@@ -421,6 +421,8 @@ func (r *ClusterBaselineReconciler) getBatchRemediation(
 // already-read remediation, so the open path can validate a whole paged List
 // without a Get per name. Split out of getBatchRemediation, which is the
 // read-then-validate wrapper the conflict-retry apply path still needs.
+// Every error it returns is a permanent reject (isPermanentBatchTargetReject);
+// callers that also see transient Get errors must classify before skipping.
 func validateBatchTarget(rem *unstructured.Unstructured) error {
 	name := rem.GetName()
 	state, _, err := unstructured.NestedString(rem.Object, "status", "applicationState")

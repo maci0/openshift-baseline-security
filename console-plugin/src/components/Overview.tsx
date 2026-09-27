@@ -103,6 +103,10 @@ const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 // hold up the rest of the page, so both surfaces render this many per group
 // first and the card offers the rest on demand.
 const CHANGES_RENDER_LIMIT = 25;
+// Module constant, not an inline literal: useWaiverExpiryClock memoizes its
+// content key on this array's identity, and a fresh literal every render would
+// rebuild the key (and reschedule the expiry timer) on every keystroke.
+const EXPIRING_SOON_OFFSET_MS: readonly number[] = [-2 * WEEK_MS];
 
 // status.lastScanTime / status.nextScanTime are cluster-supplied RFC3339
 // strings. PatternFly's Timestamp takes `date`, and substitutes the browser's
@@ -503,9 +507,10 @@ const Overview: React.FC<{
   // tick, SeverityWeighted profile badges and the expiring-soon alert stay
   // wrong until CCR identity or waiversKey change. ResultsTab clocks expiry
   // only; Overview also clocks window entry for the 2-week alert (-2w offset).
-  const { key: waiversKey, tick: waiverClock } = useWaiverExpiryClock(waivers, [
-    -2 * WEEK_MS,
-  ]);
+  const { key: waiversKey, tick: waiverClock } = useWaiverExpiryClock(
+    waivers,
+    EXPIRING_SOON_OFFSET_MS,
+  );
   // Last history tip per bucket (empty-CCR fallback in profileScore only).
   const statusProfiles = baseline?.status?.profiles;
   const statusTailored = baseline?.status?.tailoredProfiles;

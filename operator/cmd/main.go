@@ -81,6 +81,12 @@ var scheme = runtime.NewScheme()
 // The default marks a binary built without it (plain `go build`, `go run`).
 var version = "dev"
 
+// gracefulShutdownTimeout is how long the manager may spend draining before the
+// process exits anyway. It must stay well under the pod's 30s
+// terminationGracePeriodSeconds, or the kubelet SIGKILLs the process mid-drain
+// instead of letting the leader lease release cleanly.
+const gracefulShutdownTimeout = 20 * time.Second
+
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(baselinev1alpha1.AddToScheme(scheme))
@@ -247,7 +253,7 @@ func main() {
 		// terminationGracePeriodSeconds so the manager exits cleanly rather than
 		// being SIGKILLed mid-shutdown. Reconciles are single atomic API calls that
 		// fail fast once the context is cancelled, so 20s is ample.
-		GracefulShutdownTimeout: ptr.To(20 * time.Second),
+		GracefulShutdownTimeout: ptr.To(gracefulShutdownTimeout),
 		// Scope the informer cache to the namespaces the reconciler reads.
 		// ClusterBaseline is the only cluster-scoped cached type; the rest
 		// (plugin Deployment/Service/PDB, scan-storage PVCs) are namespaced, and
