@@ -1,7 +1,7 @@
 import { isValidCron } from './cron';
 import { isValidK8sName } from './names';
 import { isString } from './parse';
-import { batchApplyPatch, batchApplyRequested, remediationApplyPatch, rescanPatch, resourceVersionTest, schedulePatch, tailoredProfileBindingPatch } from './patches';
+import { batchApplyPatch, batchApplyRequested, remediationApplyPatch, rescanPatch, rescanToken, resourceVersionTest, schedulePatch, tailoredProfileBindingPatch } from './patches';
 import { randomString } from './testing/fuzz';
 
 describe('remediationApplyPatch', () => {
@@ -34,6 +34,26 @@ describe('remediationApplyPatch', () => {
         expect(['Automatic', 'Manual']).toContain(apply);
       }
     }
+  });
+});
+
+describe('rescanToken', () => {
+  it('differs between two clicks in the same millisecond', () => {
+    expect(rescanToken(1000, 1)).not.toBe(rescanToken(1000, 2));
+  });
+
+  it('differs across a page reload, where the sequence restarts at 1', () => {
+    // The regression: a session counter alone restarted at 1 after a reload, so
+    // the first rescan of the new session rewrote the value the apiserver
+    // already held. CO watches for a change, so no scan started and the UI
+    // still reported success.
+    const previousSession = rescanToken(1_000_000, 1);
+    const afterReload = rescanToken(2_000_000, 1);
+    expect(afterReload).not.toBe(previousSession);
+  });
+
+  it('produces a non-empty token rescanPatch accepts', () => {
+    expect(rescanPatch(true, rescanToken(1_000_000, 1))).toHaveLength(1);
   });
 });
 

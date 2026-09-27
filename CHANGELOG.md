@@ -129,6 +129,14 @@ depend on those tags.
 
 ### Fixed
 
+- Console plugin `Rescan now` did not always start a scan. The rescan
+  annotation value came from a counter that restarted at 1 on every page load,
+  so the first rescan after a reload or a tab switch back to the plugin wrote
+  the value the apiserver already held. The Compliance Operator watches that
+  annotation for a change, so it observed nothing, no scan started, and the UI
+  still reported "Rescan started". The token now carries the wall clock, with
+  the per-page counter kept only to separate two clicks in the same
+  millisecond.
 - `status.relatedObjects` listed the console plugin Deployment,
   PodDisruptionBudget, and ConsolePlugin even with
   `spec.console.managementState: Removed`, where the operator has deleted them

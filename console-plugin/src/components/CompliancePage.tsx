@@ -35,7 +35,7 @@ import {
 import { formatCount } from '../dates';
 import { downloadBlob, openBlobInTab } from '../download';
 import { errorMessage } from '../errors';
-import { rescanPatch } from '../patches';
+import { rescanPatch, rescanToken } from '../patches';
 import { withDisabledTip } from './DisabledTip';
 import { useAutoDismiss } from './feedback';
 import {
@@ -143,9 +143,10 @@ const CompliancePage: React.FC = () => {
     setRescanning(true);
     setRescanError(null);
     setRescanStarted(false);
-    // Unique value so a second click still mutates the annotation (CO watches changes).
+    // Unique value so a click always mutates the annotation (CO watches
+    // changes, so a repeated value starts no scan).
     rescanSeq.current += 1;
-    const token = String(rescanSeq.current);
+    const token = rescanToken(Date.now(), rescanSeq.current);
     // allSettled never rejects; rejections land in the results array.
     try {
       const results = await Promise.allSettled(

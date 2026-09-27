@@ -234,6 +234,17 @@ export const removeWaiverPatch = (index: number, name: string): PatchOp[] => {
   ];
 };
 
+// Value for the rescan annotation on one click. CO watches the ComplianceScan
+// annotation for a CHANGE, so the token must differ from whatever the scan
+// already carries. A bare per-page-load counter restarts at 1 after a reload or
+// a tab switch back to the plugin, so the first rescan of the new session would
+// rewrite the same value the apiserver already stores, CO would not observe a
+// change, no scan would start, and the UI would still report "Rescan started".
+// The wall-clock prefix makes a token unique across page loads; the sequence
+// disambiguates two clicks inside the same millisecond.
+export const rescanToken = (nowMs: number, seq: number): string =>
+  `${nowMs}-${seq}`;
+
 // JSON patch to trigger a Compliance Operator rescan. value must change each
 // click so a re-rescan is observed when the annotation already exists.
 // When metadata.annotations is missing, add the whole map (nested add fails).
