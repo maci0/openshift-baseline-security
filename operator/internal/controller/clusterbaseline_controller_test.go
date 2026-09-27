@@ -1789,6 +1789,50 @@ func TestRemediationBatchPartialReopenKeepsPreCrashPool(t *testing.T) {
 	}
 }
 
+// TestRemediationBatchRejectsForeignPoolsAnnotation: the batch-pools annotation
+// is untrusted input like the request annotation. A holder of patch on the CR
+// (no MachineConfigPool verb) must not be able to name an unrelated pool and
+// have the operator SA pause it: only pools this batch's surviving remediations
+// derived, or pools already paused with this batch's own marker, are paused.
+func TestRemediationBatchRejectsForeignPoolsAnnotation(t *testing.T) {
+	scheme := testScheme(t)
+	rem := nodeRemediation("rem1", "worker")
+	worker := machineConfigPool("worker")
+	// A pool nobody paused: naming it must not pause it.
+	foreign := machineConfigPool("latency-tracking")
+	cb := newBatchCB()
+	cb.SetAnnotations(map[string]string{
+		batchApplyAnnotation: "rem1",
+		batchPoolsAnnotation: "latency-tracking",
+	})
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).
+			WithObjects(cb, rem, worker, foreign).
+			WithStatusSubresource(&baselinev1alpha1.ClusterBaseline{}).Build(),
+		Scheme: scheme,
+	}
+	if err := r.applyRemediationBatch(context.Background(), cb); err != nil {
+		t.Fatal(err)
+	}
+	if cb.Status.RemediationBatch == nil {
+		t.Fatal("batch not opened for the owned remediation")
+	}
+	if slices.Contains(cb.Status.RemediationBatch.Pools, "latency-tracking") {
+		t.Fatalf("untrusted pool in batch set: %v", cb.Status.RemediationBatch.Pools)
+	}
+	got := &unstructured.Unstructured{}
+	got.SetGroupVersionKind(mcpGVK)
+	if err := r.Get(context.Background(), types.NamespacedName{Name: "latency-tracking"}, got); err != nil {
+		t.Fatal(err)
+	}
+	if paused, _, _ := unstructured.NestedBool(got.Object, "spec", "paused"); paused {
+		t.Fatal("a pool nobody paused must never be paused by a CR annotation")
+	}
+	if marker := got.GetAnnotations()[batchPauseOwnerAnnotation]; marker != "" {
+		t.Fatalf("untrusted pool claimed the batch pause marker: %q", marker)
+	}
+}
+
 // TestHistoryScoringModeStampDeferredToPersist: the in-memory stamp must not
 // write the annotation to the API (it would then lead the history rings, which
 // are only persisted by the trailing Status().Update). persistHistoryScoringMode

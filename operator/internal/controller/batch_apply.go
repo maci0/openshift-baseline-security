@@ -147,10 +147,27 @@ func (r *ClusterBaselineReconciler) openRemediationBatch(
 	// left paused forever (nodes stuck). Re-pausing an already-paused pool is an
 	// idempotent no-op, and the union stays within batchMaxPools (it is a subset
 	// of the original open, which the guard already bounded).
+	// The annotation is untrusted input like the request annotation: a holder of
+	// patch on the CR (no MCP verb) could otherwise name any MachineConfigPool in
+	// the cluster and have the operator SA pause it. A named pool is kept only if
+	// this batch's surviving remediations derived it, or if it is already paused
+	// with our own pause marker (the pre-crash pool this union exists to recover).
+	owner := batchPauseOwner(cb)
 	for _, p := range batchRemediationNames(cb.Annotations[batchPoolsAnnotation]) {
-		if p != "" {
-			pools[p] = true
+		switch {
+		case pools[p]:
+		default:
+			ours, err := r.poolPausedBy(ctx, p, owner)
+			if err != nil {
+				return fmt.Errorf("reading MachineConfigPool %q recorded by a prior batch: %w", p, err)
+			}
+			if !ours {
+				log.FromContext(ctx).Info("remediation batch: dropping untrusted pool name",
+					"name", cb.Name, "pool", p)
+				continue
+			}
 		}
+		pools[p] = true
 	}
 	poolList := slices.Sorted(maps.Keys(pools))
 	if len(poolList) > batchMaxPools {
@@ -170,7 +187,6 @@ func (r *ClusterBaselineReconciler) openRemediationBatch(
 	if err != nil {
 		return err
 	}
-	owner := batchPauseOwner(cb)
 	newBatch := func(pools []string) *baselinev1alpha1.RemediationBatchStatus {
 		return &baselinev1alpha1.RemediationBatchStatus{
 			Phase: baselinev1alpha1.RemediationBatchPhaseApplying, Pools: pools, Remediations: list, StartedAt: startedAt, PauseOwner: owner,

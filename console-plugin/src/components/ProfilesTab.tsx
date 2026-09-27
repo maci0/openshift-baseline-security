@@ -318,7 +318,13 @@ const ProfilesTab: React.FC<{
   const [canUpdate, canUpdateLoading] = useAccessReview(tailoredProfileUpdateAccess);
   const baselineGate: AccessGate = { allowed: canEdit };
   const createGate: AccessGate = { allowed: canAuthor && canEdit };
-  const updateGate: AccessGate = { allowed: canUpdate };
+  // Editing a bound TailoredProfile rewrites the rule set the baseline's own
+  // suites scan, so it carries the same baseline-patch requirement as create
+  // (which binds the profile) and as the Edit control. The button is a render
+  // decision; this is the enforcement point, and the two must agree or a
+  // caller holding only the tailoredprofiles update verb spends a write the UI
+  // never offers.
+  const updateGate: AccessGate = { allowed: canUpdate && canEdit };
   // Profile/Rule catalog is only for TailoredProfile authoring. Viewers lack
   // those verbs; listing them would 403 the Profiles tab. Skip until SAR
   // resolves so the watch does not flash a denial for readers.
@@ -507,7 +513,7 @@ const ProfilesTab: React.FC<{
     if (!baseline || pendingRef.current) return;
     // Same gate the form carries, so a modal opened while permitted cannot
     // create the profile or bind it after the review flipped to denied. Edit
-    // mode spends the update verb alone; create mode also binds the baseline.
+    // and create both require the baseline patch (updateGate, createGate).
     if (!mayWrite(editing ? updateGate : createGate)) {
       setError(
         !canEdit

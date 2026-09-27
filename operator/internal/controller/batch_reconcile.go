@@ -21,6 +21,32 @@ import (
 	baselinev1alpha1 "github.com/maci0/baseline-security-operator/api/v1alpha1"
 )
 
+// poolPausedBy reports whether the named pool is already paused and carries the
+// pause marker of this batch's owner. It answers the pre-crash recovery case in
+// openRemediationBatch: a pool we paused before losing status is ours to re-pause
+// and resume, whatever its role. A pool that is running, or paused by anyone
+// else, is not, so a CR author cannot name an unrelated MachineConfigPool in the
+// batch-pools annotation and have the operator SA pause it.
+// NotFound / NoMatch read as "not ours": the pause cannot be re-asserted, and
+// setMCPPaused skips the same pool moments later rather than failing the batch.
+func (r *ClusterBaselineReconciler) poolPausedBy(ctx context.Context, pool, owner string) (bool, error) {
+	if validK8sName(pool) == "" || owner == "" {
+		return false, nil
+	}
+	mcp := u(mcpGVK)
+	if err := r.Get(ctx, types.NamespacedName{Name: pool}, mcp); err != nil {
+		if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	paused, _, err := unstructured.NestedBool(mcp.Object, "spec", "paused")
+	if err != nil || !paused {
+		return false, nil
+	}
+	return mcp.GetAnnotations()[batchPauseOwnerAnnotation] == owner, nil
+}
+
 // setMCPPaused changes an MCP only when this batch owns the pause. With a
 // non-empty owner, a pool that was already paused without our marker is left
 // alone and therefore remains paused after the batch. Empty owner is the
