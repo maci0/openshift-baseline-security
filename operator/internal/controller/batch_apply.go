@@ -260,16 +260,16 @@ func (r *ClusterBaselineReconciler) listRemediationsForBatch(
 				found[item.GetName()] = item
 			}
 		}
-		next := list.GetContinue()
 		// Every name is present: stop paging rather than walk the rest of the
 		// namespace's remediations.
-		if next == "" || len(found) == len(needed) {
+		if len(found) == len(needed) {
 			return found, nil
 		}
 		// A token that does not advance means the next List would replay this
 		// page until the reconcile deadline. Stop with what is found; the
 		// missing names take the same terminal path as a NotFound.
-		if next == cont {
+		next, more := nextPageToken(list.GetContinue(), cont)
+		if !more {
 			return found, nil
 		}
 		cont = next

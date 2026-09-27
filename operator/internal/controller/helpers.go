@@ -56,6 +56,20 @@ func nearestWaiverExpiry(cb *baselinev1alpha1.ClusterBaseline, now time.Time) ti
 	return soonest
 }
 
+// nextPageToken advances a paged List loop and reports whether another page
+// exists. The apiserver is expected to hand back an empty token on the last
+// page, but a token identical to the one just used would make the next List
+// replay the same page: the loop would spin on one page until
+// reconcileTimeout and the reconcile would fail with a deadline instead of the
+// real cause. Stop with what has been collected; the unread remainder takes
+// the same path as any other partial read.
+func nextPageToken(next, used string) (string, bool) {
+	if next == "" || next == used {
+		return "", false
+	}
+	return next, true
+}
+
 func createIfMissing(ctx context.Context, c client.Client, obj client.Object) error {
 	if err := c.Create(ctx, obj); err != nil && !apierrors.IsAlreadyExists(err) {
 		// Identity in the message: callers wrap with step names, but on-call still

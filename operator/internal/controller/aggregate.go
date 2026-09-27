@@ -260,10 +260,14 @@ func (r *ClusterBaselineReconciler) aggregateStatus(ctx context.Context, cb *bas
 					addWeight(status, item, profileKey, tailoredName, isTailored)
 				}
 			}
-			cont = list.GetContinue()
-			if cont == "" {
+			// A token that does not advance would replay this page until the
+			// reconcile deadline; stop with what is counted so a partial rollup
+			// is written and the next reconcile re-lists from the start.
+			next, more := nextPageToken(list.GetContinue(), cont)
+			if !more {
 				break
 			}
+			cont = next
 		}
 	}
 	slices.Sort(currentFails)

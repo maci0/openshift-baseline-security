@@ -587,7 +587,8 @@ an accepted risk neither inflates nor tanks the score.
       endTimestamp wins; multi-suite fixture.
 - [x] **Huge result set** (thousands of checks): aggregate int math doesn't
       overflow (`FuzzScore`); CCR List is paged (`TestAggregateStatusPagesCheckResults`);
-      VirtualizedTable remains usable.
+      a continue token that does not advance stops every paging loop
+      (`TestNextPageToken`); VirtualizedTable remains usable.
 - [ ] **Huge untrusted descriptions/instructions**: Results modal remains
       responsive; text is not interpreted as HTML; CSV stays browser-safe.
 - [ ] **Unicode / RTL / emoji in rule titles**: filter, CSV, and modal do not
@@ -1132,6 +1133,9 @@ Injectable faults for envtest or a "faulty client" wrapper:
       clean.
 - [ ] **Create Subscription returns AlreadyExists**: createIfMissing ignores;
       install continues.
+- [ ] **List returns a continue token that does not advance**: every paged List
+      loop (check results, suites, remediations) stops with what it read instead
+      of replaying one page until the reconcile deadline (`TestNextPageToken`).
 - [ ] **Delete binding returns NotFound**: prune path continues.
 - [ ] **Get Console returns NoKindMatch**: deregister and ensure paths soft-fail.
 - [ ] **Patch rescan returns 403 for half the scans**: UI partial failure alert.

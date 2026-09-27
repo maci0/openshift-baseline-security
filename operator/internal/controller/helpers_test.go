@@ -208,3 +208,40 @@ func TestCreateIfMissingErrorIdentity(t *testing.T) {
 		t.Fatal("AlreadyExists must be ignored:", err)
 	}
 }
+
+func TestNextPageToken(t *testing.T) {
+	cases := []struct {
+		name       string
+		next, used string
+		want       string
+		wantMore   bool
+	}{
+		{name: "last page has no token", next: "", used: "tok-a", wantMore: false},
+		{name: "fresh token advances", next: "tok-b", used: "tok-a", want: "tok-b", wantMore: true},
+		{name: "repeated token stops the loop", next: "tok-a", used: "tok-a", wantMore: false},
+		{name: "empty token on the first page", next: "", used: "", wantMore: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, more := nextPageToken(tc.next, tc.used)
+			if got != tc.want || more != tc.wantMore {
+				t.Fatalf("nextPageToken(%q, %q) = (%q, %v), want (%q, %v)",
+					tc.next, tc.used, got, more, tc.want, tc.wantMore)
+			}
+		})
+	}
+	// Termination: a client that always answers with the same token must not
+	// spin. Two rounds is all the loop can take before it stops.
+	used, rounds := "", 0
+	for {
+		rounds++
+		if rounds > 2 {
+			t.Fatalf("paging loop did not terminate, rounds = %d", rounds)
+		}
+		next, more := nextPageToken("stuck", used)
+		if !more {
+			break
+		}
+		used = next
+	}
+}

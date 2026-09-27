@@ -122,7 +122,6 @@ func (r *ClusterBaselineReconciler) listOwnedSuites(
 			}
 			return nil, fmt.Errorf("listing ComplianceSuites in %s for history: %w", complianceNamespace, err)
 		}
-		cont = list.GetContinue()
 		// Index range: avoid copying each Unstructured (map header + metadata)
 		// per suite, and skip foreign suites before they reach the index.
 		for i := range list.Items {
@@ -131,9 +130,15 @@ func (r *ClusterBaselineReconciler) listOwnedSuites(
 				owned[item.GetName()] = item
 			}
 		}
-		if cont == "" {
+		// A token that does not advance would replay this page until the
+		// reconcile deadline; stop with the suites collected so far, which
+		// recordHistory treats as "no completed suite" rather than wedging the
+		// singleton worker.
+		next, more := nextPageToken(list.GetContinue(), cont)
+		if !more {
 			return owned, nil
 		}
+		cont = next
 	}
 }
 
