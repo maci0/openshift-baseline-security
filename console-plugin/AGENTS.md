@@ -114,6 +114,12 @@ false` in `.yarnrc.yml` means no install script fetches the browser build.
 
 `.env` carries only the four keys in `.env.example`; `e2e/dotenv.ts` rejects an
 unknown, duplicate, malformed, or unterminated-quote line with the file and line
-number, so a typo cannot surface later as a missing value. That loader is the
-one piece of `e2e/` jest runs (`e2e/dotenv.test.ts`); the `*.spec.ts` files
-there belong to Playwright and stay out of the jest gate.
+number, so a typo cannot surface later as a missing value. The `*.test.ts` files
+in `e2e/` are the pieces jest runs (`e2e/dotenv.test.ts`, `e2e/helpers.test.ts`);
+the `*.spec.ts` files there belong to Playwright and stay out of the jest gate.
+
+`shot()` hides the console masthead account control before the capture and
+restores it after, so a suite run under a real SSO account cannot commit that
+account's name and avatar initials into `docs/screenshots/`. Keep captures
+going through `shot()` rather than a bare `page.screenshot`, and do not add a
+docs image that captures an identity.
