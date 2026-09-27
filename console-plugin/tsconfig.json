@@ -19,5 +19,5 @@
     "sourceMap": true,
     "outDir": "dist"
   },
-  "include": ["src", "e2e", "tools/attribution"]
+  "include": ["src", "e2e", "tools/attribution", "tools/size"]
 }

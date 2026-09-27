@@ -17,7 +17,7 @@ Node 22 exactly, pinned by `.nvmrc` to the same patch as the digest-pinned
 ## Gate
 
 ```sh
-yarn lint          # eslint ./src ./e2e ./tools/attribution webpack.config.ts (type-aware except webpack)
+yarn lint          # eslint ./src ./e2e ./tools/attribution ./tools/size webpack.config.ts (type-aware except webpack)
 yarn lint:oxlint   # oxlint: @rikalabs/oxlint-standards strict + test-jest preset, perf, react plugin, local anti-slop
 yarn typecheck     # tsc --noEmit
 yarn test          # jest
@@ -34,6 +34,17 @@ that ships no license text. It runs after webpack in `yarn build` (webpack's
 `output.clean` wipes `dist/`) and the Dockerfile copies the result to
 `/licenses/`. Adding a dependency means adding it to `PERMISSIVE_SPDX` in
 `tools/attribution/spdx.ts` with the reason, never silencing the failure.
+
+`yarn size` is a build step for the same reason: it walks `dist/`, gzips every
+file, prints the transferred size, and fails over the ceilings in
+`tools/size/budget.ts`. What it measures is the initial JS (every
+`*-bundle-*.min.js`, the critical path before CompliancePage paints), the
+largest async chunk, and the whole tree. A `.js` file that matches neither
+output name template fails the gate rather than escaping the initial-JS
+ceiling, so renaming a webpack output template breaks the check instead of
+silently voiding it. Raising a ceiling is a deliberate edit carrying the reason;
+the printed table in the CI log is the only record of the numbers, so keep it
+in the build log rather than committing a baseline.
 
 Both linters are required and neither subsumes the other: oxlint carries the
 type-aware anti-slop rules eslint has no port of. `tools/oxlint/anti-slop/` is

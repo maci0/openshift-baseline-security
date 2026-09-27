@@ -21,7 +21,7 @@ SHELL := /usr/bin/env bash
 # this Makefile wraps the ones contributors look for next to operator/.
 .DEFAULT_GOAL := help
 
-.PHONY: help test lint ci docker-build docker-push
+.PHONY: help test lint size ci docker-build docker-push
 
 help:
 	@echo "Console plugin contributor commands:"
@@ -34,6 +34,7 @@ help:
 	@echo "  yarn start         webpack-dev-server on :9001"
 	@echo "  yarn test-e2e      Playwright (needs CONSOLE_URL; see .env.example)"
 	@echo "                    plus a one-time: yarn playwright install chromium"
+	@echo "  make size          yarn size (transferred bytes and the budget gate)"
 	@echo "  yarn licenses      regenerate dist/THIRD-PARTY-NOTICES.txt (also a build step)"
 	@echo "Image:"
 	@echo "  make docker-build docker-push IMG=... [VERSION=x.y.z]"
@@ -45,6 +46,10 @@ test:
 lint:
 	@command -v yarn >/dev/null || { echo "yarn not on PATH; enable Yarn 4 via corepack (see CONTRIBUTING.md)" >&2; exit 1; }
 	yarn lint && yarn lint:oxlint
+
+size:
+	@command -v yarn >/dev/null || { echo "yarn not on PATH; enable Yarn 4 via corepack (see CONTRIBUTING.md)" >&2; exit 1; }
+	yarn size
 
 ci:
 	@command -v yarn >/dev/null || { echo "yarn not on PATH; enable Yarn 4 via corepack (see CONTRIBUTING.md)" >&2; exit 1; }

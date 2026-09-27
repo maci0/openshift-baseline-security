@@ -7,7 +7,13 @@ export default tseslint.config(
   { ignores: ['dist/', 'node_modules/', 'coverage/', '.yarn/', 'test-results/', 'playwright-report/'] },
   ...tseslint.configs.recommended,
   {
-    files: ['src/**/*.{ts,tsx}', 'e2e/**/*.ts', 'tools/attribution/**/*.ts', 'webpack.config.ts'],
+    files: [
+      'src/**/*.{ts,tsx}',
+      'e2e/**/*.ts',
+      'tools/attribution/**/*.ts',
+      'tools/size/**/*.ts',
+      'webpack.config.ts',
+    ],
     plugins: { 'react-hooks': reactHooks },
     rules: {
       ...reactHooks.configs.recommended.rules,
@@ -20,9 +26,9 @@ export default tseslint.config(
   },
   {
     // Type-aware rules need the tsconfig program (tsconfig.json covers src, e2e
-    // and tools/attribution; webpack.config.ts stays on the non-type-aware rules
+    // and tools/; webpack.config.ts stays on the non-type-aware rules
     // above).
-    files: ['src/**/*.{ts,tsx}', 'e2e/**/*.ts', 'tools/attribution/**/*.ts'],
+    files: ['src/**/*.{ts,tsx}', 'e2e/**/*.ts', 'tools/attribution/**/*.ts', 'tools/size/**/*.ts'],
     languageOptions: { parserOptions: { projectService: true } },
     rules: {
       '@typescript-eslint/no-floating-promises': 'error',

@@ -68,6 +68,13 @@ depend on those tags.
   `manager --version` inside a running pod reports the build it came from
   instead of a bare digest. A binary built without the stamp (plain `go
   build`) reports `dev`.
+- `yarn size` (in `yarn build` and `yarn ci`) reports the transferred size of
+  the built console plugin and fails over the ceilings in
+  `console-plugin/tools/size/budget.ts`: the initial JS the browser must
+  download before CompliancePage can paint, the largest async chunk, and the
+  whole `dist/` tree, all gzipped. Nothing measured page weight before, so a
+  library pulled back into the entry bundle accreted silently. The numbers
+  print into the CI log beside the commit that produced them.
 
 ### Changed
 
