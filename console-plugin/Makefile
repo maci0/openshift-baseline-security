@@ -30,6 +30,7 @@ help:
 	@echo "  yarn test src/scoring.test.ts"
 	@echo "  yarn start         webpack-dev-server on :9001"
 	@echo "  yarn test-e2e      Playwright (needs CONSOLE_URL; see .env.example)"
+	@echo "                    plus a one-time: yarn playwright install chromium"
 	@echo "Image:"
 	@echo "  make docker-build docker-push IMG=..."
 

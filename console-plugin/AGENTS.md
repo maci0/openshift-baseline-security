@@ -85,3 +85,7 @@ double casts are rejected outright.
 (`SCREENSHOT_DIR` defaults there). Adding an image means adding the `shot()`
 call that produces it; a capture with no producer and no README reference does
 not belong in the repo.
+
+`yarn test-e2e` needs `yarn playwright install chromium` first: `enableScripts:
+false` in `.yarnrc.yml` means no install script fetches the browser build.
+`e2e/global-setup.ts` names that command when the binary is missing.

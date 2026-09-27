@@ -49,6 +49,14 @@ yarn lint && yarn lint:oxlint && yarn typecheck && yarn test
 `make test-e2e` (`KUBECONFIG`) and `yarn test-e2e` (`CONSOLE_URL` and
 `KUBEADMIN_PASSWORD`; copy `console-plugin/.env.example` to `.env`).
 
+`yarn test-e2e` also needs the Playwright chromium build, which a clean clone
+does not have: `.yarnrc.yml` sets `enableScripts: false`, so no install script
+downloads it and CI sets `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD` for the same
+reason. Fetch it once with `yarn playwright install chromium` (a user-cache
+download, no system packages). On a bare Linux host the shared libraries are
+missing too and `yarn playwright install --with-deps chromium` installs them;
+that step needs root, so it is not part of the per-clone loop.
+
 ## Before a PR
 
 1. Branch `fix/`, `feat/`, `docs/`, or `chore/` from `main`. Never commit to `main`.

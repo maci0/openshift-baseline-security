@@ -1,5 +1,6 @@
 import { chromium, FullConfig } from '@playwright/test';
 import { chmod, mkdir } from 'fs/promises';
+import { existsSync } from 'node:fs';
 
 // Logs into the OpenShift console once and saves the authenticated storage
 // state so each spec starts already logged in.
@@ -10,6 +11,17 @@ export default async function globalSetup(_config: FullConfig) {
   if (!consoleURL || !password) {
     throw new Error(
       'CONSOLE_URL and KUBEADMIN_PASSWORD must be set (see console-plugin/.env.example)',
+    );
+  }
+
+  // .yarnrc.yml sets enableScripts: false, so no install script fetches the
+  // browser binaries and CI sets PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD for the same
+  // reason. A clean clone therefore has no chromium until it is asked for.
+  // Name the install command instead of letting chromium.launch() fail with a
+  // cache-path dump.
+  if (!existsSync(chromium.executablePath())) {
+    throw new Error(
+      'Playwright chromium is not installed; run: yarn playwright install chromium',
     );
   }
 
