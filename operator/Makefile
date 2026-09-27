@@ -673,8 +673,9 @@ verify-csv-rbac:
 		bundle/manifests/baseline-security-operator.clusterserviceversion.yaml >/dev/null \
 		|| (echo "CSV missing read access to compliancesuites; completed-suite history needs it" && exit 1)
 
-# Bundle monitoring CRs are hand-copied without namespace (OLM target NS). Fail
-# if PrometheusRule or ServiceMonitor drift from config/prometheus/.
+# Bundle static manifests are hand-copied without namespace (OLM target NS).
+# Monitoring CRs are checked by verify-monitoring-bundle, CSV RBAC by
+# verify-csv-rbac; this script covers the rest.
 .PHONY: verify-bundle-static
 verify-bundle-static:
 	@./hack/verify-bundle-static.sh

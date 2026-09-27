@@ -96,8 +96,12 @@ type weightedSum struct {
 }
 
 // scoreWeights holds per-bucket weighted totals so per-profile history can
-// follow the same scoring mode as status.score. Nil maps mean fall back to
-// flat pass/fail counts (tests, or Flat mode).
+// follow the same scoring mode as status.score. profileBucketScore gates on
+// haveWeights, not on the maps being non-nil: the struct is only built in
+// SeverityWeighted mode, so a nil *scoreWeights (Flat mode, or a unit test
+// passing the flat path) falls back to pass/fail counts, while a non-nil
+// struct with a bucket missing from a map scores that bucket as nil rather
+// than flat. aggregate.go always populates both maps for every scored bucket.
 type scoreWeights struct {
 	profiles map[baselinev1alpha1.ProfileKey]weightedSum
 	tailored map[string]weightedSum

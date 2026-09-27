@@ -911,9 +911,6 @@ func FuzzClampString(f *testing.F) {
 	})
 }
 
-// FuzzClampFailureList: hand-edited or pathologically large newlyFailed/fixed/
-// previousFailures/diffBaseFailures lists must stay <= CRD MaxItems=4096 so
-// Status().Update cannot fail admission and freeze reconciliation.
 // TestClampFailureListsToBudget: four failure lists each within MaxItems=4096 of
 // long names serialize past the apiserver object limit; the joint clamp must
 // bring the combined size under budget without emptying any single list.
@@ -982,6 +979,9 @@ func TestClampListsDedupeSetTypes(t *testing.T) {
 	}
 }
 
+// FuzzClampFailureList: hand-edited or pathologically large newlyFailed/fixed/
+// previousFailures/diffBaseFailures lists must stay <= CRD MaxItems=4096 so
+// Status().Update cannot fail admission and freeze reconciliation.
 func FuzzClampFailureList(f *testing.F) {
 	f.Add("", 0)
 	f.Add("a,b,c", 3)

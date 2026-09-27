@@ -388,8 +388,9 @@ and Red Hat-updated.
   operator that mints the serving cert. Egress is deliberately undeclared: a
   policy is additive over the platform's own policies in this `openshift-*`
   namespace, so an egress rule here could cut the operator off from the API
-  server. The console plugin runs in the same namespace under a different
-  `app` label and is not covered by this policy.
+  server. The console plugin is served from the same
+  `openshift-baseline-security` namespace, but the policy's `app` selector names
+  only the operator pods, so it does not cover plugin traffic.
 - Plugin: no service account of consequence (nginx serves static files);
   every API call is the user's own token via the console proxy.
 - ClusterRoles shipped for humans:

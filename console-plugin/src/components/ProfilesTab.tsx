@@ -1078,7 +1078,10 @@ const ProfilesTab: React.FC<{
                       formattedBase: formatCount(baseRules.length, i18n.language),
                       formattedAdded: formatCount(extraEnabled, i18n.language),
                     })
-                  : t('Scans {{formattedEffective}} of {{formattedBase}} base rules.')}
+                  : t('Scans {{formattedEffective}} of {{formattedBase}} base rules.', {
+                      formattedEffective: formatCount(remainingBase, i18n.language),
+                      formattedBase: formatCount(baseRules.length, i18n.language),
+                    })}
               </HelperTextItem>
             </HelperText>
           )}

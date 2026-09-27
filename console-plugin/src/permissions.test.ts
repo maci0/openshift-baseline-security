@@ -1,8 +1,10 @@
 import { AccessGate, mayWrite } from './permissions';
 
-const allowed: AccessGate = { allowed: true, loading: false };
-const denied: AccessGate = { allowed: false, loading: false };
-const resolving: AccessGate = { allowed: false, loading: true };
+const allowed: AccessGate = { allowed: true };
+const denied: AccessGate = { allowed: false };
+// An unresolved review reaches the console as allowed: false, not as a separate
+// pending state: see the AccessGate docstring.
+const resolving: AccessGate = { allowed: false };
 
 // The deny side is the product: a control's isDisabled is a render decision, so
 // every mutation re-checks at the request boundary. These pin the cases a
@@ -18,10 +20,5 @@ describe('mayWrite', () => {
 
   it('denies while the review is unresolved: an in-flight review is not an authorization', () => {
     expect(mayWrite(resolving)).toBe(false);
-  });
-
-  it('ignores the loading flag once the review has resolved', () => {
-    expect(mayWrite({ allowed: true, loading: false })).toBe(true);
-    expect(mayWrite({ allowed: false, loading: true })).toBe(false);
   });
 });

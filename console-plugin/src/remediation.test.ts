@@ -57,7 +57,7 @@ describe('remediation helpers', () => {
         }),
       ),
     ).toBeFalsy();
-    // Operator validMCPPoolName: non-DNS-1123 pool suffix is not a batch target.
+    // Operator validK8sName: non-DNS-1123 pool suffix is not a batch target.
     expect(
       isNodeRemediation(
         rem(undefined, undefined, {

@@ -444,7 +444,7 @@ export const SCAN_NAME_LABEL = 'compliance.openshift.io/scan-name';
 // null when not a node scan / empty pool. lastIndex so tailored names that
 // contain "-node-" still resolve to the final pool segment (operator parity).
 // Does not validate DNS-1123; isNodeRemediation applies isValidK8sName so batch
-// eligibility matches operator validMCPPoolName.
+// eligibility matches the operator's validK8sName check.
 export const nodePoolFromScanName = (scan: string): string | null => {
   const i = scan.lastIndexOf('-node-');
   return i < 0 ? null : scan.slice(i + '-node-'.length) || null;

@@ -28,7 +28,7 @@ const unsetValueAnn = 'compliance.openshift.io/unset-value';
 // poolFromRemediation uses) for ANY non-MachineConfig kind, not only an empty one,
 // or such a remediation gets no reboot warning and is silently excluded from the
 // batch reboot-coalescing while still rebooting the pool. Pool suffix must be
-// DNS-1123 (operator validMCPPoolName) so the UI never marks a remediation
+// DNS-1123 (the operator's validK8sName) so the UI never marks a remediation
 // batch-eligible that the controller cannot pause. Kept in lockstep with the
 // operator: node iff a MachineConfig, or a valid "…-node-<pool>" scan name.
 export const isNodeRemediation = (rem: ComplianceRemediation): boolean => {

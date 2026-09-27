@@ -21,10 +21,12 @@ import (
 	baselinev1alpha1 "github.com/maci0/baseline-security-operator/api/v1alpha1"
 )
 
-// setMCPPaused changes an MCP only when this batch owns the pause. A pool that
-// was already paused without our marker is left alone and therefore remains
-// paused after the batch. Empty owner is the upgrade path for a legacy batch
-// status created before pause ownership was tracked.
+// setMCPPaused changes an MCP only when this batch owns the pause. With a
+// non-empty owner, a pool that was already paused without our marker is left
+// alone and therefore remains paused after the batch. Empty owner is the
+// upgrade path for a legacy batch status created before pause ownership was
+// tracked: with no owner to compare, an unmarked paused pool is unpaused,
+// because the operator cannot tell its own legacy pause from an admin's.
 func (r *ClusterBaselineReconciler) setMCPPaused(ctx context.Context, pool string, paused bool, owner string) error {
 	if pool == "" {
 		return nil

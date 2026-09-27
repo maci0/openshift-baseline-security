@@ -25,7 +25,7 @@ help:
 	@echo "  make test         cd operator && make test;  cd console-plugin && yarn test"
 	@echo "  make lint         cd operator && make lint;  cd console-plugin && yarn lint && yarn lint:oxlint"
 	@echo "  make ci           local replica of the GHA operator + console-plugin jobs (needs docker)"
-	@echo "  make operator-ci  operator/Makefile ci only (unit, race, lint, bundle; needs docker)"
+	@echo "  make operator-ci  operator/Makefile ci only (unit, race, build, reproducible, lint, govulncheck, alerts, generated drift, bundle; needs docker)"
 	@echo "  make plugin-ci    console-plugin yarn ci only (lint, oxlint, typecheck, test, build)"
 	@echo "Not local (CI only): the images and catalog jobs. Image builds:"
 	@echo "  make -C operator docker-build    make -C console-plugin docker-build"

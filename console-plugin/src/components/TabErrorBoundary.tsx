@@ -69,6 +69,7 @@ const TabError: React.FC<{ name: string; error: unknown; onRetry: () => void }> 
         isInline
         isLiveRegion
         title={t('This view failed to render.')}
+      >
         <p>
           {/* The tab name is one of four literals we pass in, so it needs no
               dir. The reason comes from a render over untrusted cluster text,

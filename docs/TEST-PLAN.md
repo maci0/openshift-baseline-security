@@ -1611,8 +1611,16 @@ Classic boundary table. Automate as table-driven unit tests where possible.
 | plugin replicas ready 1 of 2 | Deployed (ReadyMin) |
 | plugin replicas ready 2 of 2 | Deployed |
 
-- [ ] Encode this table as `TestBoundaries_*` unit tests with one assertion
-      per row (or subtests).
+Already encoded, one test per cluster of rows: the four `score` rows by
+`TestScore`, the history-cap row by `TestClampHistory`, the same-timestamp
+refresh row by `TestSyncHistorySnapshot`, and the three replica-count rows by
+`TestPluginDeploymentUnavailable` plus `TestDeploymentAvailable` and
+`TestDeploymentAvailableFalsePastGrace` for the Available condition itself. The
+profile-count, tailored, and schedule rows have no named test.
+
+- [ ] Cover the remaining rows: the profile and tailored admission counts
+      (0, 1, 8 profiles; 0 and 1 tailored), history at 0 and 1 point, and the
+      `""` / invalid schedule cases.
 
 ## AU. Feature-flag & kill-switch matrix
 
@@ -1625,7 +1633,7 @@ Classic boundary table. Automate as table-driven unit tests where possible.
 | `remediation.apply=Automatic` | ScanSetting auto flags | Manual false | [x] unit |
 | `RELATED_IMAGE_CONSOLE_PLUGIN` empty | ImageMissing | deploy image | [x] unit |
 | `complianceCatalogSource` custom | Sub.source override | redhat-operators | [x] unit |
-| metrics `--metrics-bind-address=0` | metrics off | :8443 | [ ] |
+| metrics `--metrics-bind-address=0` | metrics off | :8443 | [~] `TestValidateListenAddr` |
 | metrics insecure + non-loopback | forced secure | n/a | [x] addr class |
 
 - [ ] One integration test file that walks every knob and asserts the primary
