@@ -41,10 +41,11 @@ yarn lint && yarn lint:oxlint && yarn typecheck && yarn test
 
 From the repo root, `make setup` runs the `yarn install --immutable` line above
 once Yarn 4 is on PATH (it prints the two `corepack` commands and stops if
-`yarn` is missing) and then runs `make check`, which names anything else the
-setup above is missing (wrong Node major, no shellcheck or `uvx` for
-`make lint`) before a build starts. Docker is the one thing `check` only warns
-about: `make test` and `make lint` run without it, and `make ci` needs it.
+`yarn` is missing) and then runs `make check`, which fails on anything else
+the setup above is missing that the per-clone loop needs (wrong Node major, no
+`node_modules`) before a build starts. `check` only warns about docker,
+shellcheck, and `uvx`: nothing in `make test` uses them, and `make lint` names
+whichever one is missing at the point of use. `make ci` needs docker.
 `make test`, `make lint`, and `make ci` run both halves and only delegate to
 the per-module Makefiles; there is no second copy of a rule.
 `make help`, `make -C operator help`, and `make -C console-plugin help` list

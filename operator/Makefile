@@ -249,6 +249,14 @@ fuzz:
 	go test ./internal/controller/ -run=^$$ -fuzz=^FuzzSanitizeStatusUntrustedText$$ -fuzztime=5s
 
 GOLANGCI_LINT_VERSION ?= v2.12.2
+# golangci-lint's default cache is the user cache dir, shared by every checkout
+# of this repo on the machine, and its entries record absolute paths. A second
+# clone (a worktree, a moved directory) then replays issues that belong to the
+# other one: `make lint` fails on a correct tree with a goimports error naming a
+# file that is not in this checkout, which `make fmt` cannot clear. Scope the
+# cache to this checkout; bin/ is gitignored and `make clean` removes it.
+GOLANGCI_LINT_CACHE ?= $(CURDIR)/bin/golangci-lint
+export GOLANGCI_LINT_CACHE
 # hack/*.sh run in CI, in the bundle and alert checks, and in must-gather's
 # self-test: shellcheck covers them too. Preinstalled on the ubuntu-24.04
 # runner; elsewhere `brew install shellcheck` or `apt-get install shellcheck`.

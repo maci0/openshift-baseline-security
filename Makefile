@@ -21,7 +21,8 @@ NODE_MAJOR := $(shell cut -d. -f1 console-plugin/.nvmrc)
 help:
 	@echo "Repository contributor targets (run from the repo root):"
 	@echo "  make setup        install the console-plugin dependencies, then run check"
-	@echo "  make check        preflight: toolchain present, node major == $(NODE_MAJOR), plugin deps installed (docker only warns)"
+	@echo "  make check        preflight: toolchain present, node major == $(NODE_MAJOR), plugin deps installed"
+	@echo "                    (docker, shellcheck and uvx only warn: nothing in make test needs them)"
 	@echo "  make test         cd operator && make test;  cd console-plugin && yarn test"
 	@echo "  make lint         cd operator && make lint;  cd console-plugin && yarn lint && yarn lint:oxlint"
 	@echo "  make ci           local replica of the GHA operator + console-plugin jobs (needs docker)"
@@ -50,9 +51,11 @@ setup:
 
 # Fail before any build, naming what is missing, instead of surfacing a
 # "jest: command not found" or a toolchain download halfway through a run.
-# docker is the one exception: it only warns, because the per-PR loop
-# (make test, make lint) runs without it and a contributor on a machine that
-# has none is not blocked from the gate this preflight fronts.
+# Tools that no target in the per-clone loop needs only warn: docker, and the
+# two make lint dependencies. A contributor with Go, Node and Yarn can run
+# make test; failing the preflight over a linter they have not installed yet
+# blocks the whole documented setup, and lint-shell / lint-python repeat the
+# same message at the point of use, where it is actionable.
 # The recipe is one continued shell, so no comment line may sit inside it.
 check:
 	@missing=0; \
@@ -76,12 +79,10 @@ check:
 		missing=1; \
 	fi; \
 	if ! command -v shellcheck >/dev/null 2>&1; then \
-		echo "shellcheck not on PATH: needed by 'make lint' (operator/hack/*.sh); brew install shellcheck / apt-get install shellcheck" >&2; \
-		missing=1; \
+		echo "warning: shellcheck not on PATH: 'make lint' needs it (operator/hack/*.sh); brew install shellcheck / apt-get install shellcheck" >&2; \
 	fi; \
 	if ! command -v uvx >/dev/null 2>&1; then \
-		echo "uvx not on PATH: needed by 'make lint' (ruff and yamllint over operator/hack, .github, operator/config); install uv" >&2; \
-		missing=1; \
+		echo "warning: uvx not on PATH: 'make lint' needs it (ruff and yamllint over operator/hack, .github, operator/config); install uv" >&2; \
 	fi; \
 	if ! command -v docker >/dev/null 2>&1; then \
 		echo "warning: docker not on PATH: 'make ci', 'make -C operator bundle', test-alerts and the image builds need it; 'make test' and 'make lint' do not" >&2; \
