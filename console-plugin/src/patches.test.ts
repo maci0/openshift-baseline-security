@@ -1,8 +1,9 @@
-import { isValidCron, trimCron } from './cron';
+import { isValidCron } from './cron';
 import { isValidK8sName } from './names';
 import { isString } from './parse';
 import { batchApplyPatch, batchApplyRequested, remediationApplyPatch, rescanPatch, rescanToken, resourceVersionTest, schedulePatch, tailoredProfileBindingPatch } from './patches';
 import { randomString } from './testing/fuzz';
+import { trimGoSpace } from './text';
 
 describe('remediationApplyPatch', () => {
   it('adds the leaf when spec.remediation exists so absent defaulted fields are tolerated', () => {
@@ -188,7 +189,7 @@ describe('schedule editor helpers', () => {
       // what must round-trip, and \s admits U+FEFF, which the operator does not
       // split on.
       let bad: string | undefined;
-      const count = trimCron(s).split(operatorSpaceRe).length;
+      const count = trimGoSpace(s).split(operatorSpaceRe).length;
       if (ok && count !== 5) {
         bad = `isValidCron accepted ${JSON.stringify(s)} (${count} fields)`;
       }

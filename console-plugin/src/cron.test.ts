@@ -1,4 +1,5 @@
-import { isValidCron, trimCron } from './cron';
+import { isValidCron } from './cron';
+import { trimGoSpace } from './text';
 
 // Local predicate: the sweep pins that isValidCron returns a strict boolean,
 // and typeof checks live only inside type predicates.
@@ -166,11 +167,11 @@ describe('isValidCron throw-safety (fuzz sweep)', () => {
     // Restated here rather than imported: the assertion is that every accepted
     // value is five fields under the operator's own separator set (Go
     // unicode.IsSpace, as used by strings.Fields in schedule.go), so widening
-    // CRON_FIELD_SEPARATORS past what the operator splits on fails here.
+    // GO_SPACE in text.ts past what the operator splits on fails here.
     const operatorSpaceRe = /[\t\n\u000b\f\r\u0020\u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+/;
     for (const s of HOSTILE) {
       if (!isValidCron(s)) continue;
-      const fields = trimCron(s).split(operatorSpaceRe);
+      const fields = trimGoSpace(s).split(operatorSpaceRe);
       expect(fields).toHaveLength(5);
     }
   });

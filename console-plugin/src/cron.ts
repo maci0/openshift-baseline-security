@@ -1,5 +1,5 @@
 // Cron expression validation for ClusterBaseline.spec.schedule (5-field form).
-import { codePointLength } from './text';
+import { codePointLength, GO_SPACE, trimGoSpace } from './text';
 
 const cronMonths = {
   jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6,
@@ -66,37 +66,10 @@ const validCronField = <T extends Record<string, number>>(
     return start != null && end != null && start >= min && end <= max && start <= end;
   });
 
-// Field separators, exactly the set the operator's strings.Fields splits on
-// (Go unicode.IsSpace). JS \s and unicode.IsSpace disagree on two characters,
-// and both directions break the console/operator lockstep this validator exists
-// to keep:
-//
-//   U+FEFF  JS-only. "0\ufeff3 * * *" is five fields here and four fields to
-//           the operator, so the console patches it and reports the schedule
-//           saved, then the CR goes Degraded with InvalidSchedule on the next
-//           reconcile. A zero-width no-break space rides in on text pasted from
-//           a web page or a word processor.
-//   U+0085  operator-only (NEL, C1). Rejecting it here is the safe direction:
-//           the console refuses a schedule the operator would have run.
-//
-// Spelling the set out, rather than \s, is the point; a future \s that grows a
-// character would reopen the gap silently. Keep in lockstep with
-// normalizeAndParseSchedule's strings.Fields in schedule.go.
-//
-// Go unicode.IsSpace: the ASCII whitespace controls, space, NEL, NBSP, and the
-// Unicode_Space_Separator plus line/paragraph separator blocks. Written as
-// escapes so the set stays readable and diffable as plain ASCII.
-const CRON_FIELD_SEPARATORS =
-  '\t\n\u000b\f\r\u0020\u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000';
-// Global: without it only the leading alternative matches, so a value padded on
-// both sides keeps its trailing separators.
-const cronTrimRe = new RegExp(`^[${CRON_FIELD_SEPARATORS}]+|[${CRON_FIELD_SEPARATORS}]+$`, 'gu');
-const cronSplitRe = new RegExp(`[${CRON_FIELD_SEPARATORS}]+`, 'u');
-
-// Trim the outer separators with the same set the fields are split on, so a
-// value the operator would keep as part of a field cannot lose that character
-// on the way onto the CR.
-export const trimCron = (s: string): string => s.replace(cronTrimRe, '');
+// Fields split on GO_SPACE, the operator's strings.Fields set; that module
+// documents why the two JS and Go sets disagree and must not be \s. Global:
+// without it only the leading alternative of a padded value would match.
+const cronSplitRe = new RegExp(`[${GO_SPACE}]+`, 'u');
 
 // Match the operator's five-field robfig cron parser, including named months /
 // weekdays and '?', while rejecting descriptors and out-of-range values before
@@ -106,7 +79,7 @@ export const trimCron = (s: string): string => s.replace(cronTrimRe, '');
 // grammar accepts is ASCII anyway, so the two counts agree on every input that
 // gets past the field checks below.
 export const isValidCron = (s: string): boolean => {
-  const trimmed = trimCron(s);
+  const trimmed = trimGoSpace(s);
   if (!trimmed || codePointLength(trimmed) > 128) {
     return false;
   }

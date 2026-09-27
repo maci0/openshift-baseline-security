@@ -166,12 +166,15 @@ export const listSeparators = (count: number, locale?: string): string[] => {
   return out;
 };
 
-// Trim the character set Go's strings.TrimSpace trims (unicode.IsSpace plus the
-// Latin-1 specials): the ASCII whitespace controls, space, NEL, NBSP, and the
-// Unicode_Space_Separator plus line/paragraph separator blocks.
+// The character set Go's strings.TrimSpace trims and strings.Fields splits on
+// (unicode.IsSpace plus the Latin-1 specials): the ASCII whitespace controls,
+// space, NEL, NBSP, and the Unicode_Space_Separator plus line/paragraph
+// separator blocks. Exported because cron.ts splits a schedule's fields on the
+// operator's strings.Fields, and the two must not drift apart.
 //
 // String#trim is NOT this set, and the difference breaks operator parity in
-// both directions on the paths that must agree with a Go TrimSpace:
+// both directions on the paths that must agree with a Go TrimSpace or
+// strings.Fields:
 //
 //   U+FEFF  JS-only. "node:\uFEFFPASS" is "PASS" to the console and
 //           "\uFEFFPASS" (an unknown token, so INCONSISTENT) to the operator.
@@ -180,10 +183,12 @@ export const listSeparators = (count: number, locale?: string): string[] => {
 //
 // Both characters ride in on text pasted from a web page or a word processor,
 // and both are invisible, so the mismatch is silent: the console shows one
-// status while the operator counts another. Same set and same reasoning as
-// CRON_FIELD_SEPARATORS in cron.ts, which tracks the operator's strings.Fields.
-// Keep the two in lockstep.
-const GO_SPACE =
+// status while the operator counts another, or reports a schedule saved that
+// leaves the CR Degraded on the next reconcile. Spelled out rather than \s on
+// purpose; a future \s that grows a character would reopen the gap silently.
+// Keep in lockstep with the Go trim and with normalizeAndParseSchedule's
+// strings.Fields in schedule.go.
+export const GO_SPACE =
   '\t\n\u000b\f\r\u0020\u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000';
 // Global, so a value padded on both sides loses both runs.
 const goSpaceTrimRe = new RegExp(`^[${GO_SPACE}]+|[${GO_SPACE}]+$`, 'gu');

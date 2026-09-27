@@ -1,5 +1,5 @@
 // ClusterBaseline / TailoredProfile JSON patches (optimistic concurrency, fail-closed).
-import { isValidCron, trimCron } from './cron';
+import { isValidCron } from './cron';
 import { TAILORED_PROFILE_MAX_ITEMS, WAIVER_MAX_ITEMS, Waiver } from './models';
 import { isValidK8sName, isValidTailoredProfileName } from './names';
 import { isString, stripControlAndFormat, stripInvisibleText } from './parse';
@@ -70,11 +70,11 @@ export const tailoredProfileBindingPatch = (
 // already-set values all succeed (RFC 6902 add creates or replaces an object
 // member; matches remediationApplyPatch leaf handling for defaulted-absent
 // fields). Invalid cron yields no ops so CRD/controller rejection is not the
-// first failure mode. trimCron, not trim: the outer separators are exactly the
+// first failure mode. trimGoSpace, not trim: the outer separators are exactly the
 // ones the operator's strings.Fields would drop, so the value stored is the one
 // the operator sees.
 export const schedulePatch = (cron: string): PatchOp[] => {
-  const value = trimCron(cron);
+  const value = trimGoSpace(cron);
   if (!isValidCron(value)) {
     return [];
   }
