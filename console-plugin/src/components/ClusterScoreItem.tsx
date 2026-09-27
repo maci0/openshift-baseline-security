@@ -8,9 +8,9 @@ import ConsoleLink from './ConsoleLink';
 
 // Module-level so every render passes the same watch options object. A literal
 // built in the component body is a new reference on each render, and the SDK
-// compares watch identity before re-subscribing: the dashboard card would
-// re-subscribe on every state change of the item. Every other watch in the
-// plugin is memoized the same way.
+// re-subscribes when the options it is handed change: the dashboard card would
+// re-subscribe on every state change of the item. The page and tab watches are
+// built with useMemo for the same reason.
 const BASELINES_WATCH = {
   groupVersionKind: ClusterBaselineGVK,
   isList: true,
