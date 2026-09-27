@@ -1249,8 +1249,9 @@ Beyond existing fuzz targets, properties that should always hold:
 - [ ] **Policy engine (Gatekeeper/Kyverno) denies ScanSetting create**:
       ScanConfigured False with ReconcileError or binding error; message
       names the rejecting policy.
-- [ ] **NetworkPolicy denies operator → API**: probes fail; document symptoms
-      vs CO install failure.
+- [ ] **A foreign NetworkPolicy denies operator egress → API**: probes fail;
+      document symptoms vs CO install failure. The shipped operator policy is
+      ingress-only (SPEC §6), so it cannot cause this.
 
 ## AH. "Wrong layer" traps (tests that catch design confusion)
 
