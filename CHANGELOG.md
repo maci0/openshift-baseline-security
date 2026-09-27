@@ -219,6 +219,16 @@ depend on those tags.
   cluster still carries that batch's annotations, which the earlier finish
   removed.
 
+- The score trend, the per-profile sparklines, and the per-profile score badges
+  no longer assume `status.history` is stored oldest-first. That ordering is a
+  write-side convention (the operator appends) and not a schema constraint, so
+  a restored or hand-edited ring could arrive in any order. The trend's
+  accessible label reads the first and last points as the direction of travel,
+  so an out-of-order ring announced the trend backwards ("moved from 70 to
+  90"), and a per-profile badge could show an older scan's score than the
+  current one. Points are now ordered by instant when the ring is read, and the
+  newest point is resolved by instant rather than by array position.
+
 - The score trend and per-profile sparklines clamp a `status.history` score
   into the CRD `[0,100]` bounds before plotting it, the same bound the operator
   enforces on write and every other `status.score` read already applied. A

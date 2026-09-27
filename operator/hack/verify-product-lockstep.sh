@@ -33,6 +33,8 @@ SCORE="${ROOT}/operator/internal/controller/scoring.go"
 BATCH="${ROOT}/operator/internal/controller/batch.go"
 MODELS="${ROOT}/console-plugin/src/models.ts"
 SCORING_TS="${ROOT}/console-plugin/src/scoring.ts"
+STATUS_TS="${ROOT}/console-plugin/src/status.ts"
+INCONSISTENT="${ROOT}/operator/internal/controller/inconsistent.go"
 PATCHES="${ROOT}/console-plugin/src/patches.ts"
 PLUGIN_GO="${ROOT}/operator/internal/controller/clusterbaseline_controller.go"
 NGINX_CONF="${ROOT}/console-plugin/nginx.conf"
@@ -55,6 +57,8 @@ need "$SCORE" || true
 need "$BATCH" || true
 need "$MODELS" || true
 need "$SCORING_TS" || true
+need "$STATUS_TS" || true
+need "$INCONSISTENT" || true
 need "$PATCHES" || true
 need "$PLUGIN_GO" || true
 need "$NGINX_CONF" || true
@@ -155,6 +159,48 @@ if [[ -z "$go_ann" || -z "$ts_ann" ]]; then
   die "could not read history scoring-mode annotation key"
 elif [[ "$go_ann" != "$ts_ann" ]]; then
   die "historyScoringModeAnn ($go_ann) != HISTORY_SCORING_MODE_ANN ($ts_ann)"
+fi
+
+# Compliance Operator label and annotation keys the console reads off cluster
+# objects to route a result, weight it, or collapse an INCONSISTENT state. Both
+# sides hard-code the strings, and the console only carries a comment saying they
+# are lockstep: a CO key rename would silently drop every result into the wrong
+# bucket (or out of the score) with no compile error on either side.
+label_key() {
+  local go_name="$1" go_re="$2" go_file="$3"
+  local ts_name="$4" ts_re="$5" ts_file="$6"
+  local go_val ts_val
+  go_val=$(grep -E "$go_re" "$go_file" | head -1 | sed -E "s/.*\"([^\"]+)\".*/\1/" || true)
+  ts_val=$(grep -E "$ts_re" "$ts_file" | head -1 | sed -E "s/.*'([^']+)'.*/\1/" || true)
+  if [[ -z "$go_val" || -z "$ts_val" ]]; then
+    die "could not read operator ${go_name} / console ${ts_name}"
+  elif [[ "$go_val" != "$ts_val" ]]; then
+    die "operator ${go_name} (${go_val}) != console ${ts_name} (${ts_val})"
+  fi
+}
+
+label_key suiteLabel '^[[:space:]]*suiteLabel[[:space:]]*=' "$PLUGIN_GO" \
+  SUITE_LABEL "^(export )?const SUITE_LABEL[[:space:]]*=" "$MODELS"
+label_key checkSeverityLabel '^[[:space:]]*checkSeverityLabel[[:space:]]*=' "$PLUGIN_GO" \
+  checkSeverityLabel "^(export )?const checkSeverityLabel[[:space:]]*=" "$SCORING_TS"
+label_key scanNameLabel '^[[:space:]]*scanNameLabel[[:space:]]*=' "$PLUGIN_GO" \
+  SCAN_NAME_LABEL "^(export )?const SCAN_NAME_LABEL[[:space:]]*=" "$MODELS"
+label_key inconsistentSourceAnn '^[[:space:]]*inconsistentSourceAnn[[:space:]]*=' "$INCONSISTENT" \
+  inconsistentSourceAnn "^(export )?const inconsistentSourceAnn[[:space:]]*=" "$STATUS_TS"
+label_key mostCommonStatusAnn '^[[:space:]]*mostCommonStatusAnn[[:space:]]*=' "$INCONSISTENT" \
+  mostCommonStatusAnn "^(export )?const mostCommonStatusAnn[[:space:]]*=" "$STATUS_TS"
+
+# Node-scan name delimiter. poolFromRemediation (operator) and
+# nodePoolFromScanName (console) both split a CO scan name on the last "-node-"
+# to find the pool an apply will reboot. The separator is load-bearing on both
+# sides and lives in each only as a literal inside a call, so both are matched
+# at the call, not as a bare string in the file: the doc comments on either side
+# quote the delimiter too, and a file-level grep cannot tell them apart.
+if ! grep -qE 'LastIndex\([^,]+, "-node-"\)' "$BATCH"; then
+  die "operator poolFromRemediation no longer splits the CO scan name on \"-node-\""
+fi
+if ! grep -qE "lastIndexOf\('-node-'\)" "$MODELS"; then
+  die "console nodePoolFromScanName no longer splits the CO scan name on \"-node-\""
 fi
 
 # Batch apply annotation + cap.

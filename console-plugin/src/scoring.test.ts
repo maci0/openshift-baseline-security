@@ -1,5 +1,5 @@
 import { ClusterBaseline, ComplianceCheckResult, ResultCounts } from './models';
-import { HISTORY_SCORING_MODE_ANN, aggregateCounts, checkSeverity, clusterScore, effectiveScoringMode, flatProfileScore, historyScoringModeMismatch, normalizeScore, profileScore, scoreColor, scoreLabelColor, scoreStatus, severityWeight } from './scoring';
+import { HISTORY_SCORING_MODE_ANN, aggregateCounts, checkSeverity, clusterScore, effectiveScoringMode, flatProfileScore, historyScoringModeMismatch, latestSnapshotScore, normalizeScore, profileScore, scoreColor, scoreLabelColor, scoreStatus, severityWeight } from './scoring';
 import { isFiniteNumber } from './parse';
 
 // Runtime pins for fuzz sweeps: totals must be real numbers and mode checks
@@ -646,6 +646,46 @@ describe('normalizeScore', () => {
         expect(got).toBeLessThanOrEqual(100);
       }
     }
+  });
+});
+
+describe('latestSnapshotScore', () => {
+  it('is undefined for a missing or empty ring', () => {
+    expect(latestSnapshotScore(undefined)).toBeUndefined();
+    expect(latestSnapshotScore([])).toBeUndefined();
+  });
+
+  it('returns the newest point, not the last one in array order', () => {
+    // The operator appends oldest-first, but "oldest first" is a write-side
+    // convention the schema does not enforce, so the tip must be resolved by
+    // instant rather than by index.
+    expect(
+      latestSnapshotScore([
+        { time: '2026-01-03T00:00:00Z', score: 70 },
+        { time: '2026-01-01T00:00:00Z', score: 90 },
+        { time: '2026-01-02T00:00:00Z', score: 80 },
+      ]),
+    ).toBe(70);
+  });
+
+  it('skips a point with an unparseable time or a non-finite score', () => {
+    // A bad newest entry must fall back to the newest good one, not shadow it.
+    expect(
+      latestSnapshotScore([
+        { time: '2026-01-01T00:00:00Z', score: 90 },
+        { time: 'not-a-date', score: 10 },
+        { time: '2026-01-02T00:00:00Z', score: Number.NaN },
+      ]),
+    ).toBe(90);
+  });
+
+  it('clamps the returned point like every other status.score read', () => {
+    expect(latestSnapshotScore([{ time: '2026-01-01T00:00:00Z', score: 5000 }])).toBe(100);
+    expect(latestSnapshotScore([{ time: '2026-01-01T00:00:00Z', score: -20 }])).toBe(0);
+  });
+
+  it('floors a hand-edited fractional point, matching the integer status.score', () => {
+    expect(latestSnapshotScore([{ time: '2026-01-01T00:00:00Z', score: 87.5 }])).toBe(87);
   });
 });
 

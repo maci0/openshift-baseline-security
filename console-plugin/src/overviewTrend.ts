@@ -24,7 +24,17 @@ export const toTrendData = (history?: ScoreSnapshot[]): { x: Date; y: number }[]
     .filter(
       (p): p is { x: Date; y: number } =>
         !Number.isNaN(p.x.getTime()) && p.y !== null,
-    );
+    )
+    // Ascending by time, so index 0 is the oldest point and the last index the
+    // newest. The operator appends oldest-first (appendHistoryRing) and
+    // historyMax caps the ring at 30, but "oldest first" is a write-side
+    // convention, not a schema constraint: a restored status or a hand-edited
+    // ring can arrive in any order, and the trend's aria label reads
+    // chartData[0] / chartData[last] as from/to. Sorting here makes the single
+    // shared read point order-independent instead of leaving four call sites to
+    // each assume the convention. Array.prototype.sort is stable, so snapshots
+    // sharing an instant keep their ring order.
+    .sort((a, b) => a.x.getTime() - b.x.getTime());
 
 // Content key for history rings: status-only CR updates reallocate the array
 // with the same points; identity deps would rebuild Victory Date/path data on

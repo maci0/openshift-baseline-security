@@ -5,6 +5,7 @@ import {
   ComplianceCheckResult,
   isOwnedByBaseline,
   ResultCounts,
+  ScoreSnapshot,
   suiteFilterKey,
   Waiver,
 } from './models';
@@ -58,6 +59,38 @@ export const normalizeScore = (v: unknown): number | null => {
     return null;
   }
   return Math.min(SCORE_MAX, Math.max(SCORE_MIN, v));
+};
+
+/**
+ * Newest usable point of a score-history ring, or undefined when the ring holds
+ * none. The operator appends oldest-first and caps the ring at 30, but that is a
+ * write-side convention, not a schema constraint: a restored or hand-edited ring
+ * can arrive in any order. Callers that need "the current score for this bucket"
+ * (per-profile badges, the Overview memo key) must not read the last element and
+ * assume it is the newest, so the max-by-instant is resolved here once.
+ *
+ * Applies the same validity rules as normalizeScore: a point with an unparseable
+ * time or a non-finite score is skipped rather than returned, so a bad entry can
+ * neither shadow a good one nor surface a number the operator never wrote. The
+ * CRD declares an integer score, so flooring is a no-op on anything the operator
+ * wrote; it only stops a hand-edited fractional point from disagreeing with the
+ * integer status.score rendered beside it.
+ */
+export const latestSnapshotScore = (history?: ScoreSnapshot[]): number | undefined => {
+  let latestMs = Number.NEGATIVE_INFINITY;
+  let latest: number | undefined;
+  for (const h of history ?? []) {
+    const ms = new Date(h?.time).getTime();
+    const score = normalizeScore(h?.score);
+    if (Number.isNaN(ms) || score === null) {
+      continue;
+    }
+    if (ms >= latestMs) {
+      latestMs = ms;
+      latest = Math.floor(score);
+    }
+  }
+  return latest;
 };
 
 // Score of the singleton ClusterBaseline (metadata.name == "cluster"), or
@@ -267,12 +300,9 @@ export const profileScore = (
     // (first scan / no points yet). A loaded empty bucket after weighing still
     // returns null below.
     if (opts.results.length === 0) {
-      const hist = opts.history;
-      if (hist && hist.length > 0) {
-        const last = hist[hist.length - 1]?.score;
-        if (isFiniteNumber(last)) {
-          return normalizeScore(Math.floor(last));
-        }
+      const last = latestSnapshotScore(opts.history);
+      if (last !== undefined) {
+        return last;
       }
       return flatProfileScore(counts.pass, counts.fail);
     }

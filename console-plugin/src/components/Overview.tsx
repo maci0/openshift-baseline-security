@@ -64,6 +64,7 @@ import {
   aggregateCounts,
   effectiveScoringMode,
   historyScoringModeMismatch,
+  latestSnapshotScore,
   normalizeScore,
   profileScore,
   scoreLabelColor,
@@ -496,14 +497,10 @@ const Overview: React.FC<{
   const profileHistKey = (() => {
     let key = '';
     for (const p of statusProfiles ?? []) {
-      const h = p.history;
-      const last = h && h.length > 0 ? h[h.length - 1] : undefined;
-      key += encodeKeyList([p.key, last?.score]);
+      key += encodeKeyList([p.key, latestSnapshotScore(p.history)]);
     }
     for (const tp of statusTailored ?? []) {
-      const h = tp.history;
-      const last = h && h.length > 0 ? h[h.length - 1] : undefined;
-      key += encodeKeyList([`tp:${tp.name}`, last?.score]);
+      key += encodeKeyList([`tp:${tp.name}`, latestSnapshotScore(tp.history)]);
     }
     return key;
   })();

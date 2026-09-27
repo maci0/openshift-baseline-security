@@ -35,6 +35,31 @@ describe('toTrendData', () => {
       ]).map((p) => p.y),
     ).toEqual([100, 0]);
   });
+
+  it('orders points oldest first regardless of ring order', () => {
+    // "Oldest first" is a write-side convention (the operator appends), not a
+    // schema constraint. The trend's aria label reads chartData[0] as "from"
+    // and the last index as "to", so an out-of-order ring would announce the
+    // direction of travel backwards.
+    const shuffled = toTrendData([
+      { time: '2026-01-03T00:00:00Z', score: 70 },
+      { time: '2026-01-01T00:00:00Z', score: 90 },
+      { time: '2026-01-02T00:00:00Z', score: 80 },
+    ]);
+    expect(shuffled.map((p) => p.y)).toEqual([90, 80, 70]);
+    expect(shuffled[0].x.getTime()).toBeLessThan(shuffled[2].x.getTime());
+  });
+
+  it('sorts the points it keeps around the ones it drops', () => {
+    // A bad entry must not shift the order of the good ones around it.
+    expect(
+      toTrendData([
+        { time: '2026-01-02T00:00:00Z', score: 80 },
+        { time: 'not-a-date', score: 10 },
+        { time: '2026-01-01T00:00:00Z', score: 90 },
+      ]).map((p) => p.y),
+    ).toEqual([90, 80]);
+  });
 });
 
 // The separator the previous key builder interpolated, spelled out so the
