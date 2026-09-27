@@ -65,7 +65,7 @@ func (r *ClusterBaselineReconciler) checkScanStorage(ctx context.Context, cb *ba
 		// schedulable consumer, slow CSI provisioning, or node capacity all present
 		// the same way. State the fact (Pending) and both likely causes.
 		msg := fmt.Sprintf("PVC(s) %s in namespace %s Pending >%dm; ensure a StorageClass can provision them (a default StorageClass, and for WaitForFirstConsumer a schedulable consumer)",
-			strings.Join(pending, ", "), complianceNamespace, int(scanStoragePendingGrace.Minutes()))
+			strings.Join(pending, ", "), complianceNamespace, graceMinutes(scanStoragePendingGrace))
 		setCondFalseLogOnce(ctx, cb, "ScanStorageReady", "ScanStoragePending", msg,
 			"scan storage PVCs pending", "namespace", complianceNamespace, "pvcs", pending, "name", cb.Name)
 		return nil

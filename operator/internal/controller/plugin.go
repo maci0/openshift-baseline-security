@@ -35,6 +35,11 @@ func withoutPlugin(plugins []string, name string) []string {
 // the same key (a rename here cannot silently drift the two apart).
 const EnvRelatedImageConsolePlugin = "RELATED_IMAGE_CONSOLE_PLUGIN"
 
+// rollingUpdateSafeReplicas is the replica count at or above which a rolling
+// update may take one pod down (maxUnavailable=1). Below it, any nonzero
+// maxUnavailable lets a rollout drop the only serving pod, so it is pinned to 0.
+const rollingUpdateSafeReplicas = int32(2)
+
 // relatedImageConsolePlugin is the plugin image the operator deploys. Whitespace
 // alone is treated as unset so a mis-set env (padding, empty quotes) does not
 // create a Deployment with an unpullable image ref.
@@ -281,7 +286,7 @@ func (r *ClusterBaselineReconciler) ensureConsolePlugin(ctx context.Context, cb 
 		// only pod down, so pin it to 0 there; maxSurge=1 brings the replacement up
 		// first and the console keeps serving the old pod until it is ready.
 		maxUnavailable := int32(1)
-		if replicas < 2 {
+		if replicas < rollingUpdateSafeReplicas {
 			maxUnavailable = 0
 		}
 		dep.Spec.Strategy = appsv1.DeploymentStrategy{
@@ -415,7 +420,7 @@ func (r *ClusterBaselineReconciler) ensureConsolePlugin(ctx context.Context, cb 
 			reason = "Unavailable"
 			// Minutes from pluginUnavailableGrace so the message cannot drift.
 			msg = fmt.Sprintf("Deployment %s/%s has no ready pods for >%dm",
-				pluginNS, pluginName, int(pluginUnavailableGrace.Minutes()))
+				pluginNS, pluginName, graceMinutes(pluginUnavailableGrace))
 		}
 		// Transition-only Info so WaitingForPods / Unavailable appear in default
 		// logs without re-logging every requeue (matches ImageMissing path).
@@ -430,7 +435,7 @@ func (r *ClusterBaselineReconciler) ensureConsolePlugin(ctx context.Context, cb 
 		if deploymentAvailableFalsePastGrace(dep, r.now()) {
 			reason = "Unavailable"
 			msg = fmt.Sprintf("Deployment %s/%s Available=False for >%dm",
-				pluginNS, pluginName, int(pluginUnavailableGrace.Minutes()))
+				pluginNS, pluginName, graceMinutes(pluginUnavailableGrace))
 		}
 		logConsolePluginNotReady(ctx, cb, reason, msg)
 		return nil

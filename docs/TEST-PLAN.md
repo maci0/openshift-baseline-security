@@ -1614,6 +1614,8 @@ Classic boundary table. Automate as table-driven unit tests where possible.
 | plugin replicas ready 0 | Waiting / Unavailable by grace |
 | plugin replicas ready 1 of 2 | Deployed (ReadyMin) |
 | plugin replicas ready 2 of 2 | Deployed |
+| grace not a whole minute (90s) | message renders the ceiling (`>2m`), never the truncating floor (`>1m`) |
+| grace 1ns over / 1ns under a minute | rounds up / stays (`TestGraceMinutes`) |
 
 Already encoded, one test per cluster of rows: the four `score` rows by
 `TestScore`, the history-cap row by `TestClampHistory`, the same-timestamp
