@@ -98,11 +98,13 @@ status:
 // fakeOC installs a stub `oc` on PATH for the duration of the test. get
 // returns captured; a get that asks for a jsonpath field returns
 // FAKE_OC_RESOURCE_VERSION (empty by default, which reads as "no live object",
-// the case a restore onto a recovered cluster is in). FAKE_OC_GET_FAIL makes
-// that jsonpath get fail, the way an expired token or an apiserver blip does.
-// Every other subcommand is appended to the call log. The stub must tolerate
-// the --request-timeout flag both scripts pass on every call, so it drops
-// leading global flags before dispatching.
+// the case a restore onto a recovered cluster is in),
+// FAKE_OC_GET_FAIL (makes that jsonpath get fail, the way an expired token or
+// an apiserver blip does), and FAKE_OC_CRD_VERSIONS (the versions the CRD
+// serves, one per line, empty when the CRD cannot be read) stand in for the
+// two reads a restore makes. Every other subcommand is appended to the call
+// log. The stub must tolerate the --request-timeout flag both scripts pass on
+// every call, so it drops leading global flags before dispatching.
 func fakeOC(t *testing.T, dir, captured string) (logfile string) {
 	t.Helper()
 	stub := filepath.Join(dir, "oc")
@@ -117,7 +119,10 @@ func fakeOC(t *testing.T, dir, captured string) (logfile string) {
 		"  whoami) echo kube:admin; exit 0 ;;\n" +
 		"  get)\n" +
 		"    for a in \"$@\"; do\n" +
-		"      case \"$a\" in jsonpath=*) if [ -n \"${FAKE_OC_GET_FAIL:-}\" ]; then echo 'Forbidden: token expired' >&2; exit 1; fi; printf '%s' \"${FAKE_OC_RESOURCE_VERSION:-}\"; exit 0 ;; esac\n" +
+		"      case \"$a\" in\n" +
+		"        *spec.versions*) printf '%s' \"${FAKE_OC_CRD_VERSIONS:-v1alpha1}\"; exit 0 ;;\n" +
+		"        jsonpath=*) if [ -n \"${FAKE_OC_GET_FAIL:-}\" ]; then echo 'Forbidden: token expired' >&2; exit 1; fi; printf '%s' \"${FAKE_OC_RESOURCE_VERSION:-}\"; exit 0 ;;\n" +
+		"      esac\n" +
 		"    done\n" +
 		"    cat <<'CAPTURED'\n" + captured + "CAPTURED\nexit 0 ;;\n" +
 		"esac\n" +
@@ -565,6 +570,59 @@ func TestRestoreRefusesWhenLiveObjectCannotBeRead(t *testing.T) {
 	}
 }
 
+// A backup written at an apiVersion this cluster no longer serves cannot be
+// applied at all, and `oc apply` reports it as "no matches for kind", which
+// sends the operator looking at RBAC instead of at the version. Refuse before
+// the first write, and say what the real cause is.
+func TestRestoreRefusesAnArtifactTheClusterCannotServe(t *testing.T) {
+	bin := t.TempDir()
+	log := fakeOC(t, bin, baselineYAML)
+	work := t.TempDir()
+	dir := backupDir(t, work, "bdir", time.Now().UTC().Format(time.RFC3339))
+	t.Setenv("FAKE_OC_CRD_VERSIONS", "v1beta1")
+
+	_, stderr, code := runScript(t, "restore.sh", work, dir)
+	if code == 0 {
+		t.Fatal("restore.sh applied an artifact the cluster's CRD does not serve")
+	}
+	if !strings.Contains(stderr, "does not serve") || !strings.Contains(stderr, "v1beta1") {
+		t.Errorf("stderr %q, want the served versions named", stderr)
+	}
+	if calls := ocCalls(t, log); strings.Contains(calls, "apply -f") {
+		t.Errorf("the refusal came after a write to the cluster; oc calls:\n%s", calls)
+	}
+
+	// An admin who knows the CRD is coming back still gets a way through.
+	_, stderr, code = runScript(t, "restore.sh", work, "--force", dir)
+	if code != 0 {
+		t.Fatalf("--force on an unserved version: exit %d, want 0; stderr=%s", code, stderr)
+	}
+	if !strings.Contains(stderr, "--force") {
+		t.Errorf("stderr %q, want the forced restore announced", stderr)
+	}
+	if calls := ocCalls(t, log); !strings.Contains(calls, "replace --subresource=status -f") {
+		t.Errorf("--force did not complete the restore; oc calls:\n%s", calls)
+	}
+}
+
+// A cluster recovered without its CRD has nothing to check the artifact
+// version against, and the documented order is to restore etcd first and this
+// second. That must not turn into a refusal.
+func TestRestoreProceedsWhenTheCRDCannotBeRead(t *testing.T) {
+	bin := t.TempDir()
+	log := fakeOC(t, bin, baselineYAML)
+	work := t.TempDir()
+	dir := backupDir(t, work, "bdir", time.Now().UTC().Format(time.RFC3339))
+	t.Setenv("FAKE_OC_CRD_VERSIONS", "")
+
+	if _, stderr, code := runScript(t, "restore.sh", work, dir); code != 0 {
+		t.Fatalf("restore.sh with no readable CRD: exit %d, want 0; stderr=%s", code, stderr)
+	}
+	if calls := ocCalls(t, log); !strings.Contains(calls, "apply -f") {
+		t.Errorf("restore did not apply; oc calls:\n%s", calls)
+	}
+}
+
 // The RPO a restore buys is the age of the artifact, so the age has to be on
 // screen at restore time rather than in a doc nobody reads mid-incident.
 func TestRestoreReportsBackupAge(t *testing.T) {
@@ -594,6 +652,110 @@ func TestRestoreReportsBackupAge(t *testing.T) {
 	}
 	if !strings.Contains(stdout, "30d old") {
 		t.Errorf("stdout %q, want the age in the restore summary", stdout)
+	}
+
+	// An unreadable stamp does not stop the restore, but the operator has to
+	// be told the RPO is unknown rather than shown no age at all.
+	unreadable := backupDir(t, work, "unreadable", "last tuesday")
+	stdout, stderr, code = runScript(t, "restore.sh", work, unreadable)
+	if code != 0 {
+		t.Fatalf("restore.sh on an unreadable takenAt: exit %d, want 0; stderr=%s", code, stderr)
+	}
+	if !strings.Contains(stderr, "RPO this restore buys is") {
+		t.Errorf("stderr %q, want the unmeasurable RPO called out", stderr)
+	}
+	if strings.Contains(stdout, "d old") {
+		t.Errorf("stdout %q claims an age for a stamp that has none", stdout)
+	}
+}
+
+// pathWithBSDDate puts a `date` on PATH that has no GNU `-d` flag, the way
+// macOS ships it, and symlinks everything else through. A script that parses
+// the backup age with `date -d` loses the check entirely on such a host and
+// cannot tell that the check is gone; the age has to come out of the stamp
+// itself.
+func pathWithBSDDate(t *testing.T) {
+	t.Helper()
+	real, err := exec.LookPath("date")
+	if err != nil {
+		t.Skip("host has no date")
+	}
+	farm := t.TempDir()
+	for _, dir := range filepath.SplitList(os.Getenv("PATH")) {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			if e.IsDir() || e.Name() == "date" {
+				continue
+			}
+			info, err := e.Info()
+			if err != nil || info.Mode()&0o111 == 0 {
+				continue
+			}
+			link := filepath.Join(farm, e.Name())
+			if _, err := os.Lstat(link); err == nil {
+				continue
+			}
+			if err := os.Symlink(filepath.Join(dir, e.Name()), link); err != nil {
+				t.Fatalf("symlinking %s: %v", e.Name(), err)
+			}
+		}
+	}
+	stub := filepath.Join(farm, "date")
+	script := "#!/usr/bin/env bash\n" +
+		"for a in \"$@\"; do\n" +
+		"  case \"$a\" in -d|--date) echo 'date: illegal option -- d' >&2; exit 1 ;; esac\n" +
+		"done\n" +
+		"exec " + real + " \"$@\"\n"
+	if err := os.WriteFile(stub, []byte(script), 0o700); err != nil {
+		t.Fatalf("writing BSD date stub: %v", err)
+	}
+	t.Setenv("PATH", farm)
+}
+
+// The age is the RPO. A host whose `date` cannot parse it must still see the
+// age, or a months-old backup reads as a fresh one and nobody looks for a
+// newer one.
+func TestBackupAgeSurvivesANonGNUDate(t *testing.T) {
+	bin := t.TempDir()
+	fakeOC(t, bin, baselineYAML)
+	pathWithBSDDate(t)
+	work := t.TempDir()
+
+	stale := backupDir(t, work, "stale", time.Now().UTC().AddDate(0, 0, -30).Format(time.RFC3339))
+
+	_, stderr, code := runScript(t, "verify-backup.sh", work, stale)
+	if code == 0 {
+		t.Fatal("verify-backup.sh passed a 30-day-old backup on a host with no GNU date")
+	}
+	if !strings.Contains(stderr, "past the 7-day limit") {
+		t.Errorf("stderr %q, want the age limit enforced without `date -d`", stderr)
+	}
+
+	stdout, stderr, code := runScript(t, "restore.sh", work, stale)
+	if code != 0 {
+		t.Fatalf("restore.sh: exit %d, want 0; stderr=%s", code, stderr)
+	}
+	if !strings.Contains(stderr, "30 days old") || !strings.Contains(stdout, "30d old") {
+		t.Errorf("stdout %q stderr %q, want the age reported without `date -d`", stdout, stderr)
+	}
+}
+
+// The digest a verifier recomputes must not depend on GNU coreutils either,
+// or the check cannot run on the machine the copy landed on.
+func TestVerifyBackupWithoutGNUCoreutils(t *testing.T) {
+	work := t.TempDir()
+	dir := backupDir(t, work, "bdir", time.Now().UTC().Format(time.RFC3339))
+	pathWithoutSHA256Sum(t)
+
+	stdout, stderr, code := runScript(t, "verify-backup.sh", work, dir)
+	if code != 0 {
+		t.Fatalf("verify-backup.sh without sha256sum: exit %d, want 0; stderr=%s", code, stderr)
+	}
+	if !strings.Contains(stdout, "restorable") {
+		t.Errorf("stdout %q, want a restorable verdict without GNU coreutils", stdout)
 	}
 }
 
@@ -696,6 +858,23 @@ func TestVerifyBackup(t *testing.T) {
 				return backupDir(t, work, "bdir", now.AddDate(1, 0, 0).Format(time.RFC3339))
 			},
 			want: "in the future",
+		},
+		{
+			// An unreadable stamp is not a young backup. Passing here would
+			// make the alert on this exit status blind to the one failure it
+			// exists to catch.
+			name: "manifest records no age",
+			mutate: func(t *testing.T, work string) string {
+				return backupDir(t, work, "bdir", "")
+			},
+			want: "no takenAt",
+		},
+		{
+			name: "manifest age is not a timestamp",
+			mutate: func(t *testing.T, work string) string {
+				return backupDir(t, work, "bdir", "last tuesday")
+			},
+			want: "is not a YYYY-MM-DDTHH:MM:SSZ stamp",
 		},
 	}
 

@@ -1483,9 +1483,13 @@ read at all (an unreadable object is not an absent one, and `--force` does not
 override it), the reported artifact age, the
 future-`lastScanTime` recovery hint, the deletion warning that names the
 unrecoverable waivers, `verify-backup.sh` against a good directory and every
-way a scheduled backup fails quietly, and the same round trip on a PATH with
+way a scheduled backup fails quietly, the same round trip on a PATH with
 no GNU `sha256sum` (the macOS shape, where the digest falls back to `shasum`
-or `openssl`). The `hack/` cases below still need a live cluster.
+or `openssl`), the reported and enforced age on a PATH whose `date` has no
+GNU `-d`, the refusal of an artifact whose `apiVersion` the CRD does not
+serve (and the restore that goes ahead when the CRD cannot be read), and the
+refusal to pass a backup whose age cannot be measured. The `hack/` cases
+below still need a live cluster.
 
 - [ ] **Restore etcd from backup taken mid-scan**: ClusterBaseline generation
       and conditions converge; no permanent Progressing from stale observed

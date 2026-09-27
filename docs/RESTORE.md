@@ -36,9 +36,11 @@ Stated, so they are decisions rather than surprises:
   day of waiver edits, and the score history is gone for the scans since the
   last capture (it is recomputed forward from the next scan, not backfilled).
 - **RTO: under two minutes** for a `restore.sh` run against a reachable
-  apiserver. It is two API calls plus one SHA-256 digest (`sha256sum`, or
-  `shasum`/`openssl` where coreutils is absent, as on macOS). A full etcd
-  restore is OpenShift's, not this project's, and is orders of magnitude slower.
+  apiserver. It is a few API reads (`whoami`, the live `resourceVersion`, the
+  CRD's served versions) plus one SHA-256 digest (`sha256sum`, or
+  `shasum`/`openssl` where coreutils is absent, as on macOS) and the two
+  writes. A full etcd restore is OpenShift's, not this project's, and is
+  orders of magnitude slower.
 - **RPO for the Compliance Operator's own data is zero** here, because this
   project has no copy of it. If the Compliance Operator's results are the loss,
   a fresh scan rebuilds them, at the cost of one scan interval.
@@ -84,6 +86,12 @@ of them. `--max-age-days N` sets the age limit (default 7, the same threshold
 `restore.sh` warns at). Alert on its exit status from whatever runs the
 schedule; a backup nobody re-reads is a hypothesis.
 
+The age comes off the `takenAt` stamp in the MANIFEST, with no dependency on
+which `date` the host has, and a MANIFEST whose `takenAt` is missing or is
+not a `YYYY-MM-DDTHH:MM:SSZ` stamp fails the check. "Not old enough to
+matter" and "old enough to matter, unmeasurable" must not both exit 0, or the
+alert carries nothing.
+
 ## Restoring
 
 ```sh
@@ -124,6 +132,16 @@ the operator cannot have meant to clobber an object whose current
 
 The age of the artifact is the RPO the restore buys, so it is in the restore
 summary, and a backup more than a week old says so before anything is written.
+A MANIFEST whose `takenAt` cannot be read still restores, and says the RPO is
+unknown rather than showing no age.
+
+The artifact also has to be a version the cluster can accept. `restore.sh`
+reads the served versions off the CRD and refuses an artifact taken at an
+`apiVersion` that is not among them, naming both, because `oc apply` reports
+that as `no matches for kind`, which sends the reader after RBAC instead of
+after the version. `--force` overrides it. A CRD that cannot be read at all,
+which is the state of a cluster whose etcd restore has not finished, is left
+to the apply, which reports it.
 
 The script then applies the spec and replaces the status subresource:
 
@@ -187,6 +205,9 @@ on every `make test`, and pins the behavior that matters:
 - an empty capture, a wrong-kind object, a truncated artifact, an edited
   artifact, a missing MANIFEST, and a MANIFEST without a checksum are each
   refused, and refused **before** any call that writes to the cluster;
+- an artifact taken at an `apiVersion` the CRD does not serve is refused
+  before the apply, naming the served versions, and a CRD that cannot be
+  read does not block the restore;
 - an artifact with a second YAML document appended (a smuggled
   `ClusterRoleBinding`, say) is refused even when its checksum is valid, so the
   refusal cannot be dismissed as checksum damage;
@@ -197,8 +218,12 @@ on every `make test`, and pins the behavior that matters:
 - the artifact age is reported, and a backup older than a week says so;
 - `verify-backup.sh` passes a good directory and fails each way a scheduled
   backup dies quietly: missing directory, truncated copy, lost MANIFEST,
-  zero-byte artifact, wrong kind, a schedule that stopped running, and a
-  clock that was wrong when it was taken;
+  zero-byte artifact, wrong kind, a schedule that stopped running, a clock
+  that was wrong when it was taken, and a MANIFEST whose age cannot be
+  measured;
+- the age is read on a PATH with no GNU `date -d` (the macOS shape) and a
+  digest on a PATH with no GNU `sha256sum`, so neither check can be lost to
+  the host it runs on;
 - a future `lastScanTime` warns with the recovery command and still restores;
 - deleting the CR logs that the waivers are not recoverable and names the
   backup command.

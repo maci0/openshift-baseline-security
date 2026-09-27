@@ -19,6 +19,9 @@ set -euo pipefail
 # shellcheck source-path=SCRIPTDIR
 # shellcheck source=lib-sha256.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib-sha256.sh"
+# shellcheck source-path=SCRIPTDIR
+# shellcheck source=lib-timestamp.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib-timestamp.sh"
 
 # A restore of a backup whose resourceVersion is behind the live object's is a
 # clobber of the one state nothing can regenerate (the waiver list and its
@@ -42,7 +45,8 @@ has them, without waiting on a full control-plane restore.
 
 Options:
   -f, --force   restore even when the live object has moved on since the
-                backup was taken
+                backup was taken, or when the artifact was taken at an
+                apiVersion this cluster's CRD does not serve
   -h, --help    print this usage and exit 0
 EOF
 }
@@ -155,8 +159,18 @@ fi
 # since takenAt is not in the artifact and cannot be recovered from it.
 TAKEN_AT="$(sed -n 's/^takenAt=//p' "$MANIFEST" | head -1)"
 AGE_NOTE="${TAKEN_AT:-unknown time}"
-TAKEN_EPOCH="$(date -u -d "${TAKEN_AT:-}" +%s 2>/dev/null || true)"
-if [[ -n "$TAKEN_EPOCH" ]]; then
+if [[ -z "$TAKEN_AT" ]] || ! TAKEN_EPOCH="$(iso8601_to_epoch "$TAKEN_AT")"; then
+  # The age is the RPO this restore buys, and an unreadable stamp is not a
+  # young one. Say the RPO is unknown rather than reporting nothing, so the
+  # operator looks for a newer backup instead of assuming this is recent.
+  echo "restore.sh: note: MANIFEST takenAt '${TAKEN_AT:-<none>}' is not a" >&2
+  echo "restore.sh: YYYY-MM-DDTHH:MM:SSZ stamp, so the RPO this restore buys is" >&2
+  echo "restore.sh: unknown. Check the artifact really is recent before relying" >&2
+  echo "restore.sh: on it: anything changed since may be lost." >&2
+elif (( $(date -u +%s) < TAKEN_EPOCH )); then
+  echo "restore.sh: note: takenAt $TAKEN_AT is in the future, so the host clock" >&2
+  echo "restore.sh: was wrong when this backup was taken; its real age is unknown." >&2
+else
   AGE_SECONDS=$(( $(date -u +%s) - TAKEN_EPOCH ))
   AGE_DAYS=$(( AGE_SECONDS / 86400 ))
   AGE_NOTE="$TAKEN_AT, ${AGE_DAYS}d old"
@@ -211,6 +225,33 @@ if [[ -n "$BACKUP_RESOURCE_VERSION" && -n "$LIVE_RESOURCE_VERSION" &&
     echo "restore.sh: made since. Nothing was changed. To restore anyway:" >&2
     echo "restore.sh:   hack/restore.sh --force $DIR" >&2
     exit 1
+  fi
+fi
+
+# A backup is only restorable into a cluster that serves the version it was
+# written at. After a version bump the apiVersion in the artifact no longer
+# matches anything, and `oc apply` fails on "no matches for kind" partway
+# through an incident, with no hint that the version is why. Checking first
+# names the actual cause. A CRD that is not readable at all (a cluster
+# recovered without it yet) is left to the apply, which reports it.
+ARTIFACT_VERSION="$(sed -n 's|^apiVersion: *baselinesecurity\.openshift\.io/||p' "$ARTIFACT" | head -1)"
+SERVED_VERSIONS="$(oc get crd clusterbaselines.baselinesecurity.openshift.io \
+  -o jsonpath='{range .spec.versions[?(@.served==true)]}{.name}{"\n"}{end}' 2>/dev/null || true)"
+if [[ -n "$SERVED_VERSIONS" ]]; then
+  if ! grep -qxF "$ARTIFACT_VERSION" <<<"$SERVED_VERSIONS"; then
+    if [[ "$FORCE" == true ]]; then
+      echo "restore.sh: note: --force; artifact is ${ARTIFACT_VERSION}, this CRD serves" >&2
+      echo "restore.sh: $(tr '\n' ' ' <<<"$SERVED_VERSIONS")" >&2
+    else
+      echo "restore.sh: the artifact was taken at ${ARTIFACT_VERSION}, which this" >&2
+      echo "restore.sh: cluster's CRD does not serve. Served versions:" >&2
+      echo "restore.sh: $(tr '\n' ' ' <<<"$SERVED_VERSIONS")" >&2
+      echo "restore.sh: Nothing was changed. Restore the CRD that serves" >&2
+      echo "restore.sh: ${ARTIFACT_VERSION} first, or re-take the backup against this" >&2
+      echo "restore.sh: cluster, or force it anyway:" >&2
+      echo "restore.sh:   hack/restore.sh --force $DIR" >&2
+      exit 1
+    fi
   fi
 fi
 

@@ -22,6 +22,13 @@ set -euo pipefail
 # without a staleness warning.
 MAX_AGE_DAYS=7
 
+# shellcheck source-path=SCRIPTDIR
+# shellcheck source=lib-sha256.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib-sha256.sh"
+# shellcheck source-path=SCRIPTDIR
+# shellcheck source=lib-timestamp.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib-timestamp.sh"
+
 usage() {
   cat <<'EOF'
 Usage: verify-backup.sh [--max-age-days N] [backup-dir]
@@ -105,15 +112,25 @@ grep -q '^kind: ClusterBaseline$' "$ARTIFACT" ||
 
 EXPECTED="$(sed -n 's/^sha256=//p' "$MANIFEST" | head -1)"
 [[ -n "$EXPECTED" ]] || fail "MANIFEST has no sha256; the artifact cannot be proven intact"
-ACTUAL="$(command sha256sum < "$ARTIFACT" | cut -d' ' -f1)"
+if ! sha256_init; then
+  fail "no SHA-256 tool found, so the artifact cannot be checked at all"
+fi
+ACTUAL="$(sha256_file "$ARTIFACT")"
 [[ "$ACTUAL" == "$EXPECTED" ]] || fail "checksum mismatch; the artifact was modified or truncated (expected $EXPECTED, actual $ACTUAL)"
 
+# The age is half of what this script checks, so a MANIFEST whose takenAt
+# cannot be read is a failed check, not a passed one: "not old enough to
+# matter" and "old enough to matter, unmeasurable" must not both exit 0, or
+# the alert on this exit status carries no information.
 TAKEN_AT="$(sed -n 's/^takenAt=//p' "$MANIFEST" | head -1)"
+if [[ -z "$TAKEN_AT" ]]; then
+  fail "MANIFEST has no takenAt; the age that decides whether this backup still protects anything cannot be checked"
+fi
+if ! TAKEN_EPOCH="$(iso8601_to_epoch "$TAKEN_AT")"; then
+  fail "MANIFEST takenAt '$TAKEN_AT' is not a YYYY-MM-DDTHH:MM:SSZ stamp; the age cannot be checked"
+fi
 AGE_NOTE="${TAKEN_AT:-unknown}"
-TAKEN_EPOCH="$(date -u -d "${TAKEN_AT:-}" +%s 2>/dev/null || true)"
-if [[ -z "$TAKEN_EPOCH" ]]; then
-  echo "verify-backup.sh: note: MANIFEST has no parseable takenAt; age not checked" >&2
-elif (( $(date -u +%s) < TAKEN_EPOCH )); then
+if (( $(date -u +%s) < TAKEN_EPOCH )); then
   fail "takenAt $TAKEN_AT is in the future; the host clock was wrong when the backup was taken"
 else
   AGE_DAYS=$(( ($(date -u +%s) - TAKEN_EPOCH) / 86400 ))

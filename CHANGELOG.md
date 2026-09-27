@@ -81,6 +81,30 @@ depend on those tags.
   override it, since the operator cannot have meant to clobber an object whose
   current resourceVersion was never read.
 
+### Fixed
+
+- `hack/verify-backup.sh` computed the backup age with `date -u -d`, which is
+  GNU coreutils only. On a host with BSD `date` (macOS, which `hack/backup.sh`
+  and `hack/restore.sh` already support for the digest) the conversion failed,
+  the age check was skipped with a note on stderr, and the script exited 0: a
+  backup that had not been refreshed in a year verified as restorable, which
+  is the one failure it exists to catch. The age is now read off the stamp
+  itself (`hack/lib-timestamp.sh`, no external `date` call), and a MANIFEST
+  whose `takenAt` is missing or unparseable fails the check instead of
+  passing it, so an unmeasurable age can no longer be alerted on as a healthy
+  one. `hack/restore.sh` reports the same case as an unknown RPO rather than
+  printing no age at all.
+- `hack/verify-backup.sh` digested the artifact with `sha256sum` directly,
+  where the other two scripts go through `hack/lib-sha256.sh`, so the check
+  could not run at all on a host without GNU coreutils, which is the host the
+  doc tells an admin to pull the off-cluster copy back onto.
+- `hack/restore.sh` now refuses, before any write, an artifact taken at an
+  `apiVersion` the cluster's CRD does not serve. `oc apply` reports that as
+  `no matches for kind`, which during an incident points at RBAC rather than
+  at the version; the refusal names the artifact's version and the served
+  ones, and `--force` overrides it. A cluster whose CRD cannot be read (an
+  etcd restore still in progress) is left to the apply.
+
 ### Added
 
 - `hack/verify-backup.sh`, a cluster-free check that a backup directory is
