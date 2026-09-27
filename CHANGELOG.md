@@ -75,12 +75,14 @@ depend on those tags.
   local and in-image binaries match, but nothing checked it: a dropped or
   misspelled flag produced a different binary and every image and test run
   still passed.
+
 - The operator binary takes `--version` and prints the release version to
   stdout, exiting 0 before any cluster or port work. The value is stamped by
   the linker from the same `VERSION` the image label and the CSV carry, so
   `manager --version` inside a running pod reports the build it came from
   instead of a bare digest. A binary built without the stamp (plain `go
   build`) reports `dev`.
+
 - `yarn size` (in `yarn build` and `yarn ci`) reports the transferred size of
   the built console plugin and fails over the ceilings in
   `console-plugin/tools/size/budget.ts`: the initial JS the browser must
@@ -89,135 +91,11 @@ depend on those tags.
   library pulled back into the entry bundle accreted silently. The numbers
   print into the CI log beside the commit that produced them.
 
-### Changed
-
-- `docs/THREAT_MODEL.md` brought back in line with the code. The commit stamp
-  and eleven line citations across `role.yaml`, `cmd/main.go`, `plugin.go`,
-  `plugin_pod.go`, `nginx.conf`, both Dockerfiles, `CompliancePage.tsx`,
-  `RemediationsTab.tsx`, and the e2e dotenv loader were stale, and two surfaces
-  the model never named are now covered: the leader-election Lease and its
-  separate Role, and the operator's cluster-wide RBAC grants. No shipped
-  behavior changed.
-
-### Fixed
-
-- A waiver reason, a remediation error message, and the text in the printable
-  report lost their zero-width joiners and non-joiners on the way in and out.
-  The invisible-character filter dropped every Unicode format character, so a
-  family emoji was stored as three separate emoji and a Persian or Arabic
-  compound lost the joiner that carries its meaning. Free text now keeps those
-  two joiners while still dropping the characters that only exist to hide the
-  next one (BIDI controls, zero-width space, BOM, word joiner). The waiver
-  `requestedBy` / `approvedBy` fields keep the full filter, where a joiner in
-  front of a name is a spoof and no identity needs one. CSV export is
-  unchanged: a hidden character in front of a formula sigil is still neutralized
-  there.
-- A failed ClusterBaseline watch rendered the Overview, Profiles, and
-  Remediations tabs as "Baseline not configured" with a **Create default
-  baseline** button. A 403 on `clusterbaselines.compliance.openshift.io`, or a
-  missing CRD, was indistinguishable from an absent CR, so the page told the
-  admin a resource the operator may already have created did not exist. The
-  tabs now render a danger state naming the read failure. The **Create default
-  baseline** button also stays silent when it loses the create race, which on a
-  broken watch left the click with no output at all; it now says the CR exists.
-- Two failing watches showed only the first message in the page banner, and the
-  second one's text was never rendered anywhere. The banner now carries every
-  watch error.
-- A failed async-chunk load and a failed report-exporter load both reported one
-  fixed sentence and discarded the rejection, so a stale chunk id after a
-  console upgrade was indistinguishable from an unreachable CDN. The reason is
-  now shown.
-- A report download whose `click()` threw left its hidden anchor element in the
-  page, one per failed export.
-- `baseline_security_scan_interval_seconds` could report a value that depended
-  on which process published it first. The walk behind the gauge started at the
-  publisher's clock, so an annual schedule crossing a leap year reported 365d
-  from one phase of the year and 366d from another, and the per-process memo
-  froze whichever phase arrived first under a key that carries the schedule
-  alone. The walk is now anchored to a fixed epoch, so the value is a function
-  of `spec.schedule` and nothing else. The `ComplianceScanStale` threshold moves
-  by at most one day, and only for annual schedules.
-- `manager --help` documented the `KUBECONFIG` fallback without pinning the
-  `--kubeconfig` flag it sits behind. The flag was registered by a transitive
-  package's `init`, which upstream marks for removal, so the documented
-  precedence could have outlived the flag. It is now registered by the binary
-  itself, the help names the full resolution order, the start-up
-  `configuration` log records whether a kubeconfig was passed (not its path),
-  and a test fails if the flag ever goes missing again.
-- Release images stamped `org.opencontainers.image.version` from the
-  `ARG VERSION` default in each Dockerfile rather than the version being
-  published. The release job replaced `DOCKER_BUILD_FLAGS` to drop the
-  buildx-only `--provenance`/`--sbom`, and the replacement also dropped
-  `--build-arg VERSION`, so all four images fell back to the default. The two
-  values were kept equal by `verify-versions`, so nothing shipped mislabeled,
-  but the label depended on that gate rather than on what was built. The flags
-  are now assembled after `resolve-release-version.sh` has resolved the
-  version, so every image is built with it explicitly.
-- Operator pod termination skipped the drain window. The manager Deployment's
-  `preStop` hook was `exec: /bin/sh -c "sleep 5"`, but the runtime image is
-  `ubi9/ubi-micro`, which ships no shell and no `sleep`. The hook could not run,
-  so SIGTERM reached the process immediately and a pod being removed from the
-  Service could still receive scrapes or hold the leader lease during its final
-  seconds. Both the manager Deployment (kustomize and CSV) and the console
-  plugin container now use the kubelet's native `preStop.sleep` handler, which
-  needs no binary in the image. Requires Kubernetes 1.29+; the CSV already
-  declares `minKubeVersion: 1.35.0`.
-- Console plugin image failed to build. The `COPY` that places
-  `THIRD-PARTY-NOTICES.txt` in `/licenses/` named a path from the build stage
-  without `--from=build`, so it resolved against the build context instead,
-  where `dist/` is excluded by `.dockerignore`. The file the build stage
-  generated was never reachable from the runtime stage.
-
-### Security
-
-- Results CSV export hardened against a formula sigil hidden behind a leading
-  control character. `csvCell` dropped NULs and Unicode format characters, then
-  checked the cell for a formula starter, so a cell such as `\u0001=cmd` kept a
-  control prefix that a spreadsheet trims before deciding whether the cell is a
-  formula. A tampered `ComplianceCheckResult` name, description first line, or
-  `check-severity` label could therefore reach a downloaded export as an
-  evaluated formula. Export rows now drop the controls a spreadsheet trims
-  (tab, CR, and LF stay, since RFC 4180 quoting needs them). Cells that held a
-  control character other than a delimiter lose it from the export.
-- Console write controls were gated on `useAccessReview` through their
-  `isDisabled` prop alone. A tab holding an open confirm modal, a stopped
-  editor, or a pending form across a permission revocation would still send the
-  patch the button had already admitted. Every mutation now re-checks the
-  reviewed permission at the request boundary through one chokepoint
-  (`console-plugin/src/permissions.ts`), and an unresolved review denies rather
-  than defaulting to allow. Covered: rescan, profile toggle, schedule save,
-  waiver add and remove, TailoredProfile create, update, and bind, tailored
-  profile unbind, default baseline create, and every remediation path
-  (per-row apply, unapply, auto-apply, batch apply).
-
-### Changed
-
-- Console plugin built a fresh `Intl.NumberFormat` / `Intl.DateTimeFormat` on
-  every count, date label, and chart tick. A console session sets an explicit
-  locale, and the engine only caches the runtime default, so each card, waiver
-  row, remediation row, and axis label paid a formatter construction on the
-  main thread. `formatCount`, `formatLocalDate`, and `formatChartDate` now hold
-  one formatter per locale tag, matching how the display collator is already
-  cached. Output is unchanged, including the fallback for an invalid tag.
-- Console plugin re-canonicalized the console locale on every count, date label,
-  collator comparison, and list join: `safeLocale` ran `Intl.getCanonicalLocales`
-  per call, and `compareForDisplay` calls it once per comparison, so sorting the
-  rule catalog canonicalized the tag thousands of times per sort. `safeLocale`
-  now holds one entry per locale tag, like the formatters above it. Output is
-  unchanged, including the invalid-tag fallback.
-- Profiles typeahead re-folded the whole rule catalog, plus the query once per
-  option, on every keystroke, so typing in the enable-rules picker redid a
-  thousand NFD normalizations per character over unchanged names. The catalog
-  is now folded when it changes and the query when it is typed, leaving a
-  substring test per option. Matching is unchanged, including diacritic and
-  Turkish dotted/dotless i handling.
-
-### Added
-
 - Observe dashboard gained a Reconcile loop row (reconcile errors against total
   reconciles, and p50/p99 reconcile duration). The operator's own failure rate
   and loop latency were visible only in pod logs, so a reconcile loop slowing
   toward its 5m bound had no metric to graph before it started failing.
+
 - `docs/OBSERVABILITY.md` documents the log levels and the posture line, the
   dashboard rows and the order to read them, and why the operator ships no
   OpenTelemetry tracing.
@@ -237,6 +115,7 @@ depend on those tags.
   compliance CRDs absent, console plugin image unset) never set `Degraded`, so
   the operator previously reported healthy while producing no compliance score
   and no alert fired.
+
 - Operator memory grew with the cluster, not with what it reconciles. The
   manager's informer cache is cluster-wide per type, and the first typed read
   is what starts the informer, so the scan-storage PVC check cached every
@@ -251,23 +130,58 @@ depend on those tags.
   cannot be named per type, so they took the cluster-wide default; the default
   is now scoped to the same two namespaces, which keeps foreign compliance
   objects out of the heap instead of only out of the reconcile queue.
+
 - Operator and console plugin pods: neither declared a `preStop` hook, so a
   terminating pod kept its endpoint for the seconds between SIGTERM and
   endpoint removal, and a scrape or console request could still land on a
   draining pod. Both containers now sleep 5s in `preStop` before the process
   sees SIGTERM, inside the existing 30s grace period.
+
 - Operator `/readyz` reported ready for the whole drain. A SIGTERM now flips
   the readiness check to failing, so the pod leaves the Service endpoints as
   soon as the process starts shutting down.
+
 - Console plugin rule and profile typeahead: typing `securite` did not find
   `sécurité`, because the filter folded case with `toLowerCase()` and left
   diacritics in place. The filter now ignores case and diacritics and keeps the
   Turkish dotted and dotless I distinct, so a query matches in either case.
+
 - Console plugin rule and profile pickers: the option lists were sorted by byte
   value, so an accented name sorted after every plain letter and embedded
   numbers ordered `rule_10` before `rule_2`. They now sort by the session
   locale's collation.
+
 ### Changed
+
+- `docs/THREAT_MODEL.md` brought back in line with the code. The commit stamp
+  and eleven line citations across `role.yaml`, `cmd/main.go`, `plugin.go`,
+  `plugin_pod.go`, `nginx.conf`, both Dockerfiles, `CompliancePage.tsx`,
+  `RemediationsTab.tsx`, and the e2e dotenv loader were stale, and two surfaces
+  the model never named are now covered: the leader-election Lease and its
+  separate Role, and the operator's cluster-wide RBAC grants. No shipped
+  behavior changed.
+
+- Console plugin built a fresh `Intl.NumberFormat` / `Intl.DateTimeFormat` on
+  every count, date label, and chart tick. A console session sets an explicit
+  locale, and the engine only caches the runtime default, so each card, waiver
+  row, remediation row, and axis label paid a formatter construction on the
+  main thread. `formatCount`, `formatLocalDate`, and `formatChartDate` now hold
+  one formatter per locale tag, matching how the display collator is already
+  cached. Output is unchanged, including the fallback for an invalid tag.
+
+- Console plugin re-canonicalized the console locale on every count, date label,
+  collator comparison, and list join: `safeLocale` ran `Intl.getCanonicalLocales`
+  per call, and `compareForDisplay` calls it once per comparison, so sorting the
+  rule catalog canonicalized the tag thousands of times per sort. `safeLocale`
+  now holds one entry per locale tag, like the formatters above it. Output is
+  unchanged, including the invalid-tag fallback.
+
+- Profiles typeahead re-folded the whole rule catalog, plus the query once per
+  option, on every keystroke, so typing in the enable-rules picker redid a
+  thousand NFD normalizations per character over unchanged names. The catalog
+  is now folded when it changes and the query when it is typed, leaving a
+  substring test per option. Matching is unchanged, including diacritic and
+  Turkish dotted/dotless i handling.
 
 - The operator seeded every gauge to 0 at startup, and
   `baseline_security_status_observed_timestamp_seconds` was seeded to 0 as a
@@ -285,25 +199,7 @@ depend on those tags.
   never-published case through its `absent()` disjunct, which the seed removal
   makes the primary path, and the HA newest-publisher selection every other
   alert uses simply matches nothing until the first publish.
-- Console plugin built a fresh `Intl.NumberFormat` / `Intl.DateTimeFormat` on
-  every count, date label, and chart tick. A console session sets an explicit
-  locale, and the engine only caches the runtime default, so each card, waiver
-  row, remediation row, and axis label paid a formatter construction on the
-  main thread. `formatCount`, `formatLocalDate`, and `formatChartDate` now hold
-  one formatter per locale tag, matching how the display collator is already
-  cached. Output is unchanged, including the fallback for an invalid tag.
-- Console plugin re-canonicalized the console locale on every count, date label,
-  collator comparison, and list join: `safeLocale` ran `Intl.getCanonicalLocales`
-  per call, and `compareForDisplay` calls it once per comparison, so sorting the
-  rule catalog canonicalized the tag thousands of times per sort. `safeLocale`
-  now holds one entry per locale tag, like the formatters above it. Output is
-  unchanged, including the invalid-tag fallback.
-- Profiles typeahead re-folded the whole rule catalog, plus the query once per
-  option, on every keystroke, so typing in the enable-rules picker redid a
-  thousand NFD normalizations per character over unchanged names. The catalog
-  is now folded when it changes and the query when it is typed, leaving a
-  substring test per option. Matching is unchanged, including diacritic and
-  Turkish dotted/dotless i handling.
+
 - The console plugin's nginx access log no longer uses the `combined` format.
   It logged the admin's client IP, the referring console URL, and the browser
   user agent, none of which triage a failed static-asset fetch, and the log
@@ -318,6 +214,7 @@ depend on those tags.
   error itself went to stderr. `--help` still writes to stdout, so
   `manager --help | less` keeps working; a bad invocation now writes the
   message and the usage text to stderr, and the message names the binary.
+
 - Kubernetes objects the operator ships (manager Deployment, metrics Service,
   ServiceMonitor, PrometheusRule, and the plugin Service/Deployment/PDB) now
   carry the recommended `app.kubernetes.io/name`, `component`, `part-of`, and
@@ -325,6 +222,7 @@ depend on those tags.
   `app.kubernetes.io/version`. Selectors still match on `app` alone, because
   the Deployment selector is immutable and a selector requiring a new label
   would stop matching pods created before it.
+
 - Exported HTML report: the frame rule was a fixed brand red on every report,
   including a passing one. It now takes its color from the score band using the
   same success/warning/danger hexes as the Grafana dashboard thresholds, and an
@@ -350,6 +248,7 @@ depend on those tags.
   operator ClusterRole, the platform-Prometheus scrape as a boundary, and the
   remediation clipboard copy as an untrusted-output sink. Every file reference
   was re-read against 0.6.1.
+
 - Docs: `docs/SPEC.md` tracked the 0.5.x line and the pre-0.6.0 toolchain pins
   (k8s.io v0.35.x, controller-runtime v0.23.3, webpack 5.107) while the released
   line is 0.6.1 built on k8s.io v0.36.4 / controller-runtime v0.24.1 / webpack
@@ -358,6 +257,7 @@ depend on those tags.
   two shipped decisions that had no record are captured: ADR-030 (no OLM
   `replaces` graph, CSV `capabilities: Basic Install`) and ADR-031 (waiver
   names unique at admission).
+
 - Operator, reconcile: several passes read the Compliance Operator objects they
   need one object at a time, so a full pass cost dozens of live apiserver round
   trips (one `Get` per selected ScanSettingBinding, on every pass, on every
@@ -368,6 +268,7 @@ depend on those tags.
   spec and `alm-examples`. Reconcile latency and apiserver QPS drop on clusters
   with many profiles or check results; the objects written are unchanged, and
   every read is still a live unstructured read rather than a cached one.
+
 - Console, Remediations: **Batch apply** and **Auto-apply** now need `patch`
   on `complianceremediations` in `openshift-compliance` as well as `patch` on
   the `ClusterBaseline`. Both controls write only the baseline (an annotation,
@@ -381,6 +282,7 @@ depend on those tags.
   `openshift-compliance` to restore the previous behavior. `cluster-admin` and
   the built-in `admin` ClusterRole in that namespace already hold it; a custom
   role that granted only the baseline patch does not.
+
 - Console, Profiles: authoring a tailored profile now needs `create` on
   `tailoredprofiles` in `openshift-compliance`, and editing a profile bound to
   a baseline needs `update` on the same resource, each on top of the
@@ -389,7 +291,84 @@ depend on those tags.
   loses the Author button and the Edit control (the Unbind control beside Edit
   still patches only the baseline and is unchanged). This closes a path where
   a baseline-only patch created and rewrote objects the operator then consumed.
+
 ### Fixed
+
+- A waiver reason, a remediation error message, and the text in the printable
+  report lost their zero-width joiners and non-joiners on the way in and out.
+  The invisible-character filter dropped every Unicode format character, so a
+  family emoji was stored as three separate emoji and a Persian or Arabic
+  compound lost the joiner that carries its meaning. Free text now keeps those
+  two joiners while still dropping the characters that only exist to hide the
+  next one (BIDI controls, zero-width space, BOM, word joiner). The waiver
+  `requestedBy` / `approvedBy` fields keep the full filter, where a joiner in
+  front of a name is a spoof and no identity needs one. CSV export is
+  unchanged: a hidden character in front of a formula sigil is still neutralized
+  there.
+
+- A failed ClusterBaseline watch rendered the Overview, Profiles, and
+  Remediations tabs as "Baseline not configured" with a **Create default
+  baseline** button. A 403 on `clusterbaselines.compliance.openshift.io`, or a
+  missing CRD, was indistinguishable from an absent CR, so the page told the
+  admin a resource the operator may already have created did not exist. The
+  tabs now render a danger state naming the read failure. The **Create default
+  baseline** button also stays silent when it loses the create race, which on a
+  broken watch left the click with no output at all; it now says the CR exists.
+
+- Two failing watches showed only the first message in the page banner, and the
+  second one's text was never rendered anywhere. The banner now carries every
+  watch error.
+
+- A failed async-chunk load and a failed report-exporter load both reported one
+  fixed sentence and discarded the rejection, so a stale chunk id after a
+  console upgrade was indistinguishable from an unreachable CDN. The reason is
+  now shown.
+
+- A report download whose `click()` threw left its hidden anchor element in the
+  page, one per failed export.
+
+- `baseline_security_scan_interval_seconds` could report a value that depended
+  on which process published it first. The walk behind the gauge started at the
+  publisher's clock, so an annual schedule crossing a leap year reported 365d
+  from one phase of the year and 366d from another, and the per-process memo
+  froze whichever phase arrived first under a key that carries the schedule
+  alone. The walk is now anchored to a fixed epoch, so the value is a function
+  of `spec.schedule` and nothing else. The `ComplianceScanStale` threshold moves
+  by at most one day, and only for annual schedules.
+
+- `manager --help` documented the `KUBECONFIG` fallback without pinning the
+  `--kubeconfig` flag it sits behind. The flag was registered by a transitive
+  package's `init`, which upstream marks for removal, so the documented
+  precedence could have outlived the flag. It is now registered by the binary
+  itself, the help names the full resolution order, the start-up
+  `configuration` log records whether a kubeconfig was passed (not its path),
+  and a test fails if the flag ever goes missing again.
+
+- Release images stamped `org.opencontainers.image.version` from the
+  `ARG VERSION` default in each Dockerfile rather than the version being
+  published. The release job replaced `DOCKER_BUILD_FLAGS` to drop the
+  buildx-only `--provenance`/`--sbom`, and the replacement also dropped
+  `--build-arg VERSION`, so all four images fell back to the default. The two
+  values were kept equal by `verify-versions`, so nothing shipped mislabeled,
+  but the label depended on that gate rather than on what was built. The flags
+  are now assembled after `resolve-release-version.sh` has resolved the
+  version, so every image is built with it explicitly.
+
+- Operator pod termination skipped the drain window. The manager Deployment's
+  `preStop` hook was `exec: /bin/sh -c "sleep 5"`, but the runtime image is
+  `ubi9/ubi-micro`, which ships no shell and no `sleep`. The hook could not run,
+  so SIGTERM reached the process immediately and a pod being removed from the
+  Service could still receive scrapes or hold the leader lease during its final
+  seconds. Both the manager Deployment (kustomize and CSV) and the console
+  plugin container now use the kubelet's native `preStop.sleep` handler, which
+  needs no binary in the image. Requires Kubernetes 1.29+; the CSV already
+  declares `minKubeVersion: 1.35.0`.
+
+- Console plugin image failed to build. The `COPY` that places
+  `THIRD-PARTY-NOTICES.txt` in `/licenses/` named a path from the build stage
+  without `--from=build`, so it resolved against the build context instead,
+  where `dist/` is excluded by `.dockerignore`. The file the build stage
+  generated was never reachable from the runtime stage.
 
 - A paged apiserver `List` that returned the continue token it had just been
   given replayed the same page until `reconcileTimeout`, so the reconcile failed
@@ -397,12 +376,14 @@ depend on those tags.
   (ComplianceCheckResult aggregation, remediation batch selection, scan-diff
   history) now stop when the token does not advance, write the partial rollup
   they have, and re-list from the start on the next reconcile.
+
 - The console plugin's startup, readiness, and liveness probes were a bare TCP
   connect on 9443, so an nginx pod holding the listener open over an unreadable
   asset tree (a bad `fsGroup`, a truncated image) reported ready and drew console
   traffic while every asset 404ed. The probes now request `/healthz` over HTTPS
   on the serving path, which nginx answers from a constant return that touches no
   asset.
+
 - The Remediations tab read `metadata.name`, `metadata.labels`, and
   `status.errorMessage` off a `ComplianceRemediation` without narrowing, so one
   object that arrived without `metadata` (hand-edited, or a partial list) threw
@@ -411,15 +392,12 @@ depend on those tags.
   unfiltered. Name and labels are read through optional access, the error detail
   through the same `isString` and `stripFormatChars` guards the rest of the
   console applies to untrusted status.
-- Console plugin image failed to build. The `COPY` that places
-  `THIRD-PARTY-NOTICES.txt` in `/licenses/` named a path from the build stage
-  without `--from=build`, so it resolved against the build context instead,
-  where `dist/` is excluded by `.dockerignore`. The file the build stage
-  generated was never reachable from the runtime stage.
+
 - Release workflow: the `version` input of a manual `workflow_dispatch` run was
   never read, so the cut published whatever the dispatched ref resolved to and a
   mistyped version was accepted silently. The input is now passed to
   `resolve-release-version.sh`, which already prefers it over the ref name.
+
 - Release workflow: the console plugin image was published from the tagged
   commit without running that commit's plugin tests (the operator half was
   gated). `yarn typecheck` and `yarn test` now run, on the Node version
@@ -427,21 +405,25 @@ depend on those tags.
   `hack/verify-image-metadata.sh` between build and push, as CI already did:
   a published tag is immutable, so a root `USER` or a missing version label
   has to fail the release rather than reach a consumer.
+
 - CI image smoke check: the per-matrix checks ran without `set -e`, so a failing
   check was masked by the next command in the same branch (a missing plugin
   manifest still passed when the license check after it succeeded). The step
   now fails on the first failure, and the matrix values come from the
   environment as the metadata step above already did, rather than being
   interpolated into the script body.
+
 - Console plugin: a score-history time or waiver name containing the character
   the content key used as its separator made two different sets produce the same
   key. The score trend and the waiver expiry clock then skipped their recompute
   and kept painting the previous values after the CR had changed. The keys are
   now length-prefixed and type-tagged, so no value can forge another's.
+
 - Console plugin, Overview trend chart: a `status.history` entry that was `null`
   rather than a snapshot threw while the history was read, blanking the page
   instead of drawing the ring. Such an entry is now dropped with the rest of the
   unparseable ones.
+
 - Console plugin, waive form: a waiver reason, requestedBy, or approvedBy
   longer than 1024 / 253 characters was refused client-side with "fields are
   invalid or exceed length limits" whenever the text was mostly non-ASCII, and
@@ -449,6 +431,7 @@ depend on those tags.
   counted in UTF-16 code units while a CRD `MaxLength` counts Unicode code
   points, so an emoji (one code point, two code units) counted double. Both
   bounds are now counted in code points, the unit the apiserver applies.
+
 - `console-plugin/.env` (live-console Playwright run): a key other than the four
   the runner reads, a duplicate key, a line that is not `KEY=value`, or an
   unterminated quote was dropped without a word, so a misspelled `CONSOLE_URL`
@@ -457,6 +440,7 @@ depend on those tags.
   reports every bad line at once. `.env.example` also no longer ships a
   placeholder `CONSOLE_URL` that would run the suite against a host that does
   not exist.
+
 - Console plugin, non-English consoles: the Remediations table sorted
   remediation names by the browser's default collation rather than the console
   session's, so a German or Swedish console ordered that list differently from
@@ -465,30 +449,36 @@ depend on those tags.
   were a literal `", "`, which is wrong in every locale that has its own list
   punctuation (German "und", Arabic "، و") and leaves a stray comma in locales
   that have none (Japanese, Chinese). Both now follow the session locale.
+
 - Console plugin, bidirectional text: the Overview alerts and the Remediations
   dependency and error details render untrusted Compliance Operator text
   (check titles, waiver names, `status.errorMessage`) without a text direction,
   so an RTL value reordered the punctuation and links around it.
+
 - Console plugin, apply-remediation confirmation: the node-remediation warning
   told the admin to batch changes by pausing the target MachineConfigPool under
   Compute and resuming it afterwards, which is exactly what the Remediations tab
   does for them with the Batch apply button at the top of the same page. The
   copy now points at that button, so the manual detour through another page is
   no longer the only documented route.
+
 - Console plugin, per-profile score cards: the compact score sparkline was
   drawn in the charting library's default blue, so the one chart that plots a
   profile's own score did not carry the score color band the badge beside it,
   the donut center, and the score trend card all use. It is now colored from
   its latest point, which is the profile's current score.
+
 - Contributor setup: `make lint` reached for `shellcheck` and `uvx ruff`, and
   neither was in the prerequisites table, so the documented clean-clone command
   (`make test lint`, in both README and CONTRIBUTING) failed on a host without
   them. Both are now declared, and `make lint-python` names uv the way
   `make lint-shell` already named shellcheck instead of failing with a bare
   `uvx: command not found`.
+
 - `make help` did not list the release-path targets a version bump needs
   (`make verify-versions`, `make catalog-prepare`), which are only mentioned in
   AGENTS.md and the CSV comments.
+
 - `hack/resolve-release-version.sh` run outside GitHub Actions died on
   `GITHUB_REF_NAME: unbound variable` instead of reporting that no release
   version was found, because the tag ref was read without a default under
@@ -497,6 +487,7 @@ depend on those tags.
   same `script: message` form as the rest of `hack/`, and
   `verify-image-metadata.sh` sends its per-label output to stderr, since it is
   a pass/fail gate whose exit code is the result.
+
 - Console plugin: a `status.score` that was not a number, or was outside 0-100,
   rendered as an empty or out-of-range score. The console reads the value
   unverified from the CR, so a hand-edited or restored object could paint a
@@ -507,6 +498,7 @@ depend on those tags.
   one is clamped to 0-100, which is what the operator publishes for it. The
   report's per-profile counters got the same treatment, folding a non-finite
   or negative count to 0 as the operator does on write.
+
 - Console plugin `Rescan now` did not always start a scan. The rescan
   annotation value came from a counter that restarted at 1 on every page load,
   so the first rescan after a reload or a tab switch back to the plugin wrote
@@ -515,134 +507,99 @@ depend on those tags.
   still reported "Rescan started". The token now carries the wall clock, with
   the per-page counter kept only to separate two clicks in the same
   millisecond.
+
 - `status.relatedObjects` listed the console plugin Deployment,
   PodDisruptionBudget, and ConsolePlugin even with
   `spec.console.managementState: Removed`, where the operator has deleted them
   and refuses to recreate them. The list declares what the baseline owns, so it
   now tracks the management state and must-gather stops chasing disowned
   objects.
+
 - CI: the operator's helper scripts were unanalyzed. `make lint` now runs
   shellcheck over `operator/hack/*.sh` (the bundle, alert, and must-gather
   checks that ship with the operator) and ruff over `operator/hack/*.py`, so a
   quoting bug or an unhandled path in a script that gates a release fails the
   per-PR job instead of surfacing on a runner.
-- Operator and console plugin pods: neither declared a `preStop` hook, so a
-  terminating pod kept its endpoint for the seconds between SIGTERM and
-  endpoint removal, and a scrape or console request could still land on a
-  draining pod. Both containers now sleep 5s in `preStop` before the process
-  sees SIGTERM, inside the existing 30s grace period.
-- Operator `/readyz` reported ready for the whole drain. A SIGTERM now flips
-  the readiness check to failing, so the pod leaves the Service endpoints as
-  soon as the process starts shutting down.
+
 - Operator images shipped `/usr/bin/manager` owned by the runtime UID (65532),
   so the process could rewrite the binary it executes wherever the root
   filesystem is not read-only. The binary is now root-owned, matching
   `/licenses` and the rest of the image. The console-plugin and catalog images
   pinned the uid but not the group, leaving the primary group to the base
   image's passwd entry; both now run as `1001:1001`.
+
 - `operator/hack/must-gather.sh` appended to `related-objects.yaml` instead of
   rewriting it, and the output directory is never cleared. Collecting a second
   must-gather into the same directory duplicated every object document, and when
   the CR was gone the file kept the previous run's objects with nothing marking
   it stale. The file is now truncated at the start of collection, so a rerun
   converges on the current cluster state.
+
 - Operator logs: a detail condition returning to True (Compliance Operator
   ready, scan configuration valid, scan storage ready, console plugin deployed)
   now logs at Info on the recovery. Only the transition into a failure was
   logged, so a cleared alert had no default-level breadcrumb to pair with the
   failure line.
+
 - `operator/hack/must-gather.sh` dropped the `requestedBy` and `approvedBy`
   key lines but not the value text under them. The CRD caps those fields by
   length only, so a value containing a newline is dumped by kubectl as a
   literal or folded block and the name landed on the continuation lines, in the
   support archive, unredacted. A dropped attribution key now takes its
   block-scalar continuation with it; waiver name and reason are still kept.
+
 - Console: the waiver "Requested by" and "Approved by" fields autofilled from
   the browser profile, so a personal name could be written into the
   cluster-scoped ClusterBaseline (and every report exported from it) without
   being typed. Autofill is off on both fields; the attribution is entered
   deliberately.
+
 - Operator logs: a detail condition that changed `reason` while staying False
   (for example scan storage moving from `ScanStoragePending` to a different
   failure) was never logged. The transition guard compared against the
   condition entry that `SetStatusCondition` had already overwritten in place,
   so it always compared the new value with itself.
+
 - Operator `/readyz` still reported ready for the whole drain on a replica that
   was not the leader. The runnable that flips readiness on SIGTERM did not
   declare itself non-leader-elected, so controller-runtime only started it after
   winning the lease; the shipped Deployment has 2 replicas, so a terminating
   standby kept reporting Ready and stayed in the Service endpoints.
+
 - Operator `status.complianceOperatorVersion` kept the previously installed
   version when the Compliance Operator was uninstalled and the Subscription had
   to be re-created. The field is documented as empty while CO is not installed,
   and every other not-installed path clears it, so the console showed a version
   for an operator that was not there.
+
 - Operator metrics logs: a pod started with an empty `--metrics-cert-dir`
   (self-signed metrics identity by design) logged `failed to parse metrics TLS
   cert/key` on the first scrape, because the parse path ran on a pair of
   zero-length buffers. The false error was indistinguishable from a corrupt
   projected Secret and consumed the once-per-episode log slot a real corruption
   needs.
+
 - Operator batch: when the Compliance CRDs were uninstalled while a remediation
   batch was applying, the operator resumed the paused MachineConfigPools and
   finished the batch as `applied`, but logged each remediation as individually
   `notFound`. The real cause (the CRD disappeared mid-batch) left no trace.
+
 - Console plugin: the cluster Overview "Compliance score" item stayed on the
   loading placeholder forever when the `ClusterBaseline` watch failed before its
   first successful list, instead of showing the distinct "Unavailable" state the
   rest of the page shows for the same failure.
+
 - Console plugin: opening the check detail dialog on a list item that arrived
   without `metadata` threw during render and took down the whole Results tab,
   even though the row itself was written to survive such an item.
+
 - Console plugin: a failed GET of the async Overview charts chunk logged an
   unhandled promise rejection in the browser console, because the eager
   `import()` promise carried no rejection handler while the chart gate that
   consumes it already caught and showed Retry. A stale cached console after a
   plugin upgrade is the common way to hit it, and the unhandled rejection
   obscured the Retry control for the same failure.
-### Security
 
-- Results CSV export hardened against a formula sigil hidden behind a leading
-  control character. `csvCell` dropped NULs and Unicode format characters, then
-  checked the cell for a formula starter, so a cell such as `\u0001=cmd` kept a
-  control prefix that a spreadsheet trims before deciding whether the cell is a
-  formula. A tampered `ComplianceCheckResult` name, description first line, or
-  `check-severity` label could therefore reach a downloaded export as an
-  evaluated formula. Export rows now drop the controls a spreadsheet trims
-  (tab, CR, and LF stay, since RFC 4180 quoting needs them). Cells that held a
-  control character other than a delimiter lose it from the export.
-- Console write controls were gated on `useAccessReview` through their
-  `isDisabled` prop alone. A tab holding an open confirm modal, a stopped
-  editor, or a pending form across a permission revocation would still send the
-  patch the button had already admitted. Every mutation now re-checks the
-  reviewed permission at the request boundary through one chokepoint
-  (`console-plugin/src/permissions.ts`), and an unresolved review denies rather
-  than defaulting to allow. Covered: rescan, profile toggle, schedule save,
-  waiver add and remove, TailoredProfile create, update, and bind, tailored
-  profile unbind, default baseline create, and every remediation path
-  (per-row apply, unapply, auto-apply, batch apply).
-
-### Security
-
-- Results CSV export hardened against a formula sigil hidden behind a leading
-  control character. `csvCell` dropped NULs and Unicode format characters, then
-  checked the cell for a formula starter, so a cell such as `\u0001=cmd` kept a
-  control prefix that a spreadsheet trims before deciding whether the cell is a
-  formula. A tampered `ComplianceCheckResult` name, description first line, or
-  `check-severity` label could therefore reach a downloaded export as an
-  evaluated formula. Export rows now drop the controls a spreadsheet trims
-  (tab, CR, and LF stay, since RFC 4180 quoting needs them). Cells that held a
-  control character other than a delimiter lose it from the export.
-- Console write controls were gated on `useAccessReview` through their
-  `isDisabled` prop alone. A tab holding an open confirm modal, a stopped
-  editor, or a pending form across a permission revocation would still send the
-  patch the button had already admitted. Every mutation now re-checks the
-  reviewed permission at the request boundary through one chokepoint
-  (`console-plugin/src/permissions.ts`), and an unresolved review denies rather
-  than defaulting to allow. Covered: rescan, profile toggle, schedule save,
-  waiver add and remove, TailoredProfile create, update, and bind, tailored
-  profile unbind, default baseline create, and every remediation path
-  (per-row apply, unapply, auto-apply, batch apply).
 - `newlyFailed` reported long-standing failures as new regressions on a
   heavily-failing cluster. The apiserver object-size budget can only keep a
   prefix of `previousFailures` and `diffBaseFailures`, but the scan diff was
@@ -652,6 +609,81 @@ depend on those tags.
   all four failure lists subsets of one set the budget already admits. Checks
   past the share are now invisible rather than permanently reported; a cluster
   whose failing-check names exceed the share reports a bounded, stable subset.
+
+- A downloaded report could be saved under a name Windows refuses. The
+  `Content-Disposition` name is derived from the cluster baseline, so a cluster
+  name ending in a dot or a space (`prod.`, `prod `) lost the suffix and saved
+  as `report.csv` or as nothing at all, and a cluster whose name began with a
+  device Windows reserves (`con`, `nul`, `com1`, `lpt1`) landed in the
+  filesystem root or nowhere. Trailing dots and spaces are now trimmed and a
+  reserved stem is prefixed with `_`. The length cap still applies and still
+  never ends on half a surrogate pair.
+
+- A slow profile read or a slow clipboard write could land after a newer one.
+  The per-row **Edit** buttons stay live while a profile is loading, so a second
+  click started a second fetch and the slower response pre-filled the form with
+  the other profile; a clipboard copy that resolved late reported a failure, or
+  a success, for a copy the admin had already replaced. Both paths fence on a
+  monotonic token and drop a result that a later action superseded.
+
+### Security
+
+- Results CSV export hardened against a formula sigil hidden behind a leading
+  control character. `csvCell` dropped NULs and Unicode format characters, then
+  checked the cell for a formula starter, so a cell such as `\u0001=cmd` kept a
+  control prefix that a spreadsheet trims before deciding whether the cell is a
+  formula. A tampered `ComplianceCheckResult` name, description first line, or
+  `check-severity` label could therefore reach a downloaded export as an
+  evaluated formula. Export rows now drop the controls a spreadsheet trims
+  (tab, CR, and LF stay, since RFC 4180 quoting needs them). Cells that held a
+  control character other than a delimiter lose it from the export.
+
+- Console write controls were gated on `useAccessReview` through their
+  `isDisabled` prop alone. A tab holding an open confirm modal, a stopped
+  editor, or a pending form across a permission revocation would still send the
+  patch the button had already admitted. Every mutation now re-checks the
+  reviewed permission at the request boundary through one chokepoint
+  (`console-plugin/src/permissions.ts`), and an unresolved review denies rather
+  than defaulting to allow. Covered: rescan, profile toggle, schedule save,
+  waiver add and remove, TailoredProfile create, update, and bind, tailored
+  profile unbind, default baseline create, and every remediation path
+  (per-row apply, unapply, auto-apply, batch apply).
+
+### Migration notes
+
+- A custom role that granted only `patch` on `clusterbaselines.compliance.openshift.io`
+  loses two remediation controls and one authoring control on upgrade (see
+  **Changed** above). **Before:** that role batch-applied remediations, toggled
+  auto-apply, and authored and edited tailored profiles. **After:** **Batch
+  apply** and **Auto-apply** need `patch` on `complianceremediations` in
+  `openshift-compliance`, the **Author** button needs `create` on
+  `tailoredprofiles` there, and **Edit** on a bound profile needs `update` on
+  the same resource. The controls render disabled with the reason on hover
+  rather than failing on submit, and the toggle refuses rather than writing the
+  baseline. `cluster-admin` and the built-in `admin` ClusterRole in that
+  namespace already hold all three verbs. An install that reconciled through the
+  custom role needs no change, because the operator holds its own grants.
+- Recording rules and dashboard panels that read
+  `baseline_security_last_scan_timestamp_seconds`,
+  `baseline_security_newly_failed`, `baseline_security_remediation_batch_active`,
+  `baseline_security_remediation_batch_started_timestamp_seconds`, or
+  `baseline_security_scan_interval_seconds` see no series on a replica that has
+  not published since it started, where the seed removal (see **Changed** above)
+  leaves them absent rather than 0. Add `or vector(0)` to the PromQL wherever a
+  missing series should read as zero; alert firing is unchanged, because
+  `ComplianceStatusStale` catches the never-published case through its
+  `absent()` disjunct.
+- A `ClusterBaseline/cluster` whose failing check names exceed the per-list size
+  share reports a bounded, stable subset (see **Fixed** above). Checks past the
+  share are no longer counted in `newlyFailed`, `fixed`, `previousFailures`, or
+  `diffBaseFailures`, and the same check stops counting in both directions, so a
+  score or a failure list is no longer complete on such a cluster. No stored
+  object changes shape; the lists are shorter and self-consistent.
+- Moving from an installed 0.6.x CSV is not an OLM auto-upgrade (no `replaces`
+  graph since 0.5.5). Point the CatalogSource at the new catalog tag and install
+  that head; delete a leftover Subscription/CSV. ClusterBaseline CRs stay, and
+  `hack/backup.sh` / `hack/restore.sh` capture and recover the object if the
+  reinstall goes wrong.
 
 ## [0.6.1] - 2026-09-02
 
