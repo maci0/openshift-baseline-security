@@ -4,22 +4,27 @@
 # PrometheusRule CR so the alert expressions have a single source of truth.
 set -euo pipefail
 
-if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
-  if [ "$#" -ne 1 ]; then
-    echo "test-alerts.sh: --help takes no arguments" >&2
-    exit 2
-  fi
+usage() {
   cat <<'EOF'
 Usage: hack/test-alerts.sh
 
 Unit-test PrometheusRule alerts with promtool in a container.
 Requires python3 and docker on PATH. No arguments.
 EOF
+}
+
+if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+  if [ "$#" -ne 1 ]; then
+    echo "test-alerts.sh: --help takes no arguments" >&2
+    usage >&2
+    exit 2
+  fi
+  usage
   exit 0
 fi
 if [ "$#" -ne 0 ]; then
   echo "test-alerts.sh: unexpected arguments: $*" >&2
-  echo "Usage: hack/test-alerts.sh" >&2
+  usage >&2
   exit 2
 fi
 

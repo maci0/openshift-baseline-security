@@ -31,6 +31,7 @@ case "${1:-}" in
   -h | --help)
     if [ "$#" -ne 1 ]; then
       echo "${prog}: --help takes no arguments" >&2
+      usage >&2
       exit 2
     fi
     usage

@@ -22,11 +22,7 @@
 # Run from operator/ (make verify-csv-deploy) or with REPO_ROOT set.
 set -euo pipefail
 
-if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
-	if [ "$#" -ne 1 ]; then
-		echo "verify-csv-deploy.sh: --help takes no arguments" >&2
-		exit 2
-	fi
+usage() {
 	cat <<'EOF'
 Usage: hack/verify-csv-deploy.sh
 
@@ -34,11 +30,20 @@ Fail if the CSV install.spec.deployments[].spec drifted from
 config/manager/manager.yaml. Run from operator/ (make verify-csv-deploy) or
 with REPO_ROOT set.
 EOF
+}
+
+if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+	if [ "$#" -ne 1 ]; then
+		echo "verify-csv-deploy.sh: --help takes no arguments" >&2
+		usage >&2
+		exit 2
+	fi
+	usage
 	exit 0
 fi
 if [ "$#" -ne 0 ]; then
 	echo "verify-csv-deploy.sh: unexpected arguments: $*" >&2
-	echo "Usage: hack/verify-csv-deploy.sh" >&2
+	usage >&2
 	exit 2
 fi
 

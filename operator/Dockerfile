@@ -1,9 +1,17 @@
 # ubi9/go-toolset 1.26.6 (matches go.mod / Makefile GOTOOLCHAIN; bump digest with RH).
 # Base digest may ship a slightly older patch; GOTOOLCHAIN pins go1.26.6 for the
 # stdlib CVE floor (downloaded in the networked RUN, used offline at compile).
+# One version literal per Dockerfile: --build-arg VERSION overrides it, the
+# linker stamps it into the binary (`manager --version`), and the runtime stage
+# below re-declares it for the OCI label. Every stage that reads it must say
+# `ARG VERSION` so the global default reaches it; make verify-versions fails if
+# this line is ever duplicated.
+ARG VERSION=0.6.1
 FROM registry.access.redhat.com/ubi9/go-toolset@sha256:1a755651ffe1a438f137418d183f18ebad527ec929206c17804f93490a97869e AS build
 # BuildKit special-case ARG: clamps image/layer timestamps when passed by the client.
 ARG SOURCE_DATE_EPOCH=0
+# Pulls the global VERSION above into this stage for the linker stamp.
+ARG VERSION
 # Pin the go.mod toolchain. Image Go may lag by a patch; never float to latest.
 ENV GOTOOLCHAIN=go1.26.6
 # Hermetic locale/time for any toolchain step that consults them.
@@ -19,18 +27,18 @@ COPY api/ api/
 COPY cmd/ cmd/
 COPY internal/ internal/
 # Network off after module download so the compile cannot pull new content.
-# Flags match Makefile GO_BUILD_FLAGS / GO_LDFLAGS (trimpath, no VCS, stripped, empty build-id, PIE, readonly).
+# Flags match Makefile GO_BUILD_FLAGS / GO_LDFLAGS (trimpath, no VCS, stripped, empty build-id, PIE, readonly, version stamp).
 ENV GOPROXY=off
 # --network=none: compile cannot reach the network even if GOPROXY is overridden.
 # test -s: refuse an empty binary (matches Makefile build; partial linker failure).
-RUN --network=none CGO_ENABLED=0 go build -trimpath -buildvcs=false -mod=readonly -buildmode=pie -ldflags="-s -w -buildid=" -o /tmp/manager ./cmd \
+RUN --network=none CGO_ENABLED=0 go build -trimpath -buildvcs=false -mod=readonly -buildmode=pie -ldflags="-s -w -buildid= -X main.version=${VERSION}" -o /tmp/manager ./cmd \
 	&& test -s /tmp/manager
 
 # ubi9/ubi-micro
 FROM registry.access.redhat.com/ubi9/ubi-micro@sha256:f332c99eb8f798a8486821c91937f10ad64ee83d7e739303be2df051040918f6
 ARG SOURCE_DATE_EPOCH=0
-# Default matches Makefile VERSION; make docker-build passes --build-arg VERSION.
-ARG VERSION=0.6.1
+# The global default above; --build-arg VERSION (make docker-build) overrides it.
+ARG VERSION
 # Root-owned like every other file in the image: the runtime UID must not be
 # able to rewrite the executable it runs. /licenses/ is copied root-owned too.
 # --chmod: host umask must not change the shipped layer digest.

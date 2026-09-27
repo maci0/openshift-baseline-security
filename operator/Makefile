@@ -311,8 +311,10 @@ ci:
 # Keep in lockstep with operator/Dockerfile RUN go build flags (reproducible, stripped, PIE).
 
 # -buildid= clears the GNU build-id note so local and image binaries can match bit-for-bit.
+# -X main.version stamps the release version for `manager --version`; the Dockerfiles
+# pass the same value from their ARG VERSION.
 GO_BUILD_FLAGS ?= -trimpath -buildvcs=false -mod=readonly -buildmode=pie
-GO_LDFLAGS ?= -s -w -buildid=
+GO_LDFLAGS ?= -s -w -buildid= -X main.version=$(VERSION)
 
 # Codegen first as prerequisites (safe to run generate||manifests under -j).
 # fmt-check/vet run in the recipe so `make -j build` cannot vet half-written
@@ -499,6 +501,12 @@ verify-versions:
 		|| { echo "Dockerfile.ci go build flags must match the release Dockerfile (reproducibility parity)"; fail=1; }; \
 	grep -qE -- '-trimpath -buildvcs=false -mod=readonly -buildmode=pie' Makefile \
 		|| { echo "Makefile GO_BUILD_FLAGS must match the image go build flags (trimpath, no VCS, readonly, PIE)"; fail=1; }; \
+	grep -qF -- '-X main.version=$${VERSION}' Dockerfile \
+		|| { echo "release Dockerfile must stamp the version into the binary so manager --version matches the image label"; fail=1; }; \
+	grep -qF -- '-X main.version=$${VERSION}' Dockerfile.ci \
+		|| { echo "Dockerfile.ci must stamp the version into the binary (parity with the release Dockerfile)"; fail=1; }; \
+	grep -qF -- '-X main.version=$$(VERSION)' Makefile \
+		|| { echo "Makefile GO_LDFLAGS must stamp main.version so a local make build reports the same version as the image"; fail=1; }; \
 	grep -qE -- '--chmod=0755.*/usr/bin/manager' Dockerfile \
 		|| { echo "release Dockerfile must COPY the manager with --chmod=0755 so host umask cannot change the image digest"; fail=1; }; \
 	grep -qE -- '--chown=0:0 --chmod=0755.*/usr/bin/manager' Dockerfile \
@@ -528,6 +536,8 @@ verify-versions:
 			|| { echo "$$df must set org.opencontainers.image.source to the GitHub repo"; fail=1; }; \
 		grep -qE "^ARG VERSION=$(VERSION_RE)$$" "$$df" \
 			|| { echo "$$df ARG VERSION must be $(VERSION) (matches Makefile; image label would drift)"; fail=1; }; \
+		test "$$(grep -c '^ARG VERSION=$(VERSION_RE)$$' "$$df")" -eq 1 \
+			|| { echo "$$df must spell the version once: a global ARG VERSION with a bare ARG VERSION per stage. A second literal would drift from the label"; fail=1; }; \
 		grep -qF 'org.opencontainers.image.version="$${VERSION}"' "$$df" \
 			|| { echo "$$df must set org.opencontainers.image.version from ARG VERSION"; fail=1; }; \
 		test "$$(grep -c '^ARG SOURCE_DATE_EPOCH' "$$df")" -eq "$$(grep -c '^FROM ' "$$df")" \

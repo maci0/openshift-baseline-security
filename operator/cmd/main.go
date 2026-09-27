@@ -68,6 +68,11 @@ func (*shutdownFlag) Start(ctx context.Context) error {
 
 var scheme = runtime.NewScheme()
 
+// version is stamped by the linker from the build ARG (operator/Makefile
+// VERSION, the CSV version, and the OCI version label all read the same value).
+// The default marks a binary built without it (plain `go build`, `go run`).
+var version = "dev"
+
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(baselinev1alpha1.AddToScheme(scheme))
@@ -75,7 +80,7 @@ func init() {
 
 func main() {
 	var metricsAddr, probeAddr, metricsCertDir string
-	var enableLeaderElection, secureMetrics bool
+	var enableLeaderElection, secureMetrics, showVersion bool
 	// HTTPS + authn/authz (TokenReview / SubjectAccessReview), matching
 	// kubebuilder / Operator SDK defaults and OpenShift CONVENTIONS.md.
 	// Disable the endpoint with --metrics-bind-address=0.
@@ -84,6 +89,7 @@ func main() {
 	flag.StringVar(&metricsCertDir, "metrics-cert-dir", "/var/run/metrics-certs", "Directory with tls.crt/tls.key for metrics (service-ca). Empty or missing files fall back to self-signed.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "Health probe endpoint address.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", true, "Enable leader election.")
+	flag.BoolVar(&showVersion, "version", false, "Print the version and exit.")
 	opts := zap.Options{}
 	opts.BindFlags(flag.CommandLine)
 	// clientconfig registers --kubeconfig on the default FlagSet from a package
@@ -101,6 +107,13 @@ func main() {
 			os.Exit(0)
 		}
 		usageError(err)
+	}
+
+	// --version is data for a script or a support bundle, so it goes to stdout
+	// and exits 0 before any cluster, config, or port work.
+	if showVersion {
+		fmt.Printf("%s %s\n", filepath.Base(os.Args[0]), version)
+		os.Exit(0)
 	}
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
@@ -392,10 +405,16 @@ func lookupFlag(name string) string {
 // unexpectedArgsError is non-nil when flag.Parse left positional arguments.
 // The manager takes flags only; leftover args are almost always a boolean
 // flag written as `--metrics-secure false` (space, so `false` is positional
-// and the bool stays at its default).
+// and the bool stays at its default), which the message names rather than
+// leaving the caller to work out Go flag syntax.
 func unexpectedArgsError(args []string) error {
 	if len(args) == 0 {
 		return nil
+	}
+	if len(args) == 1 {
+		if _, err := strconv.ParseBool(args[0]); err == nil {
+			return fmt.Errorf("unexpected argument %q: a boolean flag takes no separate value, write --flag=%s", args[0], args[0])
+		}
 	}
 	return fmt.Errorf("unexpected arguments: %s", strings.Join(args, " "))
 }

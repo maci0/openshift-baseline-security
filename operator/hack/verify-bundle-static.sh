@@ -15,22 +15,27 @@
 # Run from operator/ (make verify-bundle-static) or with REPO_ROOT set.
 set -euo pipefail
 
-if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
-	if [ "$#" -ne 1 ]; then
-		echo "verify-bundle-static.sh: --help takes no arguments" >&2
-		exit 2
-	fi
+usage() {
 	cat <<'EOF'
 Usage: hack/verify-bundle-static.sh
 
 Fail if a hand-copied bundle manifest drifted from its config/ source.
 Run from operator/ (make verify-bundle-static) or with REPO_ROOT set.
 EOF
+}
+
+if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+	if [ "$#" -ne 1 ]; then
+		echo "verify-bundle-static.sh: --help takes no arguments" >&2
+		usage >&2
+		exit 2
+	fi
+	usage
 	exit 0
 fi
 if [ "$#" -ne 0 ]; then
 	echo "verify-bundle-static.sh: unexpected arguments: $*" >&2
-	echo "Usage: hack/verify-bundle-static.sh" >&2
+	usage >&2
 	exit 2
 fi
 

@@ -3,22 +3,27 @@
 # Run from operator/ (make verify-product-lockstep) or any cwd with REPO_ROOT set.
 set -euo pipefail
 
-if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
-  if [ "$#" -ne 1 ]; then
-    echo "verify-product-lockstep.sh: --help takes no arguments" >&2
-    exit 2
-  fi
+usage() {
   cat <<'EOF'
 Usage: hack/verify-product-lockstep.sh
 
 Fail if operator Go and console TypeScript product contracts drift.
 Run from operator/ (make verify-product-lockstep) or with REPO_ROOT set.
 EOF
+}
+
+if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+  if [ "$#" -ne 1 ]; then
+    echo "verify-product-lockstep.sh: --help takes no arguments" >&2
+    usage >&2
+    exit 2
+  fi
+  usage
   exit 0
 fi
 if [ "$#" -ne 0 ]; then
   echo "verify-product-lockstep.sh: unexpected arguments: $*" >&2
-  echo "Usage: hack/verify-product-lockstep.sh" >&2
+  usage >&2
   exit 2
 fi
 

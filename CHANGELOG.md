@@ -53,6 +53,12 @@ depend on those tags.
   local and in-image binaries match, but nothing checked it: a dropped or
   misspelled flag produced a different binary and every image and test run
   still passed.
+- The operator binary takes `--version` and prints the release version to
+  stdout, exiting 0 before any cluster or port work. The value is stamped by
+  the linker from the same `VERSION` the image label and the CSV carry, so
+  `manager --version` inside a running pod reports the build it came from
+  instead of a bare digest. A binary built without the stamp (plain `go
+  build`) reports `dev`.
 
 ### Changed
 

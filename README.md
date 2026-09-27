@@ -295,7 +295,8 @@ address, or unexpected positional arguments. An unrecognized
 `BASELINE_SECURITY_SKIP_DEFAULT_CR` value exits 1. `--help` prints usage
 on stdout; an unknown flag or an unexpected argument exits 2 with the
 message and the usage text on stderr, so stdout stays clean for a caller
-that captures it.
+that captures it. `--version` prints the release version on stdout and
+exits 0.
 
 ClusterBaseline spec (profiles, schedule, scoring, remediations, waivers)
 is the product config; see `operator/config/samples/` and the CRD.
@@ -307,6 +308,7 @@ is the product config; see `operator/config/samples/` and the CRD.
 | `--metrics-cert-dir` | `/var/run/metrics-certs` | Absolute path; empty falls back to self-signed |
 | `--health-probe-bind-address` | `:8081` | Required; empty is fatal (Deployment probes `:8081`) |
 | `--leader-elect` | `true` | The Deployment runs 2 replicas |
+| `--version` | none | Print the release version and exit 0 |
 | `--zap-devel` | `false` | Console debug logs; not for production |
 | `--zap-encoder` | json (prod) / console (devel) | `json` or `console` |
 | `--zap-log-level` | info (prod) / debug (devel) | `debug`, `info`, `error`, `panic`, or an integer verbosity |

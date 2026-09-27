@@ -4,8 +4,14 @@
 # openshift/release. Build steps mirror the release Dockerfile; only the FROM
 # lines differ. The builder/base tags must track the target OCP release and are
 # finalized in the openshift/release ci-operator config (see .ci-operator.yaml).
+# One version literal per Dockerfile: the linker stamps it into the binary
+# (`manager --version`) and the runtime stage re-declares it for the OCI label.
+# Same shape as the release Dockerfile; make verify-versions fails if duplicated.
+ARG VERSION=0.6.1
 FROM registry.ci.openshift.org/ocp/builder:rhel-9-golang-1.26-openshift-4.22 AS build
 ARG SOURCE_DATE_EPOCH=0
+# Pulls the global VERSION above into this stage for the linker stamp.
+ARG VERSION
 ENV GOTOOLCHAIN=go1.26.6
 # Match the release Dockerfile's reproducibility knobs (only the FROM lines and
 # CI-owned promotion differ): pinned epoch, checksum DB on, readonly modules.
@@ -20,14 +26,15 @@ COPY internal/ internal/
 # network after deps are downloaded/verified above, matching the release
 # Dockerfile. Keeps the CI image bit-comparable and closes a supply-chain seam.
 ENV GOPROXY=off
-RUN --network=none CGO_ENABLED=0 go build -trimpath -buildvcs=false -mod=readonly -buildmode=pie -ldflags="-s -w -buildid=" -o /tmp/manager ./cmd \
+RUN --network=none CGO_ENABLED=0 go build -trimpath -buildvcs=false -mod=readonly -buildmode=pie -ldflags="-s -w -buildid= -X main.version=${VERSION}" -o /tmp/manager ./cmd \
 	&& test -s /tmp/manager
 
 FROM registry.ci.openshift.org/ocp/4.22:base-rhel9
 # BuildKit special-case ARG: must be declared in this stage too or layer
 # timestamps are not clamped (release Dockerfile already does this).
 ARG SOURCE_DATE_EPOCH=0
-ARG VERSION=0.6.1
+# The global default above; --build-arg VERSION overrides it.
+ARG VERSION
 COPY --from=build --chown=0:0 --chmod=0755 /tmp/manager /usr/bin/manager
 # Two COPYs on purpose: --chmod also stamps the parent dir BuildKit creates,
 # so a single 0644 copy leaves /licenses non-traversable for the non-root USER.

@@ -35,6 +35,11 @@ compare footers), root `README.md` (**Current release**), the
 `org.opencontainers.image.version` label), and the
 `operator/catalog/package.yaml` channel entry when that file is
 present (`operator/catalog/` is gitignored; `make catalog-prepare` renders it).
+The two operator images additionally stamp the version into the binary
+(`-X main.version`, the same value `manager --version` prints), so
+`ARG VERSION` is declared once at the top of each Dockerfile and re-declared
+bare in every stage that reads it; `make verify-versions` rejects a second
+literal and a Dockerfile that drops the stamp.
 `make verify-versions` (also run from `make bundle` and
 CI) enforces that single-version consistency.
 Never reuse a published CSV/image tag; OLM unpack caches make same-tag

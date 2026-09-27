@@ -32,6 +32,7 @@ case "${1:-}" in
   -h | --help)
     if [ "$#" -ne 1 ]; then
       echo "${prog}: --help takes no arguments" >&2
+      usage >&2
       exit 2
     fi
     usage
@@ -45,7 +46,11 @@ case "${1:-}" in
 esac
 
 if [ "$#" -lt 1 ] || [ "$#" -gt 2 ]; then
-  echo "${prog}: unexpected arguments; expected <image> [--allow-scratch-user]" >&2
+  if [ "$#" -eq 0 ]; then
+    echo "${prog}: missing required argument: <image>" >&2
+  else
+    echo "${prog}: unexpected arguments: $*" >&2
+  fi
   usage >&2
   exit 2
 fi
@@ -61,6 +66,18 @@ case "$allow_scratch_user" in
     exit 2
     ;;
 esac
+
+# Fail fast with the same guard style as hack/test-alerts.sh: without these the
+# four inspect calls below die inside docker with an error that names neither the
+# script nor the image it was asked about.
+command -v docker >/dev/null || {
+  echo "${prog}: docker is required to inspect image metadata" >&2
+  exit 1
+}
+docker image inspect "$image" >/dev/null 2>&1 || {
+  echo "${prog}: no local image ${image}; build or pull it before verifying" >&2
+  exit 1
+}
 
 if [ "$allow_scratch_user" = "--allow-scratch-user" ]; then
   user=$(docker image inspect -f '{{.Config.User}}' "$image")
@@ -98,13 +115,13 @@ echo "${prog}: org.opencontainers.image.source=${src}" >&2
 ver=$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.version"}}' "$image")
 echo "${prog}: org.opencontainers.image.version=${ver}" >&2
 [ -n "$ver" ] || {
-  echo "${image} has no org.opencontainers.image.version label" >&2
+  echo "${prog}: ${image} has no org.opencontainers.image.version label" >&2
   exit 1
 }
 case "$ver" in
 [0-9]*.[0-9]*.[0-9]*) ;;
 *)
-  echo "${image} OCI version label is ${ver}, want X.Y.Z (matches Makefile VERSION)" >&2
+  echo "${prog}: ${image} OCI version label is ${ver}, want X.Y.Z (matches Makefile VERSION)" >&2
   exit 1
   ;;
 esac

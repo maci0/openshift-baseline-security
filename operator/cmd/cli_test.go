@@ -27,6 +27,24 @@ func TestUnexpectedArgsError(t *testing.T) {
 	}
 }
 
+// The common mistake is a boolean flag written with a space, so the leftover
+// token is the value; the message has to name the fix.
+func TestUnexpectedArgsErrorBooleanHint(t *testing.T) {
+	for _, arg := range []string{"false", "true", "0", "1"} {
+		err := unexpectedArgsError([]string{arg})
+		if err == nil {
+			t.Fatalf("%q: want a usage error", arg)
+		}
+		if !strings.Contains(err.Error(), "--flag="+arg) {
+			t.Errorf("%q: message does not name the --flag=value fix: %v", arg, err)
+		}
+	}
+	// A non-boolean leftover keeps the plain positional message.
+	if err := unexpectedArgsError([]string{"false", "true"}); strings.Contains(err.Error(), "--flag=") {
+		t.Errorf("multiple leftovers: %v", err)
+	}
+}
+
 func TestPrintUsageIncludesEnv(t *testing.T) {
 	var buf bytes.Buffer
 	if err := printUsage(&buf); err != nil {
