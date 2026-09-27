@@ -376,7 +376,13 @@ fi
 # agree.
 WRITE_ARTIFACT="$ARTIFACT"
 if [[ ( "$FORCE" == true || "$SPEC_CONVERGED" == true ) && -n "$BACKUP_RESOURCE_VERSION" ]]; then
-  if ! WRITE_ARTIFACT="$(mktemp -- "$DIR/.restore.XXXXXX")"; then
+  # No `--` before the template: BSD mktemp (macOS, the portability CI job)
+  # takes the template as its first operand and has no end-of-options marker, so
+  # `mktemp -- /path/tpl` makes a file literally named `--` in the caller's cwd,
+  # returns that name, and every write below lands outside $DIR where nothing
+  # cleans it up. The template is already an absolute path, so it cannot be
+  # read as an option.
+  if ! WRITE_ARTIFACT="$(mktemp "$DIR/.restore.XXXXXX")"; then
     echo "restore.sh: cannot write a temporary copy of the artifact in $DIR;" >&2
     echo "restore.sh: nothing was changed." >&2
     exit 1

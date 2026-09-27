@@ -207,6 +207,29 @@ func getBaseline(ctx context.Context, c client.Client) (*baselinev1alpha1.Cluste
 	return cb, err
 }
 
+// restoreSpec puts the whole spec back to what the test found when it started,
+// and reports a failure to do so. Every cleanup calls this rather than reading
+// the CR and writing one field back, for two reasons. getBaseline hands back a
+// non-nil zero object alongside its error, so a discarded read error turns into
+// a write of a spec with only the field under test set: the operator then drops
+// the ScanSettingBindings, tailored profiles, and waivers the test never
+// touched, and no test reports why. And a discarded write error leaves the
+// shared CR mutated for every later test in the run while this one passes. Both
+// are reported with t.Errorf so the failure survives to the test log instead of
+// vanishing into a cleanup that looks like it worked.
+func restoreSpec(t *testing.T, ctx context.Context, c client.Client, original *baselinev1alpha1.ClusterBaselineSpec) {
+	t.Helper()
+	cur, err := getBaseline(ctx, c)
+	if err != nil {
+		t.Errorf("cleanup: read ClusterBaseline to restore its spec: %v", err)
+		return
+	}
+	cur.Spec = *original
+	if err := applySpec(ctx, c, cur); err != nil {
+		t.Errorf("cleanup: restore ClusterBaseline spec: %v", err)
+	}
+}
+
 func conditionTrue(cb *baselinev1alpha1.ClusterBaseline, typ string) bool {
 	for _, cond := range cb.Status.Conditions {
 		if cond.Type == typ {

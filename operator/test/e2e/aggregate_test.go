@@ -305,6 +305,7 @@ func TestWaiverExcludesCheck(t *testing.T) {
 	}
 
 	before, _ := countOwnedResults(ctx, c, cb)
+	originalSpec := cb.Spec.DeepCopy()
 	cb.Spec.Waivers = []baselinev1alpha1.WaiverEntry{{Name: failName, Reason: "e2e"}}
 	// Retry on conflict: the operator writes .status on the same singleton, so a
 	// plain Update races a status write. A cleanup that 409s and is ignored would
@@ -315,12 +316,7 @@ func TestWaiverExcludesCheck(t *testing.T) {
 	after, _ := getBaseline(ctx, c)
 	t.Logf("waived %q; spec.waivers now has %d entries", failName, len(after.Spec.Waivers))
 	t.Cleanup(func() {
-		restore, getErr := getBaseline(ctx, c)
-		if getErr != nil {
-			return
-		}
-		restore.Spec.Waivers = nil
-		_ = applySpec(ctx, c, restore)
+		restoreSpec(t, ctx, c, originalSpec)
 	})
 
 	eventually(t, 2*time.Minute, "waived count reflected in status", func() error {

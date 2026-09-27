@@ -149,10 +149,9 @@ func TestProfileToggle(t *testing.T) {
 	if contains(profileKeys(original), "e8") {
 		t.Skip("e8 already selected; toggle test needs an unselected profile")
 	}
+	originalSpec := cb.Spec.DeepCopy()
 	t.Cleanup(func() {
-		restore, _ := getBaseline(ctx, c)
-		restore.Spec.Profiles = original
-		_ = applySpec(ctx, c, restore)
+		restoreSpec(t, ctx, c, originalSpec)
 	})
 
 	cb.Spec.Profiles = append(original, "e8")
@@ -205,14 +204,9 @@ func TestDisableAllProfiles(t *testing.T) {
 	owned := ownedSuites(cb)
 	origProfiles := append([]baselinev1alpha1.ProfileKey(nil), cb.Spec.Profiles...)
 	origTailored := append([]string(nil), cb.Spec.TailoredProfiles...)
+	originalSpec := cb.Spec.DeepCopy()
 	t.Cleanup(func() {
-		restore, getErr := getBaseline(ctx, c)
-		if getErr != nil {
-			return
-		}
-		restore.Spec.Profiles = origProfiles
-		restore.Spec.TailoredProfiles = origTailored
-		_ = applySpec(ctx, c, restore)
+		restoreSpec(t, ctx, c, originalSpec)
 	})
 
 	cb.Spec.Profiles = []baselinev1alpha1.ProfileKey{}

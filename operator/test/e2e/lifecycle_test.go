@@ -29,10 +29,10 @@ func TestInvalidScheduleDegrades(t *testing.T) {
 	if original == "" {
 		original = "0 1 * * *"
 	}
+	originalSpec := cb.Spec.DeepCopy()
+	originalSpec.Schedule = original
 	t.Cleanup(func() {
-		restore, _ := getBaseline(ctx, c)
-		restore.Spec.Schedule = original
-		_ = applySpec(ctx, c, restore)
+		restoreSpec(t, ctx, c, originalSpec)
 	})
 
 	cb.Spec.Schedule = "not a cron"
@@ -84,10 +84,10 @@ func TestScheduleChangeUpdatesNextScan(t *testing.T) {
 	if original == "" {
 		original = "0 1 * * *"
 	}
+	originalSpec := cb.Spec.DeepCopy()
+	originalSpec.Schedule = original
 	t.Cleanup(func() {
-		restore, _ := getBaseline(ctx, c)
-		restore.Spec.Schedule = original
-		_ = applySpec(ctx, c, restore)
+		restoreSpec(t, ctx, c, originalSpec)
 	})
 
 	// Pick an hour different from the current schedule.

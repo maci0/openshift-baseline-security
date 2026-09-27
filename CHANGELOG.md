@@ -2562,6 +2562,24 @@ depend on those tags.
   `hack/backup.sh` / `hack/restore.sh` capture and recover the object if the
   reinstall goes wrong.
 
+- `hack/restore.sh --force` failed on a host whose `mktemp` is BSD's (macOS,
+  where the `portability` job runs), because it passed `--` before the template.
+  BSD `mktemp` has no end-of-options marker and treated `--` as the template, so
+  the temporary artifact landed in the caller's working directory under that
+  name instead of beside the backup, the `oc apply` that followed read the wrong
+  file, and the restore stopped with nothing changed. The `--` is gone; the
+  other `hack/` scripts already use the portable form.
+
+- An e2e test that could not restore the shared `ClusterBaseline` at the end of
+  its run reported nothing. The cleanup read the CR without checking the read,
+  and `getBaseline` returns an empty object alongside its error, so a failed
+  read turned into a write of a spec carrying only the one field the test had
+  changed: the operator dropped the selected profiles, tailored profiles, and
+  waivers for every later test in the run, with no test reporting why. The
+  write error was discarded too. Both now go through one `restoreSpec` helper
+  that restores the whole spec the test started from and reports either
+  failure.
+
 ## [0.6.1] - 2026-09-02
 ### Fixed
 

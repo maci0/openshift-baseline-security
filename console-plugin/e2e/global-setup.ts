@@ -26,38 +26,47 @@ export default async function globalSetup(_config: FullConfig) {
     );
   }
 
+  // Every throw between launch and close (a login form that never renders, a
+  // consoleURL that 404s, a full disk on the storageState write) left the
+  // chromium process running for the rest of the run, because close() was the
+  // last statement rather than a finally. A failed setup is the case where a
+  // stuck headless browser is least wanted: it holds the port and a process
+  // slot on a CI runner that is about to be torn down anyway.
   const browser = await chromium.launch();
-  const page = await browser.newPage({ ignoreHTTPSErrors: true });
-  await page.goto(consoleURL, { waitUntil: 'domcontentloaded' });
-
-  // Multi-IDP clusters show a provider chooser first.
-  const kubeadminLink = page.locator('a', { hasText: 'kube:admin' });
-  if (await kubeadminLink.count()) {
-    await kubeadminLink.click();
-  }
-  await page.fill('#inputUsername', user);
-  await page.fill('#inputPassword', password);
-  await page.click('button[type=submit]');
-  await page.waitForURL('**/console-openshift-console**', { timeout: 30_000 });
-
-  // Dismiss the guided-tour modal if it appears.
   try {
-    await page.getByRole('button', { name: /skip tour/i }).click({ timeout: 5_000 });
-  } catch {
-    // no tour
-  }
+    const page = await browser.newPage({ ignoreHTTPSErrors: true });
+    await page.goto(consoleURL, { waitUntil: 'domcontentloaded' });
 
-  await mkdir('e2e/.auth', { recursive: true, mode: 0o700 });
-  const statePath = 'e2e/.auth/state.json';
-  // The state file holds live kubeadmin session cookies. Playwright creates it
-  // with the process umask (0644 on a default host) and only the chmod below
-  // narrows it, so on a shared host another local user can read the session
-  // for the length of that write. Create the file owner-only first: storageState
-  // truncates an existing path, so it never loosens the mode, and the chmod
-  // still tightens a file left behind by an older run.
-  await writeFile(statePath, '', { mode: 0o600 });
-  await page.context().storageState({ path: statePath });
-  // Session cookies: owner-only (gitignored path; still tighten on shared hosts).
-  await chmod(statePath, 0o600);
-  await browser.close();
+    // Multi-IDP clusters show a provider chooser first.
+    const kubeadminLink = page.locator('a', { hasText: 'kube:admin' });
+    if (await kubeadminLink.count()) {
+      await kubeadminLink.click();
+    }
+    await page.fill('#inputUsername', user);
+    await page.fill('#inputPassword', password);
+    await page.click('button[type=submit]');
+    await page.waitForURL('**/console-openshift-console**', { timeout: 30_000 });
+
+    // Dismiss the guided-tour modal if it appears.
+    try {
+      await page.getByRole('button', { name: /skip tour/i }).click({ timeout: 5_000 });
+    } catch {
+      // no tour
+    }
+
+    await mkdir('e2e/.auth', { recursive: true, mode: 0o700 });
+    const statePath = 'e2e/.auth/state.json';
+    // The state file holds live kubeadmin session cookies. Playwright creates it
+    // with the process umask (0644 on a default host) and only the chmod below
+    // narrows it, so on a shared host another local user can read the session
+    // for the length of that write. Create the file owner-only first: storageState
+    // truncates an existing path, so it never loosens the mode, and the chmod
+    // still tightens a file left behind by an older run.
+    await writeFile(statePath, '', { mode: 0o600 });
+    await page.context().storageState({ path: statePath });
+    // Session cookies: owner-only (gitignored path; still tighten on shared hosts).
+    await chmod(statePath, 0o600);
+  } finally {
+    await browser.close();
+  }
 }
