@@ -1,6 +1,9 @@
 package controller
 
 import (
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -139,5 +142,36 @@ func TestApplyPluginContainerPreStop(t *testing.T) {
 	// before nginx ever sees SIGTERM.
 	if *pod.TerminationGracePeriodSeconds <= 5 {
 		t.Fatalf("terminationGracePeriodSeconds = %d, must exceed the preStop sleep", *pod.TerminationGracePeriodSeconds)
+	}
+}
+
+// The plugin probes are only useful if nginx actually answers on that path. A
+// probe aimed at a location that does not exist fails the pod forever, and a
+// TCP probe silently stops checking anything. Pin both sides to the same file
+// the image is built from.
+func TestPluginHealthzPathExistsInNginxConf(t *testing.T) {
+	const conf = "../../../console-plugin/nginx.conf"
+	raw, err := os.ReadFile(filepath.FromSlash(conf))
+	if err != nil {
+		t.Fatalf("read %s: %v", conf, err)
+	}
+	text := string(raw)
+	loc := "location = " + pluginHealthzPath + " {"
+	start := strings.Index(text, loc)
+	if start < 0 {
+		t.Fatalf("nginx.conf has no `%s` block; the plugin probes it", pluginHealthzPath)
+	}
+	// The location must be a constant return: a probe that reads the asset tree
+	// would fail for an unrelated reason and take the pod down with it.
+	block := text[start:]
+	if end := strings.Index(block, "\n        }"); end >= 0 {
+		block = block[:end]
+	}
+	if !strings.Contains(block, "return 200") {
+		t.Fatalf("%s block does not `return 200`:\n%s", pluginHealthzPath, block)
+	}
+	// The listen port the probes target must match the TLS listener.
+	if !strings.Contains(text, "listen "+strconv.Itoa(pluginPort)+" ssl http2;") {
+		t.Fatalf("nginx.conf does not listen on %d, the port the probes target", pluginPort)
 	}
 }

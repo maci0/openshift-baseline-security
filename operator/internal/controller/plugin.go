@@ -254,7 +254,7 @@ func (r *ClusterBaselineReconciler) ensureConsolePlugin(ctx context.Context, cb 
 		svc.Spec.PublishNotReadyAddresses = false
 		svc.Spec.Selector = pluginSelectorLabels()
 		svc.Spec.Ports = []corev1.ServicePort{{
-			Name: "https", Port: 9443, TargetPort: intstr.FromInt32(9443), Protocol: corev1.ProtocolTCP,
+			Name: "https", Port: pluginPort, TargetPort: intstr.FromInt32(pluginPort), Protocol: corev1.ProtocolTCP,
 		}}
 		objectLabels(&svc.ObjectMeta)
 		return controllerutil.SetControllerReference(cb, svc, r.Scheme)
@@ -333,7 +333,7 @@ func (r *ClusterBaselineReconciler) ensureConsolePlugin(ctx context.Context, cb 
 			return err
 		}
 		if err := unstructured.SetNestedField(cp.Object, map[string]any{
-			"name": pluginName, "namespace": pluginNS, "port": int64(9443), "basePath": "/",
+			"name": pluginName, "namespace": pluginNS, "port": int64(pluginPort), "basePath": "/",
 		}, "spec", "backend", "service"); err != nil {
 			return err
 		}

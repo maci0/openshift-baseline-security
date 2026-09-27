@@ -1805,21 +1805,29 @@ func TestApplyPluginContainerRemovesUnownedPodPayloads(t *testing.T) {
 		t.Fatalf("TerminationMessagePolicy = %q, want FallbackToLogsOnError", pod.Containers[0].TerminationMessagePolicy)
 	}
 	// startupProbe owns cold start; liveness must not use InitialDelaySeconds alone.
+	// All three probes must hit the real nginx request path over TLS: a TCP
+	// connect proves the socket is open, not that the pod serves anything.
 	c0 := pod.Containers[0]
-	if c0.StartupProbe == nil || c0.StartupProbe.TCPSocket == nil || c0.StartupProbe.FailureThreshold != 30 {
-		t.Fatalf("StartupProbe = %+v, want TCP :9443 failureThreshold 30", c0.StartupProbe)
+	for name, probe := range map[string]*corev1.Probe{
+		"startup": c0.StartupProbe, "readiness": c0.ReadinessProbe, "liveness": c0.LivenessProbe,
+	} {
+		if probe == nil {
+			t.Fatalf("%s probe required", name)
+		}
+		if probe.HTTPGet == nil {
+			t.Fatalf("%s probe = %+v, want HTTPGet %s, not TCPSocket", name, probe, pluginHealthzPath)
+		}
+		if probe.HTTPGet.Path != pluginHealthzPath ||
+			probe.HTTPGet.Port.IntValue() != pluginPort ||
+			probe.HTTPGet.Scheme != corev1.URISchemeHTTPS {
+			t.Fatalf("%s probe target = %+v, want GET https://:%d%s", name, probe.HTTPGet, pluginPort, pluginHealthzPath)
+		}
+		if probe.InitialDelaySeconds != 0 {
+			t.Fatalf("%s probe InitialDelaySeconds = %d, want 0 (startupProbe owns delay)", name, probe.InitialDelaySeconds)
+		}
 	}
-	if c0.ReadinessProbe == nil {
-		t.Fatal("ReadinessProbe required")
-	}
-	if c0.ReadinessProbe.InitialDelaySeconds != 0 {
-		t.Fatalf("ReadinessProbe InitialDelaySeconds = %d, want 0 (startupProbe owns delay)", c0.ReadinessProbe.InitialDelaySeconds)
-	}
-	if c0.LivenessProbe == nil {
-		t.Fatal("LivenessProbe required")
-	}
-	if c0.LivenessProbe.InitialDelaySeconds != 0 {
-		t.Fatalf("LivenessProbe InitialDelaySeconds = %d, want 0 (startupProbe owns delay)", c0.LivenessProbe.InitialDelaySeconds)
+	if c0.StartupProbe.FailureThreshold != 30 {
+		t.Fatalf("StartupProbe FailureThreshold = %d, want 30", c0.StartupProbe.FailureThreshold)
 	}
 	applyPluginContainer(pod, "example.test/plugin:latest")
 	if pod.Containers[0].ImagePullPolicy != corev1.PullAlways {

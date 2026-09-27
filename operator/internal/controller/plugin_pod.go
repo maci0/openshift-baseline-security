@@ -125,11 +125,29 @@ func applyPluginContainer(pod *corev1.PodSpec, image string) {
 	if !strings.Contains(imageLeaf, ":") || strings.HasSuffix(imageLeaf, ":latest") {
 		pullPolicy = corev1.PullAlways
 	}
+	// HTTP over the real serving path, not a bare TCP connect: nginx can
+	// hold the 9443 listener open while every asset 404s (rootfs unreadable
+	// under a bad fsGroup, a truncated image), and a TCP probe reports ready
+	// for a pod that serves the console nothing. The location is a constant
+	// return, so it needs nothing from the rootfs and cannot fail for an
+	// unrelated asset. Kubelet does not verify probe certs, so the
+	// service-ca serving cert is accepted.
+	//
+	// A missing cert is not a reason to keep TCP: nginx exits at startup when
+	// /var/serving-cert/tls.crt is absent, so it never listens and an HTTP
+	// probe fails exactly when a TCP probe would.
+	healthz := corev1.ProbeHandler{
+		HTTPGet: &corev1.HTTPGetAction{
+			Path:   pluginHealthzPath,
+			Port:   intstr.FromInt32(pluginPort),
+			Scheme: corev1.URISchemeHTTPS,
+		},
+	}
 	container := corev1.Container{
 		Name:            pluginName,
 		Image:           image,
 		ImagePullPolicy: pullPolicy,
-		Ports:           []corev1.ContainerPort{{Name: "https", ContainerPort: 9443, Protocol: corev1.ProtocolTCP}},
+		Ports:           []corev1.ContainerPort{{Name: "https", ContainerPort: pluginPort, Protocol: corev1.ProtocolTCP}},
 		SecurityContext: &corev1.SecurityContext{
 			AllowPrivilegeEscalation: ptr.To(false),
 			// Explicit false: do not rely on API default if a mutating webhook
@@ -156,33 +174,26 @@ func applyPluginContainer(pod *corev1.PodSpec, image string) {
 				corev1.ResourceMemory: resource.MustParse("128Mi"),
 			},
 		},
-		// TCP only: the serving cert may be absent at first start, so HTTP
-		// probes would fail closed until service-ca mints the Secret.
-		// startupProbe owns the cold-start window (image pull lag, nginx
-		// init); liveness must not kill the pod before listen is ready.
-		// failureThreshold*periodSeconds = 2.5m (matches manager pattern).
+		// startupProbe owns the cold-start window (image pull lag, service-ca
+		// minting the serving cert, nginx init); liveness must not kill the pod
+		// before listen is ready. failureThreshold*periodSeconds = 2.5m
+		// (matches manager pattern).
 		StartupProbe: &corev1.Probe{
-			ProbeHandler: corev1.ProbeHandler{
-				TCPSocket: &corev1.TCPSocketAction{Port: intstr.FromInt32(9443)},
-			},
+			ProbeHandler:     healthz,
 			PeriodSeconds:    5,
 			TimeoutSeconds:   1,
 			SuccessThreshold: 1,
 			FailureThreshold: 30,
 		},
 		ReadinessProbe: &corev1.Probe{
-			ProbeHandler: corev1.ProbeHandler{
-				TCPSocket: &corev1.TCPSocketAction{Port: intstr.FromInt32(9443)},
-			},
+			ProbeHandler:     healthz,
 			TimeoutSeconds:   1,
 			PeriodSeconds:    10,
 			SuccessThreshold: 1,
 			FailureThreshold: 3,
 		},
 		LivenessProbe: &corev1.Probe{
-			ProbeHandler: corev1.ProbeHandler{
-				TCPSocket: &corev1.TCPSocketAction{Port: intstr.FromInt32(9443)},
-			},
+			ProbeHandler:     healthz,
 			TimeoutSeconds:   1,
 			PeriodSeconds:    20,
 			SuccessThreshold: 1,

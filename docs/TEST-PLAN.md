@@ -684,6 +684,13 @@ an accepted risk neither inflates nor tanks the score.
       carry the same hook (manifest, asserted by reading the YAML).
 - [x] **Readyz fails on SIGTERM**: readiness reports not-ready as soon as the
       process starts draining (`TestCacheSyncReadyz`).
+- [x] **Plugin probes hit the real request path**: startup, readiness and
+      liveness are all HTTP GET `https://:9443/healthz`, not a TCP connect, so
+      a pod that listens but serves nothing is pulled from the Service
+      (`TestApplyPluginContainerRemovesUnownedPodPayloads`).
+- [x] **The probed path exists**: nginx.conf declares `location = /healthz`
+      returning a constant 200 and listens on the probed port
+      (`TestPluginHealthzPathExistsInNginxConf`).
 - [x] **Recommended labels without breaking selectors**: pod and object
       metadata carry `app.kubernetes.io/*`; Service, Deployment and PDB
       selectors still require `app` alone (`TestEnsureConsolePlugin`).

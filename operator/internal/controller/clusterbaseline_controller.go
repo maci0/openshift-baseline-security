@@ -34,6 +34,12 @@ const (
 	finalizerName       = "baselinesecurity.openshift.io/cleanup"
 	pluginName          = "baseline-security-console-plugin"
 	pluginNS            = "openshift-baseline-security"
+	// pluginPort is the HTTPS port nginx serves the static assets on. It must
+	// match the listen directive in console-plugin/nginx.conf.
+	pluginPort = 9443
+	// pluginHealthzPath is the constant-return location nginx exposes for the
+	// kubelet probes. It must match `location = /healthz` in nginx.conf.
+	pluginHealthzPath = "/healthz"
 	// operatorName is this operator, the entity that owns the objects it
 	// reconciles; it is the app.kubernetes.io/managed-by value.
 	operatorName = "baseline-security-operator"
