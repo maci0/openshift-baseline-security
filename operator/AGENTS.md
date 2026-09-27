@@ -86,7 +86,7 @@ than guessing.
 - Every threshold and grace period is a named package-level constant with a
   comment saying what breaks at the boundary. No bare durations at call sites.
 - No real timers in a runnable. A retry wait goes through the injected clock
-  (`clock.Sleep` via `r.sleep` / `l.sleep` / `DefaultClusterBaseline.sleep`), so
+  (`clock.Sleep` via `l.sleep` / `DefaultClusterBaseline.sleep`), so
   a simulated run spends simulated time on it. `time.NewTimer` in a reconcile
   or Runnable loop makes a seeded replay depend on wall time.
 - Fuzz any parser of cluster-supplied text (suite labels, scan names, CSV

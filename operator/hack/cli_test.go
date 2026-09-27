@@ -201,22 +201,30 @@ func TestResolveReleaseVersionInput(t *testing.T) {
 		{"newline", "INPUT_VERSION=0.6.1\nINJECTED=1", "INPUT_VERSION"},
 		{"branch-ref", "GITHUB_REF_NAME=refs/heads/main", "GITHUB_REF_NAME"},
 	} {
-		_, stderr, code := runScriptEnv(t, script, []string{tc.env})
+		stdout, stderr, code := runScriptEnv(t, script, []string{tc.env})
 		if code != 2 {
 			t.Errorf("%s: exit %d, want 2; stderr=%q", tc.name, code, stderr)
 		}
 		if !strings.Contains(stderr, "invalid release version from "+tc.wantSource) {
 			t.Errorf("%s: stderr does not name the source: %q", tc.name, stderr)
 		}
+		// A rejected input must not reach the version the image build stamps
+		// on stdout, or a caller capturing it would build the wrong version.
+		if stdout != "" {
+			t.Errorf("%s: rejected input wrote %q to stdout", tc.name, stdout)
+		}
 	}
 
 	// No version from either source is a resolution failure, not a shape one.
-	_, stderr, code := runScriptEnv(t, script, []string{"INPUT_VERSION=", "GITHUB_REF_NAME="})
+	stdout, stderr, code := runScriptEnv(t, script, []string{"INPUT_VERSION=", "GITHUB_REF_NAME="})
 	if code != 1 {
 		t.Errorf("unset: exit %d, want 1; stderr=%q", code, stderr)
 	}
 	if !strings.Contains(stderr, "no release version") {
 		t.Errorf("unset: stderr=%q", stderr)
+	}
+	if stdout != "" {
+		t.Errorf("unset: unresolved version wrote %q to stdout", stdout)
 	}
 }
 

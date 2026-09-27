@@ -175,7 +175,7 @@ STRIDE, tied to entry points. Not a generic checklist.
 
 | Class | Concrete threat |
 |-------|-----------------|
-| Tampering | Foreign suite labels must not enter the score. Mitigated by `ownedSuites` / `matchesAnyProfile` (`matching.go`) and `isOwnedByBaseline` (`models.ts`). Recurring: 19 fuzz targets in `matching_test.go` plus 12 in `fuzz_extra_test.go`. |
+| Tampering | Foreign suite labels must not enter the score. Mitigated by `ownedSuites` / `matchesAnyProfile` (`matching.go`) and `isOwnedByBaseline` (`models.ts`). Recurring: 19 fuzz targets in `matching_test.go` plus 13 in `fuzz_extra_test.go`. |
 | Information disclosure / XSS | `description` and `instructions` are untrusted. Modal uses text (`ResultsTab.tsx` `Content` / pre-wrap). Report HTML escapes (`report.ts`). CSV formula prefix (`results.ts`, CWE-1236). Deep-links are path-relative (`links.ts`). |
 | Denial of service | Unstructured maps from CO objects: the batch path avoids `NestedMap` (which DeepCopyJSON-panics on non-JSON types) in favor of `NestedFieldNoCopy` + type assert (`batch.go` `poolFromRemediation`). Huge result lists and a hostile status are the residual DoS. |
 | Elevation | Hostile remediation labels driving MCP names: non-DNS-1123 dropped by `poolFromRemediation` (`batch.go:77-102`, `validK8sName` at `batch.go:111-116`), re-checked in `batch_reconcile.go`. |
@@ -195,7 +195,7 @@ STRIDE, tied to entry points. Not a generic checklist.
 | Class | Concrete threat |
 |-------|-----------------|
 | Tampering | Substituted operator or plugin image. Recurring: `workflow_dispatch` shell injection (fixed 0.5.11 by env-passing the version). `ValidRelatedImage` does not pin digest or registry. A compromised npm package with a `postinstall` cannot run during `yarn install` (`enableScripts: false` in `console-plugin/.yarnrc.yml`; image `YARN_ENABLE_SCRIPTS=false`). |
-| Denial of service | Standard-library infinite loop on invalid input via status text (fixed: `golang.org/x/text` bump, 0.5.9). Recurring class: untrusted string → parser, now including the status sanitizer. 57 fuzz targets exist; `make fuzz` is a release gate, not a per-PR one. |
+| Denial of service | Standard-library infinite loop on invalid input via status text (fixed: `golang.org/x/text` bump, 0.5.9). Recurring class: untrusted string → parser, now including the status sanitizer. 58 fuzz targets exist; `make fuzz` is a release gate, not a per-PR one. |
 
 ## 5. Mitigations mapping
 
@@ -218,7 +218,7 @@ Existing controls, with the threats they cover:
 | Plugin nginx: TLS1.2+, no tickets, nosniff, DENY frame, CSP `default-src 'none'`, GET/HEAD, 1k body, `server_tokens off`, `Referrer-Policy no-referrer`, `Permissions-Policy`, HSTS, `Cross-Origin-Resource-Policy`/`-Opener-Policy same-origin`; plaintext 8080 explicitly excluded so the S2I snippets cannot add one | `console-plugin/nginx.conf:48-124` (server block 58-145; the 8080 exclusion rationale at :55-56) | Direct hits on the plugin Service |
 | Report export via `Blob` + `openBlobInTab` (opener dropped, revoked on every path, falls back to download on popup block) | `CompliancePage.tsx:210-262`, `download.ts` | Window-opener takeover and silent no-op from the one path that hands untrusted text to a browser document |
 | React text rendering; report `esc()`; CSV formula prefix; `safeDownloadName` | `ResultsTab.tsx`, `report.ts`, `results.ts`, `download.ts` | XSS / CWE-1236 / download path |
-| 57 operator fuzz targets plus a deterministic sweep in the plugin | `operator/{cmd,internal/controller}/*_test.go`, `console-plugin/src/{fuzz.test.ts,report.test.ts,links.test.ts}` | Recurring parser panics. `report.ts` and `links.ts` are covered by seeded sweeps in their test files (which include `<img src=x onerror=alert(1)>` and `javascript:` payloads) rather than by a Go-style fuzz target |
+| 58 operator fuzz targets plus a deterministic sweep in the plugin | `operator/{cmd,internal/controller}/*_test.go`, `console-plugin/src/{fuzz.test.ts,report.test.ts,links.test.ts}` | Recurring parser panics. `report.ts` and `links.ts` are covered by seeded sweeps in their test files (which include `<img src=x onerror=alert(1)>` and `javascript:` payloads) rather than by a Go-style fuzz target |
 | e2e `.env` key allowlist with hard errors | `console-plugin/e2e/dotenv.ts:12-17,23-76`, `dotenv.test.ts` | A typo'd key or an unrelated variable silently inheriting into the runner (which would also pull in `KUBEADMIN_PASSWORD` where it was not meant to go) |
 | Hermetic, digest-pinned image builds (`--network=none`, `GOPROXY=off`, lockfile, digest bases) | `operator/Dockerfile`, `console-plugin/Dockerfile`, `operator/catalog.Dockerfile` | Build-time supply chain for released images. `operator/Dockerfile.ci` is tag-pinned against `registry.ci.openshift.org`, not digest-pinned; it never ships |
 | Yarn install without lifecycle scripts | `console-plugin/.yarnrc.yml` `enableScripts: false`; `console-plugin/Dockerfile` `YARN_ENABLE_SCRIPTS=false` | Compromised registry package cannot run `preinstall`/`install`/`postinstall` |
@@ -293,7 +293,7 @@ and `cacheSyncReadyz`. It also corrected four more: a cited function that does
 not exist (`validMCPPoolName`; the real name is `validK8sName`, `batch.go:111-116`),
 the optional metrics-cert volume (it is `manager.yaml:179-183`, not the
 lifecycle block the old citation pointed into), the nginx server block (it runs
-to line 145, the end of the file), the operator fuzz-target count (57, not 55),
+to line 145, the end of the file), the operator fuzz-target count (58, not 55),
 and the `SPEC.md` / `PATTERNS.md` line numbers for the confirmation-gate claim
 (`395` and `155`, not `381` and `138`). Every `role.yaml`, `manager.yaml`
 security-context, and `nginx.conf` header citation re-checked clean, as did the

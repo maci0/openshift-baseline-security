@@ -15,6 +15,13 @@ label adds the namespace to Prometheus's selector, but the monitoring operator
 only auto-grants this service-discovery RBAC to namespaces it manages; without
 it, discovery finds zero targets and nothing is scraped (`ComplianceStatusStale`).
 
+The install also ships a default-deny ingress `NetworkPolicy`
+(`config/manager/networkpolicy.yaml`) on the operator pods: port 8443 is
+reachable only from `openshift-monitoring` and the service-ca namespaces,
+every other port is denied everywhere, and egress is unrestricted. A scraper
+outside those namespaces gets a refused connection and no error on the
+operator side; add the namespace to the policy's `from` selector to admit it.
+
 ## Metrics
 
 | Metric | Meaning |

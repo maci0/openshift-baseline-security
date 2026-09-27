@@ -636,7 +636,7 @@ func (l *lazyComplianceWatch) Start(ctx context.Context) error {
 		// mid-wait does not leave the retry holding the Runnable goroutine's
 		// stack.
 		if err := l.sleep(ctx, watchRetryInterval); err != nil {
-			return nil
+			return nil //nolint:nilerr // the wait only fails on ctx cancel: a Runnable returning an error is fatal to the manager
 		}
 	}
 }

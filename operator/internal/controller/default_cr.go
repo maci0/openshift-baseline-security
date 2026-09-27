@@ -85,7 +85,7 @@ func (d *DefaultClusterBaseline) Start(ctx context.Context) error {
 				"syncAttempt", syncAttempt)
 		}
 		if err := d.sleep(ctx); err != nil {
-			return nil // graceful shutdown, not a runtime failure
+			return nil //nolint:nilerr // graceful shutdown, not a runtime failure
 		}
 	}
 	// Retry on transient list/create failures so a brief API blip does not
@@ -110,7 +110,7 @@ func (d *DefaultClusterBaseline) Start(ctx context.Context) error {
 				"attempt", attempt)
 		}
 		if err := d.sleep(ctx); err != nil {
-			return nil
+			return nil //nolint:nilerr // graceful shutdown, not a runtime failure
 		}
 	}
 }

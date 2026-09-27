@@ -66,13 +66,6 @@ func (l *lazyComplianceWatch) now() time.Time {
 
 // sleep waits out a retry delay on the injected clock, so a simulated run
 // spends simulated time on the wait and none of its own.
-func (r *ClusterBaselineReconciler) sleep(ctx context.Context, d time.Duration) error {
-	if r.Clock == nil {
-		return realClock{}.Sleep(ctx, d)
-	}
-	return r.Clock.Sleep(ctx, d)
-}
-
 func (l *lazyComplianceWatch) sleep(ctx context.Context, d time.Duration) error {
 	if l.clock == nil {
 		return realClock{}.Sleep(ctx, d)

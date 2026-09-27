@@ -226,252 +226,6 @@ depend on those tags.
   library pulled back into the entry bundle accreted silently. The numbers
   print into the CI log beside the commit that produced them.
 
-### Changed
-
-- The CRD and manager ClusterRole are generated with controller-gen v0.21.0
-  instead of v0.20.1. The Makefile asks for the controller-tools release whose
-  `k8s.io/*` matches the operator's, and the k8s bump to v0.36.4 left it a
-  minor behind: v0.20.1 builds against k8s v0.35. The generated schema is
-  byte-identical apart from the `controller-gen.kubebuilder.io/version`
-  annotation, so no field changes.
-
-- `yarn size` reports the first-paint download (entry bundles plus the manifest
-  and locale the console fetches ahead of them) and no longer counts
-  `THIRD-PARTY-NOTICES.txt` in the dist total. No page links that file, so it
-  was inflating the ceiling that stands for what a browser actually
-  downloads, and the locale bundle the first paint waits on was invisible to
-  the report. No shipped bytes changed.
-
-- The Observe → Dashboards view and the exported HTML report now paint statuses
-  in the same colors the console paints them in. Every dashboard graph panel
-  took Grafana's default categorical palette, where a failing-check series can
-  render green and a passing one blue, and the report and dashboard carried
-  PatternFly 4-era hexes while the console plugin reads PatternFly 6 status
-  tokens. All three surfaces share one palette now (success `#3d7317`, danger
-  `#b1380b`, warning `#dca614`, info `#5e40be`, custom `#147878`, orangered
-  `#fbbea8` for Error, neutral `#a3a3a3`), and the 30-day score trend follows
-  the same 60/90 bands as the score beside it.
-
-- `docs/THREAT_MODEL.md` brought back in line with the code. The commit stamp
-  and eleven line citations across `role.yaml`, `cmd/main.go`, `plugin.go`,
-  `plugin_pod.go`, `nginx.conf`, both Dockerfiles, `CompliancePage.tsx`,
-  `RemediationsTab.tsx`, and the e2e dotenv loader were stale, and two surfaces
-  the model never named are now covered: the leader-election Lease and its
-  separate Role, and the operator's cluster-wide RBAC grants. No shipped
-  behavior changed.
-
-### Fixed
-
-- `hack/restore.sh --force` restores again. The artifact carries the
-  `resourceVersion` it was captured at, and that field is a precondition on
-  both writes, so restoring over a live object that had moved on (exactly the
-  case `--force` exists for) sent a precondition that could never be satisfied:
-  `oc apply` and the status replace were both refused, the script exited with
-  the spec half restored and told the operator to re-run, and the re-run hit
-  the identical conflict. Under `--force` both writes now go out from a copy of
-  the artifact with that field removed, so the restore completes and a repeated
-  run reaches the state the first one reached. Without `--force` nothing
-  changed: the artifact is sent as captured, and the staleness guard and the
-  write still agree.
-
-- `baseline_security_remediation_batches_total` no longer counts one batch once
-  per retry. The finish path strips the batch annotations from the cluster and
-  then counts the outcome, but clears `status.remediationBatch` only in the
-  trailing `Status().Update`. When that write failed, every reconcile re-ran
-  the whole finish: the pool resumes were no-ops, the counter was not, and the
-  outcome of a single batch accrued once per requeue for as long as the status
-  subresource stayed unwritable. The finish path now counts only when the
-  cluster still carries that batch's annotations, which the earlier finish
-  removed.
-
-- The score trend, the per-profile sparklines, and the per-profile score badges
-  no longer assume `status.history` is stored oldest-first. That ordering is a
-  write-side convention (the operator appends) and not a schema constraint, so
-  a restored or hand-edited ring could arrive in any order. The trend's
-  accessible label reads the first and last points as the direction of travel,
-  so an out-of-order ring announced the trend backwards ("moved from 70 to
-  90"), and a per-profile badge could show an older scan's score than the
-  current one. Points are now ordered by instant when the ring is read, and the
-  newest point is resolved by instant rather than by array position.
-
-- The score trend and per-profile sparklines clamp a `status.history` score
-  into the CRD `[0,100]` bounds before plotting it, the same bound the operator
-  enforces on write and every other `status.score` read already applied. A
-  restored or hand-edited snapshot outside the range was labelled verbatim
-  ("Score moved from 5,000 to 90"), colored from an impossible value, and drawn
-  as a point the chart domain had to clip.
-
-- Console text renders correctly in non-English locales. Untrusted cluster and
-  API messages (apiserver `Status.message`, compliance-operator condition
-  text, a chunk-load rejection reason) are now bidi-isolated with `dir="auto"`
-  the way check titles and waiver names already were, so an Arabic or Hebrew
-  value no longer reorders the punctuation around it. Counted strings
-  (orphaned waivers, extra rules, chart scan counts) carry a real plural key,
-  so a locale with more than two forms selects the right one instead of
-  always reading the `_other` form. The waiver field-length message quotes the
-  limit constants through the locale-aware number formatter rather than baking
-  Latin digits into a translatable string, the two Remediation confirmation
-  sentences name the remediation as its own element so a translated locale can
-  put it where the grammar needs it, and the empty-state link pair is joined
-  with the locale's own list punctuation instead of a hardcoded middle dot.
-
-- The metrics endpoint serves the service-ca certificate again. The manager
-  Deployment projected the service-ca Secret with `defaultMode: 0400`, and the
-  kubelet writes secret-volume files root-owned while the manager runs at the
-  image UID 65532 with no `fsGroup` (OLM owns the pod spec), so the projected
-  `tls.crt` and `tls.key` were never readable. The metrics server fell back to
-  its self-signed pair, permanently, and the `serving-cert-secret-name`
-  annotation on the metrics Service means the cluster metrics stack verified
-  against the service CA, so the ServiceMonitor had no working target and the
-  bundled PrometheusRule alerts could not fire. The mode is now 0644: the
-  serving certificate is published in the cluster service CA bundle anyway, and
-  a projected volume cannot be tightened past what the process UID can read.
-
-- The console plugin image builds again. `yarn build` runs the transferred-byte
-  size gate, but `.dockerignore` excluded `tools/*` and re-included only
-  `tools/attribution`, so `tools/size` was missing from the build context and
-  the build stage failed on the `ts-node tools/size/check.ts` step. The size
-  generator is now copied into the build stage alongside the attribution one.
-
-- `restore.sh` no longer restores a backup over a live `ClusterBaseline` that
-  has moved on since it was taken. The MANIFEST records the `resourceVersion`
-  the backup holds, and the script now reads the live one before writing: a
-  mismatch discarded every waiver edit and batch annotation made in between,
-  silently, with no soft-delete window behind it. The restore is refused with
-  both versions named until `--force` says it was meant. The age of the
-  artifact, which is the RPO the restore actually buys, is now reported in the
-  restore summary and called out when it is past a week.
-
-- The status size budget mis-sized text that is not valid UTF-8, which a
-  status restored from a protobuf backup can carry. An ill-formed byte is
-  coerced rather than rejected, and the count of what the encoder then writes
-  has changed with the toolchain: the Go release this operator pins spells the
-  coercion as the six-byte `\ufffd` escape, Go 1.27 as the raw three-byte
-  U+FFFD rune. Counting the three-byte form under-counted on the pinned
-  toolchain, so a failure list built from the budget could land past the CRD
-  bound and the next status write would be rejected, freezing reconcile until
-  the object was hand-edited. The budget counts the six-byte form, which is
-  exact on the pinned toolchain and trims three bytes early per ill-formed
-  byte on a newer one.
-
-- Deleting `ClusterBaseline/cluster` logs, at the moment the finalizer drops,
-  that the waivers and score history are not recoverable and names
-  `hack/backup.sh`. Nothing restores a deleted CR, and that was the last
-  moment the operator could still see the object.
-
-- A waiver reason, a remediation error message, and the text in the printable
-  report lost their zero-width joiners and non-joiners on the way in and out.
-  The invisible-character filter dropped every Unicode format character, so a
-  family emoji was stored as three separate emoji and a Persian or Arabic
-  compound lost the joiner that carries its meaning. Free text now keeps those
-  two joiners while still dropping the characters that only exist to hide the
-  next one (BIDI controls, zero-width space, BOM, word joiner). The waiver
-  `requestedBy` / `approvedBy` fields keep the full filter, where a joiner in
-  front of a name is a spoof and no identity needs one. CSV export is
-  unchanged: a hidden character in front of a formula sigil is still neutralized
-  there.
-- A failed ClusterBaseline watch rendered the Overview, Profiles, and
-  Remediations tabs as "Baseline not configured" with a **Create default
-  baseline** button. A 403 on `clusterbaselines.compliance.openshift.io`, or a
-  missing CRD, was indistinguishable from an absent CR, so the page told the
-  admin a resource the operator may already have created did not exist. The
-  tabs now render a danger state naming the read failure. The **Create default
-  baseline** button also stays silent when it loses the create race, which on a
-  broken watch left the click with no output at all; it now says the CR exists.
-- Two failing watches showed only the first message in the page banner, and the
-  second one's text was never rendered anywhere. The banner now carries every
-  watch error.
-- A failed async-chunk load and a failed report-exporter load both reported one
-  fixed sentence and discarded the rejection, so a stale chunk id after a
-  console upgrade was indistinguishable from an unreachable CDN. The reason is
-  now shown.
-- A report download whose `click()` threw left its hidden anchor element in the
-  page, one per failed export.
-- `baseline_security_scan_interval_seconds` could report a value that depended
-  on which process published it first. The walk behind the gauge started at the
-  publisher's clock, so an annual schedule crossing a leap year reported 365d
-  from one phase of the year and 366d from another, and the per-process memo
-  froze whichever phase arrived first under a key that carries the schedule
-  alone. The walk is now anchored to a fixed epoch, so the value is a function
-  of `spec.schedule` and nothing else. The `ComplianceScanStale` threshold moves
-  by at most one day, and only for annual schedules.
-- `manager --help` documented the `KUBECONFIG` fallback without pinning the
-  `--kubeconfig` flag it sits behind. The flag was registered by a transitive
-  package's `init`, which upstream marks for removal, so the documented
-  precedence could have outlived the flag. It is now registered by the binary
-  itself, the help names the full resolution order, the start-up
-  `configuration` log records whether a kubeconfig was passed (not its path),
-  and a test fails if the flag ever goes missing again.
-- Release images stamped `org.opencontainers.image.version` from the
-  `ARG VERSION` default in each Dockerfile rather than the version being
-  published. The release job replaced `DOCKER_BUILD_FLAGS` to drop the
-  buildx-only `--provenance`/`--sbom`, and the replacement also dropped
-  `--build-arg VERSION`, so all four images fell back to the default. The two
-  values were kept equal by `verify-versions`, so nothing shipped mislabeled,
-  but the label depended on that gate rather than on what was built. The flags
-  are now assembled after `resolve-release-version.sh` has resolved the
-  version, so every image is built with it explicitly.
-- Operator pod termination skipped the drain window. The manager Deployment's
-  `preStop` hook was `exec: /bin/sh -c "sleep 5"`, but the runtime image is
-  `ubi9/ubi-micro`, which ships no shell and no `sleep`. The hook could not run,
-  so SIGTERM reached the process immediately and a pod being removed from the
-  Service could still receive scrapes or hold the leader lease during its final
-  seconds. Both the manager Deployment (kustomize and CSV) and the console
-  plugin container now use the kubelet's native `preStop.sleep` handler, which
-  needs no binary in the image. Requires Kubernetes 1.29+; the CSV already
-  declares `minKubeVersion: 1.35.0`.
-- Console plugin image failed to build. The `COPY` that places
-  `THIRD-PARTY-NOTICES.txt` in `/licenses/` named a path from the build stage
-  without `--from=build`, so it resolved against the build context instead,
-  where `dist/` is excluded by `.dockerignore`. The file the build stage
-  generated was never reachable from the runtime stage.
-
-### Security
-
-- Results CSV export hardened against a formula sigil hidden behind a leading
-  control character. `csvCell` dropped NULs and Unicode format characters, then
-  checked the cell for a formula starter, so a cell such as `\u0001=cmd` kept a
-  control prefix that a spreadsheet trims before deciding whether the cell is a
-  formula. A tampered `ComplianceCheckResult` name, description first line, or
-  `check-severity` label could therefore reach a downloaded export as an
-  evaluated formula. Export rows now drop the controls a spreadsheet trims
-  (tab, CR, and LF stay, since RFC 4180 quoting needs them). Cells that held a
-  control character other than a delimiter lose it from the export.
-- Console write controls were gated on `useAccessReview` through their
-  `isDisabled` prop alone. A tab holding an open confirm modal, a stopped
-  editor, or a pending form across a permission revocation would still send the
-  patch the button had already admitted. Every mutation now re-checks the
-  reviewed permission at the request boundary through one chokepoint
-  (`console-plugin/src/permissions.ts`), and an unresolved review denies rather
-  than defaulting to allow. Covered: rescan, profile toggle, schedule save,
-  waiver add and remove, TailoredProfile create, update, and bind, tailored
-  profile unbind, default baseline create, and every remediation path
-  (per-row apply, unapply, auto-apply, batch apply).
-
-### Changed
-
-- Console plugin built a fresh `Intl.NumberFormat` / `Intl.DateTimeFormat` on
-  every count, date label, and chart tick. A console session sets an explicit
-  locale, and the engine only caches the runtime default, so each card, waiver
-  row, remediation row, and axis label paid a formatter construction on the
-  main thread. `formatCount`, `formatLocalDate`, and `formatChartDate` now hold
-  one formatter per locale tag, matching how the display collator is already
-  cached. Output is unchanged, including the fallback for an invalid tag.
-- Console plugin re-canonicalized the console locale on every count, date label,
-  collator comparison, and list join: `safeLocale` ran `Intl.getCanonicalLocales`
-  per call, and `compareForDisplay` calls it once per comparison, so sorting the
-  rule catalog canonicalized the tag thousands of times per sort. `safeLocale`
-  now holds one entry per locale tag, like the formatters above it. Output is
-  unchanged, including the invalid-tag fallback.
-- Profiles typeahead re-folded the whole rule catalog, plus the query once per
-  option, on every keystroke, so typing in the enable-rules picker redid a
-  thousand NFD normalizations per character over unchanged names. The catalog
-  is now folded when it changes and the query when it is typed, leaving a
-  substring test per option. Matching is unchanged, including diacritic and
-  Turkish dotted/dotless i handling.
-
-### Added
-
 - Observe dashboard gained a Reconcile loop row (reconcile errors against total
   reconciles, and p50/p99 reconcile duration). The operator's own failure rate
   and loop latency were visible only in pod logs, so a reconcile loop slowing
@@ -533,6 +287,30 @@ depend on those tags.
   locale's collation.
 
 ### Changed
+
+- The CRD and manager ClusterRole are generated with controller-gen v0.21.0
+  instead of v0.20.1. The Makefile asks for the controller-tools release whose
+  `k8s.io/*` matches the operator's, and the k8s bump to v0.36.4 left it a
+  minor behind: v0.20.1 builds against k8s v0.35. The generated schema is
+  byte-identical apart from the `controller-gen.kubebuilder.io/version`
+  annotation, so no field changes.
+
+- `yarn size` reports the first-paint download (entry bundles plus the manifest
+  and locale the console fetches ahead of them) and no longer counts
+  `THIRD-PARTY-NOTICES.txt` in the dist total. No page links that file, so it
+  was inflating the ceiling that stands for what a browser actually
+  downloads, and the locale bundle the first paint waits on was invisible to
+  the report. No shipped bytes changed.
+
+- The Observe → Dashboards view and the exported HTML report now paint statuses
+  in the same colors the console paints them in. Every dashboard graph panel
+  took Grafana's default categorical palette, where a failing-check series can
+  render green and a passing one blue, and the report and dashboard carried
+  PatternFly 4-era hexes while the console plugin reads PatternFly 6 status
+  tokens. All three surfaces share one palette now (success `#3d7317`, danger
+  `#b1380b`, warning `#dca614`, info `#5e40be`, custom `#147878`, orangered
+  `#fbbea8` for Error, neutral `#a3a3a3`), and the 30-day score trend follows
+  the same 60/90 bands as the score beside it.
 
 - `docs/THREAT_MODEL.md` brought back in line with the code. The commit stamp
   and eleven line citations across `role.yaml`, `cmd/main.go`, `plugin.go`,
@@ -675,13 +453,139 @@ depend on those tags.
 
 ### Fixed
 
-- The failure-list size budget over-counted a name carrying ill-formed UTF-8 by
-  four bytes per bad byte, so a list of such names was truncated well before
-  the status limit it is clamped against. `encoding/json` writes the
-  three-byte U+FFFD replacement character for an ill-formed byte; the estimate
-  still assumed the six-byte `\ufffd` escape it emitted in older toolchains.
-  A `newlyFailed` / `fixed` list built from a restored protobuf backup, which
-  can carry lone continuation bytes, now keeps the names it used to drop.
+- The same check status was drawn in different colors depending on which view
+  read it. `MANUAL` was the icon-token amber on the console composition donut
+  and a brighter yellow in the Observe dashboard; `WAIVED` was teal on the
+  console (donut wedge and Results status chip) and the same grey as
+  not-applicable in the dashboard, which stacks the two adjacent. The dashboard
+  now paints both from the same PatternFly 6 tokens the console reads, and the
+  exported HTML report's score and severity type now uses the text status
+  tokens it claimed to use (the warning amber and the success green were
+  hand-picked values that matched no token), so a status is one color across
+  the console, the report, and the dashboard. `TestDashboardUsesStatusPalette`
+  pins the widened set.
+
+- `hack/verify-backup.sh` computed the backup age with `date -u -d`, which is
+  GNU coreutils only. On a host with BSD `date` (macOS, which `hack/backup.sh`
+  and `hack/restore.sh` already support for the digest) the conversion failed,
+  the age check was skipped with a note on stderr, and the script exited 0: a
+  backup that had not been refreshed in a year verified as restorable, which
+  is the one failure it exists to catch. The age is now read off the stamp
+  itself (`hack/lib-timestamp.sh`, no external `date` call), and a MANIFEST
+  whose `takenAt` is missing or unparseable fails the check instead of
+  passing it, so an unmeasurable age can no longer be alerted on as a healthy
+  one. `hack/restore.sh` reports the same case as an unknown RPO rather than
+  printing no age at all.
+
+- `hack/verify-backup.sh` digested the artifact with `sha256sum` directly,
+  where the other two scripts go through `hack/lib-sha256.sh`, so the check
+  could not run at all on a host without GNU coreutils, which is the host the
+  doc tells an admin to pull the off-cluster copy back onto.
+
+- `hack/restore.sh` now refuses, before any write, an artifact taken at an
+  `apiVersion` the cluster's CRD does not serve. `oc apply` reports that as
+  `no matches for kind`, which during an incident points at RBAC rather than
+  at the version; the refusal names the artifact's version and the served
+  ones, and `--force` overrides it. A cluster whose CRD cannot be read (an
+  etcd restore still in progress) is left to the apply.
+
+- `hack/restore.sh --force` restores again. The artifact carries the
+  `resourceVersion` it was captured at, and that field is a precondition on
+  both writes, so restoring over a live object that had moved on (exactly the
+  case `--force` exists for) sent a precondition that could never be satisfied:
+  `oc apply` and the status replace were both refused, the script exited with
+  the spec half restored and told the operator to re-run, and the re-run hit
+  the identical conflict. Under `--force` both writes now go out from a copy of
+  the artifact with that field removed, so the restore completes and a repeated
+  run reaches the state the first one reached. Without `--force` nothing
+  changed: the artifact is sent as captured, and the staleness guard and the
+  write still agree.
+
+- `baseline_security_remediation_batches_total` no longer counts one batch once
+  per retry. The finish path strips the batch annotations from the cluster and
+  then counts the outcome, but clears `status.remediationBatch` only in the
+  trailing `Status().Update`. When that write failed, every reconcile re-ran
+  the whole finish: the pool resumes were no-ops, the counter was not, and the
+  outcome of a single batch accrued once per requeue for as long as the status
+  subresource stayed unwritable. The finish path now counts only when the
+  cluster still carries that batch's annotations, which the earlier finish
+  removed.
+
+- The score trend, the per-profile sparklines, and the per-profile score badges
+  no longer assume `status.history` is stored oldest-first. That ordering is a
+  write-side convention (the operator appends) and not a schema constraint, so
+  a restored or hand-edited ring could arrive in any order. The trend's
+  accessible label reads the first and last points as the direction of travel,
+  so an out-of-order ring announced the trend backwards ("moved from 70 to
+  90"), and a per-profile badge could show an older scan's score than the
+  current one. Points are now ordered by instant when the ring is read, and the
+  newest point is resolved by instant rather than by array position.
+
+- The score trend and per-profile sparklines clamp a `status.history` score
+  into the CRD `[0,100]` bounds before plotting it, the same bound the operator
+  enforces on write and every other `status.score` read already applied. A
+  restored or hand-edited snapshot outside the range was labelled verbatim
+  ("Score moved from 5,000 to 90"), colored from an impossible value, and drawn
+  as a point the chart domain had to clip.
+
+- Console text renders correctly in non-English locales. Untrusted cluster and
+  API messages (apiserver `Status.message`, compliance-operator condition
+  text, a chunk-load rejection reason) are now bidi-isolated with `dir="auto"`
+  the way check titles and waiver names already were, so an Arabic or Hebrew
+  value no longer reorders the punctuation around it. Counted strings
+  (orphaned waivers, extra rules, chart scan counts) carry a real plural key,
+  so a locale with more than two forms selects the right one instead of
+  always reading the `_other` form. The waiver field-length message quotes the
+  limit constants through the locale-aware number formatter rather than baking
+  Latin digits into a translatable string, the two Remediation confirmation
+  sentences name the remediation as its own element so a translated locale can
+  put it where the grammar needs it, and the empty-state link pair is joined
+  with the locale's own list punctuation instead of a hardcoded middle dot.
+
+- The metrics endpoint serves the service-ca certificate again. The manager
+  Deployment projected the service-ca Secret with `defaultMode: 0400`, and the
+  kubelet writes secret-volume files root-owned while the manager runs at the
+  image UID 65532 with no `fsGroup` (OLM owns the pod spec), so the projected
+  `tls.crt` and `tls.key` were never readable. The metrics server fell back to
+  its self-signed pair, permanently, and the `serving-cert-secret-name`
+  annotation on the metrics Service means the cluster metrics stack verified
+  against the service CA, so the ServiceMonitor had no working target and the
+  bundled PrometheusRule alerts could not fire. The mode is now 0644: the
+  serving certificate is published in the cluster service CA bundle anyway, and
+  a projected volume cannot be tightened past what the process UID can read.
+
+- The console plugin image builds again. `yarn build` runs the transferred-byte
+  size gate, but `.dockerignore` excluded `tools/*` and re-included only
+  `tools/attribution`, so `tools/size` was missing from the build context and
+  the build stage failed on the `ts-node tools/size/check.ts` step. The size
+  generator is now copied into the build stage alongside the attribution one.
+
+- `restore.sh` no longer restores a backup over a live `ClusterBaseline` that
+  has moved on since it was taken. The MANIFEST records the `resourceVersion`
+  the backup holds, and the script now reads the live one before writing: a
+  mismatch discarded every waiver edit and batch annotation made in between,
+  silently, with no soft-delete window behind it. The restore is refused with
+  both versions named until `--force` says it was meant. The age of the
+  artifact, which is the RPO the restore actually buys, is now reported in the
+  restore summary and called out when it is past a week.
+
+- The status size budget mis-sized text that is not valid UTF-8, which a
+  status restored from a protobuf backup can carry. An ill-formed byte is
+  coerced rather than rejected, and the count of what the encoder then writes
+  has changed with the toolchain: the Go release this operator pins spells the
+  coercion as the six-byte `\ufffd` escape, Go 1.27 as the raw three-byte
+  U+FFFD rune. Counting the three-byte form under-counted on the pinned
+  toolchain, so a failure list built from the budget could land past the CRD
+  bound and the next status write would be rejected, freezing reconcile until
+  the object was hand-edited. The budget counts the six-byte form, which is
+  exact on the pinned toolchain and trims three bytes early per ill-formed
+  byte on a newer one.
+
+- Deleting `ClusterBaseline/cluster` logs, at the moment the finalizer drops,
+  that the waivers and score history are not recoverable and names
+  `hack/backup.sh`. Nothing restores a deleted CR, and that was the last
+  moment the operator could still see the object.
+
 - A waiver reason, a remediation error message, and the text in the printable
   report lost their zero-width joiners and non-joiners on the way in and out.
   The invisible-character filter dropped every Unicode format character, so a
@@ -757,6 +661,14 @@ depend on those tags.
   without `--from=build`, so it resolved against the build context instead,
   where `dist/` is excluded by `.dockerignore`. The file the build stage
   generated was never reachable from the runtime stage.
+
+- The failure-list size budget over-counted a name carrying ill-formed UTF-8 by
+  four bytes per bad byte, so a list of such names was truncated well before
+  the status limit it is clamped against. `encoding/json` writes the
+  three-byte U+FFFD replacement character for an ill-formed byte; the estimate
+  still assumed the six-byte `\ufffd` escape it emitted in older toolchains.
+  A `newlyFailed` / `fixed` list built from a restored protobuf backup, which
+  can carry lone continuation bytes, now keeps the names it used to drop.
 
 - A paged apiserver `List` that returned the continue token it had just been
   given replayed the same page until `reconcileTimeout`, so the reconcile failed
@@ -1016,6 +928,52 @@ depend on those tags.
 
 ### Security
 
+- The operator namespace now ships a `NetworkPolicy`. Any pod in the cluster
+  could previously open a TCP connection to the operator's metrics port 8443;
+  the bearer token was the only control. Ingress is now denied on every
+  operator port except 8443, and only for `openshift-monitoring` (the
+  platform Prometheus scrape) and the service-ca operator (which mints the
+  serving cert the scrape verifies against). Egress is deliberately left
+  unrestricted so the policy cannot intersect the platform's own policies and
+  cut the operator off from the API server.
+
+- The serialized-size budget that trims `status` failure lists under-counted
+  a string carrying ill-formed UTF-8 by up to 4 bytes per bad byte, because it
+  counted the three-byte replacement rune where `encoding/json` writes the
+  six-byte escape. A `ClusterBaseline` whose failure names came back from a
+  protobuf restore with lone continuation bytes could therefore exceed the
+  size bound and fail every subsequent status write, wedging conditions,
+  score, and phase. The count now uses the wider of the two forms, which can
+  only trim a list early.
+
+- A console write is now denied while its access review is still in flight, not
+  only once the review comes back negative. `mayWrite` is the single chokepoint
+  every mutation passes through, and it read `allowed` alone, so a permission
+  revoked between the moment a control rendered and the moment it was clicked
+  could still be spent on the wire when the review had not resolved yet. The
+  check now fails closed on an unresolved review, matching what the plugin's
+  contributor rules already stated.
+
+- `hack/restore.sh` now refuses a backup artifact that holds more than one YAML
+  document. `oc apply -f` and `oc replace -f` apply every document in a
+  multi-document file, so a backup directory with a second document appended
+  after the `ClusterBaseline` would have been written to the cluster with the
+  restoring operator's own credentials, whatever privilege it held. The
+  existing kind and apiVersion checks match on any line and could not see the
+  extra document, and the MANIFEST sha256 does not help: it lives in the same
+  directory and is recomputable by anyone who can edit the artifact. Backups
+  taken by `hack/backup.sh` are a single named object and never contain a
+  `---` separator, so no valid backup is affected.
+
+- `hack/restore.sh` now stops, changing nothing, when it cannot read the live
+  `ClusterBaseline/cluster`. A failed read left the resourceVersion comparison
+  with an empty value, which read the same as an absent object: the rollback
+  guard was skipped, and an out-of-date backup was applied over a live object
+  that had moved on, discarding every waiver edit and remediation batch
+  annotation made since, with no `--force` and no warning. `--force` does not
+  override it, since the operator cannot have meant to clobber an object whose
+  current resourceVersion was never read.
+
 - Results CSV export hardened against a formula sigil hidden behind a leading
   control character. `csvCell` dropped NULs and Unicode format characters, then
   checked the cell for a formula starter, so a cell such as `\u0001=cmd` kept a
@@ -1039,6 +997,24 @@ depend on those tags.
 
 ### Migration notes
 
+- The operator namespace now ships a default-deny ingress `NetworkPolicy` (see
+  **Security** above). **Before:** any pod in the cluster could open a TCP
+  connection to the operator's metrics port 8443, with the bearer token as the
+  only control, so a scraper, a sidecar, or an attacker pod could read the
+  metrics. **After:** only pods in `openshift-monitoring` (the platform
+  Prometheus scrape) and `openshift-service-ca-operator` /
+  `openshift-service-ca` (which mints and refreshes the serving cert) may
+  reach port 8443, and every other operator port is denied everywhere. A
+  custom Prometheus, a federating scrape, or any other client outside those
+  namespaces now gets a refused connection with no error on the operator side,
+  and no series to show for it. Platform monitoring on a supported 4.22 host
+  is unaffected. Egress is unrestricted on purpose, so the operator keeps its
+  cluster-wide reads and its path to the API server. To scrape from a
+  namespace of your own, add its name to the `from.namespaceSelector` in
+  `operator/config/manager/networkpolicy.yaml` (or grant a `NetworkPolicy` of
+  your own that selects the operator pods and allows 8443 from that
+  namespace); egress from the scraper is unaffected.
+
 - A custom role that granted only `patch` on `clusterbaselines.compliance.openshift.io`
   loses two remediation controls and one authoring control on upgrade (see
   **Changed** above). **Before:** that role batch-applied remediations, toggled
@@ -1051,6 +1027,7 @@ depend on those tags.
   baseline. `cluster-admin` and the built-in `admin` ClusterRole in that
   namespace already hold all three verbs. An install that reconciled through the
   custom role needs no change, because the operator holds its own grants.
+
 - Recording rules and dashboard panels that read
   `baseline_security_last_scan_timestamp_seconds`,
   `baseline_security_newly_failed`, `baseline_security_remediation_batch_active`,
@@ -1061,12 +1038,14 @@ depend on those tags.
   missing series should read as zero; alert firing is unchanged, because
   `ComplianceStatusStale` catches the never-published case through its
   `absent()` disjunct.
+
 - A `ClusterBaseline/cluster` whose failing check names exceed the per-list size
   share reports a bounded, stable subset (see **Fixed** above). Checks past the
   share are no longer counted in `newlyFailed`, `fixed`, `previousFailures`, or
   `diffBaseFailures`, and the same check stops counting in both directions, so a
   score or a failure list is no longer complete on such a cluster. No stored
   object changes shape; the lists are shorter and self-consistent.
+
 - Moving from an installed 0.6.x CSV is not an OLM auto-upgrade (no `replaces`
   graph since 0.5.5). Point the CatalogSource at the new catalog tag and install
   that head; delete a leftover Subscription/CSV. ClusterBaseline CRs stay, and
