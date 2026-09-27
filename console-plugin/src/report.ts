@@ -56,28 +56,125 @@ export interface ReportVars {
 // used with simple {{var}} interpolation so unit tests need no i18n harness.
 export type ReportTranslate = (key: string, options?: ReportVars) => string;
 
-// Printable chrome: PatternFly 6 light-theme values inlined because the report
-// is a standalone document (CSP: no external CSS). Text status hexes are the
-// 4.5:1 tokens (same 60/90 bands as scoreColor). system-ui first so CJK/Arabic/
-// Cyrillic glyphs resolve to platform fonts. Brand bar is OpenShift/PatternFly
-// danger red (docs/SPEC.md mermaid already uses this hex).
+// Printable report palette and type scale, in one place. The report is a
+// standalone document (CSP style-src 'unsafe-inline' only, no external CSS), so
+// PatternFly 6 light-theme values are inlined rather than inherited. Naming
+// them here is what keeps the report editable as a set: a literal pasted into
+// the CSS below is a value that can drift into a second role with nothing to
+// notice the split.
+const REPORT_TOKENS = {
+  // Neutrals, PatternFly 6 light theme. textSubtle and every text status value
+  // sit at or above the 4.5:1 text ratio the console's own status tokens are
+  // calibrated for (see scoreColor in src/scoring.ts).
+  text: '#151515',
+  textSubtle: '#4d4d4d',
+  border: '#c7c7c7',
+  surface: '#fff',
+  surfaceSubtle: '#f2f2f2',
+  // Text bands for a 0-100 score, same 60/90 thresholds as the console.
+  statusDanger: '#b1380b',
+  statusWarning: '#795600',
+  statusSuccess: '#1e4f18',
+  // The accent rule is decorative: it carries no text and nothing depends on
+  // it, so it takes the PatternFly icon/status tokens rather than the 4.5:1
+  // text ones. Same three hexes the Grafana dashboard thresholds already use
+  // (operator/internal/controller/assets/compliance-dashboard.json), so the
+  // report and the dashboards a cluster admin reads read as one product. The
+  // rule follows the score instead of being a fixed brand color: a red frame on
+  // a passing report contradicts the number printed under it, and the report is
+  // read by people deciding whether a cluster passed.
+  accentDanger: '#c9190b',
+  accentWarning: '#f0ab00',
+  accentSuccess: '#3e8635',
+  // A report with no computable score is unscored, not failing. Its frame is
+  // the neutral, the same value that renders "—" in the score line.
+  accentNone: '#8a8d90',
+  // Type scale, in rem off the 16px root. Each level is a named step, not a
+  // default: the score sits a clear step above the page title because it is
+  // the one number the report exists to communicate, and section titles get a
+  // rule above them so the three tables read as three groups.
+  textSm: '0.8125rem',
+  textBase: '0.875rem',
+  heading: '1.5rem',
+  subheading: '1.125rem',
+  score: '2.25rem',
+  // Measure. The waiver table has six columns of free text; full-bleed on a
+  // wide monitor stretches a reason across a thousand pixels. 72rem keeps the
+  // longest table at a readable column width and centers the rest.
+  measure: '72rem',
+} as const;
+
+// system-ui first so CJK/Arabic/Cyrillic glyphs resolve to platform fonts.
 const REPORT_CSS =
   ':root{color-scheme:light}' +
-  'body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans","Helvetica Neue",Arial,sans-serif;font-size:14px;line-height:1.5;margin:2rem;color:#151515;background:#fff;border-block-start:4px solid #c9190b;padding-block-start:1.5rem}' +
-  'h1{font-size:1.5rem;font-weight:700;line-height:1.3;margin:0}' +
-  'h2{font-size:1.125rem;font-weight:700;line-height:1.3;margin:1.5rem 0 0.5rem}' +
-  '.muted{color:#4d4d4d;font-size:0.875rem;margin:0.25rem 0 0}' +
-  '.score{font-size:1.75rem;font-weight:700;line-height:1.2;font-variant-numeric:tabular-nums;margin:0.75rem 0 0}' +
-  '.score-danger{color:#b1380b}' +
-  '.score-warning{color:#795600}' +
-  '.score-success{color:#1e4f18}' +
-  '.score-none{color:#4d4d4d;font-size:1.125rem}' +
+  // The band class on <body> sets the custom property the body rule below
+  // draws with. Every band is named explicitly, so a missing case is a
+  // colorless rule rather than a silent wrong color.
+  '.accent-danger{--report-accent:' +
+  REPORT_TOKENS.accentDanger +
+  '}' +
+  '.accent-warning{--report-accent:' +
+  REPORT_TOKENS.accentWarning +
+  '}' +
+  '.accent-success{--report-accent:' +
+  REPORT_TOKENS.accentSuccess +
+  '}' +
+  '.accent-none{--report-accent:' +
+  REPORT_TOKENS.accentNone +
+  '}' +
+  'body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans","Helvetica Neue",Arial,sans-serif;font-size:' +
+  REPORT_TOKENS.textBase +
+  ';line-height:1.5;max-width:' +
+  REPORT_TOKENS.measure +
+  ';margin:2rem auto;padding:0 1.5rem;color:' +
+  REPORT_TOKENS.text +
+  ';background:' +
+  REPORT_TOKENS.surface +
+  ';border-block-start:4px solid var(--report-accent);padding-block-start:1.5rem}' +
+  'h1{font-size:' +
+  REPORT_TOKENS.heading +
+  ';font-weight:700;line-height:1.3;margin:0}' +
+  'h2{font-size:' +
+  REPORT_TOKENS.subheading +
+  ';font-weight:700;line-height:1.3;border-block-start:1px solid ' +
+  REPORT_TOKENS.border +
+  ';padding-block-start:1rem;margin:2rem 0 0.5rem}' +
+  '.muted{color:' +
+  REPORT_TOKENS.textSubtle +
+  ';font-size:' +
+  REPORT_TOKENS.textSm +
+  ';margin:0.25rem 0 0}' +
+  '.score{font-size:' +
+  REPORT_TOKENS.score +
+  ';font-weight:700;line-height:1.2;font-variant-numeric:tabular-nums;margin:0.75rem 0 0}' +
+  '.score-danger{color:' +
+  REPORT_TOKENS.statusDanger +
+  '}' +
+  '.score-warning{color:' +
+  REPORT_TOKENS.statusWarning +
+  '}' +
+  '.score-success{color:' +
+  REPORT_TOKENS.statusSuccess +
+  '}' +
+  '.score-none{color:' +
+  REPORT_TOKENS.textSubtle +
+  ';font-size:' +
+  REPORT_TOKENS.subheading +
+  '}' +
   'table{border-collapse:collapse;margin:0.5rem 0 0;width:100%}' +
-  'th,td{border-block-end:1px solid #c7c7c7;padding:0.5rem 0.75rem;text-align:start;overflow-wrap:anywhere;unicode-bidi:isolate}' +
-  'th{background:#f2f2f2;font-weight:700}' +
-  '.sev-high{color:#b1380b;font-weight:700}' +
-  '.sev-medium{color:#795600}' +
-  '@media print{body{margin:1cm;border-block-start-width:2px}}';
+  'th,td{border-block-end:1px solid ' +
+  REPORT_TOKENS.border +
+  ';padding:0.5rem 0.75rem;text-align:start;overflow-wrap:anywhere;unicode-bidi:isolate}' +
+  'th{background:' +
+  REPORT_TOKENS.surfaceSubtle +
+  ';font-weight:700}' +
+  '.sev-high{color:' +
+  REPORT_TOKENS.statusDanger +
+  ';font-weight:700}' +
+  '.sev-medium{color:' +
+  REPORT_TOKENS.statusWarning +
+  '}' +
+  '@media print{body{margin:1cm auto;padding:0;border-block-start-width:2px}}';
 
 // Known-only class: never interpolate untrusted CCR severity into markup.
 const severityClass = (severity: string): string =>
@@ -160,6 +257,9 @@ export const buildReportHtml = (
     : t('Not scanned');
   // Same 60/90 bands as Overview. Unscored reports stay muted, not danger.
   const scoreClass = scored ? `score score-${scoreStatus(Number(st.score))}` : 'score score-none';
+  // The frame rule follows the same band. scoreStatus returns a closed union, so
+  // this is a known class name, never a value read off a cluster object.
+  const frameClass = scored ? `accent-${scoreStatus(Number(st.score))}` : 'accent-none';
   const profileRows = [
     ...(st.profiles ?? []).map((p) => ({ name: t(profileTitle(p.key ?? '')), c: p })),
     ...(st.tailoredProfiles ?? []).map((p) => ({
@@ -230,7 +330,7 @@ export const buildReportHtml = (
   // CSP: no scripts (report is static HTML). style-src unsafe-inline covers the
   // embedded chrome CSS only; all untrusted text is HTML-escaped above.
   return `<!doctype html><html lang="${esc(htmlLang)}" dir="${htmlDir}"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"><meta name="referrer" content="no-referrer"><title>${esc(t('Compliance report'))}</title>
-<style>${REPORT_CSS}</style></head><body>
+<style>${REPORT_CSS}</style></head><body class="${frameClass}">
 <h1>${esc(t('Compliance report'))}</h1>
 <p class="muted">${esc(t('Generated {{when}} • last scan {{lastScan}}', {
     when: whenText,

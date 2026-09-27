@@ -758,7 +758,11 @@ const RemediationsTab: React.FC<{
                   <Td dataLabel={t('Kind')}>
                     {rem.spec.current?.object?.kind ?? '—'}
                     {nodeNames.has(rem.metadata.name) && (
-                      <Label isCompact color="orange" style={{ marginInlineStart: 8 }}>
+                      <Label
+                        isCompact
+                        color="orange"
+                        style={{ marginInlineStart: 'var(--pf-t--global--spacer--sm)' }}
+                      >
                         {t('reboots nodes')}
                       </Label>
                     )}

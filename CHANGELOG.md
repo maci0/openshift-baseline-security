@@ -85,6 +85,15 @@ depend on those tags.
   `app.kubernetes.io/version`. Selectors still match on `app` alone, because
   the Deployment selector is immutable and a selector requiring a new label
   would stop matching pods created before it.
+- Exported HTML report: the frame rule was a fixed brand red on every report,
+  including a passing one. It now takes its color from the score band using the
+  same success/warning/danger hexes as the Grafana dashboard thresholds, and an
+  unscored report is framed in neutral grey rather than danger red. The palette
+  and the type scale moved into one `REPORT_TOKENS` table so a report's colors
+  are edited in one place, the score is a clear step above the page title rather
+  than four pixels, section headings carry a rule so the three tables read as
+  three groups, and the page is held to a 72rem measure so the six-column waiver
+  table stops stretching across a wide monitor.
 
 - Threat model: the manager pod was described as running under Restricted PSS.
   The pod spec satisfies Restricted, but no

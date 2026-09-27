@@ -22,9 +22,11 @@ import { resultsHref } from '../links';
 import { historyContentKey, toTrendData } from '../overviewTrend';
 import { scoreColor } from '../scoring';
 
-// Empty-ring fill only. Segment colors live on Overview (the legend is HTML
-// next to this chart, not a Victory colorScale built here).
-const DONUT_GREY = 'var(--pf-t--global--icon--color--disabled)';
+// The neutral for a chart that has nothing to score yet: the empty ring, and
+// the trend area when the current score is missing. Segment colors live on
+// Overview (the legend is HTML next to the donut, not a Victory colorScale
+// built here).
+const NEUTRAL_FILL = 'var(--pf-t--global--icon--color--disabled)';
 
 // Center title uses the same 60/90 text-status token as ClusterScoreItem.
 // ChartDonut cloneElement-overwrites style; merge fill onto the title slot
@@ -77,7 +79,7 @@ export const CompositionDonut = React.memo<{
         // Static: score composition is status data, not a motion cue (WCAG 2.3.3).
         animate={false}
         data={[{ x: t('No results'), y: 1 }]}
-        colorScale={[DONUT_GREY]}
+        colorScale={[NEUTRAL_FILL]}
         // Always "—" here: with zero evaluated checks the score is 0/0 and
         // meaningless, and the ariaDesc already says it is unavailable. A stale
         // non-null status.score must not paint a number over a "No results" ring.
@@ -173,7 +175,8 @@ export const OverallTrendChart = React.memo<{
   historyChartData: { x: Date; y: number }[];
   historyModeMismatch: boolean;
   locale: string | undefined;
-}>(({ historyChartData, historyModeMismatch, locale }) => {
+  score: number | null | undefined;
+}>(({ historyChartData, historyModeMismatch, locale, score }) => {
   const { t } = useTranslation('plugin__baseline-security-console-plugin');
   return (
     <Card>
@@ -213,7 +216,15 @@ export const OverallTrendChart = React.memo<{
             fixLabelOverlap
           />
           <ChartAxis dependentAxis tickFormat={(y: number) => formatCount(y, locale)} />
-          <ChartArea data={historyChartData} />
+          {/* Same 60/90 band token as the donut center title, the cluster score
+              item, and the exported report. Unset, the area takes the charting
+              library's default blue, so the one chart on the page that plots the
+              score itself is the one element colored by something other than the
+              score. An unscored cluster falls back to the neutral, not danger. */}
+          <ChartArea
+            data={historyChartData}
+            style={{ data: { fill: score == null ? NEUTRAL_FILL : scoreColor(score) } }}
+          />
         </Chart>
       </CardBody>
     </Card>

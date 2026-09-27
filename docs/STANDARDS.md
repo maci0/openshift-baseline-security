@@ -114,7 +114,11 @@ including Results table column titles. Spacing uses PatternFly global
 CSS tokens (`--pf-t--global--spacer--*`) rather than custom stylesheets.
 The printable HTML report cannot load PatternFly CSS (standalone document,
 CSP `style-src 'unsafe-inline'` only), so it inlines the light-theme hex
-values for text, borders, and 60/90 score status.
+values for text, borders, and 60/90 score status. `REPORT_TOKENS` in
+`console-plugin/src/report.ts` is the single place those values live; the
+frame rule it draws uses the same success/warning/danger hexes as the
+Grafana dashboard thresholds, and takes its band from the score so a
+passing report is not framed in danger red.
 
 ## Commit / PR workflow
 

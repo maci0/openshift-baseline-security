@@ -210,6 +210,8 @@ describe('buildReportHtml data correctness', () => {
     expect(html).not.toContain('42 / 100');
     expect(html).toContain('class="score score-none"');
     expect(html).not.toContain('class="score score-danger"');
+    // Unscored is not failing: the frame is the neutral, not the danger band.
+    expect(html).toContain('<body class="accent-none">');
   });
 
   it('uses the passed locale for native digits, html lang, and RTL dir', () => {
@@ -350,6 +352,15 @@ describe('buildReportHtml', () => {
     expect(html).toContain('#1e4f18');
     expect(html).not.toContain('#ccc');
     expect(html).not.toContain('#666');
+  });
+  it('tints the frame rule by score band, never a fixed red', () => {
+    // A passing report must not be framed in danger red: the rule is
+    // decoration, and decoration that contradicts the score is a false signal.
+    expect(html).toContain('<body class="accent-success">');
+    expect(html).toContain('.accent-danger{--report-accent:#c9190b}');
+    expect(html).toContain('.accent-warning{--report-accent:#f0ab00}');
+    expect(html).toContain('.accent-success{--report-accent:#3e8635}');
+    expect(html).toContain('.accent-none{--report-accent:#8a8d90}');
   });
   it('escapes untrusted waiver text (no raw script tag)', () => {
     expect(html).toContain('&lt;script&gt;');

@@ -84,14 +84,14 @@ describe('canDelegateRemediationApply', () => {
   // Deny side: the annotation reaches the remediation write through the operator,
   // so a baseline patch alone must not authorize a rolling node reboot.
   it('denies when the remediation patch is missing', () => {
-    expect(canDelegateRemediationApply(true, false)).toBe(false);
+    expect(canDelegateRemediationApply(true, false)).toBeFalsy();
   });
   it('denies when the baseline patch is missing', () => {
-    expect(canDelegateRemediationApply(false, true)).toBe(false);
-    expect(canDelegateRemediationApply(false, false)).toBe(false);
+    expect(canDelegateRemediationApply(false, true)).toBeFalsy();
+    expect(canDelegateRemediationApply(false, false)).toBeFalsy();
   });
   it('allows only with both permissions', () => {
-    expect(canDelegateRemediationApply(true, true)).toBe(true);
+    expect(canDelegateRemediationApply(true, true)).toBeTruthy();
   });
 });
 

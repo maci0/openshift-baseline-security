@@ -583,7 +583,11 @@ const ResultsTab: React.FC<{
             {/* Stale waiver on a non-FAIL (e.g. self-healed PASS): keep a badge
                 so the waiver can still be found; FAIL+waiver is already WAIVED. */}
             {status !== 'WAIVED' && name !== '' && activeWaived.has(name) && (
-              <Label isCompact color="grey" style={{ marginInlineStart: 8 }}>
+              <Label
+                isCompact
+                color="grey"
+                style={{ marginInlineStart: 'var(--pf-t--global--spacer--sm)' }}
+              >
                 {t('Waived')}
               </Label>
             )}

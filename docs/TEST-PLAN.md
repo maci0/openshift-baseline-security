@@ -1176,6 +1176,10 @@ Beyond existing fuzz targets, properties that should always hold:
 - [x] **HTML report chrome is PatternFly-aligned**: system-ui stack, status
       hexes, no generic `#ccc`/`#666` table dump (jest `uses PatternFly status
       colors`).
+- [x] **HTML report frame agrees with the score**: the top rule is the
+      dashboard success/warning/danger hex for the score band, and an unscored
+      report is neutral, not danger red (jest `tints the frame rule by score
+      band, never a fixed red`; unscored row above).
 - [x] **Score scale digits follow locale**: `of 100` / `n / 100` interpolate
       `formatCount(100)` (jest `formatCount` ar-SA; report `ar-SA` native
       digits and `dir=rtl`).

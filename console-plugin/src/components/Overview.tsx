@@ -883,6 +883,7 @@ const Overview: React.FC<{
               historyChartData={historyChartData}
               historyModeMismatch={historyModeMismatch}
               locale={locale}
+              score={score}
             />
           ))}
         <Card>
