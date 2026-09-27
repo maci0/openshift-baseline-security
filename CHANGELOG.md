@@ -91,6 +91,14 @@ depend on those tags.
 
 ### Fixed
 
+- The Overview tab rendered one link per newly failing and per fixed check on
+  first paint, and `status.newlyFailed` / `status.fixed` hold up to 4096 names
+  each, so a large scan delta put thousands of elements into the DOM before the
+  rest of the page painted. Both surfaces now render the first 25 of each group
+  and the Recent changes card shows the remainder on request; the counts in the
+  alert and the group headings still report the full totals. The compliance
+  score card on the cluster Overview also passed a fresh watch options object
+  on every render, re-subscribing to the `ClusterBaseline` list each time.
 - The same check status was drawn in different colors depending on which view
   read it. `MANUAL` was the icon-token amber on the console composition donut
   and a brighter yellow in the Observe dashboard; `WAIVED` was teal on the

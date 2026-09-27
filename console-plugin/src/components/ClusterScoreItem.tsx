@@ -5,6 +5,16 @@ import { formatCount } from '../dates';
 import { ClusterBaseline, ClusterBaselineGVK } from '../models';
 import { clusterScore, scoreColor } from '../scoring';
 
+// Module-level so every render passes the same watch options object. A literal
+// built in the component body is a new reference on each render, and the SDK
+// compares watch identity before re-subscribing: the dashboard card would
+// re-subscribe on every state change of the item. Every other watch in the
+// plugin is memoized the same way.
+const BASELINES_WATCH = {
+  groupVersionKind: ClusterBaselineGVK,
+  isList: true,
+} as const;
+
 /**
  * Value for the "Compliance score" item added to the cluster Overview Details
  * card (console.dashboards/custom/overview/detail/item). Links to the full
@@ -12,10 +22,8 @@ import { clusterScore, scoreColor } from '../scoring';
  */
 const ClusterScoreItem: React.FC = () => {
   const { t, i18n } = useTranslation('plugin__baseline-security-console-plugin');
-  const [baselines, loaded, error] = useK8sWatchResource<ClusterBaseline[]>({
-    groupVersionKind: ClusterBaselineGVK,
-    isList: true,
-  });
+  const [baselines, loaded, error] =
+    useK8sWatchResource<ClusterBaseline[]>(BASELINES_WATCH);
 
   // Error first: a watch that fails before its first successful list never sets
   // loaded, so checking !loaded ahead of error would strand the card on the

@@ -28,7 +28,10 @@ export const useWaiverExpiryClock = (
   waivers: Waiver[] | undefined,
   offsetsMs: readonly number[] = [],
 ) => {
-  const key = waiversContentKey(waivers);
+  // Memoized on the array identity: status-only CR updates reallocate
+  // spec.waivers, and the key must still be rebuilt for them, but a re-render
+  // driven by anything else must not re-join up to 256 encoded pairs.
+  const key = React.useMemo(() => waiversContentKey(waivers), [waivers]);
   const [tick, setTick] = React.useState(0);
   React.useEffect(() => {
     const now = nowMs();

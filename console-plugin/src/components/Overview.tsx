@@ -96,6 +96,12 @@ void loadOverviewCharts().catch(() => undefined);
 const EMPTY_NAMES: readonly string[] = [];
 const EMPTY_RESULTS: ComplianceCheckResult[] = [];
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+// The CRD caps status.newlyFailed / status.fixed at 4096 names each, and the
+// first paint maps every one of them into the alert and the Recent-changes
+// card. Thousands of links in one commit block the main thread long enough to
+// hold up the rest of the page, so both surfaces render this many per group
+// first and the card offers the rest on demand.
+const CHANGES_RENDER_LIMIT = 25;
 
 // status.lastScanTime / status.nextScanTime are cluster-supplied RFC3339
 // strings. PatternFly's Timestamp takes `date`, and substitutes the browser's
@@ -502,7 +508,7 @@ const Overview: React.FC<{
   // Last history tip per bucket (empty-CCR fallback in profileScore only).
   const statusProfiles = baseline?.status?.profiles;
   const statusTailored = baseline?.status?.tailoredProfiles;
-  const profileHistKey = (() => {
+  const profileHistKey = React.useMemo(() => {
     let key = '';
     for (const p of statusProfiles ?? []) {
       key += encodeKeyList([p.key, latestSnapshotScore(p.history)]);
@@ -511,11 +517,11 @@ const Overview: React.FC<{
       key += encodeKeyList([`tp:${tp.name}`, latestSnapshotScore(tp.history)]);
     }
     return key;
-  })();
+  }, [statusProfiles, statusTailored]);
   // Per-bucket result counts. profileScore falls back to flat pass/fail counts
   // when the CCR bucket is empty and history is empty too, so weightedScores
   // below reads these and must recompute when they change.
-  const countsKey = (() => {
+  const countsKey = React.useMemo(() => {
     let key = '';
     for (const p of statusProfiles ?? []) {
       key += encodeKeyList([
@@ -530,7 +536,7 @@ const Overview: React.FC<{
       ]);
     }
     return key;
-  })();
+  }, [statusProfiles, statusTailored]);
 
   // One waiver Set + one score pass for all cards (avoids N Set builds and
   // re-scoring every Overview re-render during CCR watch churn).
@@ -587,8 +593,21 @@ const Overview: React.FC<{
   );
   const newlyFailedItems = recentChanges[0];
   const fixedItems = recentChanges[1];
+  // Only the rendered slice goes into the DOM; the counts in the alert title
+  // and the group terms stay the full totals, so nothing is silently dropped
+  // from the picture. The card toggles the rest in on demand.
+  const [showAllChanges, setShowAllChanges] = React.useState(false);
+  const visibleNewlyFailed = showAllChanges
+    ? newlyFailedItems
+    : newlyFailedItems.slice(0, CHANGES_RENDER_LIMIT);
+  const visibleFixed = showAllChanges ? fixedItems : fixedItems.slice(0, CHANGES_RENDER_LIMIT);
+  const changesTruncated = !showAllChanges && (visibleNewlyFailed.length < newlyFailedItems.length
+    || visibleFixed.length < fixedItems.length);
   // List punctuation for the alert's inline link list of check links.
-  const newlyFailedSeparators = listSeparators(newlyFailedItems.length, locale);
+  const newlyFailedSeparators = React.useMemo(
+    () => listSeparators(visibleNewlyFailed.length, locale),
+    [visibleNewlyFailed.length, locale],
+  );
   // Names in status.newlyFailed with no current check result: nothing to link,
   // so the alert reports them apart from the ones it can name.
   const unresolvedNewlyFailed = newlyFailed.length - newlyFailedItems.length;
@@ -839,7 +858,7 @@ const Overview: React.FC<{
               raw FAIL (including checks currently WAIVED for score), so a
               FAIL filter would hide waived regressions this alert counts. */}
           {newlyFailedItems.length > 0 ? (
-            newlyFailedItems.map((c, i) => (
+            visibleNewlyFailed.map((c, i) => (
               <React.Fragment key={c.name}>
                 {/* Locale list punctuation, not a literal ", ": de/fr want
                     "und"/"et" before the last item, ja/zh use no separator. */}
@@ -854,6 +873,17 @@ const Overview: React.FC<{
             ))
           ) : (
             <a href="/baseline-security/results">{t('Review check results')}</a>
+          )}
+          {changesTruncated && newlyFailedItems.length > 0 && (
+            <>
+              {' '}
+              {t('and {{formattedCount}} more', {
+                formattedCount: formatCount(
+                  newlyFailedItems.length - visibleNewlyFailed.length,
+                  locale,
+                ),
+              })}
+            </>
           )}
           {/* A name in status.newlyFailed with no current check result cannot be
               linked; say so instead of silently dropping it from the count. */}
@@ -1060,7 +1090,7 @@ const Overview: React.FC<{
                       t('Newly failing ({{formattedCount}})', {
                         formattedCount: formatCount(newlyFailedItems.length, locale),
                       }),
-                      newlyFailedItems,
+                      visibleNewlyFailed,
                       'danger',
                       ExclamationCircleIcon,
                     )}
@@ -1069,13 +1099,37 @@ const Overview: React.FC<{
                       t('Fixed ({{formattedCount}})', {
                         formattedCount: formatCount(fixedItems.length, locale),
                       }),
-                      fixedItems,
+                      visibleFixed,
                       'success',
                       CheckCircleIcon,
                     )}
                 </DescriptionList>
               </div>
             )}
+            {changesTruncated && (
+              <Button
+                variant="link"
+                isInline
+                onClick={() => {
+                  setShowAllChanges(true);
+                }}
+              >
+                {t('Show all changes')}
+              </Button>
+            )}
+            {showAllChanges &&
+              (newlyFailedItems.length > CHANGES_RENDER_LIMIT ||
+                fixedItems.length > CHANGES_RENDER_LIMIT) && (
+                <Button
+                  variant="link"
+                  isInline
+                  onClick={() => {
+                    setShowAllChanges(false);
+                  }}
+                >
+                  {t('Show fewer changes')}
+                </Button>
+              )}
           </CardBody>
         </Card>
       </Gallery>
