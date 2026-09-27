@@ -14,7 +14,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
-	utilvalidation "k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -33,7 +32,7 @@ func (r *ClusterBaselineReconciler) setMCPPaused(ctx context.Context, pool strin
 	// Pool names come from untrusted remediation labels / scan-name suffixes.
 	// An invalid name would make Get return a non-NotFound error and could
 	// wedge batch pause/resume; skip rather than fail the batch.
-	if len(utilvalidation.IsDNS1123Subdomain(pool)) > 0 {
+	if validK8sName(pool) == "" {
 		log.FromContext(ctx).Info("skipping MachineConfigPool with invalid name", "pool", pool)
 		return nil
 	}
@@ -490,17 +489,10 @@ func (r *ClusterBaselineReconciler) resumeBatchPoolsOnDelete(ctx context.Context
 		// with an invalid name can return 400 (not 404), which would fall through
 		// to the error return below and block finalizer removal. The apply path
 		// rejects these outright; here we skip and keep resuming what we can.
-		if len(names) > batchMaxRemediations {
-			log.FromContext(ctx).Info("batch-apply annotation exceeds max during pool recovery; capping",
-				"count", len(names), "max", batchMaxRemediations, "name", cb.Name)
-			names = names[:batchMaxRemediations]
-		}
+		names, _ = splitValidRemediationNames(ctx, cb,
+			capBatchRemediations(ctx, cb, names, "batch-apply annotation"),
+			"skipping invalid remediation name while recovering batch pools")
 		for _, name := range names {
-			if len(utilvalidation.IsDNS1123Subdomain(name)) > 0 {
-				log.FromContext(ctx).Info("skipping invalid remediation name while recovering batch pools",
-					"remediation", name, "name", cb.Name)
-				continue
-			}
 			rem := u(remediationGVK)
 			if err := r.Get(ctx, types.NamespacedName{Namespace: complianceNamespace, Name: name}, rem); err != nil {
 				if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) {

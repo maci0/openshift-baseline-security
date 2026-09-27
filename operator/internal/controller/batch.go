@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"maps"
 	"slices"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	utilvalidation "k8s.io/apimachinery/pkg/util/validation"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	baselinev1alpha1 "github.com/maci0/baseline-security-operator/api/v1alpha1"
 )
@@ -81,7 +83,7 @@ func poolFromRemediation(rem *unstructured.Unstructured) string {
 			if kind, _, _ := unstructured.NestedString(obj, "kind"); kind == "MachineConfig" {
 				// Non-allocating single-label read (batch path can hit 256 remediations).
 				if role := unstructuredLabel(obj, "machineconfiguration.openshift.io/role"); role != "" {
-					if pool := validMCPPoolName(role); pool != "" {
+					if pool := validK8sName(role); pool != "" {
 						return pool
 					}
 				}
@@ -97,18 +99,58 @@ func poolFromRemediation(rem *unstructured.Unstructured) string {
 	// Single-key read: GetLabels copies the whole map (batch path can hit 256 remediations).
 	scan := unstructuredLabel(rem.Object, scanNameLabel)
 	if i := strings.LastIndex(scan, "-node-"); i >= 0 {
-		return validMCPPoolName(scan[i+len("-node-"):])
+		return validK8sName(scan[i+len("-node-"):])
 	}
 	return ""
 }
 
-// validMCPPoolName returns name when it is a non-empty DNS-1123 subdomain
-// (Kubernetes resource name shape), otherwise "".
-func validMCPPoolName(name string) string {
+// validK8sName returns name when it is a non-empty DNS-1123 subdomain
+// (Kubernetes resource name shape), otherwise "". One definition of the rule
+// for every untrusted name the reconciler feeds to a Get or a name list: a
+// non-conforming name returns 400 rather than 404, so it must be dropped before
+// it reaches the apiserver.
+func validK8sName(name string) string {
 	if name == "" || len(utilvalidation.IsDNS1123Subdomain(name)) > 0 {
 		return ""
 	}
 	return name
+}
+
+// capBatchRemediations trims an untrusted remediation name list to
+// batchMaxRemediations, logging when it had to. source names the list it came
+// from ("status remediation batch", "batch-apply annotation") so the log says
+// which one was capped. Without the cap one oversized list drives a read per
+// entry (the wait path polls every 15s; the finalizer runs once) with no bound.
+func capBatchRemediations(
+	ctx context.Context, cb *baselinev1alpha1.ClusterBaseline, names []string, source string,
+) []string {
+	if len(names) <= batchMaxRemediations {
+		return names
+	}
+	log.FromContext(ctx).Info(source+" exceeds max; capping",
+		"count", len(names), "max", batchMaxRemediations, "name", cb.Name)
+	return names[:batchMaxRemediations]
+}
+
+// splitValidRemediationNames separates a remediation name list into the names a
+// Get accepts and the ones it rejects. A non-DNS-1123 name returns 400, not
+// 404, which would otherwise fall through to the transient-error path and wedge
+// the wait (pools paused until grace) or block finalizer removal. Each rejected
+// name is logged under logMsg; both are returned so a caller that reports
+// missing remediations can include them.
+func splitValidRemediationNames(
+	ctx context.Context, cb *baselinev1alpha1.ClusterBaseline, names []string, logMsg string,
+) (valid, invalid []string) {
+	valid = make([]string, 0, len(names))
+	for _, name := range names {
+		if len(utilvalidation.IsDNS1123Subdomain(name)) > 0 {
+			log.FromContext(ctx).Info(logMsg, "remediation", name, "name", cb.Name)
+			invalid = append(invalid, name)
+			continue
+		}
+		valid = append(valid, name)
+	}
+	return valid, invalid
 }
 
 func batchPauseOwner(cb *baselinev1alpha1.ClusterBaseline) string {

@@ -7,6 +7,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"slices"
 	"time"
 	"unicode/utf8"
 
@@ -119,24 +120,32 @@ func condTrue(cb *baselinev1alpha1.ClusterBaseline, typ string) bool {
 	return condIsTrue(meta.FindStatusCondition(cb.Status.Conditions, typ))
 }
 
-// conditionProgressing is true for non-terminal False detail reasons that mean
-// work is still in flight (not permanent admin action like Manual NotInstalled).
-func conditionProgressing(c *metav1.Condition) bool {
+// condFalseWith reports whether c is present, False, and (when reasons is
+// non-empty) carries one of them. One definition of "detail condition is False
+// for this reason", so the rollup cases cannot drift on the nil guard.
+func condFalseWith(c *metav1.Condition, reasons ...string) bool {
 	if c == nil || c.Status != metav1.ConditionFalse {
 		return false
 	}
-	switch c.Reason {
-	// Steady states (must not Progress / 15s-poll forever):
-	// - ImageMissing / ImageInvalid: permanent deployment misconfig
-	// - ConsoleMissing: Console capability disabled
-	// - CRDsMissing: no compliance CRDs (common with installComplianceOperator=Manual
-	//   until the admin installs CO; Automatic install is already Progressing via
-	//   Installing/CSVNotReady on ComplianceOperatorReady)
-	case "Installing", "CSVNotReady", "WaitingForPods":
-		return true
-	default:
-		return false
-	}
+	return len(reasons) == 0 || slices.Contains(reasons, c.Reason)
+}
+
+// Detail reasons that mean work is still in flight, not a permanent admin action
+// (Manual NotInstalled). Steady states are deliberately absent: ImageMissing /
+// ImageInvalid is a permanent deployment misconfig, ConsoleMissing is the
+// Console capability disabled, and CRDsMissing is the common state under
+// installComplianceOperator=Manual until the admin installs CO (Automatic is
+// already Progressing through Installing/CSVNotReady on ComplianceOperatorReady).
+var progressingReasons = []string{"Installing", "CSVNotReady", "WaitingForPods"}
+
+// coInstallStuckReasons are the progressing reasons that mean the Compliance
+// Operator install itself has not finished, the subset coInstallGrace applies to.
+var coInstallStuckReasons = []string{"Installing", "CSVNotReady"}
+
+// conditionProgressing is true for non-terminal False detail reasons that mean
+// work is still in flight.
+func conditionProgressing(c *metav1.Condition) bool {
+	return condFalseWith(c, progressingReasons...)
 }
 
 // setRollupConditions sets Available, Progressing, and Degraded from the
@@ -158,8 +167,7 @@ func setRollupConditions(cb *baselinev1alpha1.ClusterBaseline, now time.Time) {
 	// unresolvable Subscription) would otherwise Progress + fast-poll forever. Past
 	// a grace window, stop treating it as progress so it rolls up to Degraded and
 	// the poll backs off, mirroring the console plugin's Unavailable-past-grace.
-	coStuck := co != nil && co.Status == metav1.ConditionFalse &&
-		(co.Reason == "Installing" || co.Reason == "CSVNotReady") &&
+	coStuck := condFalseWith(co, coInstallStuckReasons...) &&
 		!co.LastTransitionTime.IsZero() &&
 		now.Sub(co.LastTransitionTime.Time) > coInstallGrace
 	progressing := (conditionProgressing(co) && !coStuck) ||
@@ -181,7 +189,7 @@ func setRollupConditions(cb *baselinev1alpha1.ClusterBaseline, now time.Time) {
 	// Use fixed CamelCase reasons (never copy a possibly empty/hostile detail
 	// Reason) so status admission cannot fail on Reason pattern/minLength.
 	switch {
-	case co != nil && co.Status == metav1.ConditionFalse && co.Reason == "CSVFailed":
+	case condFalseWith(co, "CSVFailed"):
 		setCond(cb, "Degraded", metav1.ConditionTrue, "CSVFailed", co.Message)
 	case coStuck:
 		// Prefer the detail message; fall back to reason so we never end with a
@@ -192,13 +200,13 @@ func setRollupConditions(cb *baselinev1alpha1.ClusterBaseline, now time.Time) {
 		}
 		setCond(cb, "Degraded", metav1.ConditionTrue, "InstallStalled",
 			fmt.Sprintf("Compliance Operator not ready after %s: %s", coInstallGrace, detail))
-	case scan != nil && scan.Status == metav1.ConditionFalse && scan.Reason == "InvalidSchedule":
+	case condFalseWith(scan, "InvalidSchedule"):
 		setCond(cb, "Degraded", metav1.ConditionTrue, "InvalidSchedule", scan.Message)
-	case storage != nil && storage.Status == metav1.ConditionFalse:
+	case condFalseWith(storage):
 		// Fixed reason only: never copy storage.Reason (hand-edit can violate
 		// Condition Reason pattern and brick Status().Update admission).
 		setCond(cb, "Degraded", metav1.ConditionTrue, "ScanStorageNotReady", storage.Message)
-	case plugin != nil && plugin.Status == metav1.ConditionFalse && plugin.Reason == "Unavailable":
+	case condFalseWith(plugin, "Unavailable"):
 		setCond(cb, "Degraded", metav1.ConditionTrue, "ConsolePluginUnavailable", plugin.Message)
 	default:
 		setCond(cb, "Degraded", metav1.ConditionFalse, "AsExpected", "")

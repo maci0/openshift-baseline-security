@@ -281,7 +281,7 @@ func FuzzPoolFromRemediationTypeConfusion(f *testing.F) {
 			rem.Object["spec"] = map[string]any{"current": map[string]any{"object": []any{map[string]any{"kind": "MachineConfig"}}}}
 		}
 		got := poolFromRemediation(rem)
-		if got != "" && validMCPPoolName(got) != got {
+		if got != "" && validK8sName(got) != got {
 			t.Fatalf("non-DNS1123 pool %q", got)
 		}
 	})

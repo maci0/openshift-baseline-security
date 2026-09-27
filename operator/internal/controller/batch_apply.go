@@ -10,7 +10,6 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	utilvalidation "k8s.io/apimachinery/pkg/util/validation"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -62,7 +61,7 @@ func (r *ClusterBaselineReconciler) openRemediationBatch(
 		return nil
 	}
 	for _, name := range list {
-		if errs := utilvalidation.IsDNS1123Subdomain(name); len(errs) > 0 {
+		if validK8sName(name) == "" {
 			log.FromContext(ctx).Info("remediation batch skipped: invalid remediation name",
 				"name", cb.Name, "remediation", name)
 			if err := r.clearBatchAnnotations(ctx, cb, requested, false); err != nil {
@@ -247,7 +246,7 @@ func (r *ClusterBaselineReconciler) listRemediationsForBatch(
 	}
 	needed := make(map[string]bool, len(want))
 	for _, n := range want {
-		if len(utilvalidation.IsDNS1123Subdomain(n)) == 0 {
+		if validK8sName(n) != "" {
 			needed[n] = true
 		}
 	}
@@ -300,19 +299,17 @@ func (r *ClusterBaselineReconciler) finishRemediationBatch(
 	applied := true
 	anyApplying := false
 	var getErr error
-	// Names gone mid-batch (delete / CRDs uninstalled). Treated as done so resume
-	// is not blocked forever; collect for the finish log so reason=applied is not
-	// misread as "every listed remediation reached Applied".
-	var missing []string
 	// Status is hostile input here: this runs before sanitizeRemediationBatch, so
 	// a corrupt restored list would otherwise fire one Get per entry every
 	// reconcile until grace. Cap like resumeBatchPoolsOnDelete.
-	names := batch.Remediations
-	if len(names) > batchMaxRemediations {
-		log.FromContext(ctx).Info("status remediation batch exceeds max while waiting; capping",
-			"count", len(names), "max", batchMaxRemediations, "name", cb.Name)
-		names = names[:batchMaxRemediations]
-	}
+	//
+	// A non-DNS1123 name can return 400 (not 404), which would fall through to
+	// getErr and block resume as "still waiting" until grace. Treat those names as
+	// terminal like NotFound and collect them with the names gone mid-batch (delete
+	// / CRDs uninstalled), so the finish log can report both.
+	names, missing := splitValidRemediationNames(ctx, cb,
+		capBatchRemediations(ctx, cb, batch.Remediations, "status remediation batch"),
+		"skipping invalid remediation name while waiting for batch")
 	// One paged List replaces a Get per name. A batch lists up to 256
 	// remediations and reconcile requeues every 15s while one is active, so the
 	// old shape spent up to 256 sequential live apiserver round trips per poll
@@ -336,15 +333,6 @@ func (r *ClusterBaselineReconciler) finishRemediationBatch(
 		applied = false
 	}
 	for _, name := range names {
-		// A non-DNS1123 name can return 400 (not 404), which would fall through to
-		// getErr and block resume as "still waiting" until grace. Treat as terminal
-		// like NotFound; apply-path validation rejects these before they are stored.
-		if len(utilvalidation.IsDNS1123Subdomain(name)) > 0 {
-			log.FromContext(ctx).Info("skipping invalid remediation name while waiting for batch",
-				"remediation", name, "name", cb.Name)
-			missing = append(missing, name)
-			continue
-		}
 		if lerr != nil && !crdsAbsent {
 			// State is unknown for every name this cycle.
 			continue

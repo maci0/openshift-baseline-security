@@ -140,11 +140,11 @@ func FuzzPoolFromRemediation(f *testing.F) {
 		// yields "". The rendered kind never short-circuits the scan-name fallback.
 		var want string
 		if kind == "MachineConfig" && role != "" {
-			want = validMCPPoolName(role)
+			want = validK8sName(role)
 		}
 		if want == "" {
 			if i := strings.LastIndex(scan, "-node-"); i >= 0 {
-				want = validMCPPoolName(scan[i+len("-node-"):])
+				want = validK8sName(scan[i+len("-node-"):])
 			}
 		}
 		if got != want {
@@ -165,7 +165,7 @@ func FuzzValidMCPPoolName(f *testing.F) {
 		f.Add(seed)
 	}
 	f.Fuzz(func(t *testing.T, name string) {
-		got := validMCPPoolName(name)
+		got := validK8sName(name)
 		if name == "" {
 			if got != "" {
 				t.Fatalf("empty name returned %q", got)
