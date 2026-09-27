@@ -30,7 +30,7 @@
     "@patternfly/react-core": "^6.4.3",
     "@patternfly/react-icons": "^6.6.1",
     "@patternfly/react-table": "^6.4.3",
-    "@playwright/test": "^1.61.1",
+    "@playwright/test": "^1.62.1",
     "@rikalabs/oxlint-standards": "0.8.1",
     "@types/jest": "^30.0.0",
     "@types/node": "^22.0.0",
