@@ -45,6 +45,19 @@ depend on those tags.
 
 ### Added
 
+- `hack/backup.sh` and `hack/restore.sh`, a backup and restore path for
+  `ClusterBaseline/cluster`, the only durable state this operator owns. Before
+  them, recovering a lost or corrupted CR meant an out-of-band etcd restore,
+  and the DR plan in `docs/TEST-PLAN.md` AQ had never been executed. The
+  backup captures the object with its spec, status, and batch annotations plus
+  a sha256 MANIFEST, and refuses to write one for an empty or wrong-kind
+  capture. The restore validates that MANIFEST before it writes anything, and
+  replaces the status subresource rather than only applying, so the score,
+  conditions, score history, and an in-flight remediation batch come back
+  instead of being silently dropped. RPO and RTO are now stated in
+  `docs/RESTORE.md`. Both scripts are driven end to end by
+  `hack/backup_restore_test.go` on every `make test`.
+
 - `baseline_security_remediation_batches_total`, a counter of finished
   remediation batches by outcome (`applied`, `cancelled`, `grace`, `orphaned`),
   and a `RemediationBatchGraceResume` alert on it. A batch that ends on the

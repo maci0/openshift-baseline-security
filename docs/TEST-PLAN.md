@@ -1465,6 +1465,13 @@ content is weird.
 
 ## AQ. Disaster recovery & backup
 
+Automated on every `make test` by `operator/hack/backup_restore_test.go`:
+the `backup.sh` / `restore.sh` round trip, the status-subresource replace
+(`oc apply` alone silently drops the score, history, and in-flight batch), the
+refusal of an empty, wrong-kind, truncated, edited, or unmanifested artifact
+before any cluster write, and the future-`lastScanTime` recovery hint. The
+`hack/` cases below still need a live cluster.
+
 - [ ] **Restore etcd from backup taken mid-scan**: ClusterBaseline generation
       and conditions converge; no permanent Progressing from stale observed
       generation confusion.
