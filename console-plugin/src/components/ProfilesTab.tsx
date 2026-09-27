@@ -293,6 +293,12 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
   const [pendingKey, setPendingKey] = React.useState<string | null>(null);
   // Sync guard: React state alone cannot block a second click before re-render.
   const pendingRef = React.useRef(false);
+  // Monotonic token fencing the openEdit fetch. The row Edit buttons stay live
+  // while k8sGet is in flight (pendingRef guards writes, not this read), so two
+  // different rows can be loading at once and resolve in either order. Without
+  // the token the slower response pre-fills the form with the other profile and
+  // Save then k8sUpdates the wrong TailoredProfile.
+  const editSeq = React.useRef(0);
   const [error, setError] = React.useState<string | null>(null);
   const [success, setSuccess] = React.useState<string | null>(null);
   const [canEdit, canEditLoading] = useAccessReview(clusterBaselinePatchAccess);
@@ -433,6 +439,10 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
     // Same gate the Edit control carries: the save path is a k8sUpdate on the
     // TailoredProfile, so a denied review must not fetch and pre-fill it.
     if (!canUpdate) return;
+    // Bumped only on the path that actually fetches, so a click refused by the
+    // guards above cannot cancel an in-flight load and leave nothing open.
+    editSeq.current += 1;
+    const token = editSeq.current;
     setError(null);
     setSuccess(null);
     try {
@@ -443,6 +453,9 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
         name,
         ns: COMPLIANCE_NAMESPACE,
       })) as TailoredProfileResource;
+      // A newer openEdit (or a form the user already moved on from) won: drop
+      // this response rather than overwrite the form with the wrong profile.
+      if (token !== editSeq.current) return;
       setEditing({ name, obj });
       setTpName(name);
       setTpExtends(obj.spec?.extends || DEFAULT_BASE_PROFILE);
@@ -457,6 +470,9 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
       returnFocusRef.current = trigger;
       setCreating(true);
     } catch (e) {
+      // Same fence: a failure for a superseded profile must not surface inside
+      // the modal the newer openEdit opened.
+      if (token !== editSeq.current) return;
       setError(errorMessage(e) ?? t('Failed to load tailored profile.'));
     }
   };
@@ -513,6 +529,9 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
     }
     pendingRef.current = true;
     setPending(true);
+    // A write owns the form: supersede any openEdit fetch still in flight, so a
+    // late response cannot pre-fill the modal out from under this call.
+    editSeq.current += 1;
     setError(null);
     // Same normalization as tailoredProfileManifest (trim, drop invalid names,
     // dedupe, disable wins) so update and create payloads cannot drift.
@@ -639,6 +658,9 @@ const ProfilesTab: React.FC<{ baseline?: ClusterBaseline; loaded?: boolean }> = 
   // (e.g. profile created but not bound).
   const closeCreateModal = () => {
     if (pendingRef.current) return;
+    // Cancel supersedes an in-flight openEdit: its response must not reopen the
+    // form the admin just dismissed.
+    editSeq.current += 1;
     setCreating(false);
     setEditing(null);
     setTpName('');

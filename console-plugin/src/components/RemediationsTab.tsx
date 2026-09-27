@@ -165,6 +165,13 @@ const RemediationsTab: React.FC<{
   const [autoApplyConfirming, setAutoApplyConfirming] = React.useState(false);
   const [batchConfirming, setBatchConfirming] = React.useState(false);
   const [viewing, setViewing] = React.useState<ComplianceRemediation | null>(null);
+  // Monotonic token fencing the clipboard write. writeText settles
+  // asynchronously (permission prompt, unfocused document), and every open and
+  // close of this modal resets `copied` and `error`, so a late settlement would
+  // land on whichever view session came next: a stale failure becomes a
+  // page-level banner with no modal behind it, and a stale success marks a
+  // different remediation's button as Copied.
+  const viewSeq = React.useRef(0);
   // Copy-to-clipboard feedback for the rendered-object modal.
   const [copied, setCopied] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
@@ -827,6 +834,7 @@ const RemediationsTab: React.FC<{
                       aria-label={t('View object for {{name}}', { name: remName })}
                       onClick={(e) => {
                         returnFocusRef.current = e.currentTarget;
+                        viewSeq.current += 1;
                         setError(null);
                         setCopied(false);
                         setViewing(rem);
@@ -1055,6 +1063,7 @@ const RemediationsTab: React.FC<{
         variant="medium"
         isOpen={!!viewing}
         onClose={() => {
+          viewSeq.current += 1;
           setViewing(null);
           setCopied(false);
           // Clipboard errors already shown inline; do not leave them on the page.
@@ -1108,6 +1117,8 @@ const RemediationsTab: React.FC<{
                         // clipboard is undefined on insecure origins and writeText
                         // rejects when the document lacks focus / permission. The
                         // object stays on-screen for manual selection either way.
+                        viewSeq.current += 1;
+                        const token = viewSeq.current;
                         const write = navigator.clipboard?.writeText(objectText);
                         if (write === undefined) {
                           setCopied(false);
@@ -1116,10 +1127,12 @@ const RemediationsTab: React.FC<{
                         }
                         write.then(
                           () => {
+                            if (token !== viewSeq.current) return;
                             setError(null);
                             setCopied(true);
                           },
                           () => {
+                            if (token !== viewSeq.current) return;
                             setCopied(false);
                             setError(t('Failed to copy to clipboard.'));
                           },
@@ -1142,6 +1155,7 @@ const RemediationsTab: React.FC<{
           <Button
             variant="link"
             onClick={() => {
+              viewSeq.current += 1;
               setViewing(null);
               setCopied(false);
               setError(null);
