@@ -31,18 +31,23 @@ each directory lists the rest. Human clone-to-PR path: `CONTRIBUTING.md`.
 
 ## Version lockstep
 
-One version string, five files: `operator/Makefile` (`VERSION`), the CSV
+One version string, ten files: `operator/Makefile` (`VERSION`), the CSV
 (`name`, `spec.version`, `containerImage`, and every image ref; the CSV is
 hand-maintained, nothing generates those), `console-plugin/package.json`
 (`version` and `consolePlugin.version`), `CHANGELOG.md` (section heading and
-both compare footers), and `README.md` (**Current release** plus the catalog
-tags in the install snippets). `make verify-versions` enforces all of it; run
-it after any bump rather than eyeballing the diff.
+both compare footers), `README.md` (**Current release** plus the catalog
+tags in the install snippets), and the `ARG VERSION=` default in each of the
+five Dockerfiles (`operator/Dockerfile`, `operator/Dockerfile.ci`,
+`operator/bundle.Dockerfile`, `operator/catalog.Dockerfile`,
+`console-plugin/Dockerfile`). `operator/catalog/package.yaml` is rendered
+from `VERSION` by `make catalog-prepare`; never hand-edit it. `make
+verify-versions` enforces all of it; run it after any bump rather than
+eyeballing the diff.
 
 Cutting a release:
 
 1. Land the work with `[Unreleased]` entries in `CHANGELOG.md`.
-2. Bump all five; promote `[Unreleased]` to `## [X.Y.Z] - <date>` and
+2. Bump all ten; promote `[Unreleased]` to `## [X.Y.Z] - <date>` and
    leave a fresh empty `[Unreleased]` above it.
 3. `make bundle` (regenerates the CRD copy, runs every verify target, and
    validates the bundle in operator-sdk).

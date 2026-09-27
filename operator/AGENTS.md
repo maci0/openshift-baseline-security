@@ -46,7 +46,8 @@ deleted on SingleReplica; do not add a PDB to the operator bundle.
 Each has its own target and its own failure message; read the message rather
 than guessing.
 
-- `verify-versions`: release version, toolchain pins, image-build flags, CSV
+- `verify-versions`: release version, toolchain pins, image-build flags, the
+  `ARG VERSION=` default in every Dockerfile, CSV
   `capabilities: Basic Install` with no `spec.replaces` / `spec.skipRange`.
 - `verify-product-lockstep`: score weights, caps, the `ProfileKey` set, and
   annotation keys shared between Go and the console plugin (ADR-024). Adding a
