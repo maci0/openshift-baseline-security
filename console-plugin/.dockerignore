@@ -35,9 +35,15 @@ Dockerfile
 Makefile
 .oxlintrc.json
 tools/*
-# ...except the attribution generator: `yarn build` runs it to emit
-# dist/THIRD-PARTY-NOTICES.txt, so the build stage needs its sources.
+# ...except the tools `yarn build` runs: the attribution generator emits
+# dist/THIRD-PARTY-NOTICES.txt and the size gate reads dist/ and fails the build
+# on a budget breach. `tools/oxlint` stays out (lint only, never in the image).
 # (`tools/*` rather than `tools/`: a negated child cannot re-include a file
 # whose parent directory the ignore list already excluded.)
 !tools/attribution/
+!tools/size/
+# The negations above re-include everything under those directories, undoing the
+# `**/*.test.ts` rule; re-exclude the test so only build inputs travel.
+tools/attribution/*.test.ts
 src/testing/
+tools/size/*.test.ts
