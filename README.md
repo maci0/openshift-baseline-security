@@ -278,8 +278,9 @@ and CSV first; the CRD and `ClusterBaseline` objects stay. `make deploy`
 applies over the previous kustomize tree (and drops the pre-0.5.7 operator
 PDB).
 
-- **Host**: OpenShift 4.22 only (`=v4.22`, `minKubeVersion 1.35.0`,
-  `@console/pluginAPI >=4.22.0-0 <4.23.0-0`).
+- **Host**: OpenShift 4.22 only. Declared, not admission-enforced: the CSV
+  carries `minKubeVersion: 1.35.0` and no `com.redhat.openshift.versions`
+  label, and the plugin declares `@console/pluginAPI >=4.22.0-0 <4.23.0-0`.
 - **Install**: OLM bundle + file-based catalog (or the in-cluster build above).
 - **Release process and version-source lockstep**:
   [docs/PATTERNS.md](docs/PATTERNS.md) §2 (`make verify-versions` enforces it).

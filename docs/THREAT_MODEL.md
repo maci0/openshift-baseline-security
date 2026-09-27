@@ -1,6 +1,6 @@
 # Threat model
 
-Last reviewed: 2026-09-27 (against `main` at 0.6.1, `d466f8c`).
+Last reviewed: 2026-09-27 (against `main` at 0.6.1, `1496241`).
 Every file reference below was re-read against that commit on that date.
 Owner and review cadence are organizational; this file does not name either.
 
@@ -18,18 +18,19 @@ Kubernetes API. Model those first.
 
 | Rank | Threat | Boundary | Exploitability | Impact | Mitigation in tree |
 |------|--------|----------|----------------|--------|--------------------|
-| 1 | Operator SA or operator image takeover | Build to runtime; privilege transition | Needs write to the operator Deployment, CSV, or image that OLM runs | Operator ClusterRole can patch MachineConfigPools cluster-wide (no `resourceNames`), full CRUD on `scansettingbindings`, patch ComplianceRemediations, `consoles.operator.openshift.io/cluster`, create namespaces, install a Compliance Operator Subscription, and deploy the console plugin image | Pod spec *satisfies* Restricted PSS but **no `pod-security.kubernetes.io/enforce` label exists anywhere in the repo** (`manager.yaml:1-10`); least-privilege ClusterRole (`operator/config/rbac/role.yaml`); no `secrets` / `nodes` / `pods/exec`. Does not stop a stolen SA token. |
-| 2 | Hostile console-plugin image via `RELATED_IMAGE_CONSOLE_PLUGIN` | Build to runtime | Needs write to the operator Deployment env or the CSV that sets it | Arbitrary JS loaded into every admin console session that opens Administration → Compliance | `ValidRelatedImage` in `operator/internal/controller/plugin.go` is syntactic only (length, charset). Not a registry allowlist. Digest-pinned Dockerfiles on the build side. |
+| 1 | Operator SA or operator image takeover | Build to runtime; privilege transition | Needs write to the operator Deployment, CSV, or image that OLM runs | Operator ClusterRole can patch MachineConfigPools cluster-wide (no `resourceNames`, `role.yaml:168-171`), full CRUD on `scansettingbindings` (`role.yaml:116-123`), patch ComplianceRemediations, `consoles.operator.openshift.io/cluster`, create namespaces, install a Compliance Operator Subscription, and deploy the console plugin image | Pod spec *satisfies* Restricted PSS but **no `pod-security.kubernetes.io/enforce` label exists anywhere in the repo** (`manager.yaml:1-11`); least-privilege ClusterRole (`operator/config/rbac/role.yaml`); no `secrets` / `nodes` / `pods/exec` rules at all. Does not stop a stolen SA token. |
+| 2 | Hostile console-plugin image via `RELATED_IMAGE_CONSOLE_PLUGIN` | Build to runtime | Needs write to the operator Deployment env or the CSV that sets it | Arbitrary JS loaded into every admin console session that opens Administration → Compliance | `ValidRelatedImage` in `operator/internal/controller/plugin.go:49` is syntactic only (length, charset). Not a registry allowlist, not a digest pin. |
 | 3 | Remediation apply, auto-apply, or batch-apply reboots nodes | Authenticated API user → operator SA | User with `patch` on `ComplianceRemediation` **or** `patch` on `ClusterBaseline` (batch annotation / `spec.remediation.apply`). The four confirmation modals in `RemediationsTab.tsx` are UI-only. | MachineConfigs and node reboots. Batch path also pauses MachineConfigPools. | RBAC (`operator/config/rbac/user_roles.yaml`); CRD default `spec.remediation.apply: Manual` (`operator/api/v1alpha1/clusterbaseline_types.go`); batch count/DNS-1123 guards with limits in `batch.go` enforced in `batch_apply.go`. Modals are not a server control. |
 | 4 | ClusterBaseline patch: waivers, schedule, profiles, catalog source | Authenticated API user → operator | User with `update`/`patch` on `clusterbaselines` (`baseline-security-admin` ClusterRoleBinding, or cluster-admin) | Score integrity (waive FAILs), scan enablement, `ScanSetting` schedule, optional auto-apply remediations, CO catalog override | CRD MaxItems/MaxLength/Pattern (`clusterbaseline_types.go`); writes name-scoped to `cluster` (`user_roles.yaml`); no validating admission webhook. Kubernetes API audit is the attribution trail. |
-| 5 | Untrusted Compliance Operator fields rendered in the console | CO CRs → browser | Needs write to ComplianceCheckResult (or similar) in `openshift-compliance`, or a content-image that ships hostile description/instruction text | Stored XSS in an admin session if a render path uses HTML; spreadsheet formula injection on CSV export; path injection in deep-links | React text nodes (no `dangerouslySetInnerHTML` in `console-plugin/src`); HTML escape in `console-plugin/src/report.ts`; CSV formula hardening in `console-plugin/src/results.ts`; path-relative hrefs in `console-plugin/src/links.ts`. Recurring class: TEST-PLAN §U still carries XSS and href-injection as open manual checks. |
-| 6 | Compliance posture disclosure via metrics | In-cluster network → `/metrics` | Needs a token allowed `get` on nonResourceURL `/metrics`, or access to platform Prometheus | Score, fail counts, last-scan time, batch-active | HTTPS + `filters.WithAuthenticationAndAuthorization` (`operator/cmd/main.go:178`); non-loopback insecure metrics refused (`main.go:117-121`); scraper SA + `baseline-security-metrics-reader` (`operator/config/prometheus/servicemonitor.yaml`, `operator/config/rbac/metrics_reader_role.yaml`). The cert Secret volume is `optional: true` (`manager.yaml:151-157`), so a missing Secret leaves the process on its self-signed fallback; the ServiceMonitor pins `serverName`, so the scrape fails closed rather than trusting it. |
-| 7 | Operator memory / reconcile exhaustion from check-result volume | CO CRs → operator | Large genuine result sets, or a flood of ComplianceCheckResults the operator lists | Manager OOM or wedged reconcile; stale score (`ComplianceStatusStale`) | `GOMEMLIMIT=440MiB` and memory limit 512Mi (`manager.yaml`); CRD caps on waivers (256), profiles (8), tailored profiles (32); batch caps in `batch.go`. No admission quota on foreign CO objects. |
-| 8 | In-cluster reachability of plugin :9443 and metrics :8443 | Pod network | Any pod can TCP to the ClusterIP Services. No NetworkPolicy is shipped. | Plugin: static assets only. Metrics: still needs a token. | Plugin Service forced ClusterIP (`plugin.go`); GET/HEAD only, 1k body, TLS 1.2+ (`console-plugin/nginx.conf`). Gap: no NetworkPolicy. |
+| 5 | Hand-edited `status` wedges every later status write | Operator SA → API server | Needs `update` on `clusterbaselines/status`, or a restore-from-backup of a hostile status | A status that violates the CRD schema fails admission on every subsequent `Status().Update`, freezing conditions, score, and phase for the whole CR. Silent: the object still reads as present. | `operator/internal/controller/sanitize.go` clamps every value written to status to the CRD schema (MaxItems, MaxLength, Enum, Pattern, Minimum) plus an aggregate serialized-size budget before the update leaves the reconciler. Recurring class: unbounded untrusted list → schema. |
+| 6 | Untrusted Compliance Operator fields rendered in the console | CO CRs → browser | Needs write to ComplianceCheckResult (or similar) in `openshift-compliance`, or a content image that ships hostile description/instruction text | Stored XSS in an admin session if a render path uses HTML; spreadsheet formula injection on CSV export; path injection in deep-links | React text nodes (no `dangerouslySetInnerHTML`, `innerHTML`, `document.write`, or `eval` anywhere in `console-plugin/src`; the one `document.write` hit is a comment at `CompliancePage.tsx:223` explaining why the blob path replaced it); HTML escape in `console-plugin/src/report.ts`; CSV formula hardening in `console-plugin/src/results.ts`; path-relative hrefs in `console-plugin/src/links.ts`. Recurring class: TEST-PLAN §U still carries XSS and href-injection as open manual checks. |
+| 7 | Compliance posture disclosure via metrics | In-cluster network → `/metrics` | Needs a token allowed `get` on nonResourceURL `/metrics`, or access to platform Prometheus | Score, fail counts, last-scan time, batch-active | HTTPS + `filters.WithAuthenticationAndAuthorization` (`operator/cmd/main.go:201`); non-loopback insecure metrics refused (`main.go:141`); scraper SA + `baseline-security-metrics-reader` (`operator/config/prometheus/servicemonitor.yaml`, `operator/config/rbac/metrics_reader_role.yaml`). The cert Secret volume is `optional: true` (`manager.yaml:173-176`), so a missing Secret leaves the process on its self-signed fallback; the ServiceMonitor pins `serverName`, so the scrape fails closed rather than trusting it. |
+| 8 | Operator memory / reconcile exhaustion from check-result volume | CO CRs → operator | Large genuine result sets, or a flood of ComplianceCheckResults the operator lists | Manager OOM or wedged reconcile; stale score (`ComplianceStatusStale`) | `GOMEMLIMIT=440MiB` (`manager.yaml:89`) and memory limit 512Mi (`manager.yaml:158-159`); CRD caps on waivers (256), profiles (8), tailored profiles (32); batch caps in `batch.go`; status clamps in `sanitize.go`. No admission quota on foreign CO objects. |
+| 9 | In-cluster reachability of plugin :9443 and metrics :8443 | Pod network | Any pod can TCP to the ClusterIP Services. No NetworkPolicy is shipped. | Plugin: static assets only. Metrics: still needs a token. | Plugin Service forced ClusterIP (`plugin.go:242-253`); GET/HEAD only, 1k body, TLS 1.2+ (`console-plugin/nginx.conf`). Gap: no NetworkPolicy. |
 
-Gaps ranked above existing controls are 2 (image ref not pinned at deploy time), 3 (the four UI confirm modals are not authz), 4 (no webhook, waiver fields are free-form), and 8 (no NetworkPolicy).
+Gaps ranked above existing controls are 2 (image ref not pinned at deploy time), 3 (the four UI confirm modals are not authz), 4 (no webhook, waiver fields are free-form), and 9 (no NetworkPolicy).
 
-One claimed mitigation the code does not support: "Restricted PSS" on the manager pod. The pod spec satisfies Restricted (`runAsNonRoot`, `RuntimeDefault` seccomp, `allowPrivilegeEscalation: false`, drop ALL, read-only rootfs) but nothing enforces it, because no `pod-security.kubernetes.io/enforce` label exists on the `openshift-baseline-security` Namespace or anywhere else in the tree. A namespace admin can widen the pod spec and the pod will still be admitted. Treat the pod spec as defense in depth, not as an enforced control.
+One claimed mitigation the code does not support: "Restricted PSS" on the manager pod. The pod spec satisfies Restricted (`runAsNonRoot`, `RuntimeDefault` seccomp, `allowPrivilegeEscalation: false`, drop ALL, read-only rootfs; `manager.yaml:55-58,106-119`) but nothing enforces it, because no `pod-security.kubernetes.io/enforce` label exists on the `openshift-baseline-security` Namespace or anywhere else in the tree. A namespace admin can widen the pod spec and the pod will still be admitted. Treat the pod spec as defense in depth, not as an enforced control.
 
 ## 1. Attack surface inventory
 
@@ -38,21 +39,25 @@ Not internet sockets. Entry points the code actually has:
 | Entry point | Where | Trust of input |
 |-------------|-------|----------------|
 | OpenShift console → dynamic plugin JS | `console-plugin/src/components/*`, extensions in `console-plugin/console-extensions.json` | Authenticated console user. Data is k8s objects via the console proxy and the user's bearer token (ADR-007 in `docs/DESIGN-DECISIONS.md`). |
-| Kubernetes API: `ClusterBaseline` spec + annotations | `operator/api/v1alpha1/clusterbaseline_types.go`; reconcile in `operator/internal/controller/` | Untrusted. Any client with patch. Includes `baselinesecurity.openshift.io/batch-apply` (`batch.go`). |
+| Kubernetes API: `ClusterBaseline` spec, annotations, **and `status`** | `operator/api/v1alpha1/clusterbaseline_types.go`; reconcile in `operator/internal/controller/`; status clamps in `operator/internal/controller/sanitize.go` | Untrusted. Any client with patch on the object; `status` is writable separately and is read back by the reconciler. Includes `baselinesecurity.openshift.io/batch-apply` (`batch.go`). |
 | Kubernetes API: Compliance Operator CRs (CheckResult, Scan, Suite, Remediation, Profile, TailoredProfile) | Watched in `operator/internal/controller/`; rendered in `console-plugin/src/{models,results,status,scoring,report}.ts` | Untrusted cluster data (labels, annotations, description, instructions, severity). Ownership filtered by suite label `baseline-<profile>` / `baseline-tp-<name>` (`matching.go`, `isOwnedByBaseline` in `models.ts`). |
 | Console writes (user token) | Rescan, profile toggle, schedule, waivers, TailoredProfile authoring, remediation apply/unapply, auto-apply, batch annotation: `docs/SPEC.md` §4.3 and `console-plugin/src/patches.ts` | Authenticated; gated in the UI with `useAccessReview`. The API is the real gate. |
-| Manager flags and env | `operator/cmd/main.go`: `--metrics-bind-address`, `--metrics-secure`, `--metrics-cert-dir`, `--health-probe-bind-address`, `--leader-elect`, `--zap-devel`; `RELATED_IMAGE_CONSOLE_PLUGIN`; `BASELINE_SECURITY_SKIP_DEFAULT_CR` | Deployment/CSV author. Treated as config, not end-user input. `RELATED_IMAGE_CONSOLE_PLUGIN` is still validated (`ValidRelatedImage`) because a mis-set or hostile env must not become a Deployment. |
+| Manager flags | `operator/cmd/main.go:81-85`: `--metrics-bind-address`, `--metrics-secure`, `--metrics-cert-dir`, `--health-probe-bind-address`, `--leader-elect`; `--zap-devel` is a controller-runtime flag | Deployment/CSV author. Treated as config, not end-user input. `RELATED_IMAGE_CONSOLE_PLUGIN` is still validated (`ValidRelatedImage`) because a mis-set or hostile env must not become a Deployment. |
+| Manager env | `os.Getenv` has exactly two call sites, `plugin.go:42` (`EnvRelatedImageConsolePlugin`) and `main.go:148` (`RELATED_IMAGE_CONSOLE_PLUGIN`, start-up logging); `BASELINE_SECURITY_SKIP_DEFAULT_CR` is read through `parseEnvBool` (`main.go:152,348`) | Deployment/CSV author. `parseEnvBool` fails start on an unrecognized value and truncates the logged value to 64 chars. |
 | Metrics `:8443` `/metrics` | `operator/cmd/main.go`, Service `operator/config/manager/metrics_service.yaml` | Authenticated scrape (TokenReview + SAR). ClusterIP only. |
-| Health `:8081` `/healthz` (liveness) and cache-sync readyz | `operator/cmd/main.go:236-237`, `cacheSyncReadyz` at `main.go:410`; probes in `manager.yaml:128-150` | Unauthenticated ping. Port is **not** on a Service (`metrics_service.yaml` is the only Service in `operator/config`); kubelet to the pod. Readyz also fails once SIGTERM arrives, so a draining pod leaves the endpoints. |
+| Health `:8081` `/healthz` (startup + liveness) and `/readyz` (cache sync) | registered at `main.go:255`; `cacheSyncReadyz` at `main.go:465`; probes in `manager.yaml:128-150` | Unauthenticated ping. Port is **not** on a Service (`metrics_service.yaml` is the only Service in `operator/config`); kubelet to the pod. Readyz also fails once SIGTERM arrives, so a draining pod leaves the endpoints. `--health-probe-bind-address=` empty is a hard exit 2 rather than a silent disable, because the Deployment still probes :8081 (`main.go:115-119`). |
 | Platform Prometheus scrape | `operator/config/prometheus/servicemonitor.yaml`; the Namespace label `openshift.io/cluster-monitoring: "true"` (`manager.yaml:10`) | The label is what opts the namespace into *platform* monitoring, so this is scraped by cluster monitoring, not user workload monitoring. Without it the ServiceMonitor and PrometheusRule ship with no targets. A cluster-monitoring reader can read everything on `/metrics`. |
 | Prometheus service discovery | `operator/config/prometheus/servicemonitor.yaml:44-70` | A namespaced Role/RoleBinding grants the `prometheus-k8s` SA in `openshift-monitoring` `get/list/watch` on `services`, `endpoints`, `pods` in the operator namespace. It exists only so discovery works, but it is a real cross-namespace RBAC edge to name. |
 | Plugin TailoredProfile reads | `console-plugin/src/components/ProfilesTab.tsx:388,508` (`k8sGet`) | A read the UI needs to populate the edit form; adds `tailoredprofiles` to the user's effective read surface. |
 | `ClusterScoreItem` watch | `console-plugin/src/components/ClusterScoreItem.tsx:15` (`useK8sWatchResource` on `ClusterBaseline`) | An independent watch independent of the main page tree; its RBAC surface is the baseline read, not the compliance reads. |
 | Clipboard copy of a remediation | `console-plugin/src/components/RemediationsTab.tsx:1036` (`navigator.clipboard.writeText`) | Fully attacker-influenceable text (remediation instructions, labels, annotations) is copied into the operator's clipboard. No HTML parsing, so not XSS, but it is a paste-into-terminal vector and a one-click exfiltration path into a local buffer. |
-| Plugin nginx `:9443` | `console-plugin/nginx.conf`; Service created in `plugin.go` | TLS ClusterIP. Static files. Console proxy is the intended client. Probes are HTTP GET on `location = /healthz` (constant return, no disk access) over TLS; kubelet does not verify the serving cert, and a missing cert means nginx never listens. |
+| Plugin nginx `:9443` | `console-plugin/nginx.conf:55-105`; Service created in `plugin.go:229-256` | TLS ClusterIP. Static files. Console proxy is the intended client. startup/readiness/liveness are HTTPS `GET /healthz` over the serving cert (`plugin_pod.go:139-145`); kubelet does not verify that cert, and a missing cert means nginx never listens, which the HTTP probe (unlike a bare TCP connect) reflects as a real failure. |
+| Plugin access log (stdout) | `console-plugin/nginx.conf:37-40` | The `pii_safe` format records method, `$uri`, protocol, status, and body size only. Client IP, `Referer`, `User-Agent`, and the query string are deliberately dropped because the line is collected verbatim into must-gather's `console-plugin.log` and from there into support archives. Consequence for investigation: a 4xx spike cannot be attributed to a source IP from this log alone. |
+| Report export (browser) | `console-plugin/src/components/CompliancePage.tsx:214-235` (`buildReportHtml` → `Blob` → `openBlobInTab`, `downloadBlob` on popup block) | The exported HTML is built from untrusted CO text and then **executed in a new tab in the operator's browser session** by an explicit click. This is the one place the plugin hands attacker-influenceable markup to a document; it rests entirely on `report.ts` escaping. |
 | Default CR creator | `operator/cmd/default_cr.go` (leader-elected `ClusterBaseline/cluster`) | Operator SA. Opt-out env `BASELINE_SECURITY_SKIP_DEFAULT_CR`. |
 | OLM / catalog / CSV | `operator/bundle/manifests/baseline-security-operator.clusterserviceversion.yaml` | Install-time. Sets image refs, RBAC, env. |
 | CI release publish | `.github/workflows/release.yml` | `workflow_dispatch` version is passed through an env var (fixed after command-injection in 0.5.11). Quay credentials are GitHub secrets. |
+| e2e `.env` loader (developer workstation only) | `console-plugin/e2e/dotenv.ts:23-70` | Reads a developer-supplied file into `CONSOLE_URL`, `KUBEADMIN_USER`, `KUBEADMIN_PASSWORD`, `SCREENSHOT_DIR`. Key allowlist at `dotenv.ts:12-17`; every unknown key, duplicate, non-`KEY=value` line, and unterminated quote is a hard error rather than a silent drop, so the runner cannot inherit `PATH`, `NODE_OPTIONS`, or an unrelated variable. This is the only place a password is read from disk, and it is a dev-only path, not a shipped one. |
 | Cron schedule | `spec.schedule` → owned `ScanSetting` (`operator/internal/controller/schedule.go`, `scanconfig.go`) | Untrusted CR field; five-field cron only. Invalid → `InvalidSchedule` Degraded, not a panic. |
 
 Absent from the code (do not model as present):
@@ -62,18 +67,16 @@ Absent from the code (do not model as present):
 - No operator REST API, no gRPC, no webhook receiver, no upload parser.
 - No NetworkPolicy manifests.
 - No `pprof` / debug bind in `main.go`.
-- No `secrets` API access on the operator ClusterRole.
-- In the plugin, no `dangerouslySetInnerHTML`, `innerHTML`, `insertAdjacentHTML`,
-  `document.write`, `eval`, `new Function`, `postMessage` listener,
-  `localStorage`, `fetch`, `axios`, or `XMLHttpRequest`. The plugin holds no
-  session of its own and makes no outbound request.
+- No `secrets` API access on the operator ClusterRole (`role.yaml` contains no
+  `secrets`, `nodes`, or `exec` rule at all).
+- In the plugin, no `dangerouslySetInnerHTML`, `innerHTML`,
+  `insertAdjacentHTML`, live `document.write`, `eval`, `new Function`,
+  `postMessage` listener, `localStorage`, `fetch`, `axios`, or
+  `XMLHttpRequest`. The plugin holds no session of its own and makes no
+  outbound request.
 
-Operator env vars are exactly two (`os.Getenv` call sites, all in
-`plugin.go:43` and `main.go:125,324`): `RELATED_IMAGE_CONSOLE_PLUGIN` and
-`BASELINE_SECURITY_SKIP_DEFAULT_CR`. `parseEnvBool` (`main.go:323-344`) fails
-start on an unrecognized value and truncates the logged value to 64 chars.
 Flags are the stdlib `flag` package, not cobra; a positional argument is a hard
-exit 2 (`main.go:70-74`), which is what rejects `--metrics-secure false`.
+exit 2, which is what rejects `--metrics-secure false`.
 
 CLI is `oc` / `kubectl` against the API, not a product binary that parses files.
 
@@ -91,6 +94,7 @@ CLI is `oc` / `kubectl` against the API, not a product binary that parses files.
 [kube-apiserver]  <---- CRD OpenAPI (no webhook)
     |                      |
     | ClusterBaseline      | Compliance* CRs
+    |  (spec + status)     |
     v                      v
 [Operator SA] ---------> [Compliance Operator]
     |  elevated: MCP patch, remediation patch,
@@ -107,11 +111,11 @@ Named boundaries:
 | User → app (console plugin) | Clicks, form fields, filters | Console SSO (platform). Plugin has no session of its own. |
 | User → Kubernetes API | CR patches, list/watch | RBAC on the user token. CRD schema for `ClusterBaseline`. |
 | App → API (plugin) | `useK8sWatchResource` / `k8sPatch` | Same user token. `useAccessReview` only disables UI. |
-| Operator SA → cluster APIs | Reconcile writes | Operator ClusterRole. This is the privilege transition. |
+| Operator SA → cluster APIs | Reconcile writes, including `ClusterBaseline` status | Operator ClusterRole. This is the privilege transition. Status values written back are clamped in `sanitize.go`. |
 | CO CRs → operator/plugin | Labels, descriptions, timestamps, remediation objects | Narrowed at the boundary: unstructured helpers, DNS-1123 checks, `isOwnedByBaseline`. Not treated as trusted. |
 | Tenant → tenant | N/A (single cluster, one `ClusterBaseline/cluster`) | Isolation is Kubernetes RBAC, not a product tenancy layer. |
 | Build → runtime | Images, CSV, `RELATED_IMAGE_*` | Digest-pinned Dockerfiles; OLM relatedImages; `ValidRelatedImage` (syntax). |
-| Secrets → code | Service-ca TLS files; scraper SA token Secret; operator SA token | Operator ClusterRole has no `secrets` verbs. Certs are volume-mounted. Plugin sets `automountServiceAccountToken: false` (`plugin_pod.go`). |
+| Secrets → code | Service-ca TLS files; scraper SA token Secret; operator SA token; the e2e `.env` on a developer workstation | Operator ClusterRole has no `secrets` verbs. Certs are volume-mounted. Plugin sets `automountServiceAccountToken: false` and `ServiceAccountName: "default"` (`plugin_pod.go:86-91`). The e2e loader allowlists four keys and never dumps its map (`dotenv.ts`). |
 
 Privilege transitions the model must keep:
 
@@ -122,11 +126,11 @@ Privilege transitions the model must keep:
 
 Secrets flow:
 
-- Enter: service-ca annotation on the metrics and plugin Services; OLM/kubelet injects TLS Secrets as volumes. The metrics cert volume is `optional: true` (`manager.yaml:151-157`), so the process can run on the self-signed fallback identity in `metrics_cert.go:180-195`; the ServiceMonitor pins `serverName` so the scrape fails closed. Scraper token Secret is declared in `servicemonitor.yaml`. GitHub Actions hold `QUAY_USERNAME` / `QUAY_TOKEN` (build only).
-- Live: files under `/var/run/metrics-certs` and `/var/serving-cert`. Operator SA token is automounted for API calls. Plugin does not automount a token (`plugin_pod.go:83-84`, plus `ServiceAccountName: "default"` and `ImagePullSecrets: nil`).
-- Leave: metrics scrape uses the scraper Secret as a Bearer token. No product code copies cluster secrets into `ClusterBaseline` status. `main.go` logs related-image set/valid booleans, not the ref path.
+- Enter: service-ca annotation on the metrics and plugin Services; OLM/kubelet injects TLS Secrets as volumes. The metrics cert volume is `optional: true` (`manager.yaml:173-176`), so the process can run on the self-signed fallback identity in `metrics_cert.go`; the ServiceMonitor pins `serverName` so the scrape fails closed. Scraper token Secret is declared in `servicemonitor.yaml`. GitHub Actions hold `QUAY_USERNAME` / `QUAY_TOKEN` (build only). A developer's `console-plugin/.env` supplies `KUBEADMIN_PASSWORD` to the Playwright runner; process env wins over the file, and the file is never a fallback for a key CI injects.
+- Live: files under `/var/run/metrics-certs` and `/var/serving-cert`. Operator SA token is automounted for API calls. Plugin does not automount a token and has no pull secrets of its own (`plugin_pod.go:85-91`).
+- Leave: metrics scrape uses the scraper Secret as a Bearer token. No product code copies cluster secrets into `ClusterBaseline` status. `main.go` logs related-image set/valid booleans, not the ref path. The plugin logs no client identity by design (see §1).
 
-Rotation: service-ca rotation is the platform's; metrics TLS reloads via `GetCertificate` (`operator/cmd/metrics_cert.go`). No application-level credential rotation.
+Rotation: service-ca rotation is the platform's; the metrics cert reloads through `metricsCertProvider.GetCertificate` (`operator/cmd/metrics_cert.go:89`), which is called from concurrent TLS handshakes. No application-level credential rotation.
 
 ## 3. Assets and impact
 
@@ -136,13 +140,15 @@ Rotation: service-ca rotation is the platform's; metrics TLS reloads via `GetCer
 | Admin browser session | Hostile plugin JS runs as the logged-in console user | ConsolePlugin backend + plugin image |
 | Compliance score and history | False PASS/waiver theater; auditors trust `status.score` / reports | `ClusterBaseline` status; Prometheus gauges in `metrics.go` |
 | Scan enablement and schedule | Scans stopped (`spec.profiles: []`) or hammered via cron | `ClusterBaseline` spec → `ScanSetting` |
-| Operator SA privileges | Full product blast radius. Two rules carry most of it: `machineconfigpools` `get,patch` is cluster-wide with **no `resourceNames`** (`role.yaml:165-171`), and `scansettingbindings` has full CRUD in `openshift-compliance` (`role.yaml:113-122`), so a stolen token can repoint the `baseline` ScanSetting. Also `namespaces: create`, `subscriptions: create`, `operatorgroups: create`. | `operator/config/rbac/role.yaml` bound cluster-wide |
+| Operator SA privileges | Full product blast radius. Two rules carry most of it: `machineconfigpools` `get,patch` is cluster-wide with **no `resourceNames`** (`role.yaml:168-171`), and `scansettingbindings` has full CRUD in `openshift-compliance` (`role.yaml:116-123`), so a stolen token can repoint the `baseline` ScanSetting. Also `namespaces: create`, `subscriptions: create`, `operatorgroups: create`. | `operator/config/rbac/role.yaml` bound cluster-wide |
 | Platform monitoring config | Repointing or silencing the scrape and alerts that expose a cooked score | `servicemonitor.yaml`, `prometheusrule.yaml`, the `openshift.io/cluster-monitoring` Namespace label |
 | Console operator plugin list | Plugin removed or extra plugins injected if the patch is broader than intended | `consoles.operator.openshift.io/cluster` |
 | Metrics | Disclosure of fail counts and score to anyone who can scrape | `/metrics` |
+| The operator's own status write path | A hostile or corrupt status blocks every later update, so the product reports nothing rather than something wrong | `ClusterBaseline.status`, guarded by `sanitize.go` |
 | Availability of the plugin and operator | Compliance UI gone; scans unconfigured; `Degraded` | Deployments in `openshift-baseline-security` |
+| Administrator identity, indirectly | The plugin access log deliberately carries no client IP, so a support archive cannot be traced back to a person; conversely a stolen log leaks nothing about who browsed | `console-plugin/nginx.conf:37-40` |
 
-Reputation: a cooked score or a remediation-driven outage is attributed to "the compliance operator / baseline" by operators. That is the concrete blast radius, not a generic "data breach". This product does not store customer PII; waiver `reason` / `requestedBy` / `approvedBy` are free-text a customer might put names into.
+Reputation: a cooked score or a remediation-driven outage is attributed to "the compliance operator / baseline" by operators. That is the concrete blast radius, not a generic "data breach". This product does not store customer PII; waiver `reason` / `requestedBy` / `approvedBy` are free-text a customer might put names into, and that text is reachable by anyone with viewer rights and by every report export.
 
 ## 4. Threats per boundary
 
@@ -154,36 +160,37 @@ STRIDE, tied to entry points. Not a generic checklist.
 |-------|-----------------|
 | Spoofing | Console session takeover is a platform problem. Waiver `requestedBy` / `approvedBy` are typed strings (`ResultsTab.tsx`, `WaiverEntry` in `clusterbaseline_types.go`), not the authenticated user. A patch can impersonate an approver. |
 | Tampering | Patch `ClusterBaseline` to waive FAILs (max 256), set `remediation.apply: Automatic`, change `schedule`, empty `profiles` (stops scanning), or set `complianceCatalogSource` to a hostile CatalogSource name (DNS-1123 only). Patch `ComplianceRemediation.spec.apply: true` directly, skipping the modal. |
-| Repudiation | No Kubernetes Event is emitted on apply/waive (`Eventf` is unused). Attribution is API audit + optional free-form waiver fields. |
+| Tampering (status) | Write `clusterbaselines/status` directly with a schema-violating or oversized value. Mitigated by `sanitize.go` on the operator's writes; a client with status write access can still leave a status the operator must live with until the next reconcile replaces it. |
+| Repudiation | No Kubernetes Event is emitted on apply/waive (`Eventf` has no call site in `operator/`). Attribution is API audit + optional free-form waiver fields. |
 | Information disclosure | Viewer role can list check results (`user_roles.yaml` aggregates to `view` / `cluster-reader`). Expected. |
-| Denial of service | Hostile `schedule` is bounded (MaxLength 128) and rejected if not five-field cron. Batch annotation over 256 names or non-DNS-1123 is cleared (`reconcile_test.go` `TestApplyRemediationBatchGuardrails`). Rescan annotation on every owned scan is a user-triggered load on CO, not amplified by this operator beyond the owned set. |
-| Elevation of privilege | Batch-apply and auto-apply (confused deputy, above). `baseline-security-admin` is **not** aggregated onto `admin`: a RoleBinding to `admin` in `openshift-compliance` does not inherit remediation/scan patch. Bind `baseline-security-admin` cluster-wide, or use cluster-admin. Note that the unbounded `machineconfigpools` patch is the operator SA's alone; no user role in `user_roles.yaml` carries it. |
+| Denial of service | Hostile `schedule` is bounded (MaxLength 128) and rejected if not five-field cron. Batch annotation over 256 names or non-DNS-1123 is cleared (`batch_apply.go`; `TestApplyRemediationBatchGuardrails`). A hand-edited status is bounded by the sanitize clamps. Rescan annotation on every owned scan is a user-triggered load on CO, not amplified by this operator beyond the owned set. |
+| Elevation of privilege | Batch-apply and auto-apply (confused deputy, above). `baseline-security-admin` is **not** aggregated onto `admin` (no `aggregationRule` in `user_roles.yaml`): a RoleBinding to `admin` in `openshift-compliance` does not inherit remediation/scan patch. Bind `baseline-security-admin` cluster-wide, or use cluster-admin. The unbounded `machineconfigpools` patch is the operator SA's alone; no user role carries it. |
 
 ### CO CRs → operator and plugin (untrusted cluster data)
 
 | Class | Concrete threat |
 |-------|-----------------|
-| Tampering | Foreign suite labels must not enter the score. Mitigated by `ownedSuites` / `matchesAnyProfile` (`matching.go`) and `isOwnedByBaseline` (`models.ts`). Recurring: fuzz targets in `fuzz_extra_test.go`, `matching_test.go`. |
+| Tampering | Foreign suite labels must not enter the score. Mitigated by `ownedSuites` / `matchesAnyProfile` (`matching.go`) and `isOwnedByBaseline` (`models.ts`). Recurring: 19 fuzz targets in `matching_test.go` plus 12 in `fuzz_extra_test.go`. |
 | Information disclosure / XSS | `description` and `instructions` are untrusted. Modal uses text (`ResultsTab.tsx` `Content` / pre-wrap). Report HTML escapes (`report.ts`). CSV formula prefix (`results.ts`, CWE-1236). Deep-links are path-relative (`links.ts`). |
-| Denial of service | Unstructured maps from CO objects: helpers avoid `NestedMap` panic on non-JSON types (`batch.go` comment). Huge result lists are the residual DoS. |
-| Elevation | Hostile remediation labels driving MCP names: non-DNS-1123 dropped by `poolFromRemediation` (`batch.go:75-103`, `validMCPPoolName` at `batch.go:107-112`), re-checked in `batch_reconcile.go:36,479`. |
+| Denial of service | Unstructured maps from CO objects: the batch path avoids `NestedMap` (which DeepCopyJSON-panics on non-JSON types) in favor of `NestedFieldNoCopy` + type assert (`batch.go` `poolFromRemediation`). Huge result lists and a hostile status are the residual DoS. |
+| Elevation | Hostile remediation labels driving MCP names: non-DNS-1123 dropped by `poolFromRemediation` (`batch.go:75-103`, `validMCPPoolName` at `batch.go:107-112`), re-checked in `batch_reconcile.go`. |
 
 ### Operator process (in-cluster listeners)
 
 | Class | Concrete threat |
 |-------|-----------------|
-| Spoofing | Metrics without authn. Mitigated: default `--metrics-secure=true`; non-loopback insecure forced back to secure (`main.go`). |
-| Information disclosure | `/metrics` with a stolen scraper token or overly broad `get` on `/metrics`. Healthz is unauthenticated but not Service-exposed. |
-| Denial of service | nginx `client_max_body_size 1k` and GET/HEAD only. Metrics bind validated (`validateListenAddr`). Empty metrics addr is restored to `:8443` rather than controller-runtime's `:8080`. |
-| Elevation | `--leader-elect=false` on a 2-replica Deployment races default-CR create (`main.go` logs a warning). |
-| Resource exhaustion | The manager informer cache is cluster-wide per type by default, so a typed read caches every object of that type in the cluster. Scoped to the read namespaces in `controller.ManagerCacheOptions()` (`internal/controller/managercache.go`): plugin Deployment/Service/PDB in `openshift-baseline-security`, scan-storage PVCs in `openshift-compliance`. RBAC still grants cluster-wide `list`/`watch` on those four types, which is the residual edge. |
+| Spoofing | Metrics without authn. Mitigated: default `--metrics-secure=true`; non-loopback insecure forced back to secure (`main.go:141`). |
+| Information disclosure | `/metrics` with a stolen scraper token or overly broad `get` on `/metrics`. Health probes are unauthenticated but not Service-exposed. |
+| Denial of service | nginx `client_max_body_size 1k` and GET/HEAD only. Metrics and probe bind addresses are validated (`validateListenAddr`, `main.go:121-129`); an empty probe address is a hard exit rather than a never-ready pod. Empty metrics addr is restored to `:8443` rather than controller-runtime's `:8080`. |
+| Elevation | `--leader-elect=false` on a 2-replica Deployment races default-CR create (`main.go:172-175` logs a warning). |
+| Resource exhaustion | The manager informer cache is cluster-wide per type unless scoped, so a typed read caches every object of that type in the cluster. Scoped by `controller.ManagerCacheOptions()` (`internal/controller/managercache.go`): plugin Deployment/Service/PDB in `openshift-baseline-security`, scan-storage PVCs in `openshift-compliance`. Named ConfigMap reads bypass the cache entirely (`main.go:232-238`, `DisableFor: []client.Object{&corev1.ConfigMap{}}`), so the dashboard CM costs one `get` and no `list/watch`. RBAC still grants cluster-wide `list`/`watch` on the four scoped types, which is the residual edge. |
 
 ### Build → runtime
 
 | Class | Concrete threat |
 |-------|-----------------|
 | Tampering | Substituted operator or plugin image. Recurring: `workflow_dispatch` shell injection (fixed 0.5.11 by env-passing the version). `ValidRelatedImage` does not pin digest or registry. A compromised npm package with a `postinstall` cannot run during `yarn install` (`enableScripts: false` in `console-plugin/.yarnrc.yml`; image `YARN_ENABLE_SCRIPTS=false`). |
-| Denial of service | Standard-library infinite loop on invalid input via status text (fixed: `golang.org/x/text` bump, 0.5.9). Recurring class: untrusted string → parser. Fuzz targets exist; `make fuzz` is release-gate, not per-PR. |
+| Denial of service | Standard-library infinite loop on invalid input via status text (fixed: `golang.org/x/text` bump, 0.5.9). Recurring class: untrusted string → parser, now including the status sanitizer. 55 fuzz targets exist; `make fuzz` is a release gate, not a per-PR one. |
 
 ## 5. Mitigations mapping
 
@@ -192,18 +199,22 @@ Existing controls, with the threats they cover:
 | Control | File | Covers |
 |---------|------|--------|
 | User-token data path, no plugin backend | `docs/DESIGN-DECISIONS.md` ADR-007; plugin uses SDK hooks | Plugin cannot act beyond the user's RBAC |
-| Viewer aggregated to view/cluster-reader; admin ClusterRole not aggregated | `operator/config/rbac/user_roles.yaml` | Readers get results without extra bindings; namespace admin of `openshift-compliance` does not inherit node-reboot writes |
-| Operator ClusterRole without secrets/nodes/exec | `operator/config/rbac/role.yaml` | Limits blast radius of SA theft vs cluster-admin. Does **not** bound `machineconfigpools` patch (cluster-wide, no `resourceNames`) or `scansettingbindings` CRUD |
-| Pod spec satisfies Restricted PSS; read-only rootfs, drop ALL, non-root | `manager.yaml:44-47,95-107`, `plugin.go:259-264`, `plugin_pod.go:129-143`, `operator/Dockerfile:49` `USER 65532`, `console-plugin/Dockerfile:52` `USER 1001` | Container breakout cost. **No `pod-security.kubernetes.io/enforce` label exists in the repo**, so this is admitted-anyway posture, not an enforced control |
-| Plugin: no automount SA token, no hostNetwork/PID/IPC | `plugin_pod.go:80-143` (regression test `clusterbaseline_controller_test.go:1727-1820`) | Plugin pod is a static file server. The Service is re-coerced to ClusterIP and every external-exposure field is cleared on every pass (`plugin.go:215-231`) |
-| Metrics HTTPS + TokenReview/SAR; insecure non-loopback refused | `operator/cmd/main.go`, `metrics_auth_role.yaml` | Unauthenticated metrics scrape |
-| CRD MaxItems/MaxLength/Pattern | `clusterbaseline_types.go`: waivers 256 (`:168`), profiles 8 (`:98`) plus a `ProfileKey` enum (`:9`), tailored profiles 32 (`:108`), schedule MaxLength 128 (`:121`), catalog source MaxLength 253 + DNS-1123-ish pattern (`:140-142`, deliberately no enum so unset auto-detect still works) | CR bloat, junk catalog names, junk waiver names |
+| Viewer aggregated to view/cluster-reader; admin ClusterRole not aggregated | `operator/config/rbac/user_roles.yaml` (no `aggregationRule` block exists) | Readers get results without extra bindings; namespace admin of `openshift-compliance` does not inherit node-reboot writes |
+| Operator ClusterRole without secrets/nodes/exec | `operator/config/rbac/role.yaml` (no such rule) | Limits blast radius of SA theft vs cluster-admin. Does **not** bound `machineconfigpools` patch (cluster-wide, no `resourceNames`) or `scansettingbindings` CRUD |
+| Pod spec satisfies Restricted PSS; read-only rootfs, drop ALL, non-root | `manager.yaml:55-58,106-119`, `plugin_pod.go:150-165`, `operator/Dockerfile:49` `USER 65532`, `console-plugin/Dockerfile:62` `USER 1001` | Container breakout cost. **No `pod-security.kubernetes.io/enforce` label exists in the repo**, so this is admitted-anyway posture, not an enforced control |
+| Plugin: no automount SA token, no pull secrets, no host namespaces | `plugin_pod.go:85-96` | Plugin pod is a static file server. The Service is re-coerced to ClusterIP and every external-exposure field is cleared on every pass (`plugin.go:242-253`) |
+| Plugin access log carries no client identity | `console-plugin/nginx.conf:37-40` | Personal data does not reach must-gather or support archives. Cost: the log cannot attribute a 4xx to a source |
+| Status sanitizing layer | `operator/internal/controller/sanitize.go`; clamps mirror the CRD markers in `clusterbaseline_types.go` | A hostile, hand-edited, or restored status cannot wedge `Status().Update` and freeze every later write |
+| Metrics HTTPS + TokenReview/SAR; insecure non-loopback refused | `operator/cmd/main.go:193,201,141`; `metrics_auth_role.yaml` | Unauthenticated metrics scrape |
+| CRD MaxItems/MaxLength/Pattern | `clusterbaseline_types.go`: waivers 256, profiles 8 plus a `ProfileKey` enum, tailored profiles 32, schedule MaxLength 128, catalog source MaxLength 253 + DNS-1123-ish pattern (deliberately no enum so unset auto-detect still works) | CR bloat, junk catalog names, junk waiver names |
 | Suite-label ownership filter | `matching.go`, `models.ts` `isOwnedByBaseline` | Foreign CO results in score/UI |
 | DNS-1123 + count guards on batch-apply | `batch.go` | Hostile annotation pausing MCPs / wedging reconcile |
-| `ValidRelatedImage` | `plugin.go` | Shell metacharacters / huge env in image ref |
-| Plugin nginx: TLS1.2+, no tickets, nosniff, DENY frame, CSP `default-src 'none'`, GET/HEAD, 1k body, `server_tokens off`, `Referrer-Policy no-referrer`, HSTS, `Cross-Origin-Resource-Policy`/`-Opener-Policy same-origin`; plaintext 8080 explicitly excluded so the S2I snippets cannot add one | `console-plugin/nginx.conf:40-101` | Direct hits on the plugin Service |
+| `ValidRelatedImage` | `plugin.go:49` | Shell metacharacters / huge env in image ref |
+| Plugin nginx: TLS1.2+, no tickets, nosniff, DENY frame, CSP `default-src 'none'`, GET/HEAD, 1k body, `server_tokens off`, `Referrer-Policy no-referrer`, `Permissions-Policy`, HSTS, `Cross-Origin-Resource-Policy`/`-Opener-Policy same-origin`; plaintext 8080 explicitly excluded so the S2I snippets cannot add one | `console-plugin/nginx.conf:40-105` | Direct hits on the plugin Service |
+| Report export via `Blob` + `openBlobInTab` (opener dropped, revoked on every path, falls back to download on popup block) | `CompliancePage.tsx:214-235`, `download.ts` | Window-opener takeover and silent no-op from the one path that hands untrusted text to a browser document |
 | React text rendering; report `esc()`; CSV formula prefix; `safeDownloadName` | `ResultsTab.tsx`, `report.ts`, `results.ts`, `download.ts` | XSS / CWE-1236 / download path |
-| Fuzz targets on untrusted maps, image refs, cron, scoring (48 in the operator) | `operator/internal/controller/*_test.go`, `console-plugin/src/fuzz.test.ts` | Recurring parser panics. `report.ts` and `links.ts` are **not** fuzzed; they rest on `report.test.ts` (which does include `<img src=x onerror=alert(1)>` and `javascript:` payloads) and `links.test.ts` |
+| 55 operator fuzz targets plus a deterministic sweep in the plugin | `operator/{cmd,internal/controller}/*_test.go`, `console-plugin/src/{fuzz.test.ts,report.test.ts,links.test.ts}` | Recurring parser panics. `report.ts` and `links.ts` are covered by seeded sweeps in their test files (which include `<img src=x onerror=alert(1)>` and `javascript:` payloads) rather than by a Go-style fuzz target |
+| e2e `.env` key allowlist with hard errors | `console-plugin/e2e/dotenv.ts:12-70`, `dotenv.test.ts` | A typo'd key or an unrelated variable silently inheriting into the runner (which would also pull in `KUBEADMIN_PASSWORD` where it was not meant to go) |
 | Hermetic, digest-pinned image builds (`--network=none`, `GOPROXY=off`, lockfile, digest bases) | `operator/Dockerfile`, `console-plugin/Dockerfile`, `operator/catalog.Dockerfile` | Build-time supply chain for released images. `operator/Dockerfile.ci` is tag-pinned against `registry.ci.openshift.org`, not digest-pinned; it never ships |
 | Yarn install without lifecycle scripts | `console-plugin/.yarnrc.yml` `enableScripts: false`; `console-plugin/Dockerfile` `YARN_ENABLE_SCRIPTS=false` | Compromised registry package cannot run `preinstall`/`install`/`postinstall` |
 | Release version not interpolated into `run:` | `.github/workflows/release.yml` | Workflow command injection |
@@ -219,6 +230,7 @@ Threats with no (or only UI) mitigation:
 | Waiver attribution spoof | Medium | Fields are spec strings; not bound to the user token |
 | No NetworkPolicy | Medium | Any pod can reach ClusterIP ports |
 | No validating webhook | Medium | Schema-only; `Automatic` remediations are a legal spec |
+| Direct status write by a client with status RBAC | Low | Clamped on the operator's side, but a third-party writer's value is only corrected on the next reconcile |
 | No Kubernetes Events on apply/waive | Low (investigation) | API audit exists cluster-wide; product emits none |
 
 `docs/SPEC.md:381` calls remediation apply "confirmation-gated and RBAC-gated (user
@@ -238,39 +250,40 @@ console default CSP applies unmodified. Verified: no `fetch`, `axios`,
 Hostile but authenticated. Enabling path named. Not demonstrated.
 
 1. **Compliance theater.** User with `ClusterBaseline` patch adds waivers for every FAIL (up to 256) with a far-future `expiresAt`. Score climbs; Prometheus `ComplianceScoreLow` quiets. Path: `ResultsTab.tsx` → `addWaiverPatch` (`patches.ts`) → CR spec; operator scoring in `aggregate.go` / `scoring.go`. Attribution fields can name someone else.
-
 2. **Node reboot without the modal.** `oc patch complianceremediation … --type merge -p '{"spec":{"apply":true}}'` with `baseline-security-admin` (or cluster-admin). Path: CO applies; this operator is not in the loop. Same for `spec.remediation.apply: Automatic` on the CR, which the operator copies onto `ScanSetting`. A RoleBinding to `admin` in `openshift-compliance` is not enough.
-
-3. **Batch pause as deputy.** Patch annotation `baselinesecurity.openshift.io/batch-apply` with owned remediation names. Operator pauses MCPs (`batch_apply.go`). A 10-minute grace resumes (`batchResumeGrace`, `batch.go:45`) even if apply never completes. Still a window of paused pools. The guards are count-based, not per-item: more than 256 remediations, or **one** non-DNS-1123 name in the list, aborts the whole batch and clears the annotation (`batch_apply.go:57-74`) rather than skipping the bad entry, so a partial pause is not reachable through this path.
-
-4. **Stop scanning, keep the UI.** `spec.profiles: []` and empty tailored list prunes bindings and clears the score (`clusterbaseline_types.go` comment). The CR remains; Overview shows an empty baseline rather than an uninstall.
-
-5. **Client-side enforcement.** Disabled buttons via `useAccessReview` (`RemediationsTab.tsx`, `ProfilesTab.tsx`, `Overview.tsx`, `CompliancePage.tsx`, `BaselineNotConfigured.tsx`). A user who bypasses the UI with the same token gets the API's decision, not the button's. The hook only feeds `isDisabled`; the write still goes to the API server, which authorizes independently.
-
-6. **CSV / HTML export of hostile rule text.** Export is client-side (`results.ts`, `report.ts`, `download.ts`). Hardening is in those files; a regression would execute in the admin's spreadsheet or browser, not on the operator.
-
-7. **Clipboard as a paste-into-terminal vector.** A user with remediation read copies a `ComplianceRemediation` whose instructions or labels carry attacker-chosen text (`RemediationsTab.tsx:1036`), then pastes it into a shell or a support ticket. The plugin's own controls do not cover the destination. The blob paths are hardened; the clipboard is a raw passthrough.
+3. **Batch pause as deputy.** Patch annotation `baselinesecurity.openshift.io/batch-apply` with owned remediation names. Operator pauses MCPs (`batch_apply.go`). A 10-minute grace (`batchResumeGrace`, `batch.go:45`) resumes the pools even if apply never completes, and a zero or far-future `StartedAt` is treated as garbage rather than disabling the valve forever. The guards are count-based, not per-item: more than 256 remediations, or **one** non-DNS-1123 name in the list, aborts the whole batch and clears the annotation (`batch_apply.go`) rather than skipping the bad entry, so a partial pause is not reachable through this path.
+4. **Stop scanning, keep the UI.** `spec.profiles: []` and empty tailored list prunes bindings and clears the score. The CR remains; Overview shows an empty baseline rather than an uninstall.
+5. **Freeze the score by poisoning status.** A writer with `clusterbaselines/status` writes a condition list that is pattern-valid per entry but exceeds the aggregate size budget, or a count outside its `Minimum`. Any unclamped write would fail admission and wedge the CR. Enabling path today: the writer calls the API directly, not the operator. `sanitize.go` is why the operator cannot be the one to do this by accident; the third-party writer is bounded only on the next reconcile.
+6. **Client-side enforcement.** Disabled buttons via `useAccessReview` (`RemediationsTab.tsx`, `ProfilesTab.tsx`, `Overview.tsx`, `CompliancePage.tsx`, `BaselineNotConfigured.tsx`). A user who bypasses the UI with the same token gets the API's decision, not the button's. The hook only feeds `isDisabled`; the write still goes to the API server, which authorizes independently.
+7. **CSV / HTML export of hostile rule text.** Export is client-side (`results.ts`, `report.ts`, `download.ts`) and the HTML opens in a new tab in the operator's session. Hardening is in those files; a regression would execute in the admin's spreadsheet or browser, not on the operator.
+8. **Clipboard as a paste-into-terminal vector.** A user with remediation read copies a `ComplianceRemediation` whose instructions or labels carry attacker-chosen text (`RemediationsTab.tsx:1036`), then pastes it into a shell or a support ticket. The plugin's own controls do not cover the destination. The blob paths are hardened; the clipboard is a raw passthrough.
 
 ## 7. Document quality
 
 This file is current as of the date above. Every file reference in it was
 re-read against that commit on that date. Re-check on any change to RBAC, plugin
-nginx, metrics flags, `RELATED_IMAGE_*`, remediation/batch paths, Namespace
-labels, or CRD validation.
+nginx, metrics flags, `RELATED_IMAGE_*`, remediation/batch paths, the status
+sanitizing layer, Namespace labels, or CRD validation.
 
 `SECURITY.md` was checked against reality on 2026-09-27 and every claim holds:
 
-- Supported versions: latest published 0.x only. README **Current release** and
-  `operator/Makefile` `VERSION` are both `0.6.1`, and `CHANGELOG.md` carries a
-  `0.6.1` section. The table does not overstate a backport stream that does not
-  exist.
-- Supported host: OpenShift 4.22, matching CHANGELOG **Support window** and the
-  `com.redhat.openshift.versions: =v4.22` pin in the CSV.
+- Supported versions: latest published 0.x only. README **Current release**
+  (`README.md:10`) and `operator/Makefile` `VERSION` are both `0.6.1`, and
+  `CHANGELOG.md` carries a `0.6.1` section. The table does not overstate a
+  backport stream that does not exist.
+- Supported host: OpenShift 4.22, matching CHANGELOG **Support window** and
+  `README.md:279-281`. The enforcement is `minKubeVersion: 1.35.0`
+  (`baseline-security-operator.clusterserviceversion.yaml:62`) plus the plugin's
+  `@console/pluginAPI` range, not a `com.redhat.openshift.versions` label: no such
+  label exists on the CSV, so an install on a newer OCP with a still-1.35 kube
+  version is not refused. That is a support claim, not a control.
 - Disclosure contact: the CSV `spec.maintainers` email
   (`baseline-security-operator.clusterserviceversion.yaml:64-66`). The address
   exists; `SECURITY.md` does not publish a public issue tracker for
   security-sensitive reports, which is the accurate posture.
 - Scope matches what ships: operator, plugin, bundle manifests, metrics scrape.
+  The e2e harness is named nowhere in the file and is a developer-workstation
+  path, not a shipped one.
 
 `SECURITY.md` names no owner, no SLA, and no advisory identifier process, and
 this file does not invent any.
@@ -282,6 +295,12 @@ Security-relevant actions with no product Event/audit object of their own:
 - Remediation apply / unapply / batch (API audit on the CO objects and on `ClusterBaseline` annotations only)
 - Waiver add/remove (API audit on `ClusterBaseline`; `requestedBy`/`approvedBy` are not authenticated identity)
 - Plugin image change (Deployment env / pod spec)
+- Direct writes to `ClusterBaseline.status` (API audit only; nothing records the clamped value the operator substituted)
+
+One audit source is deliberately degraded: the plugin access log records the
+request shape and the status, never the client IP, so an investigation into
+plugin 4xx/5xx has to start from the console-proxy side or the apiserver audit
+log, not from `console-plugin.log`.
 
 Operator logs reconcile errors; metrics/alerts are in `docs/OBSERVABILITY.md`. Log shape is not owned here.
 

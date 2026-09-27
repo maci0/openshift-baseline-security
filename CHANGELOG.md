@@ -11,11 +11,12 @@ changes may land in minor bumps until 1.0. Prefer reading each release's
 Security fixes belong under a **### Security** heading (include CVE IDs when
 assigned).
 
-Supported host: OpenShift 4.22 (`com.redhat.openshift.versions: =v4.22`,
-`minKubeVersion: 1.35.0`). Older or newer OCP releases are not claimed (the
-`=` pins to exactly 4.22; a bare `v4.22` would also advertise 4.22 and later).
-The console plugin declares `@console/pluginAPI` as `>=4.22.0-0 <4.23.0-0` so
-it does not advertise compatibility with untested console majors.
+Supported host: OpenShift 4.22. Older or newer OCP releases are not claimed.
+What the bundle actually enforces is `minKubeVersion: 1.35.0` in the CSV and
+the console plugin's `@console/pluginAPI` range `>=4.22.0-0 <4.23.0-0`. There is
+no `com.redhat.openshift.versions` label on the CSV, so OLM does not refuse an
+install on a 4.23 cluster whose kube version is still 1.35: the pin is
+documentation and a declared range, not an admission-time check.
 
 **Consumer contract** (what versioning and this changelog cover):
 
