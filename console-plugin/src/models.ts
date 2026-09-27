@@ -388,6 +388,10 @@ export type ClusterBaseline = {
       type: string;
       status: string;
       reason?: string;
+      // metav1.Condition carries it; the operator writes the human-readable
+      // reason for a Degraded / Progressing condition, which the Overview
+      // alerts show instead of a generic sentence.
+      message?: string;
     }[];
     history?: ScoreSnapshot[];
     newlyFailed?: string[];

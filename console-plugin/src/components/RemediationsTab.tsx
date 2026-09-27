@@ -74,7 +74,7 @@ import {
 } from '../remediation';
 import { isString, stripInvisibleText } from '../parse';
 import BaselineNotConfigured from './BaselineNotConfigured';
-import { BaselineUnavailable } from './BaselineUnavailable';
+import BaselineUnavailable from './BaselineUnavailable';
 import ConsoleLink from './ConsoleLink';
 import { regionFocusProps, withDisabledTip } from './DisabledTip';
 import { restoreFocus } from './focus';

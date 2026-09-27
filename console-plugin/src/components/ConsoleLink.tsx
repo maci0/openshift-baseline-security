@@ -5,7 +5,7 @@
 // still shows the target and the browser's own new-tab and copy-link gestures
 // keep working; only a plain left click is taken over.
 import * as React from 'react';
-import { useHistory } from '@openshift-console/dynamic-plugin-sdk';
+import { useNavigate } from 'react-router';
 
 const ConsoleLink: React.FC<{
   href: string;
@@ -14,7 +14,10 @@ const ConsoleLink: React.FC<{
   style?: React.CSSProperties;
   children?: React.ReactNode;
 }> = ({ href, children, ...rest }) => {
-  const history = useHistory();
+  // react-router, not the SDK: the console provides it to plugins as a shared
+  // singleton (the SDK re-exports none of it), so this is the host's router and
+  // the same instance the console's own navigation uses.
+  const navigate = useNavigate();
   return (
     <a
       href={href}
@@ -26,7 +29,7 @@ const ConsoleLink: React.FC<{
           return;
         }
         e.preventDefault();
-        history.push(href);
+        navigate(href);
       }}
     >
       {children}
