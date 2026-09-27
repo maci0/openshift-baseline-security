@@ -23,19 +23,18 @@
 	],
 	// This repo tests with jest, and `strict-tests-jest.json` selects that
 	// variant, but the preset extends `strict-tests.json`, which enables the
-	// vitest rules, and never turns them off. Two of them rewrite assertions the
-	// tests deliberately write exactly (`toBe(true)` to `toBeTruthy()`), and a
+	// vitest rules, and never turns them off. Three of them cannot be satisfied:
+	// `prefer-to-be-truthy` / `prefer-to-be-falsy` rewrite assertions the tests
+	// deliberately write exactly (`toBe(true)` / `toBe(false)`), and a
 	// `toBeTruthy()` passes on any truthy value, so complying would weaken 38
-	// assertions rather than enforce anything. No vitest runner exists here, so
-	// the whole namespace is off. Drop this block if the repo ever runs vitest.
+	// assertions rather than enforce anything; `prefer-called-once` and
+	// `prefer-called-times` flag each other's spelling of the same strict claim,
+	// and the tests use the `toHaveBeenCalledTimes(1)` form. The rest of the
+	// namespace stays on: it finds nothing in this tree. Drop this block if the
+	// repo ever runs vitest.
 	"rules": {
-		"vitest/consistent-test-filename": "off",
-		"vitest/no-conditional-tests": "off",
-		"vitest/no-import-node-test": "off",
 		"vitest/prefer-called-once": "off",
-		"vitest/prefer-called-times": "off",
 		"vitest/prefer-to-be-falsy": "off",
-		"vitest/prefer-to-be-object": "off",
 		"vitest/prefer-to-be-truthy": "off",
 		"anti-slop/no-chained-type-assertions": "error",
 		"anti-slop/no-conditional-empty-object-spread": "error",
