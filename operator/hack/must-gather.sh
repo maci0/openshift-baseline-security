@@ -21,29 +21,43 @@ redact_clusterbaseline_dump() {
   # its continuation is kept and the JSON substitutions redact it instead.
   # Rewrite via a temp file: GNU sed -i is not accepted by BSD sed (macOS),
   # which treats the next argument as a required backup suffix.
-  local tmp
-  tmp="$(mktemp)"
-  awk '
-    function indent(s) { match(s, /^[ \t]*/); return RLENGTH }
-    # -1 is "not dropping": an uninitialized variable compares as 0 and would
-    # swallow the first indented line of the dump.
-    BEGIN { dropping = -1 }
-    {
-      if (dropping >= 0) {
-        # Blank lines inside a block scalar belong to it; a line at or left of
-        # the key indent is the next sibling and must be kept.
-        if ($0 ~ /^[ \t]*$/) next
-        if (indent($0) > dropping) next
-        dropping = -1
+  #
+  # The rewrite runs in a subshell that owns the temp file, whose EXIT trap
+  # removes it on every exit. Hand-written rm calls covered only the two failure
+  # paths and the success path, so an interrupted must-gather left the
+  # pre-redaction copy behind in TMPDIR, still carrying the requestedBy /
+  # approvedBy identities this function exists to strip. The signal traps turn a
+  # signal into an ordinary exit so the EXIT trap still runs.
+  (
+    local tmp
+    tmp="$(mktemp)"
+    trap 'rm -f -- "$tmp"' EXIT
+    trap 'exit 129' HUP
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    awk '
+      function indent(s) { match(s, /^[ \t]*/); return RLENGTH }
+      # -1 is "not dropping": an uninitialized variable compares as 0 and would
+      # swallow the first indented line of the dump.
+      BEGIN { dropping = -1 }
+      {
+        if (dropping >= 0) {
+          # Blank lines inside a block scalar belong to it; a line at or left of
+          # the key indent is the next sibling and must be kept.
+          if ($0 ~ /^[ \t]*$/) next
+          if (indent($0) > dropping) next
+          dropping = -1
+        }
+        if ($0 ~ /^[ \t]*(requestedBy|approvedBy):/) { dropping = indent($0); next }
+        if ($0 ~ /kubectl\.kubernetes\.io\/last-applied-configuration:/) next
+        gsub(/"(requestedBy|approvedBy)"[ \t]*:[ \t]*"[^"]*"[ \t]*,?[ \t]*/, "", $0)
+        print
       }
-      if ($0 ~ /^[ \t]*(requestedBy|approvedBy):/) { dropping = indent($0); next }
-      if ($0 ~ /kubectl\.kubernetes\.io\/last-applied-configuration:/) next
-      gsub(/"(requestedBy|approvedBy)"[ \t]*:[ \t]*"[^"]*"[ \t]*,?[ \t]*/, "", $0)
-      print
-    }
-  ' "$f" > "$tmp" || { rm -f -- "$tmp"; return 1; }
-  cat "$tmp" > "$f" || { rm -f -- "$tmp"; return 1; }
-  rm -f -- "$tmp"
+    ' "$f" > "$tmp" || exit 1
+    # The subshell's exit status is the function's return value, so a failed
+    # cat still fails the caller under set -e exactly as `return 1` did.
+    cat "$tmp" > "$f"
+  )
 }
 
 # Concatenate the YAML of every object in status.relatedObjects into one file,
@@ -201,6 +215,41 @@ EOF
       cat "$block" >&2
       exit 1
     }
+    # The redaction temp file holds the unredacted dump (it still carries the
+    # requestedBy/approvedBy identities). Point TMPDIR at a directory we own so
+    # "nothing left behind" is observable, and assert it on the success and the
+    # failure path.
+    tmproot="$work/tmpdir"
+    mkdir -p "$tmproot"
+    leakcheck="$work/leakcheck.yaml"
+    cat > "$leakcheck" <<'EOF'
+spec:
+  waivers:
+    - name: chk1
+      reason: accepted risk
+      requestedBy: alice
+EOF
+    TMPDIR="$tmproot" redact_clusterbaseline_dump "$leakcheck"
+    if [ -n "$(ls -A "$tmproot")" ]; then
+      echo "FAIL: redaction left a temp file behind: $(ls -A "$tmproot")" >&2
+      exit 1
+    fi
+    if grep -q 'requestedBy' "$leakcheck"; then
+      echo "FAIL: leakcheck fixture was not redacted" >&2
+      exit 1
+    fi
+    # Same invariant on the failure path: awk cannot read a directory, so the
+    # subshell exits nonzero and the temp still has to be gone. (A missing file
+    # would short-circuit the `-s` guard and never create one.)
+    if TMPDIR="$tmproot" redact_clusterbaseline_dump "$work" 2>/dev/null; then
+      echo "FAIL: redaction of an unreadable path reported success" >&2
+      exit 1
+    fi
+    if [ -n "$(ls -A "$tmproot")" ]; then
+      echo "FAIL: failed redaction left a temp file behind: $(ls -A "$tmproot")" >&2
+      exit 1
+    fi
+
     echo "must-gather redaction self-test ok"
   )
   # Rerun property: the output dir is reused across runs, so every collector must

@@ -234,7 +234,7 @@ describe('downloadBlob', () => {
     }
   });
 
-  it('revokes the object URL even when click throws', () => {
+  it('revokes the object URL and detaches the anchor even when click throws', () => {
     const dom = installDom();
     dom.anchor.click.mockImplementation(() => {
       throw new Error('click failed');
@@ -242,6 +242,8 @@ describe('downloadBlob', () => {
     try {
       expect(() => downloadBlob(new Blob(['x']), 'ok.csv')).toThrow('click failed');
       expect(dom.revokeObjectURL).toHaveBeenCalledWith('blob:mock-url');
+      // Appended without removal would accumulate one hidden <a> per failed export.
+      expect(dom.anchor.remove).toHaveBeenCalledTimes(1);
     } finally {
       dom.restore();
     }

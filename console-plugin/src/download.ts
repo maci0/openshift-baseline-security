@@ -63,8 +63,13 @@ export const downloadBlob = (blob: Blob, filename: string): void => {
     a.rel = 'noopener noreferrer';
     a.style.display = 'none';
     document.body.appendChild(a);
-    a.click();
-    a.remove();
+    // The anchor is appended, so its removal is the release: a click that
+    // throws must not leave one hidden <a> in document.body per export.
+    try {
+      a.click();
+    } finally {
+      a.remove();
+    }
   } finally {
     window.setTimeout(() => URL.revokeObjectURL(url), 0);
   }
