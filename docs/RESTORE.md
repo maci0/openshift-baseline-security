@@ -64,6 +64,26 @@ audit record an incident needs. Treat the output directory as sensitive.
 survive the loss of that cluster. Nothing in this repo can enforce that; the
 etcd snapshot policy and the off-cluster copy are the cluster admin's.
 
+## Proving a backup is still good
+
+`backup.sh` failing loudly only covers the run it watched. A schedule that
+stopped running, a copy that never finished landing off-cluster, a transfer
+that truncated, an expired token: none of these make the job exit non-zero,
+and the first sign of any of them is an incident.
+
+```sh
+cd operator
+./hack/verify-backup.sh /var/backups/baseline/20260920T030000Z
+```
+
+No cluster needed and nothing is written, so it also runs against a copy
+pulled back from remote storage, which is the only place a scheduled backup
+can be proven rather than assumed. It checks the same kind, non-empty, and
+sha256 conditions `restore.sh` does, plus the age, and exits non-zero on any
+of them. `--max-age-days N` sets the age limit (default 7, the same threshold
+`restore.sh` warns at). Alert on its exit status from whatever runs the
+schedule; a backup nobody re-reads is a hypothesis.
+
 ## Restoring
 
 ```sh
@@ -86,6 +106,16 @@ checksum is not a defence against that: it lives in the same directory, so
 anyone who can edit the artifact can recompute it. `backup.sh` captures a
 single named object and never emits a `---` separator, so a real backup always
 passes.
+
+Then it reads the live object's `resourceVersion`. The MANIFEST records the one
+the backup was taken at, and a restore that has fallen behind is a rollback:
+it discards every waiver edit and batch annotation made since, and there is no
+soft-delete window behind that. The script refuses, naming both versions, and
+takes `--force` to proceed anyway. On a cluster where the CR is gone, there is
+nothing to compare against and the restore goes ahead.
+
+The age of the artifact is the RPO the restore buys, so it is in the restore
+summary, and a backup more than a week old says so before anything is written.
 
 The script then applies the spec and replaces the status subresource:
 
@@ -120,7 +150,9 @@ Watch it converge with
 5. **The CR was deleted on purpose**: nothing restores it. Deleting
    `ClusterBaseline/cluster` removes the finalizer-protected plugin, the scan
    bindings, and the CRD record of your waivers, in that order. Take a backup
-   before any uninstall.
+   before any uninstall. The operator logs, at the moment it drops the
+   finalizer, that the waivers and score history are not recoverable and names
+   `hack/backup.sh`; that log line is the last trace of the object.
 
 ### Two cases the restore cannot fix alone
 
@@ -138,7 +170,7 @@ Watch it converge with
 
 ## What is verified, and what is not
 
-`operator/hack/backup_restore_test.go` runs both scripts against a stub `oc`
+`operator/hack/backup_restore_test.go` runs the scripts against a stub `oc`
 on every `make test`, and pins the behavior that matters:
 
 - the round trip preserves the spec, the status, and all four batch
@@ -150,7 +182,16 @@ on every `make test`, and pins the behavior that matters:
 - an artifact with a second YAML document appended (a smuggled
   `ClusterRoleBinding`, say) is refused even when its checksum is valid, so the
   refusal cannot be dismissed as checksum damage;
-- a future `lastScanTime` warns with the recovery command and still restores.
+- a restore over a live object that has moved on is refused before any write,
+  names both resourceVersions, and proceeds under `--force`;
+- the artifact age is reported, and a backup older than a week says so;
+- `verify-backup.sh` passes a good directory and fails each way a scheduled
+  backup dies quietly: missing directory, truncated copy, lost MANIFEST,
+  zero-byte artifact, wrong kind, a schedule that stopped running, and a
+  clock that was wrong when it was taken;
+- a future `lastScanTime` warns with the recovery command and still restores;
+- deleting the CR logs that the waivers are not recoverable and names the
+  backup command.
 
 Not covered, because it needs a live cluster: running the real restore
 against a real cluster with a paused `MachineConfigPool` mid-batch. The

@@ -58,6 +58,14 @@ depend on those tags.
 
 ### Added
 
+- `hack/verify-backup.sh`, a cluster-free check that a backup directory is
+  still restorable: the artifact is present, non-empty, the right kind, matches
+  the sha256 in its MANIFEST, and is within an age limit. A scheduled backup
+  that stops running, whose off-cluster copy never landed, or that was
+  truncated in transit fails silently until an incident; this gives that
+  schedule something to alert on, and it runs against a copy pulled back from
+  remote storage. `--max-age-days` sets the limit.
+
 - `hack/backup.sh` and `hack/restore.sh`, a backup and restore path for
   `ClusterBaseline/cluster`, the only durable state this operator owns. Before
   them, recovering a lost or corrupted CR meant an out-of-band etcd restore,
@@ -122,6 +130,25 @@ depend on those tags.
   behavior changed.
 
 ### Fixed
+
+- `restore.sh` no longer restores a backup over a live `ClusterBaseline` that
+  has moved on since it was taken. The MANIFEST records the `resourceVersion`
+  the backup holds, and the script now reads the live one before writing: a
+  mismatch discarded every waiver edit and batch annotation made in between,
+  silently, with no soft-delete window behind it. The restore is refused with
+  both versions named until `--force` says it was meant. The age of the
+  artifact, which is the RPO the restore actually buys, is now reported in the
+  restore summary and called out when it is past a week.
+
+- The status size budget mis-sized text that is not valid UTF-8, which a
+  status restored from a protobuf backup can carry. Each ill-formed byte is
+  coerced to U+FFFD, three bytes out, and it was counted as six, so the
+  failure lists were trimmed further than the encoder needed.
+
+- Deleting `ClusterBaseline/cluster` logs, at the moment the finalizer drops,
+  that the waivers and score history are not recoverable and names
+  `hack/backup.sh`. Nothing restores a deleted CR, and that was the last
+  moment the operator could still see the object.
 
 - A waiver reason, a remediation error message, and the text in the printable
   report lost their zero-width joiners and non-joiners on the way in and out.

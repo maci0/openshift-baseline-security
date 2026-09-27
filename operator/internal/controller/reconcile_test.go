@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-logr/logr/funcr"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -25,6 +27,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	baselinev1alpha1 "github.com/maci0/baseline-security-operator/api/v1alpha1"
 )
@@ -132,6 +135,39 @@ func TestReconcileDeletionDeregistersAndRemovesFinalizer(t *testing.T) {
 	}
 	if got := testutil.CollectAndCount(complianceChecks); got != 0 {
 		t.Fatalf("checks after delete: %d series remain", got)
+	}
+}
+
+// TestReconcileDeletionWarnsThatTheWaiversAreGone: the waiver list and its
+// audit attribution live only in the CR, and nothing restores a deleted one.
+// The finalizer removal is the last moment the operator can still see the
+// object, so it names what is being lost and the command that would have
+// preserved it.
+func TestReconcileDeletionWarnsThatTheWaiversAreGone(t *testing.T) {
+	scheme := testScheme(t)
+	cb := newCB("cis")
+	cb.Finalizers = []string{finalizerName}
+	now := metav1.Now()
+	cb.DeletionTimestamp = &now
+	cb.Spec.Waivers = []baselinev1alpha1.WaiverEntry{{Name: "legacy-tls", Reason: "upstream not migrated"}}
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).
+			WithObjects(cb).WithStatusSubresource(&baselinev1alpha1.ClusterBaseline{}).Build(),
+		Scheme: scheme,
+	}
+
+	var buf bytes.Buffer
+	logger := funcr.NewJSON(func(obj string) { _, _ = buf.WriteString(obj + "\n") }, funcr.Options{})
+	ctx := log.IntoContext(t.Context(), logger)
+	if _, err := r.Reconcile(ctx, ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: "cluster"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	logged := buf.String()
+	if !strings.Contains(logged, "not recoverable") || !strings.Contains(logged, "hack/backup.sh") {
+		t.Fatalf("deletion did not warn that the waivers are unrecoverable: %s", logged)
 	}
 }
 

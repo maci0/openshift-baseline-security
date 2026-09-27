@@ -249,6 +249,13 @@ func (r *ClusterBaselineReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 			return ctrl.Result{}, err
 		}
 		if controllerutil.RemoveFinalizer(cb, finalizerName) {
+			// Last moment the operator can still see what is about to be lost.
+			// The waiver list and its audit attribution are recorded nowhere
+			// else, and no restore path exists for a deleted CR, so say it at
+			// default level rather than leaving it to the backup doc.
+			logger.Info("ClusterBaseline deleted; its waivers and score history are not recoverable. "+
+				"Take a backup with operator/hack/backup.sh before deleting.",
+				"name", cb.Name)
 			if err := r.Update(ctx, cb); err != nil {
 				logger.Error(err, "remove finalizer failed", "name", cb.Name, "duration", r.elapsed(started))
 				return ctrl.Result{}, err

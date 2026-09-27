@@ -12,7 +12,7 @@
 # operator to rebuild a partial view from Compliance Operator results. That
 # rebuild is the correct steady state, but it is not a restore.
 #
-# Usage: hack/restore.sh [backup-dir]   (defaults to ./baseline-backup)
+# Usage: hack/restore.sh [--force] [backup-dir]   (defaults to ./baseline-backup)
 #        hack/restore.sh --help
 set -euo pipefail
 
@@ -20,9 +20,16 @@ set -euo pipefail
 # shellcheck source=lib-sha256.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib-sha256.sh"
 
+# A restore of a backup whose resourceVersion is behind the live object's is a
+# clobber of the one state nothing can regenerate (the waiver list and its
+# audit attribution), so it is refused rather than warned about. Staleness
+# beyond this age is only a warning: the operator decides whether an old
+# backup beats a damaged live object.
+STALE_BACKUP_MAX_AGE_DAYS=7
+
 usage() {
   cat <<'EOF'
-Usage: restore.sh [backup-dir]
+Usage: restore.sh [--force] [backup-dir]
 
 Restore ClusterBaseline/cluster from a directory written by backup.sh
 (default ./baseline-backup). Validates the artifact's checksum, kind, and
@@ -34,20 +41,37 @@ the user-owned spec and the derived status back onto a cluster that no longer
 has them, without waiting on a full control-plane restore.
 
 Options:
-  -h, --help   print this usage and exit 0
+  -f, --force   restore even when the live object has moved on since the
+                backup was taken
+  -h, --help    print this usage and exit 0
 EOF
 }
 
+FORCE=false
 case "${1:-}" in
-  -h | --help) usage; exit 0 ;;
+  -h | --help)
+    usage
+    exit 0
+    ;;
 esac
-
-DIR="${1:-./baseline-backup}"
-if [[ $# -gt 1 ]]; then
-  echo "restore.sh: unexpected arguments after backup-dir: ${*:2}" >&2
+DIRS=()
+for arg in "$@"; do
+  case "$arg" in
+    -f | --force) FORCE=true ;;
+    -*)
+      echo "restore.sh: unknown option: $arg" >&2
+      usage >&2
+      exit 2
+      ;;
+    *) DIRS+=("$arg") ;;
+  esac
+done
+if [[ ${#DIRS[@]} -gt 1 ]]; then
+  echo "restore.sh: unexpected arguments after backup-dir: ${DIRS[*]:1}" >&2
   usage >&2
   exit 2
 fi
+DIR="${DIRS[0]:-./baseline-backup}"
 if [[ -z "$DIR" || "$DIR" == -* ]]; then
   echo "restore.sh: invalid backup directory: ${DIR:-<empty>}" >&2
   usage >&2
@@ -127,6 +151,21 @@ if grep -qE '^  lastScanTime: "?([0-9]{4})' "$ARTIFACT"; then
   echo "restore.sh:   oc patch clusterbaseline cluster --subresource=status --type=merge -p '{\"status\":{\"lastScanTime\":null}}'" >&2
 fi
 
+# Age is the RPO this restore actually buys: everything edited or scanned
+# since takenAt is not in the artifact and cannot be recovered from it.
+TAKEN_AT="$(sed -n 's/^takenAt=//p' "$MANIFEST" | head -1)"
+AGE_NOTE="${TAKEN_AT:-unknown time}"
+TAKEN_EPOCH="$(date -u -d "${TAKEN_AT:-}" +%s 2>/dev/null || true)"
+if [[ -n "$TAKEN_EPOCH" ]]; then
+  AGE_SECONDS=$(( $(date -u +%s) - TAKEN_EPOCH ))
+  AGE_DAYS=$(( AGE_SECONDS / 86400 ))
+  AGE_NOTE="$TAKEN_AT, ${AGE_DAYS}d old"
+  if (( AGE_DAYS > STALE_BACKUP_MAX_AGE_DAYS )); then
+    echo "restore.sh: note: this backup is ${AGE_DAYS} days old, so it discards at" >&2
+    echo "restore.sh: least that much waiver and scan history. Any newer backup?" >&2
+  fi
+fi
+
 # --- write ------------------------------------------------------------------
 
 oc() { command oc --request-timeout=30s "$@"; }
@@ -134,6 +173,29 @@ oc() { command oc --request-timeout=30s "$@"; }
 if ! oc whoami >/dev/null 2>&1; then
   echo "restore.sh: oc is not authenticated (oc whoami failed); nothing was changed" >&2
   exit 1
+fi
+
+# Refuse to roll a live object back to an older backup without being told to.
+# The MANIFEST records the resourceVersion the backup was taken at; if the live
+# object has a higher one, the waiver edits and batch progress made since are
+# not in the artifact and apply would discard them silently. There is no
+# soft-delete window behind that, so it takes --force.
+BACKUP_RESOURCE_VERSION="$(sed -n 's/^resourceVersion=//p' "$MANIFEST" | head -1)"
+LIVE_RESOURCE_VERSION="$(oc get clusterbaseline cluster -o jsonpath='{.metadata.resourceVersion}' 2>/dev/null || true)"
+if [[ -n "$BACKUP_RESOURCE_VERSION" && -n "$LIVE_RESOURCE_VERSION" &&
+  "$LIVE_RESOURCE_VERSION" != "$BACKUP_RESOURCE_VERSION" ]]; then
+  if [[ "$FORCE" == true ]]; then
+    echo "restore.sh: note: --force; restoring over live object at resourceVersion" >&2
+    echo "restore.sh: $LIVE_RESOURCE_VERSION with a backup taken at $BACKUP_RESOURCE_VERSION" >&2
+  else
+    echo "restore.sh: the live object has moved on since this backup was taken:" >&2
+    echo "restore.sh:   live   resourceVersion $LIVE_RESOURCE_VERSION" >&2
+    echo "restore.sh:   backup resourceVersion $BACKUP_RESOURCE_VERSION" >&2
+    echo "restore.sh: restoring discards every waiver edit and batch annotation" >&2
+    echo "restore.sh: made since. Nothing was changed. To restore anyway:" >&2
+    echo "restore.sh:   hack/restore.sh --force $DIR" >&2
+    exit 1
+  fi
 fi
 
 # Spec first. If the CR does not exist at all (deleted namespace, lost CR),
@@ -151,6 +213,6 @@ if ! oc replace --subresource=status -f "$ARTIFACT"; then
   exit 1
 fi
 
-echo "restore.sh: restored ClusterBaseline/cluster (backup taken $(sed -n 's/^takenAt=//p' "$MANIFEST" | head -1))"
+echo "restore.sh: restored ClusterBaseline/cluster (backup taken $AGE_NOTE)"
 echo "restore.sh: watch it converge with:"
 echo "restore.sh:   oc get clusterbaseline cluster -o yaml --watch"

@@ -20,6 +20,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // resealManifest recomputes the sha256 line in a backup directory's MANIFEST
@@ -95,9 +96,12 @@ status:
 `
 
 // fakeOC installs a stub `oc` on PATH for the duration of the test. get
-// returns captured; every other subcommand is appended to the call log. The
-// stub must tolerate the --request-timeout flag both scripts pass on every
-// call, so it drops leading global flags before dispatching.
+// returns captured; a get that asks for a jsonpath field returns
+// FAKE_OC_RESOURCE_VERSION (empty by default, which reads as "no live object",
+// the case a restore onto a recovered cluster is in). Every other subcommand
+// is appended to the call log. The stub must tolerate the --request-timeout
+// flag both scripts pass on every call, so it drops leading global flags
+// before dispatching.
 func fakeOC(t *testing.T, dir, captured string) (logfile string) {
 	t.Helper()
 	stub := filepath.Join(dir, "oc")
@@ -110,7 +114,11 @@ func fakeOC(t *testing.T, dir, captured string) (logfile string) {
 		"set -- \"${args[@]}\"\n" +
 		"case \"${1:-}\" in\n" +
 		"  whoami) echo kube:admin; exit 0 ;;\n" +
-		"  get) cat <<'CAPTURED'\n" + captured + "CAPTURED\nexit 0 ;;\n" +
+		"  get)\n" +
+		"    for a in \"$@\"; do\n" +
+		"      case \"$a\" in jsonpath=*) printf '%s' \"${FAKE_OC_RESOURCE_VERSION:-}\"; exit 0 ;; esac\n" +
+		"    done\n" +
+		"    cat <<'CAPTURED'\n" + captured + "CAPTURED\nexit 0 ;;\n" +
 		"esac\n" +
 		"printf '%s\\n' \"$*\" >> " + filepath.Join(dir, "oc.log") + "\n" +
 		"exit 0\n"
@@ -179,6 +187,9 @@ func runScript(t *testing.T, name string, workdir string, args ...string) (stdou
 func TestBackupRestoreRoundTripPreservesDurableState(t *testing.T) {
 	bin := t.TempDir()
 	log := fakeOC(t, bin, baselineYAML)
+	// The live object is exactly what the backup holds, so the staleness guard
+	// sees matching resourceVersions and lets the restore through.
+	t.Setenv("FAKE_OC_RESOURCE_VERSION", "41237")
 	work := t.TempDir()
 
 	if _, stderr, code := runScript(t, "backup.sh", work, "bdir"); code != 0 {
@@ -457,8 +468,224 @@ func TestRestoreWarnsOnFutureLastScanTime(t *testing.T) {
 	}
 }
 
+// backupDir writes a backup directory whose artifact is baselineYAML and
+// whose MANIFEST carries the given takenAt, re-signing the artifact so the
+// checksum always matches. It is the starting point for the tests that are
+// about one specific property of an otherwise good backup.
+func backupDir(t *testing.T, work, name, takenAt string) string {
+	t.Helper()
+	dir := filepath.Join(work, name)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "clusterbaseline.yaml")
+	if err := os.WriteFile(path, []byte(baselineYAML), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sum, err := exec.CommandContext(t.Context(), "sha256sum", path).Output()
+	if err != nil {
+		t.Fatalf("sha256sum: %v", err)
+	}
+	digest := strings.SplitN(string(sum), " ", 2)[0]
+	manifest := "takenAt=" + takenAt + "\nresourceVersion=41237\nuid=6f0b1c2a\nsha256=" + digest + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "MANIFEST"), []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+func TestRestoreRefusesToRollBackAMovedOnObject(t *testing.T) {
+	bin := t.TempDir()
+	log := fakeOC(t, bin, baselineYAML)
+	// The live object carries waiver edits made after the backup. Applying
+	// the artifact discards them, and nothing else records them.
+	t.Setenv("FAKE_OC_RESOURCE_VERSION", "41999")
+	work := t.TempDir()
+	dir := backupDir(t, work, "bdir", "2026-09-20T03:00:00Z")
+
+	_, stderr, code := runScript(t, "restore.sh", work, dir)
+	if code == 0 {
+		t.Fatal("restore overwrote a live object that had moved on since the backup")
+	}
+	if !strings.Contains(stderr, "41999") || !strings.Contains(stderr, "41237") {
+		t.Errorf("stderr %q, want both resourceVersions named", stderr)
+	}
+	if !strings.Contains(stderr, "--force") {
+		t.Errorf("stderr %q, want the override named", stderr)
+	}
+	if calls := ocCalls(t, log); strings.Contains(calls, "apply -f") {
+		t.Errorf("the refused restore still wrote to the cluster:\n%s", calls)
+	}
+
+	// --force is how an operator says they meant it, and then it proceeds.
+	if _, stderr, code := runScript(t, "restore.sh", work, "--force", dir); code != 0 {
+		t.Fatalf("restore.sh --force: exit %d, want 0; stderr=%s", code, stderr)
+	}
+	calls := ocCalls(t, log)
+	if !strings.Contains(calls, "apply -f") || !strings.Contains(calls, "replace --subresource=status -f") {
+		t.Errorf("--force did not complete the restore; oc calls:\n%s", calls)
+	}
+}
+
+// The RPO a restore buys is the age of the artifact, so the age has to be on
+// screen at restore time rather than in a doc nobody reads mid-incident.
+func TestRestoreReportsBackupAge(t *testing.T) {
+	bin := t.TempDir()
+	fakeOC(t, bin, baselineYAML)
+	work := t.TempDir()
+
+	fresh := backupDir(t, work, "fresh", time.Now().UTC().Format(time.RFC3339))
+	stdout, stderr, code := runScript(t, "restore.sh", work, fresh)
+	if code != 0 {
+		t.Fatalf("restore.sh: exit %d, want 0; stderr=%s", code, stderr)
+	}
+	if !strings.Contains(stdout, "0d old") {
+		t.Errorf("stdout %q, want the artifact age reported", stdout)
+	}
+	if strings.Contains(stderr, "days old") {
+		t.Errorf("a backup taken today warned about staleness: %q", stderr)
+	}
+
+	stale := backupDir(t, work, "stale", time.Now().UTC().AddDate(0, 0, -30).Format(time.RFC3339))
+	stdout, stderr, code = runScript(t, "restore.sh", work, stale)
+	if code != 0 {
+		t.Fatalf("restore.sh on a stale backup: exit %d, want 0; stderr=%s", code, stderr)
+	}
+	if !strings.Contains(stderr, "30 days old") {
+		t.Errorf("stderr %q, want the stale age called out", stderr)
+	}
+	if !strings.Contains(stdout, "30d old") {
+		t.Errorf("stdout %q, want the age in the restore summary", stdout)
+	}
+}
+
+func TestVerifyBackup(t *testing.T) {
+	now := time.Now().UTC()
+
+	t.Run("a good backup verifies", func(t *testing.T) {
+		work := t.TempDir()
+		dir := backupDir(t, work, "bdir", now.Format(time.RFC3339))
+		stdout, stderr, code := runScript(t, "verify-backup.sh", work, dir)
+		if code != 0 {
+			t.Fatalf("exit %d, want 0; stderr=%s", code, stderr)
+		}
+		if !strings.Contains(stdout, "restorable") || stderr != "" {
+			t.Errorf("stdout %q stderr %q, want a clean restorable verdict", stdout, stderr)
+		}
+	})
+
+	// Everything below is a way a scheduled backup dies without anyone
+	// noticing: a copy that never landed, a truncated transfer, a cron whose
+	// token expired weeks ago, a host whose clock jumped.
+	cases := []struct {
+		name   string
+		mutate func(t *testing.T, work string) string
+		want   string
+	}{
+		{
+			name: "directory never arrived",
+			mutate: func(t *testing.T, work string) string {
+				return filepath.Join(work, "missing")
+			},
+			want: "does not exist",
+		},
+		{
+			name: "copy truncated in transit",
+			mutate: func(t *testing.T, work string) string {
+				dir := backupDir(t, work, "bdir", now.Format(time.RFC3339))
+				path := filepath.Join(dir, "clusterbaseline.yaml")
+				if err := os.WriteFile(path, []byte(baselineYAML[:200]), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				return dir
+			},
+			want: "checksum mismatch",
+		},
+		{
+			name: "manifest lost",
+			mutate: func(t *testing.T, work string) string {
+				dir := backupDir(t, work, "bdir", now.Format(time.RFC3339))
+				if err := os.Remove(filepath.Join(dir, "MANIFEST")); err != nil {
+					t.Fatal(err)
+				}
+				return dir
+			},
+			want: "unverifiable",
+		},
+		{
+			name: "zero-byte artifact",
+			mutate: func(t *testing.T, work string) string {
+				dir := backupDir(t, work, "bdir", now.Format(time.RFC3339))
+				if err := os.WriteFile(filepath.Join(dir, "clusterbaseline.yaml"), nil, 0o600); err != nil {
+					t.Fatal(err)
+				}
+				return dir
+			},
+			want: "empty",
+		},
+		{
+			name: "artifact is another kind",
+			mutate: func(t *testing.T, work string) string {
+				dir := backupDir(t, work, "bdir", now.Format(time.RFC3339))
+				path := filepath.Join(dir, "clusterbaseline.yaml")
+				other := strings.Replace(baselineYAML, "kind: ClusterBaseline", "kind: ConfigMap", 1)
+				if err := os.WriteFile(path, []byte(other), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				sum, err := exec.CommandContext(t.Context(), "sha256sum", path).Output()
+				if err != nil {
+					t.Fatal(err)
+				}
+				digest := strings.SplitN(string(sum), " ", 2)[0]
+				manifest := "takenAt=" + now.Format(time.RFC3339) + "\nsha256=" + digest + "\n"
+				if err := os.WriteFile(filepath.Join(dir, "MANIFEST"), []byte(manifest), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				return dir
+			},
+			want: "not a ClusterBaseline",
+		},
+		{
+			name: "schedule stopped running",
+			mutate: func(t *testing.T, work string) string {
+				return backupDir(t, work, "bdir", now.AddDate(0, 0, -9).Format(time.RFC3339))
+			},
+			want: "past the 7-day limit",
+		},
+		{
+			name: "clock was wrong when it was taken",
+			mutate: func(t *testing.T, work string) string {
+				return backupDir(t, work, "bdir", now.AddDate(1, 0, 0).Format(time.RFC3339))
+			},
+			want: "in the future",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			work := t.TempDir()
+			dir := tc.mutate(t, work)
+			_, stderr, code := runScript(t, "verify-backup.sh", work, dir)
+			if code == 0 {
+				t.Fatal("verify-backup.sh passed a backup that cannot be restored")
+			}
+			if !strings.Contains(stderr, tc.want) {
+				t.Errorf("stderr %q, want it to mention %q", stderr, tc.want)
+			}
+		})
+	}
+
+	// The age limit is the admin's call, and a verifier that cannot be tuned
+	// to a daily schedule is a verifier nobody runs.
+	work := t.TempDir()
+	dir := backupDir(t, work, "bdir", now.AddDate(0, 0, -9).Format(time.RFC3339))
+	if _, stderr, code := runScript(t, "verify-backup.sh", work, "--max-age-days", "30", dir); code != 0 {
+		t.Fatalf("--max-age-days 30 on a 9-day backup: exit %d, want 0; stderr=%s", code, stderr)
+	}
+}
+
 func TestBackupRestoreUsage(t *testing.T) {
-	for _, name := range []string{"backup.sh", "restore.sh"} {
+	for _, name := range []string{"backup.sh", "restore.sh", "verify-backup.sh"} {
 		script := scriptPath(t, name)
 		for _, flag := range []string{"--help", "-h"} {
 			stdout, stderr, code := runCmd(t, script, flag)

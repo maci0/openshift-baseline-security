@@ -1473,10 +1473,13 @@ the `backup.sh` / `restore.sh` round trip, the status-subresource replace
 (`oc apply` alone silently drops the score, history, and in-flight batch), the
 refusal of an empty, wrong-kind, truncated, edited, or unmanifested artifact
 before any cluster write, the refusal of a multi-document artifact even when
-its checksum is valid, the future-`lastScanTime` recovery hint, and the same
-round trip on a PATH with no GNU `sha256sum` (the macOS shape, where the digest
-falls back to `shasum` or `openssl`). The `hack/` cases below still need a live
-cluster.
+its checksum is valid, the refusal to roll a live object back past its own
+resourceVersion without `--force`, the reported artifact age, the
+future-`lastScanTime` recovery hint, the deletion warning that names the
+unrecoverable waivers, `verify-backup.sh` against a good directory and every
+way a scheduled backup fails quietly, and the same round trip on a PATH with
+no GNU `sha256sum` (the macOS shape, where the digest falls back to `shasum`
+or `openssl`). The `hack/` cases below still need a live cluster.
 
 - [ ] **Restore etcd from backup taken mid-scan**: ClusterBaseline generation
       and conditions converge; no permanent Progressing from stale observed
@@ -1494,6 +1497,9 @@ cluster.
       document order (delete CR first).
 - [ ] **Velero / OADP restore of only plugin Deployment**: operator re-owns
       and rewrites image/env from RELATED_IMAGE_*.
+- [ ] **Restore an older backup over a live object**: the refusal names both
+      resourceVersions and writes nothing; `--force` restores and the waiver
+      list matches the artifact, not the live object.
 
 ## AR. Negative-space testing ("prove it does not…")
 
