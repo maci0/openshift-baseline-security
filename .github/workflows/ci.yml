@@ -107,9 +107,13 @@ jobs:
       # 3.81 BSD make that ships as /usr/bin/make). Homebrew's GNU make formula
       # is named make and is keg-only; the binary is still gmake, and it is not
       # on PATH until the opt prefix is added.
-      - name: install gmake
+      #
+      # shellcheck is installed rather than assumed: the ubuntu-24.04 image still
+      # preinstalls it, the macos-14 image no longer does, and `make lint-shell`
+      # refuses to run without it, which failed this job after `make test`.
+      - name: install gmake and shellcheck
         run: |
-          brew install make
+          brew install make shellcheck
           echo "$(brew --prefix make)/bin" >> "$GITHUB_PATH"
       # `make test` is the target the docs claim macOS supports: fmt-check, vet,
       # go test ./... (which drives hack/*.sh through a fake oc) and the
