@@ -377,8 +377,22 @@ func (r *ClusterBaselineReconciler) ensureConsolePlugin(ctx context.Context, cb 
 	// Re-read Deployment status so Ready is not claimed before pods are up.
 	// Use pluginReadyMin (not full pluginReplicas) so a partial HA outage still
 	// reports Deployed once the plugin can serve traffic.
+	//
+	// This reads the manager's informer cache, and the CreateOrUpdate above went
+	// straight to the apiserver, so on the reconcile that (re)creates the
+	// Deployment the watch event may not have landed yet and the cached Get
+	// answers NotFound for an object this reconcile just wrote. That is cache
+	// lag, not a missing Deployment: treating it as a hard error wedged the whole
+	// reconcile (Degraded=ReconcileError and aggregateStatus skipped) on every
+	// fresh install or post-delete recovery. Soft-fail like ConsoleMissing above
+	// so the next poll reads the cached object once the watch delivers it.
 	if err := r.Get(ctx, types.NamespacedName{Namespace: pluginNS, Name: pluginName}, dep); err != nil {
-		return fmt.Errorf("reading plugin Deployment %s/%s status: %w", pluginNS, pluginName, err)
+		if !apierrors.IsNotFound(err) {
+			return fmt.Errorf("reading plugin Deployment %s/%s status: %w", pluginNS, pluginName, err)
+		}
+		logConsolePluginNotReady(ctx, cb, "WaitingForPods",
+			fmt.Sprintf("Deployment %s/%s not visible in the informer cache yet", pluginNS, pluginName))
+		return nil
 	}
 	if dep.Status.ReadyReplicas < pluginReadyMin {
 		reason, msg := "WaitingForPods",

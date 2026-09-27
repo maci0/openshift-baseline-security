@@ -88,17 +88,25 @@ func createIfMissing(ctx context.Context, c client.Client, obj client.Object) er
 //
 // The list declares ownership, so it must track what the reconciler actually
 // holds. With console.managementState=Removed, removeConsolePlugin deletes the
-// plugin Deployment, PDB, and ConsolePlugin, so advertising them would send
-// must-gather after objects the operator has disowned.
+// plugin Service, Deployment, PDB, and ConsolePlugin, so advertising them would
+// send must-gather after objects the operator has disowned.
+//
+// The PDB is advertised even on a SingleReplica cluster, where ensureConsolePlugin
+// deletes it: the topology read fails safe to HA, so "PDB present" is the state
+// the reconciler can confirm from the CR alone, and a must-gather that finds it
+// absent is the signal that topology was read as HA. The Service is listed
+// because it is the only object carrying the serving-cert annotation, so it is
+// what explains the baseline-security-console-plugin-cert Secret in a gather.
 func relatedObjectsFromSuites(cb *baselinev1alpha1.ClusterBaseline, suites map[string]bool) []baselinev1alpha1.ObjectRef {
 	// Cap at fixed refs + suite count so the slice does not thrash under multi-profile.
-	refs := make([]baselinev1alpha1.ObjectRef, 0, 4+len(suites))
+	refs := make([]baselinev1alpha1.ObjectRef, 0, 5+len(suites))
 	refs = append(refs,
 		baselinev1alpha1.ObjectRef{Group: "compliance.openshift.io", Resource: "scansettings", Name: scanSettingName, Namespace: complianceNamespace},
 	)
 	if cb.Spec.Console.ManagementState != baselinev1alpha1.Removed {
 		refs = append(refs,
 			baselinev1alpha1.ObjectRef{Group: "apps", Resource: "deployments", Name: pluginName, Namespace: pluginNS},
+			baselinev1alpha1.ObjectRef{Group: "", Resource: "services", Name: pluginName, Namespace: pluginNS},
 			baselinev1alpha1.ObjectRef{Group: "policy", Resource: "poddisruptionbudgets", Name: pluginName, Namespace: pluginNS},
 			baselinev1alpha1.ObjectRef{Group: "console.openshift.io", Resource: "consoleplugins", Name: pluginName},
 		)

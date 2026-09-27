@@ -253,7 +253,7 @@ const RemediationsTab: React.FC<{
   const batchable = React.useMemo(
     () =>
       ordered.filter((r) => {
-        if (r.spec.apply || !nodeNames.has(r.metadata?.name ?? "")) {
+        if (r.spec?.apply || !nodeNames.has(r.metadata?.name ?? "")) {
           return false;
         }
         const state = r.status?.applicationState;
@@ -789,7 +789,7 @@ const RemediationsTab: React.FC<{
                     {remName}
                   </Td>
                   <Td dataLabel={t('Kind')}>
-                    {rem.spec.current?.object?.kind ?? '—'}
+                    {rem.spec?.current?.object?.kind ?? '—'}
                     {nodeNames.has(remName) && (
                       <Label
                         isCompact
@@ -844,7 +844,7 @@ const RemediationsTab: React.FC<{
                     </Button>
                   </Td>
                   <Td dataLabel={t('Actions')}>
-                    {rem.spec.apply ? (
+                    {rem.spec?.apply ? (
                       withDisabledTip(
                         applyDisabledReason,
                         <Button

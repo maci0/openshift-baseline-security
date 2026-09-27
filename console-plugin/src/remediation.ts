@@ -32,7 +32,7 @@ const unsetValueAnn = 'compliance.openshift.io/unset-value';
 // batch-eligible that the controller cannot pause. Kept in lockstep with the
 // operator: node iff a MachineConfig, or a valid "…-node-<pool>" scan name.
 export const isNodeRemediation = (rem: ComplianceRemediation): boolean => {
-  if (rem.spec.current?.object?.kind === 'MachineConfig') {
+  if (rem.spec?.current?.object?.kind === 'MachineConfig') {
     return true;
   }
   const pool = nodePoolFromScanName(rem.metadata?.labels?.[SCAN_NAME_LABEL] ?? '');
@@ -54,7 +54,7 @@ export const isNodeRemediation = (rem: ComplianceRemediation): boolean => {
 export const REMEDIATION_OBJECT_UNSERIALIZABLE = '\0unserializable';
 
 export const remediationObjectText = (rem: ComplianceRemediation): string => {
-  const obj = rem.spec.current?.object;
+  const obj = rem.spec?.current?.object;
   if (!obj) {
     return '';
   }

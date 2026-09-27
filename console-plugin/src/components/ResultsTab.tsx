@@ -214,9 +214,13 @@ const ResultsTab: React.FC<{
   );
   // Offer the waiver controls for a FAIL (the only score-affecting status), and
   // for any already-waived check so a stale waiver can always be removed even
-  // after the check starts passing.
+  // after the check starts passing. metadata is optional-chained: selectedLive
+  // deliberately lets a nameless list item through only so the detail modal can
+  // close cleanly, and this runs on `selected` (the raw click target), so an
+  // unguarded read would throw during render and blank the whole tab.
   const showWaiver = (r: ComplianceCheckResult): boolean =>
-    !!findWaiver(r.metadata.name, waivers) || (!!baseline && effectiveStatus(r) === 'FAIL');
+    !!findWaiver(r.metadata?.name ?? '', waivers) ||
+    (!!baseline && effectiveStatus(r) === 'FAIL');
 
   const resetWaiverForm = () => {
     setSelected(null);
@@ -526,8 +530,16 @@ const ResultsTab: React.FC<{
       {
         title: t('Profile'),
         id: 'profile',
-        // Optional-chain: partial list items must not throw mid-sort.
-        sort: sortByString((r) => suiteFilterKey(r.metadata?.labels) ?? ''),
+        // Display title, not the hidden filter key: the cell renders
+        // checkProfileLabel (localized built-in titles, tailored names without
+        // the tp- prefix), so sorting on the key orders "ACSC Essential Eight"
+        // after "CIS" and puts every tailored row where its own name does not
+        // belong. Same rule the profile chips use below. Optional-chain:
+        // partial list items must not throw mid-sort.
+        sort: sortByString((r) => {
+          const key = suiteFilterKey(r.metadata?.labels);
+          return key === undefined ? '' : suiteFilterKeyTitle(key);
+        }),
       },
       { title: t('Status'), id: 'status', sort: sortByString(rowFilterStatus) },
       { title: t('Severity'), id: 'severity', sort: sortByString(checkSeverity) },

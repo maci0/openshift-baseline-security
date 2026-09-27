@@ -479,11 +479,11 @@ func FuzzOwnedSuitesRelatedObjects(f *testing.F) {
 			}
 		}
 		// The plugin refs track console.managementState: with Removed the operator
-		// deletes the Deployment/PDB/ConsolePlugin, so it must not claim them.
+		// deletes the Service/Deployment/PDB/ConsolePlugin, so it must not claim them.
 		for _, state := range []baselinev1alpha1.ManagementState{baselinev1alpha1.Managed, baselinev1alpha1.Removed} {
 			cb.Spec.Console.ManagementState = state
 			refs := relatedObjectsFromSuites(cb, suites)
-			fixed := 4
+			fixed := 5
 			if state == baselinev1alpha1.Removed {
 				fixed = 1
 			}
@@ -492,7 +492,7 @@ func FuzzOwnedSuitesRelatedObjects(f *testing.F) {
 				t.Fatalf("relatedObjectsFromSuites len %d want %d", len(refs), fixed+len(suites))
 			}
 			for _, ref := range refs[:fixed] {
-				if ref.Resource == "deployments" || ref.Resource == "poddisruptionbudgets" || ref.Resource == "consoleplugins" {
+				if ref.Resource == "services" || ref.Resource == "deployments" || ref.Resource == "poddisruptionbudgets" || ref.Resource == "consoleplugins" {
 					if state == baselinev1alpha1.Removed {
 						t.Fatalf("plugin ref %q advertised while managementState=Removed", ref.Resource)
 					}

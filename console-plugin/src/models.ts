@@ -303,7 +303,12 @@ export type ComplianceRemediation = {
     annotations?: Record<string, string>;
     resourceVersion?: string;
   };
-  spec: { apply: boolean; current?: { object?: RemediationObject } };
+  // spec is optional and every leaf inside it is optional: a hand-edited or
+  // partially restored ComplianceRemediation reaches the Remediations tab with
+  // no spec, and an unguarded `rem.spec.apply` throws inside the row-list memo,
+  // blanking the whole tab (the same class of narrowing commit 86b3fb7 applied
+  // to metadata).
+  spec?: { apply?: boolean; current?: { object?: RemediationObject } };
   status?: {
     applicationState?: 'Applied' | 'NotApplied' | 'Error' | 'Outdated' | 'MissingDependencies';
     // CO status.errorMessage when applicationState is Error (or sometimes
