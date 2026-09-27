@@ -94,7 +94,9 @@ Describes `main`; install from published OLM tags for only the released surface.
   [docs/OBSERVABILITY.md](docs/OBSERVABILITY.md).
 - **Support**: `operator/hack/must-gather.sh` collects operator + compliance
   state (Secret objects and waiver `requestedBy`/`approvedBy` are omitted).
-  `--help` prints usage; a partial collection exits 1.
+  `--help` prints usage; a partial collection exits 1. It and
+  `hack/backup.sh` write into `./must-gather` and `./baseline-backup` by
+  default; both are gitignored, because a backup is unredacted.
 
 ## Layout
 

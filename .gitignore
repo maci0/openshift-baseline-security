@@ -22,6 +22,15 @@ console-plugin/.yarn/
 console-plugin/test-results/
 # Playwright session cookies after e2e login (also in console-plugin/.gitignore).
 console-plugin/e2e/.auth/
+# Default output directories of the operator support scripts, which run from
+# operator/ (hack/backup.sh -> ./baseline-backup, hack/must-gather.sh ->
+# ./must-gather). A backup is the unredacted ClusterBaseline, so it carries the
+# spec.waivers[].requestedBy/approvedBy identities must-gather.sh strips, and a
+# must-gather holds operator logs and cluster dumps. Their 0600/0700 modes do
+# not stop `git add -A`; TestDefaultOutputDirsAreGitignored keeps these entries
+# matching the scripts' defaults.
+operator/baseline-backup/
+operator/must-gather/
 # Python bytecode from hack/ scripts (e.g. prometheusrule_to_rules.py).
 **/__pycache__/
 *.py[cod]

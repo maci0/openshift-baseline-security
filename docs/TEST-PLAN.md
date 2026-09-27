@@ -1055,6 +1055,10 @@ stale Available or eternal Progressing.
       `requestedBy`/`approvedBy` (including a value dumped as a multi-line
       block, whose continuation lines would otherwise survive) and
       `last-applied-configuration` (`hack/must-gather.sh --self-test`).
+- [x] **Support-archive output stays out of git**: the default output
+      directory of `hack/backup.sh` and `hack/must-gather.sh` is ignored, so
+      the waiver attribution a backup carries cannot be committed with
+      `git add -A` (`TestDefaultOutputDirsAreGitignored`).
 - [x] **Must-gather CLI usage**: `--help`/`-h` print usage on stdout and
       exit 0; unknown flags and extra args exit 2 (`TestMustGatherHelp`,
       `TestMustGatherUnknownOption`, `TestMustGatherExtraArgs`).

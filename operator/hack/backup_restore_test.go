@@ -18,6 +18,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -1174,5 +1175,75 @@ func TestBackupRestoreUsage(t *testing.T) {
 	// An unknown option must not be turned into a directory named after it.
 	if _, err := os.Stat("--not-a-flag"); err == nil {
 		t.Fatal("a script created a path named after an unknown option")
+	}
+}
+
+// defaultOutputDir reads a hack/ script's `OUT="${1:-<default>}"` default.
+// The default is relative to operator/, the directory the scripts are
+// documented to run from.
+var defaultOutputDir = regexp.MustCompile(`OUT="\$\{1:-(?:\./)?([^}"]+)\}"`)
+
+func scriptDefaultOutputDir(t *testing.T, name string) string {
+	t.Helper()
+	raw, err := os.ReadFile(scriptPath(t, name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := defaultOutputDir.FindSubmatch(raw)
+	if m == nil {
+		t.Fatalf("%s has no OUT default to check against .gitignore", name)
+	}
+	return string(m[1])
+}
+
+// repoRoot walks up from the test's own directory for the marker that only the
+// repository root has: hack/ itself, one level under operator/.
+func repoRoot(t *testing.T) string {
+	t.Helper()
+	dir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "operator", "hack", "backup.sh")); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			t.Fatal("operator/hack/backup.sh not found above the test directory")
+		}
+		dir = parent
+	}
+}
+
+// TestDefaultOutputDirsAreGitignored keeps .gitignore in step with the two
+// support scripts that default their output into the working tree. A backup is
+// the unredacted ClusterBaseline, so it carries the waiver requestedBy and
+// approvedBy identities must-gather.sh strips, and a must-gather carries
+// operator logs and cluster dumps. The 0600 file and 0700 directory modes
+// stop another local user, not `git add -A`, so an unignored default is a
+// path from a cluster user's identity into a commit. Renaming a default
+// without updating .gitignore fails here.
+func TestDefaultOutputDirsAreGitignored(t *testing.T) {
+	root := repoRoot(t)
+	git, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("git not on PATH; the ignore rules cannot be checked")
+	}
+	inside := exec.CommandContext(t.Context(), git, "rev-parse", "--is-inside-work-tree")
+	inside.Dir = root
+	if out, err := inside.CombinedOutput(); err != nil || strings.TrimSpace(string(out)) != "true" {
+		t.Skipf("not a git work tree: %v %s", err, out)
+	}
+	for _, name := range []string{"backup.sh", "must-gather.sh"} {
+		rel := filepath.Join("operator", scriptDefaultOutputDir(t, name))
+		// A file inside the directory, not the bare name: a rule that ignored
+		// only the directory entry would still let its contents be added.
+		probe := filepath.Join(rel, "clusterbaseline.yaml")
+		check := exec.CommandContext(t.Context(), git, "check-ignore", "-q", "--no-index", probe)
+		check.Dir = root
+		if err := check.Run(); err != nil {
+			t.Errorf("%s default output %s is not gitignored; a backup there can be committed with the waiver attribution it carries", name, rel)
+		}
 	}
 }
