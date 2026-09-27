@@ -183,7 +183,11 @@ func (r *ClusterBaselineReconciler) ensureBatchMetadata(
 			}
 		}
 		if started.IsZero() {
-			started = metav1.Now()
+			// r.now(), not metav1.Now(): the grace valve in batchPastGrace
+			// compares this stamp against the injected clock, so stamping it
+			// from the wall clock can leave StartedAt a full clock ahead of it
+			// and be read back as corrupt, resuming a live pause immediately.
+			started = metav1.NewTime(r.now().UTC())
 			annotations[batchStartedAtAnnotation] = started.UTC().Format(time.RFC3339Nano)
 			changed = true
 		}

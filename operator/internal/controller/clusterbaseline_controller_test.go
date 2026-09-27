@@ -1722,6 +1722,36 @@ func TestEnsureBatchMetadataCorruptStartedAtFailClosed(t *testing.T) {
 	}
 }
 
+// A fresh batch stamps batch-started-at from the injected clock, not the wall
+// clock: batchPastGrace compares that stamp against the same clock, so a wall
+// clock stamp ahead of it reads as corrupt and resumes a live pause at once.
+func TestEnsureBatchMetadataStampsInjectedClock(t *testing.T) {
+	scheme := testScheme(t)
+	cb := newBatchCB()
+	want := time.Date(2024, 3, 1, 0, 30, 0, 0, time.UTC)
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(cb).
+			WithStatusSubresource(&baselinev1alpha1.ClusterBaseline{}).Build(),
+		Scheme: scheme,
+		Clock:  &virtualClock{at: want},
+	}
+	started, err := r.ensureBatchMetadata(context.Background(), cb, []string{"worker"}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !started.Time.Equal(want) {
+		t.Fatalf("started = %v, want the injected clock's %v", started, want)
+	}
+	if got := cb.Annotations[batchStartedAtAnnotation]; got != want.Format(time.RFC3339Nano) {
+		t.Fatalf("batch-started-at annotation = %q, want %q", got, want.Format(time.RFC3339Nano))
+	}
+	// A batch stamped from the wall clock would be ~years ahead of the virtual
+	// clock and trip the corrupt-stamp branch of the grace valve.
+	if batchPastGrace(started, want) {
+		t.Fatal("freshly stamped batch reported past grace on its own clock")
+	}
+}
+
 // TestEnsureComplianceDashboard: the operator creates the console-dashboard
 // ConfigMap in openshift-config-managed, labeled console.openshift.io/dashboard,
 // carrying the embedded Grafana-schema JSON and an owner ref for GC.
