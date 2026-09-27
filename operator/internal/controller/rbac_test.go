@@ -51,11 +51,6 @@ func assertRoleResourceUpdate(t *testing.T, text, resource string) {
 	}
 }
 
-// complianceOperatorName is the object every name-scoped write rule in role.yaml
-// and the CSV must pin. Naming it once keeps the guards below and the RBAC they
-// read in step, and keeps the helper free of a parameter with one call value.
-const complianceOperatorName = "compliance-operator"
-
 // policyRule mirrors one entry of a ClusterRole's rules list. The json tags are
 // what sigs.k8s.io/yaml decodes, because it routes YAML through JSON.
 type policyRule struct {

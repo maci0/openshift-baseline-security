@@ -159,14 +159,20 @@ spec:
               memory: 512Mi
           lifecycle:
             preStop:
-              exec:
-                # Kube removes the endpoint only after SIGTERM, so a pod can
-                # still be scraped (and can still hold the leader lease) in the
-                # first seconds of termination. Sleep before the process sees
-                # SIGTERM so the endpoint leaves the Service first; the 5s is
-                # well inside terminationGracePeriodSeconds (30) minus the 20s
-                # GracefulShutdownTimeout in cmd/main.go.
-                command: ["/bin/sh", "-c", "sleep 5"]
+              # Kube removes the endpoint only after SIGTERM, so a pod can
+              # still be scraped (and can still hold the leader lease) in the
+              # first seconds of termination. The sleep lets the endpoint leave
+              # the Service before the process sees SIGTERM; 5s is well inside
+              # terminationGracePeriodSeconds (30) minus the 20s
+              # GracefulShutdownTimeout in cmd/main.go.
+              #
+              # Native sleep handler, not exec: the runtime image is ubi-micro,
+              # which ships no shell and no coreutils, so `/bin/sh -c "sleep 5"`
+              # cannot run in the container and the hook would fail without ever
+              # opening the drain window. The kubelet sleeps on the pod's behalf
+              # (Kubernetes 1.29+; the CSV's minKubeVersion is 1.35).
+              sleep:
+                seconds: 5
           # Prefer logs when the process dies before writing /dev/termination-log.
           terminationMessagePolicy: FallbackToLogsOnError
       volumes:

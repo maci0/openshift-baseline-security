@@ -119,7 +119,7 @@ func applyPluginContainer(pod *corev1.PodSpec, image string) {
 	pod.DNSPolicy = corev1.DNSClusterFirst
 	pod.RestartPolicy = corev1.RestartPolicyAlways
 	pod.SchedulerName = corev1.DefaultSchedulerName
-	pod.TerminationGracePeriodSeconds = ptr.To(int64(30))
+	pod.TerminationGracePeriodSeconds = ptr.To(pluginTerminationGracePeriodSeconds)
 	pullPolicy := corev1.PullIfNotPresent
 	imageLeaf := image[strings.LastIndex(image, "/")+1:]
 	if !strings.Contains(imageLeaf, ":") || strings.HasSuffix(imageLeaf, ":latest") {
@@ -207,7 +207,12 @@ func applyPluginContainer(pod *corev1.PodSpec, image string) {
 				// Sleep before the process sees SIGTERM so the endpoint leaves the
 				// Service first; nginx then quits gracefully on SIGTERM. 5s fits
 				// inside terminationGracePeriodSeconds (30) with room for the quit.
-				Exec: &corev1.ExecAction{Command: []string{"/bin/sh", "-c", "sleep 5"}},
+				//
+				// Native sleep handler, not exec: the hook must not depend on a
+				// shell being present in the base image (the manager image is
+				// ubi-micro and has none). The kubelet sleeps on the pod's behalf
+				// (Kubernetes 1.29+; the CSV declares minKubeVersion 1.35).
+				Sleep: &corev1.SleepAction{Seconds: pluginPreStopSeconds},
 			},
 		},
 		// Prefer container logs when nginx dies before writing the termination file

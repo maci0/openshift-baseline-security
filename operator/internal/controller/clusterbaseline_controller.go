@@ -30,10 +30,15 @@ import (
 
 const (
 	complianceNamespace = "openshift-compliance"
-	scanSettingName     = "baseline"
-	finalizerName       = "baselinesecurity.openshift.io/cleanup"
-	pluginName          = "baseline-security-console-plugin"
-	pluginNS            = "openshift-baseline-security"
+	// Name of the Compliance Operator Subscription and OperatorGroup this
+	// operator owns. One constant so a rename cannot leave the RBAC
+	// resourceNames, the subscription lookup, and the group target in
+	// different files disagreeing.
+	complianceOperatorName = "compliance-operator"
+	scanSettingName        = "baseline"
+	finalizerName          = "baselinesecurity.openshift.io/cleanup"
+	pluginName             = "baseline-security-console-plugin"
+	pluginNS               = "openshift-baseline-security"
 	// pluginPort is the HTTPS port nginx serves the static assets on. It must
 	// match the listen directive in console-plugin/nginx.conf.
 	pluginPort = 9443
@@ -80,6 +85,14 @@ const (
 	// Ready threshold for ConsolePluginReady=True: one ready pod is enough for
 	// the plugin to serve; partial (1/2) must not Progress forever as WaitingForPods.
 	pluginReadyMin = int32(1)
+	// preStop drain window: endpoint removal races the SIGTERM, so the pod keeps
+	// serving this long after the endpoint starts leaving the Service. Must stay
+	// well under the 30s terminationGracePeriodSeconds below so nginx still gets
+	// its SIGQUIT (the image's STOPSIGNAL) and the in-flight asset requests.
+	pluginPreStopSeconds int64 = 5
+	// terminationGracePeriod plugin, matching the manager Deployment. Bounds the
+	// preStop sleep plus nginx's graceful quit; below it the pod is SIGKILLed.
+	pluginTerminationGracePeriodSeconds int64 = 30
 )
 
 // Foreign CRs are unstructured so we do not import their Go API modules.

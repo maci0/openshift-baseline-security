@@ -132,15 +132,23 @@ func TestApplyPluginContainerPreStop(t *testing.T) {
 	pod := &corev1.PodSpec{}
 	applyPluginContainer(pod, "quay.io/example/plugin:0.1.0")
 	c := pod.Containers[0]
-	if c.Lifecycle == nil || c.Lifecycle.PreStop == nil || c.Lifecycle.PreStop.Exec == nil {
-		t.Fatal("preStop exec hook required so the endpoint leaves the Service before SIGTERM")
+	if c.Lifecycle == nil || c.Lifecycle.PreStop == nil {
+		t.Fatal("preStop hook required so the endpoint leaves the Service before SIGTERM")
 	}
-	if got := strings.Join(c.Lifecycle.PreStop.Exec.Command, " "); got != "/bin/sh -c sleep 5" {
-		t.Fatalf("preStop command = %q", got)
+	// A sleep handler, never exec: the hook must not depend on a shell or
+	// coreutils binary existing in the base image (the manager image is
+	// ubi-micro and ships neither), and an exec that cannot run is a hook the
+	// kubelet skips before the pod ever drains.
+	if c.Lifecycle.PreStop.Exec != nil || c.Lifecycle.PreStop.Sleep == nil {
+		t.Fatalf("preStop must be the native sleep handler, got exec=%v sleep=%v",
+			c.Lifecycle.PreStop.Exec, c.Lifecycle.PreStop.Sleep)
+	}
+	if c.Lifecycle.PreStop.Sleep.Seconds != pluginPreStopSeconds {
+		t.Fatalf("preStop sleep = %ds, want %ds", c.Lifecycle.PreStop.Sleep.Seconds, pluginPreStopSeconds)
 	}
 	// The sleep must fit inside the grace period or the pod is SIGKILLed
 	// before nginx ever sees SIGTERM.
-	if *pod.TerminationGracePeriodSeconds <= 5 {
+	if *pod.TerminationGracePeriodSeconds <= pluginPreStopSeconds {
 		t.Fatalf("terminationGracePeriodSeconds = %d, must exceed the preStop sleep", *pod.TerminationGracePeriodSeconds)
 	}
 }

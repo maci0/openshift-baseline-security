@@ -420,12 +420,16 @@ spec:
                         memory: 512Mi
                     lifecycle:
                       preStop:
-                        exec:
-                          # Sleep before SIGTERM reaches the process so the
-                          # endpoint leaves the Service first; 5s is well inside
-                          # terminationGracePeriodSeconds (30) minus the 20s
-                          # GracefulShutdownTimeout in cmd/main.go.
-                          command: ["/bin/sh", "-c", "sleep 5"]
+                        # Sleep before SIGTERM reaches the process so the
+                        # endpoint leaves the Service first; 5s is well inside
+                        # terminationGracePeriodSeconds (30) minus the 20s
+                        # GracefulShutdownTimeout in cmd/main.go.
+                        #
+                        # Native sleep handler, not exec: the runtime image is
+                        # ubi-micro (no shell, no coreutils), so the exec form
+                        # cannot run and the drain window never opens.
+                        sleep:
+                          seconds: 5
                     terminationMessagePolicy: FallbackToLogsOnError
                 volumes:
                   - name: metrics-certs

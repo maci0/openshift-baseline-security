@@ -64,6 +64,15 @@ depend on those tags.
   but the label depended on that gate rather than on what was built. The flags
   are now assembled after `resolve-release-version.sh` has resolved the
   version, so every image is built with it explicitly.
+- Operator pod termination skipped the drain window. The manager Deployment's
+  `preStop` hook was `exec: /bin/sh -c "sleep 5"`, but the runtime image is
+  `ubi9/ubi-micro`, which ships no shell and no `sleep`. The hook could not run,
+  so SIGTERM reached the process immediately and a pod being removed from the
+  Service could still receive scrapes or hold the leader lease during its final
+  seconds. Both the manager Deployment (kustomize and CSV) and the console
+  plugin container now use the kubelet's native `preStop.sleep` handler, which
+  needs no binary in the image. Requires Kubernetes 1.29+; the CSV already
+  declares `minKubeVersion: 1.35.0`.
 - Console plugin image failed to build. The `COPY` that places
   `THIRD-PARTY-NOTICES.txt` in `/licenses/` named a path from the build stage
   without `--from=build`, so it resolved against the build context instead,

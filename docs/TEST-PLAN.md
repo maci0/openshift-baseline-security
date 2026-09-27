@@ -694,9 +694,10 @@ an accepted risk neither inflates nor tanks the score.
 - [x] **Plugin HA strategy**: Deployment maxUnavailable=1 so Available stays
       True at 1/2 ready (`TestEnsureConsolePlugin` strategy assert).
 - [x] **preStop on both pods**: the plugin container declares a 5s preStop
-      exec hook inside the 30s grace period
+      sleep handler inside the 30s grace period, never an exec hook (the
+      images do not guarantee a shell)
       (`TestApplyPluginContainerPreStop`); the manager Deployment and the CSV
-      carry the same hook (manifest, asserted by reading the YAML).
+      carry the same sleep handler (manifest, asserted by reading the YAML).
 - [x] **Readyz fails on SIGTERM**: readiness reports not-ready as soon as the
       process starts draining (`TestCacheSyncReadyz`).
 - [x] **Plugin probes hit the real request path**: startup, readiness and

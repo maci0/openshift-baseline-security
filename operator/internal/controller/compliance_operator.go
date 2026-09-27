@@ -21,7 +21,7 @@ import (
 
 func (r *ClusterBaselineReconciler) ensureComplianceOperator(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline) error {
 	sub := u(subscriptionGVK)
-	getErr := r.Get(ctx, types.NamespacedName{Namespace: complianceNamespace, Name: "compliance-operator"}, sub)
+	getErr := r.Get(ctx, types.NamespacedName{Namespace: complianceNamespace, Name: complianceOperatorName}, sub)
 	if getErr == nil {
 		// Keep catalog source in sync when we manage install. createIfMissing only
 		// writes the Subscription once; without this, changing
@@ -71,7 +71,7 @@ func (r *ClusterBaselineReconciler) ensureComplianceOperator(ctx context.Context
 	}
 
 	sub = u(subscriptionGVK)
-	sub.SetName("compliance-operator")
+	sub.SetName(complianceOperatorName)
 	sub.SetNamespace(complianceNamespace)
 	// No CSV exists yet, so no version is installed: clear it on this path too so
 	// a stale version from a previous install cannot survive alongside
@@ -82,7 +82,7 @@ func (r *ClusterBaselineReconciler) ensureComplianceOperator(ctx context.Context
 	// re-resolves confidently.
 	createSource, _ := r.resolveCatalogSource(ctx, cb)
 	sub.Object["spec"] = map[string]any{
-		"name": "compliance-operator", "channel": "stable",
+		"name": complianceOperatorName, "channel": "stable",
 		"source": createSource, "sourceNamespace": "openshift-marketplace",
 	}
 	if err := createIfMissing(ctx, r.Client, sub); err != nil {
@@ -107,7 +107,7 @@ func (r *ClusterBaselineReconciler) ensureComplianceOperatorGroup(ctx context.Co
 		return fmt.Errorf("listing OperatorGroups in %s: %w", complianceNamespace, err)
 	}
 	for i := range existing.Items {
-		if existing.Items[i].GetName() != "compliance-operator" {
+		if existing.Items[i].GetName() != complianceOperatorName {
 			// A user-managed OperatorGroup already owns the namespace. Leave it and
 			// add nothing: the Compliance Operator installs through it, and a second
 			// OG here would break OLM for the whole namespace.
@@ -117,7 +117,7 @@ func (r *ClusterBaselineReconciler) ensureComplianceOperatorGroup(ctx context.Co
 		}
 	}
 	og := u(operatorGroupGVK)
-	og.SetName("compliance-operator")
+	og.SetName(complianceOperatorName)
 	og.SetNamespace(complianceNamespace)
 	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, og, func() error {
 		return unstructured.SetNestedStringSlice(og.Object, []string{complianceNamespace}, "spec", "targetNamespaces")
@@ -207,7 +207,7 @@ func (r *ClusterBaselineReconciler) syncComplianceSubscriptionSource(
 	if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		latest := u(subscriptionGVK)
 		if err := r.Get(ctx, types.NamespacedName{
-			Namespace: complianceNamespace, Name: "compliance-operator",
+			Namespace: complianceNamespace, Name: complianceOperatorName,
 		}, latest); err != nil {
 			return err
 		}
