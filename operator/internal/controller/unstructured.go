@@ -59,3 +59,17 @@ func unstructuredName(obj map[string]any) string {
 	}
 	return stringMapValue(meta, "name")
 }
+
+// nextPageToken advances a paged List loop and reports whether another page
+// exists. The apiserver is expected to hand back an empty token on the last
+// page, but a token identical to the one just used would make the next List
+// replay the same page: the loop would spin on one page until
+// reconcileTimeout and the reconcile would fail with a deadline instead of the
+// real cause. Stop with what has been collected; the unread remainder takes
+// the same path as any other partial read.
+func nextPageToken(next, used string) (string, bool) {
+	if next == "" || next == used {
+		return "", false
+	}
+	return next, true
+}

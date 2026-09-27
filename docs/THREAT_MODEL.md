@@ -192,7 +192,7 @@ STRIDE, tied to entry points. Not a generic checklist.
 |-------|-----------------|
 | Spoofing | Metrics without authn. Mitigated: default `--metrics-secure=true`; non-loopback insecure forced back to secure (`main.go:169`, loopback table test at `metrics_cert_test.go:634`). |
 | Information disclosure | `/metrics` with a stolen scraper token or overly broad `get` on `/metrics`. Health probes are unauthenticated but not Service-exposed. |
-| Denial of service | nginx `client_max_body_size 1k` and GET/HEAD only (`nginx.conf:80,118-122`). Metrics and probe bind addresses are validated (`validateListenAddr`, `main.go:331`); an empty probe address is a hard exit rather than a never-ready pod, and a relative `--metrics-cert-dir` is rejected (`main.go:163`). Empty metrics addr is restored to `:8443` (`main.go:139`) rather than controller-runtime's `:8080`. Recurring class: a hostile or buggy apiserver that returns a repeated `continue` token would spin a paged List until the reconcile deadline. Guarded at all four paged call sites by a token-advance check (`nextPageToken`, `internal/controller/helpers.go:66-71`; inlined at `compliance_operator.go:295-300`) and covered by `helpers_test.go`. |
+| Denial of service | nginx `client_max_body_size 1k` and GET/HEAD only (`nginx.conf:80,118-122`). Metrics and probe bind addresses are validated (`validateListenAddr`, `main.go:331`); an empty probe address is a hard exit rather than a never-ready pod, and a relative `--metrics-cert-dir` is rejected (`main.go:163`). Empty metrics addr is restored to `:8443` (`main.go:139`) rather than controller-runtime's `:8080`. Recurring class: a hostile or buggy apiserver that returns a repeated `continue` token would spin a paged List until the reconcile deadline. Guarded at all four paged call sites by a token-advance check (`nextPageToken`, `internal/controller/unstructured.go:70-75`; inlined at `compliance_operator.go:295-300`) and covered by `unstructured_test.go`. |
 | Elevation | `--leader-elect=false` on a 2-replica Deployment races default-CR create (`main.go:202-205` logs a warning). |
 | Resource exhaustion | The manager informer cache is cluster-wide per type unless scoped, so a typed read caches every object of that type in the cluster. Scoped by `controller.ManagerCacheOptions()` (`internal/controller/managercache.go`): plugin Deployment/Service/PDB in `openshift-baseline-security`, scan-storage PVCs in `openshift-compliance`. Named ConfigMap reads bypass the cache entirely (`main.go:268`, `DisableFor: []client.Object{&corev1.ConfigMap{}}`), so the dashboard CM costs one `get` and no `list/watch`. RBAC still grants cluster-wide `list`/`watch` on the four scoped types, which is the residual edge. |
 
@@ -279,7 +279,7 @@ This file is current as of the date above. Every file reference in it was
 re-read against that commit on that date. Re-check on any change to RBAC, plugin
 nginx, metrics flags, `RELATED_IMAGE_*`, remediation/batch paths, the status
 sanitizing layer, Namespace labels, CRD validation, the paged-List guards in
-`internal/controller/helpers.go`, or the operator's own flag and help surface in
+`internal/controller/unstructured.go`, or the operator's own flag and help surface in
 `cmd/main.go`.
 
 The previous pass found and closed: a stale commit stamp; eleven drifted line
@@ -315,7 +315,7 @@ recorded at the end of §5.
 The current pass re-verified this file after 38 commits landed since the
 previous stamp, and found the operator half of the model had held: every
 `main.go` citation, all of `role.yaml`, `manager.yaml`, `plugin.go`,
-`batch.go`, `helpers.go`, `metrics_cert.go`, `nginx.conf`, `sanitize.go`'s clamp
+`batch.go`, `unstructured.go`, `metrics_cert.go`, `nginx.conf`, `sanitize.go`'s clamp
 surface, and the 58-target fuzz count all still resolve. Drift was concentrated
 in the console plugin, which changed far more, plus the stamp itself.
 

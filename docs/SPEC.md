@@ -477,6 +477,8 @@ openshift-baseline-security/
 │   │                               # domain modules; tests live alongside as *.test.ts
 │   ├── src/testing/                # shared test-only helpers (fuzz PRNG)
 │   ├── tools/oxlint/               # local anti-slop oxlint plugin
+│   ├── tools/attribution/          # yarn licenses: SPDX allowlist over the node_modules closure
+│   ├── tools/size/                 # yarn size: gzip budget over dist/
 │   ├── locales/en/
 │   ├── e2e/                        # Playwright live-console suite
 │   ├── console-extensions.json
@@ -492,6 +494,8 @@ openshift-baseline-security/
 ├── .github/workflows/{ci,release}.yml
 ├── .github/PULL_REQUEST_TEMPLATE.md    # PR checklist (gate, changelog, generate)
 ├── .ci-operator.yaml               # ci-operator onboarding stub
+├── ruff.toml                       # lint rules for operator/hack/*.py (lint-python)
+├── .yamllint.yaml                  # lint rules for the hand-maintained YAML
 ├── CHANGELOG.md
 ├── README.md
 ├── SECURITY.md                     # support window + vulnerability reporting

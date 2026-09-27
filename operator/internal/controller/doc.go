@@ -10,17 +10,19 @@
 // CheckResults in pages of 500.
 //
 // Files are split by concern (same package, no import cycles):
-//   - clusterbaseline_controller.go: Reconcile loop, reconcileOwned, SetupWithManager
+//   - clusterbaseline_controller.go: Reconcile loop, reconcileOwned, SetupWithManager,
+//     and the requeue cadence (requeueAfterAt, nearestWaiverExpiry)
 //   - default_cr.go: DefaultClusterBaseline, the zero-config ClusterBaseline/cluster
 //     bootstrap Runnable (leader-only, opt out with BASELINE_SECURITY_SKIP_DEFAULT_CR)
 //   - clock.go: the reconciler's wall-clock source (nil = real clock)
 //   - managercache.go: ManagerCacheOptions, the manager's namespace-scoped cache bounds
-//   - helpers.go: requeue cadence, createIfMissing, relatedObjectsFromSuites
-//   - unstructured.go: unstructured object/list helpers and metadata field readers
+//   - create_if_missing.go: createIfMissing, shared by the create-owning steps
+//   - unstructured.go: unstructured object/list helpers, metadata field readers,
+//     and the paged-List token guard (nextPageToken)
 //   - compliance_operator.go: CO Subscription/OperatorGroup/CSV readiness
 //   - scanconfig.go: ScanSetting + per-profile/tailored ScanSettingBindings
 //   - scanstorage.go: Pending PVC readiness condition
-//   - aggregate.go: check-result scoring, counts, profile status
+//   - aggregate.go: check-result scoring, counts, profile status, relatedObjectsFromSuites
 //   - history_reconcile.go: suite-completion history advance and scan-diff base
 //   - history.go: score history rings, failure-diff, per-profile ring sync, scan endTimestamp parse
 //   - scoring.go: pass/fail and severity-weighted score math, severity lookup
