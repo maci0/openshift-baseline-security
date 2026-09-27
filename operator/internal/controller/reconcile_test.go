@@ -1796,7 +1796,7 @@ func TestReconcileSkipsUnchangedStatusWrite(t *testing.T) {
 	// Replay the stored object unchanged: nothing moved on the cluster, so the
 	// rollup comes out identical and the write must be skipped.
 	stored := &baselinev1alpha1.ClusterBaseline{}
-	if err := r.Client.Get(context.Background(), types.NamespacedName{Name: "cluster"}, stored); err != nil {
+	if err := r.Get(context.Background(), types.NamespacedName{Name: "cluster"}, stored); err != nil {
 		t.Fatalf("get stored ClusterBaseline: %v", err)
 	}
 	stored.Finalizers = []string{finalizerName}

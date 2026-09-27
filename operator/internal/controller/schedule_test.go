@@ -147,7 +147,6 @@ func TestNextScanTime(t *testing.T) {
 }
 
 func TestScanIntervalSeconds(t *testing.T) {
-	now := time.Date(2026, 7, 10, 3, 0, 0, 0, time.UTC)
 	cases := []struct {
 		schedule string
 		want     float64
@@ -164,13 +163,21 @@ func TestScanIntervalSeconds(t *testing.T) {
 		// weekend gap, so a fire-capped walk would under-report 300s and
 		// false-page. Max gap is Fri 23:55 -> Mon 00:00 = 2d + 5m.
 		{"*/5 * * * 1-5", 173100},
+		// Annual cadence: the walk is anchored to scanIntervalEpoch, so the
+		// leap-year gap is the same value whoever asks and whenever. Pinned
+		// here because the cache key carries the schedule alone and therefore
+		// has to stand in for the walk's start: a caller-anchored walk
+		// returns 366d from some phases and 365d from others, so the first
+		// publisher to fill the entry would decide it for the process.
+		{"0 0 1 1 *", 365 * 86400},
 		{"", 86400},        // empty -> default daily
 		{"not a cron", 0},  // invalid
 		{"@daily", 0},      // descriptor rejected (five-field only)
 		{"*/7 , 1 1 0", 0}, // parseable but never fires
 	}
+	resetScanIntervalCache(t)
 	for _, c := range cases {
-		if got := scanIntervalSeconds(c.schedule, now); got != c.want {
+		if got := scanIntervalSeconds(c.schedule); got != c.want {
 			t.Fatalf("scanIntervalSeconds(%q) = %v, want %v", c.schedule, got, c.want)
 		}
 	}
@@ -195,18 +202,27 @@ func scanIntervalCacheLen(t *testing.T) int {
 	return len(scanIntervalCache)
 }
 
-// Max gap is a property of the cron, so a later `now` must reuse the memoized
-// value rather than walk a different 14-month window.
-func TestScanIntervalSecondsCachedAcrossNow(t *testing.T) {
+// The cache key is the normalized schedule alone, so the memoized value must be
+// exactly what an uncached walk returns: same number, regardless of when the
+// entry was filled or who reads it afterwards.
+func TestScanIntervalSecondsCachedValueMatchesWalk(t *testing.T) {
 	resetScanIntervalCache(t)
-	now := time.Date(2026, 7, 10, 3, 0, 0, 0, time.UTC)
-	first := scanIntervalSeconds("0 1 * * *", now)
-	if first != 86400 {
+	if first := scanIntervalSeconds("0 1 * * *"); first != 86400 {
 		t.Fatalf("first = %v, want 86400", first)
 	}
-	later := scanIntervalSeconds("0 1 * * *", now.AddDate(0, 6, 0))
-	if later != first {
-		t.Fatalf("cached interval = %v, want %v", later, first)
+	// A second reader is served the entry, and the entry still equals a walk
+	// from scratch. A cache keyed without the walk's anchor would fail this:
+	// its value would follow the first caller's clock phase.
+	_, sched, err := normalizeAndParseSchedule("0 1 * * *")
+	if err != nil {
+		t.Fatal(err)
+	}
+	walked, complete := computeScanInterval(sched)
+	if !complete {
+		t.Fatal("walk truncated at the iteration cap")
+	}
+	if cached := scanIntervalSeconds("0 1 * * *"); cached != walked {
+		t.Fatalf("cached interval = %v, want %v from a fresh walk", cached, walked)
 	}
 	if n := scanIntervalCacheLen(t); n != 1 {
 		t.Fatalf("cache entries = %d, want 1", n)
@@ -215,8 +231,7 @@ func TestScanIntervalSecondsCachedAcrossNow(t *testing.T) {
 
 func TestScanIntervalSecondsInvalidNotCached(t *testing.T) {
 	resetScanIntervalCache(t)
-	now := time.Date(2026, 7, 10, 3, 0, 0, 0, time.UTC)
-	if got := scanIntervalSeconds("not a cron", now); got != 0 {
+	if got := scanIntervalSeconds("not a cron"); got != 0 {
 		t.Fatalf("invalid = %v, want 0", got)
 	}
 	if n := scanIntervalCacheLen(t); n != 0 {
@@ -226,10 +241,9 @@ func TestScanIntervalSecondsInvalidNotCached(t *testing.T) {
 
 func TestScanIntervalCacheBounded(t *testing.T) {
 	resetScanIntervalCache(t)
-	now := time.Date(2026, 7, 10, 3, 0, 0, 0, time.UTC)
 	for i := 0; i < scanIntervalCacheMax+20; i++ {
 		sched := fmt.Sprintf("%d %d * * *", i%60, (i/60)%24)
-		if got := scanIntervalSeconds(sched, now); got != 86400 {
+		if got := scanIntervalSeconds(sched); got != 86400 {
 			t.Fatalf("scanIntervalSeconds(%q) = %v, want 86400", sched, got)
 		}
 	}
@@ -242,7 +256,6 @@ func TestScanIntervalCacheBounded(t *testing.T) {
 
 func TestScanIntervalSecondsConcurrent(t *testing.T) {
 	resetScanIntervalCache(t)
-	now := time.Date(2026, 7, 10, 3, 0, 0, 0, time.UTC)
 	const n = 32
 	var wg sync.WaitGroup
 	wg.Add(n)
@@ -250,7 +263,7 @@ func TestScanIntervalSecondsConcurrent(t *testing.T) {
 	for i := 0; i < n; i++ {
 		go func() {
 			defer wg.Done()
-			got[i] = scanIntervalSeconds("0 1 * * 1-5", now)
+			got[i] = scanIntervalSeconds("0 1 * * 1-5")
 		}()
 	}
 	wg.Wait()

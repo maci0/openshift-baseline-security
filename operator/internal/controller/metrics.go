@@ -128,7 +128,7 @@ func publishMetrics(cb *baselinev1alpha1.ClusterBaseline, now time.Time) {
 	scanning := len(cb.Spec.Profiles) > 0 || len(cb.Spec.TailoredProfiles) > 0
 	var interval float64
 	if scanning {
-		interval = scanIntervalSeconds(cb.Spec.Schedule, now)
+		interval = scanIntervalSeconds(cb.Spec.Schedule)
 	}
 
 	metricsMu.Lock()

@@ -84,27 +84,36 @@ const (
 // scanIntervalCache memoizes scanIntervalSeconds per normalized schedule: the
 // full-horizon walk below costs ~0.3s for a per-minute cron, too much for every
 // metrics publish but fine once per distinct schedule per process lifetime.
-// Max gap is a property of the cron, not of `now`, so the key is the normalized
-// expression. A truncated walk is not stored: an underestimate would false-page
-// ComplianceScanStale at 1.5x.
+// The key is the normalized expression alone because the walk is anchored to
+// scanIntervalEpoch, not to the caller's clock, so the memoized value is a
+// function of the cron alone. A truncated walk is not stored: an underestimate
+// would false-page ComplianceScanStale at 1.5x.
 var (
 	scanIntervalMu    sync.Mutex
 	scanIntervalCache = map[string]float64{}
+	// scanIntervalEpoch anchors every walk. Anchoring to the caller's `now`
+	// would make the max gap depend on when the first publisher happened to
+	// run: an annual schedule crossing a leap year reports 365d from one phase
+	// and 366d from another (measured, not theoretical), and the cache would
+	// then freeze whichever phase won the race under a key that omits it. The
+	// drift is under the alert's 1.5x tolerance, but a memoized value that
+	// varies with arrival order is a value the key cannot describe.
+	scanIntervalEpoch = time.Date(2024, time.January, 1, 0, 0, 0, 0, time.UTC)
 )
 
 // scanIntervalSeconds returns the LARGEST gap between consecutive fires over
-// the next ~14 months, or 0 for an invalid/degenerate schedule. The maximum
-// (not the next) gap is what the ComplianceScanStale alert must scale by: a
-// weekday-only cron's next-two-fires gap is 24h midweek, but the true
-// Friday-to-Monday gap is 72h, and reporting 24h would false-page every
-// weekend at the 1.5x threshold. The walk covers the WHOLE horizon (no fire
-// cap): a dense-plus-sparse mix like "*/5 * * * 1-5" fires ~1.4k times before
-// its first weekend gap (~88k over the horizon), so any small cap would
-// silently under-report and resurrect the false pages. For fixed cadences
-// the max gap equals the only
-// gap, so daily/weekly/hourly stay exact; the horizon covers monthly and
-// yearly schedules plus one Feb-29 cycle irregularity.
-func scanIntervalSeconds(schedule string, now time.Time) float64 {
+// the ~14 months following scanIntervalEpoch, or 0 for an invalid/degenerate
+// schedule. The maximum (not the next) gap is what the ComplianceScanStale
+// alert must scale by: a weekday-only cron's next-two-fires gap is 24h
+// midweek, but the true Friday-to-Monday gap is 72h, and reporting 24h would
+// false-page every weekend at the 1.5x threshold. The walk covers the WHOLE
+// horizon (no fire cap): a dense-plus-sparse mix like "*/5 * * * 1-5" fires
+// ~1.4k times before its first weekend gap (~88k over the horizon), so any
+// small cap would silently under-report and resurrect the false pages. For
+// fixed cadences the max gap equals the only gap, so daily/weekly/hourly stay
+// exact; the horizon covers monthly and yearly schedules plus one Feb-29
+// cycle irregularity.
+func scanIntervalSeconds(schedule string) float64 {
 	norm, sched, err := normalizeAndParseSchedule(schedule)
 	if err != nil {
 		return 0
@@ -118,7 +127,7 @@ func scanIntervalSeconds(schedule string, now time.Time) float64 {
 	if v, ok := scanIntervalCache[norm]; ok {
 		return v
 	}
-	maxGap, complete := computeScanInterval(sched, now)
+	maxGap, complete := computeScanInterval(sched)
 	if !complete {
 		return maxGap
 	}
@@ -132,11 +141,11 @@ func scanIntervalSeconds(schedule string, now time.Time) float64 {
 	return maxGap
 }
 
-// computeScanInterval walks consecutive fires from now. complete is false when
-// the iteration cap is hit before the horizon, so the caller must not cache
-// maxGap (it may under-report the true weekend/month gap).
-func computeScanInterval(sched cron.Schedule, now time.Time) (float64, bool) {
-	prev := sched.Next(now.UTC())
+// computeScanInterval walks consecutive fires from scanIntervalEpoch. complete
+// is false when the iteration cap is hit before the horizon, so the caller must
+// not cache maxGap (it may under-report the true weekend/month gap).
+func computeScanInterval(sched cron.Schedule) (float64, bool) {
+	prev := sched.Next(scanIntervalEpoch)
 	if prev.IsZero() {
 		return 0, true
 	}

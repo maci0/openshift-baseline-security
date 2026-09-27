@@ -850,6 +850,10 @@ stale Available or eternal Progressing.
 - [x] Scan-interval memoizer is bounded, ignores parse failures, and shares one
       walk across concurrent publishers (`TestScanIntervalCacheBounded`,
       `TestScanIntervalSecondsInvalidNotCached`, `TestScanIntervalSecondsConcurrent`).
+- [x] Scan-interval value is a function of the schedule alone: the walk is
+      anchored to a fixed epoch, so the memoized entry always equals a fresh
+      walk (`TestScanIntervalSeconds`,
+      `TestScanIntervalSecondsCachedValueMatchesWalk`).
 - [x] History ring cap 30, no aliasing after truncate
       (`TestAppendHistoryRing`, `FuzzAppendHistoryRing`).
 - [x] Score-history content key is not forgeable, so the trend chart recomputes

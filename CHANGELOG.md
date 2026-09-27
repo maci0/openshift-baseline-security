@@ -66,6 +66,14 @@ depend on those tags.
 
 ### Fixed
 
+- `baseline_security_scan_interval_seconds` could report a value that depended
+  on which process published it first. The walk behind the gauge started at the
+  publisher's clock, so an annual schedule crossing a leap year reported 365d
+  from one phase of the year and 366d from another, and the per-process memo
+  froze whichever phase arrived first under a key that carries the schedule
+  alone. The walk is now anchored to a fixed epoch, so the value is a function
+  of `spec.schedule` and nothing else. The `ComplianceScanStale` threshold moves
+  by at most one day, and only for annual schedules.
 - Release images stamped `org.opencontainers.image.version` from the
   `ARG VERSION` default in each Dockerfile rather than the version being
   published. The release job replaced `DOCKER_BUILD_FLAGS` to drop the
