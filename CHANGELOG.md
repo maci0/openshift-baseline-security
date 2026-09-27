@@ -54,6 +54,15 @@ depend on those tags.
   remediation clipboard copy as an untrusted-output sink. Every file reference
   was re-read against 0.6.1.
 
+### Fixed
+
+- `operator/hack/must-gather.sh` appended to `related-objects.yaml` instead of
+  rewriting it, and the output directory is never cleared. Collecting a second
+  must-gather into the same directory duplicated every object document, and when
+  the CR was gone the file kept the previous run's objects with nothing marking
+  it stale. The file is now truncated at the start of collection, so a rerun
+  converges on the current cluster state.
+
 ## [0.6.1] - 2026-09-02
 
 ### Fixed

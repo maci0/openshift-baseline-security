@@ -902,6 +902,9 @@ stale Available or eternal Progressing.
 - [x] **Must-gather CLI usage**: `--help`/`-h` print usage on stdout and
       exit 0; unknown flags and extra args exit 2 (`TestMustGatherHelp`,
       `TestMustGatherUnknownOption`, `TestMustGatherExtraArgs`).
+- [x] **Must-gather rerun**: two runs into the same output dir produce
+      byte-identical files, and a run that collects no related objects leaves
+      no file from the run before (`hack/must-gather.sh --self-test`).
 - [x] **prometheusrule_to_rules.py CLI**: `--help` exits 0 on stdout; wrong
       argc or unknown options exit 2; extract writes a top-level `groups:`
       file (`TestPrometheusRuleToRulesHelp`, `TestPrometheusRuleToRulesExtract`).

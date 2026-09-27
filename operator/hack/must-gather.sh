@@ -30,6 +30,34 @@ redact_clusterbaseline_dump() {
   rm -f -- "$tmp"
 }
 
+# Concatenate the YAML of every object in status.relatedObjects into one file,
+# so the per-object `oc get` needs `>>`. Truncate first: the output dir is
+# reused across runs, and appending would duplicate every document on a second
+# run, and leave a prior run's objects behind when the CR is gone and the loop
+# never executes.
+collect_related_objects() {
+  local out="$1"
+  : > "$out"
+  # relatedObjects declared by the CR (group/resource/name[/namespace]).
+  # Only DNS-1123-shaped tokens are passed to oc (status is operator-written, but
+  # a hand-edited or corrupted relatedObjects list must not become shell noise).
+  # Reject leading dashes (oc flag injection) and '/' in resource (type/name
+  # shorthand). Tokens: alnum / dash / dot only.
+  { oc get clusterbaseline cluster -o jsonpath='{range .status.relatedObjects[*]}{.resource}.{.group} {.name} {.namespace}{"\n"}{end}' 2>/dev/null || true; } \
+    | while read -r res name ns; do
+        [ -z "$res" ] && continue
+        case "$res" in -*|*[!a-z0-9.-]*) continue ;; esac
+        case "$name" in ''|-*|*[!a-z0-9.-]*) continue ;; esac
+        if [ -n "$ns" ]; then
+          case "$ns" in -*|*[!a-z0-9.-]*) continue ;; esac
+          oc -n "$ns" get "$res" "$name" -o yaml >> "$out" 2>/dev/null || true
+        else
+          oc get "$res" "$name" -o yaml >> "$out" 2>/dev/null || true
+        fi
+        echo '---' >> "$out"
+      done
+}
+
 # Offline check that attribution does not survive a typical kubectl YAML dump.
 # No oc, no cluster. Invoked as --self-test and from `make test`.
 self_test() {
@@ -115,6 +143,51 @@ EOF
       exit 1
     }
     echo "must-gather redaction self-test ok"
+  )
+  # Rerun property: the output dir is reused across runs, so every collector must
+  # converge. A stub `oc` stands in for the cluster; two runs into the same
+  # directory must produce byte-identical output, and a run that collects
+  # nothing must clear the file rather than leave the prior run's objects.
+  (
+    work="$(mktemp -d)"
+    trap 'rm -rf -- "$work"' EXIT
+    oc() {
+      case "$*" in
+        *jsonpath*) printf 'scansettings.compliance.openshift.io scansettings compliance-operator\n' ;;
+        *) printf 'kind: ScanSetting\nmetadata:\n  name: scansettings\n' ;;
+      esac
+    }
+    rel="$work/related-objects.yaml"
+
+    collect_related_objects "$rel"
+    first="$(cat "$rel")"
+    [ "$(grep -c '^kind: ScanSetting' "$rel")" -eq 1 ] || {
+      echo "FAIL: first run did not collect exactly one object" >&2
+      exit 1
+    }
+
+    collect_related_objects "$rel"
+    [ "$(cat "$rel")" = "$first" ] || {
+      echo "FAIL: second run into the same dir changed related-objects.yaml" >&2
+      cat "$rel" >&2
+      exit 1
+    }
+
+    # CR gone: jsonpath yields nothing, so the loop body never runs. The file
+    # must end up empty, not still holding the objects from the run before.
+    oc() {
+      case "$*" in
+        *jsonpath*) : ;;
+        *) printf 'kind: ScanSetting\n' ;;
+      esac
+    }
+    collect_related_objects "$rel"
+    [ ! -s "$rel" ] || {
+      echo "FAIL: stale related-objects.yaml survived a run that collected nothing" >&2
+      exit 1
+    }
+
+    echo "must-gather rerun self-test ok"
   )
 }
 
@@ -272,24 +345,7 @@ oc get mcp -o custom-columns=NAME:.metadata.name,PAUSED:.spec.paused,UPDATED:.st
 # Soft-fail: Console capability may be disabled.
 oc get consoleplugin baseline-security-console-plugin -o yaml > "$OUT/consoleplugin.yaml" 2>/dev/null || true
 
-# relatedObjects declared by the CR (group/resource/name[/namespace]).
-# Only DNS-1123-shaped tokens are passed to oc (status is operator-written, but
-# a hand-edited or corrupted relatedObjects list must not become shell noise).
-# Reject leading dashes (oc flag injection) and '/' in resource (type/name
-# shorthand). Tokens: alnum / dash / dot only.
-{ oc get clusterbaseline cluster -o jsonpath='{range .status.relatedObjects[*]}{.resource}.{.group} {.name} {.namespace}{"\n"}{end}' 2>/dev/null || true; } \
-  | while read -r res name ns; do
-      [ -z "$res" ] && continue
-      case "$res" in -*|*[!a-z0-9.-]*) continue ;; esac
-      case "$name" in ''|-*|*[!a-z0-9.-]*) continue ;; esac
-      if [ -n "$ns" ]; then
-        case "$ns" in -*|*[!a-z0-9.-]*) continue ;; esac
-        oc -n "$ns" get "$res" "$name" -o yaml >> "$OUT/related-objects.yaml" 2>/dev/null || true
-      else
-        oc get "$res" "$name" -o yaml >> "$OUT/related-objects.yaml" 2>/dev/null || true
-      fi
-      echo '---' >> "$OUT/related-objects.yaml"
-    done
+collect_related_objects "$OUT/related-objects.yaml"
 
 echo "Collected baseline-security must-gather into $OUT"
 if [ "$failures" -gt 0 ]; then
