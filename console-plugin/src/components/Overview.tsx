@@ -655,16 +655,6 @@ const Overview: React.FC<{
       { label: t('Not applicable'), value: totals.notApplicable, color: DONUT_GREY, filter: 'NOT-APPLICABLE' },
     ].filter((s) => s.value > 0);
   }, [totals, t]);
-  const totalChecks = React.useMemo(
-    () => segments.reduce((n, s) => n + s.value, 0),
-    [segments],
-  );
-  const donutData = React.useMemo(
-    () => segments.map((s) => ({ x: s.label, y: s.value })),
-    [segments],
-  );
-  const donutColors = React.useMemo(() => segments.map((s) => s.color), [segments]);
-
   if (!loaded) {
     return <LoadingCards cardMinWidth="300px" skeletonHeight="180px" />;
   }
@@ -961,9 +951,6 @@ const Overview: React.FC<{
             ) : (
               <Charts.CompositionDonut
                 score={score}
-                totalChecks={totalChecks}
-                donutData={donutData}
-                donutColors={donutColors}
                 segments={segments}
                 locale={locale}
               />

@@ -286,13 +286,6 @@ const ResultsTab: React.FC<{
       setWaiveError(t('You do not have permission to waive checks.'));
       return;
     }
-    // Empty mutation ops: a bare resourceVersion test would succeed without
-    // changing waivers and look like a real add/remove. Callers should already
-    // refuse empty patches; guard here so success is never a silent no-op.
-    if (!data.length) {
-      setWaiveError(failMsg);
-      return;
-    }
     busyRef.current = true;
     setBusy(true);
     setWaiveError(null);

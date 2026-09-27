@@ -265,7 +265,6 @@ export type ComplianceScan = {
   metadata: {
     name: string;
     namespace: string;
-    labels?: Record<string, string>;
     annotations?: Record<string, string>;
     resourceVersion?: string;
   };
@@ -361,8 +360,6 @@ export type Waiver = {
 
 export type ProfileStatus = ResultCounts & {
   key: string;
-  // Optional on the CR (omitempty); absent until the first aggregate fill.
-  profileNames?: string[];
   history?: ScoreSnapshot[];
 };
 
@@ -375,12 +372,6 @@ export type ClusterBaseline = {
     profiles: ProfileKey[] | string[];
     tailoredProfiles?: string[];
     schedule?: string;
-    installComplianceOperator?: 'Automatic' | 'Manual';
-    // OLM CatalogSource name for the compliance-operator package. No CRD
-    // default: when unset the operator auto-detects redhat-operators on OCP
-    // and community-operators on OKD. Matches CRD spec.complianceCatalogSource.
-    complianceCatalogSource?: string;
-    console?: { managementState?: 'Managed' | 'Removed' };
     remediation?: { apply?: 'Automatic' | 'Manual' };
     scoring?: { mode?: 'Flat' | 'SeverityWeighted' };
     waivers?: Waiver[];
@@ -396,32 +387,18 @@ export type ClusterBaseline = {
       type: string;
       status: string;
       reason?: string;
-      message?: string;
-      lastTransitionTime?: string;
-      observedGeneration?: number;
     }[];
     history?: ScoreSnapshot[];
     newlyFailed?: string[];
     fixed?: string[];
-    // Owned/driven resources for must-gather (status.relatedObjects).
-    relatedObjects?: {
-      group?: string;
-      resource: string;
-      name: string;
-      namespace?: string;
-    }[];
     // Operator-internal scan-diff bookkeeping (not a consumer contract; may
     // change in 0.x). Its presence alone means "a prior scan exists"; the
     // history-length fallback covers a first scan that scored nothing. Prefer
     // newlyFailed/fixed for regressions.
     diffBaseScanTime?: string;
-    remediationBatch?: {
-      phase: string;
-      pools?: string[];
-      remediations?: string[];
-      startedAt: string;
-      pauseOwner?: string;
-    };
+    // The batch's fields are operator bookkeeping; the console only asks
+    // whether a batch exists.
+    remediationBatch?: unknown;
   };
 };
 

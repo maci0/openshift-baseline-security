@@ -62,16 +62,15 @@ type DonutSegment = {
 // relative to a shallow prop check when counts are content-stable.
 export const CompositionDonut = React.memo<{
   score: number | null | undefined;
-  totalChecks: number;
-  donutData: { x: string; y: number }[];
-  donutColors: string[];
   segments: readonly DonutSegment[];
   locale: string | undefined;
-}>(({ score, totalChecks, donutData, donutColors, segments, locale }) => {
+}>(({ score, segments, locale }) => {
   const { t } = useTranslation('plugin__baseline-security-console-plugin');
   const maxText = formatCount(100, locale);
   const ofMax = t('of {{max}}', { max: 100, formattedMax: maxText });
-  if (totalChecks === 0) {
+  // segments is the single source for the series, the color scale, and the
+  // empty check: the value>0 filter that built it already dropped zero counts.
+  if (segments.length === 0) {
     return (
       <ChartDonut
         ariaTitle={t('Compliance score')}
@@ -111,8 +110,8 @@ export const CompositionDonut = React.memo<{
         })}
         animate={false}
         constrainToVisibleArea
-        data={donutData}
-        colorScale={donutColors}
+        data={segments.map((s) => ({ x: s.label, y: s.value }))}
+        colorScale={segments.map((s) => s.color)}
         labels={({ datum }) =>
           t('{{label}}: {{value}}', {
             label: datum.x,

@@ -111,9 +111,6 @@ help:
 	@echo "  make catalog-prepare   render + validate the file-based catalog (needs docker)"
 	@echo "Single test: go test ./internal/controller/ -count=1 -run TestName"
 
-.PHONY: all
-all: build
-
 .PHONY: clean
 clean:
 	# Whole bin/ (manager + any go run tool leftovers), not only bin/manager.
@@ -394,10 +391,6 @@ deploy: manifests
 	# left behind (removed in ADR-028; it deadlocks SNO node drains).
 	oc -n openshift-baseline-security delete pdb baseline-security-operator --ignore-not-found=true
 
-.PHONY: undeploy
-undeploy:
-	oc delete -k config/default --ignore-not-found=true
-
 BUNDLE_IMG ?= quay.io/openshift-baseline-security/baseline-security-operator-bundle:latest
 CATALOG_IMG ?= quay.io/openshift-baseline-security/baseline-security-operator-catalog:latest
 
@@ -497,8 +490,6 @@ verify-versions:
 		|| { echo "CSV links must include name: License so OperatorHub consumers can find the Apache-2.0 text"; fail=1; }; \
 	grep -qE 'url: https://github.com/maci0/openshift-baseline-security/blob/.*/LICENSE' "$$csv" \
 		|| { echo "CSV License link must point at the GitHub LICENSE"; fail=1; }; \
-	grep -qE '^    capabilities: Basic Install$$' "$$csv" \
-		|| { echo "CSV capabilities must be Basic Install (no OLM replaces graph pre-1.0; Seamless Upgrades would be a lie)"; fail=1; }; \
 	cmp -s ../LICENSE LICENSE \
 		|| { echo "operator/LICENSE must match ../LICENSE (image /licenses copy)"; fail=1; }; \
 	cmp -s ../LICENSE ../console-plugin/LICENSE \

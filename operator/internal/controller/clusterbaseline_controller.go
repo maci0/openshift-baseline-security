@@ -587,11 +587,6 @@ func enqueueSingleton(_ context.Context, obj client.Object) []reconcile.Request 
 // objectSuiteLabel reads the CO suite label without copying the whole label map.
 func objectSuiteLabel(obj client.Object) string {
 	switch o := obj.(type) {
-	case *metav1.PartialObjectMetadata:
-		if o.Labels == nil {
-			return ""
-		}
-		return o.Labels[suiteLabel]
 	case *unstructured.Unstructured:
 		return unstructuredLabel(o.Object, suiteLabel)
 	default:

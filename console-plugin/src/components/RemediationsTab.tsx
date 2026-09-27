@@ -473,7 +473,7 @@ const RemediationsTab: React.FC<{
     if (canApplyLoading) {
       applyDisabledReason = t('Checking permissions…');
     } else if (!canApply) {
-      applyDisabledReason = t('You do not have permission to apply remediations.');
+      applyDisabledReason = deniedMessage;
     }
   }
 
@@ -499,7 +499,7 @@ const RemediationsTab: React.FC<{
     } else if (!baseline) {
       delegatedApplyDisabledReason = t('Baseline not configured');
     } else if (!canApply) {
-      delegatedApplyDisabledReason = t('You do not have permission to apply remediations.');
+      delegatedApplyDisabledReason = deniedMessage;
     }
   }
 

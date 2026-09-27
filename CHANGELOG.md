@@ -133,6 +133,89 @@ depend on those tags.
   override it, since the operator cannot have meant to clobber an object whose
   current resourceVersion was never read.
 
+
+- `hack/must-gather.sh` no longer dumps a Secret into a support archive. It
+  collected every object named in `status.relatedObjects`, and the only filter
+  on that list was a character check, so a hand-edited or etcd-restored
+  `relatedObjects` entry naming `secrets` was collected like any other object,
+  putting the metrics TLS private key and the scraper service-account token
+  into an attachment the operator can no longer redact. Collection is now
+  pinned to the six kinds the reconciler actually writes.
+
+- The operator built against `google.golang.org/grpc` v1.82.1, which is
+  affected by GO-2026-6348 (heap exhaustion from HTTP/2 DATA frame
+  fragmentation) and is fixed in v1.83.1. `govulncheck` reaches it from
+  `cmd/main.go` through the manager start, so an API server that fragments its
+  responses could drive the operator out of memory. Pinned to v1.83.1, which
+  brings the `go.opentelemetry.io/otel` core modules to v1.44.0 with it.
+
+- The operator namespace now ships a `NetworkPolicy`. Any pod in the cluster
+  could previously open a TCP connection to the operator's metrics port 8443;
+  the bearer token was the only control. Ingress is now denied on every
+  operator port except 8443, and only for `openshift-monitoring` (the
+  platform Prometheus scrape) and the service-ca operator (which mints the
+  serving cert the scrape verifies against). Egress is deliberately left
+  unrestricted so the policy cannot intersect the platform's own policies and
+  cut the operator off from the API server.
+
+- The serialized-size budget that trims `status` failure lists under-counted
+  a string carrying ill-formed UTF-8 by up to 4 bytes per bad byte, because it
+  counted the three-byte replacement rune where `encoding/json` writes the
+  six-byte escape. A `ClusterBaseline` whose failure names came back from a
+  protobuf restore with lone continuation bytes could therefore exceed the
+  size bound and fail every subsequent status write, wedging conditions,
+  score, and phase. The count now uses the wider of the two forms, which can
+  only trim a list early.
+
+- A console write is now denied while its access review is still in flight, not
+  only once the review comes back negative. `mayWrite` is the single chokepoint
+  every mutation passes through, and it read `allowed` alone, so a permission
+  revoked between the moment a control rendered and the moment it was clicked
+  could still be spent on the wire when the review had not resolved yet. The
+  check now fails closed on an unresolved review, matching what the plugin's
+  contributor rules already stated.
+
+- `hack/restore.sh` now refuses a backup artifact that holds more than one YAML
+  document. `oc apply -f` and `oc replace -f` apply every document in a
+  multi-document file, so a backup directory with a second document appended
+  after the `ClusterBaseline` would have been written to the cluster with the
+  restoring operator's own credentials, whatever privilege it held. The
+  existing kind and apiVersion checks match on any line and could not see the
+  extra document, and the MANIFEST sha256 does not help: it lives in the same
+  directory and is recomputable by anyone who can edit the artifact. Backups
+  taken by `hack/backup.sh` are a single named object and never contain a
+  `---` separator, so no valid backup is affected.
+
+- `hack/restore.sh` now stops, changing nothing, when it cannot read the live
+  `ClusterBaseline/cluster`. A failed read left the resourceVersion comparison
+  with an empty value, which read the same as an absent object: the rollback
+  guard was skipped, and an out-of-date backup was applied over a live object
+  that had moved on, discarding every waiver edit and remediation batch
+  annotation made since, with no `--force` and no warning. `--force` does not
+  override it, since the operator cannot have meant to clobber an object whose
+  current resourceVersion was never read.
+
+- Results CSV export hardened against a formula sigil hidden behind a leading
+  control character. `csvCell` dropped NULs and Unicode format characters, then
+  checked the cell for a formula starter, so a cell such as `\u0001=cmd` kept a
+  control prefix that a spreadsheet trims before deciding whether the cell is a
+  formula. A tampered `ComplianceCheckResult` name, description first line, or
+  `check-severity` label could therefore reach a downloaded export as an
+  evaluated formula. Export rows now drop the controls a spreadsheet trims
+  (tab, CR, and LF stay, since RFC 4180 quoting needs them). Cells that held a
+  control character other than a delimiter lose it from the export.
+
+- Console write controls were gated on `useAccessReview` through their
+  `isDisabled` prop alone. A tab holding an open confirm modal, a stopped
+  editor, or a pending form across a permission revocation would still send the
+  patch the button had already admitted. Every mutation now re-checks the
+  reviewed permission at the request boundary through one chokepoint
+  (`console-plugin/src/permissions.ts`), and an unresolved review denies rather
+  than defaulting to allow. Covered: rescan, profile toggle, schedule save,
+  waiver add and remove, TailoredProfile create, update, and bind, tailored
+  profile unbind, default baseline create, and every remediation path
+  (per-row apply, unapply, auto-apply, batch apply).
+
 ### Changed
 
 - The console plugin now gzips its assets at level 9 instead of level 5. Every
@@ -681,6 +764,130 @@ depend on those tags.
   now logged at Error (rate-limited to one line per 30m, V(1) in between) with
   the CatalogSource name and the underlying cause, and the Subscription create
   records when the source it wrote came from an unverified guess.
+- Typing one more character than the last match in the Remediations search
+  unmounted the search box itself, leaving no way to back off by a character
+  short of clearing the query and retyping it. The search box and the
+  "Showing X of Y" count now stay on screen in the no-match state.
+- Every link between the Compliance tabs ("Go to Profiles", "Review check
+  results", "Clear filters", the Overview drill-downs) was a bare anchor to a
+  console route, so each one left the single-page app and reloaded the whole
+  console shell, dropping the plugin's open watches. They now navigate inside
+  the console; a modified click still opens the target in a new tab.
+- A remediation whose apply the operator had accepted but not yet written to
+  `status.applicationState` read "Not applied" next to a clickable "Unapply".
+  It now reads "Applying…" until the operator confirms the state.
+- The Results table sorted Status and Severity alphabetically, so an ascending
+  sort read Error, Fail, ..., Pass and High, Info, Low, Medium. Both now sort
+  by their facet order, matching the order of the filter chips above them.
+- Exporting a CSV while a filter was active wrote the filtered rows but
+  confirmed only "Results downloaded as compliance-results.csv.", so a subset
+  was indistinguishable from a full export. The confirmation now names the row
+  count written.
+- Removing an orphaned waiver reported "The check counts toward the score
+  again", which is false for a waiver that matches no result. The button in the
+  orphan list now shows a progress spinner on the click that is in flight and
+  carries the check name as its tooltip.
+- The Results table gave no count, so a filter that dropped most of the set
+  looked like the whole set. It now shows the filtered count under the filter
+  chips, using the same wording the Remediations search already used.
+
+- On a single-node cluster the console plugin rolled out with
+  `maxUnavailable: 1` against a one-replica Deployment, so a plugin upgrade
+  could take the only pod down and blank Administration → Compliance until its
+  replacement was ready. The plugin Deployment now pins `maxUnavailable: 0`
+  whenever it runs a single replica; two-replica clusters keep `1`, which is
+  what keeps the Deployment Available while a node is drained.
+- The Overview tab rendered one link per newly failing and per fixed check on
+  first paint, and `status.newlyFailed` / `status.fixed` hold up to 4096 names
+  each, so a large scan delta put thousands of elements into the DOM before the
+  rest of the page painted. Both surfaces now render the first 25 of each group
+  and the Recent changes card shows the remainder on request; the counts in the
+  alert and the group headings still report the full totals. The compliance
+  score card on the cluster Overview also passed a fresh watch options object
+  on every render, re-subscribing to the `ClusterBaseline` list each time.
+- A render failure in Administration → Compliance left a blank page. The
+  console mounts an extension page with no error boundary, so a throw while
+  rendering a tab or the page shell unmounted the whole route, and the browser
+  console carried no record of what threw. Every tab route and the page shell
+  now sit behind an error boundary that names the view, reports the reason and
+  the error object to the browser console, and offers Retry, so a bad
+  `ClusterBaseline` or Compliance Operator object an admin fixes no longer
+  needs a full page reload to recover from.
+- The same check status was drawn in different colors depending on which view
+  read it. `MANUAL` was the icon-token amber on the console composition donut
+  and a brighter yellow in the Observe dashboard; `WAIVED` was teal on the
+  console (donut wedge and Results status chip) and the same grey as
+  not-applicable in the dashboard, which stacks the two adjacent. The dashboard
+  now paints both from the same PatternFly 6 tokens the console reads, and the
+  exported HTML report's score and severity type now uses the text status
+  tokens it claimed to use (the warning amber and the success green were
+  hand-picked values that matched no token), so a status is one color across
+  the console, the report, and the dashboard. `TestDashboardUsesStatusPalette`
+  pins the widened set.
+- The Results tab reported "Baseline not configured" with a Create button when
+  the `ClusterBaseline` watch failed, for example on a 403 or a missing CRD.
+  The page forces its loaded flag true on a watch error so the tabs stop
+  skeletonning, and Results was the one tab that did not read
+  `baselineError` off the shared context, so it could not tell a failed read
+  from an absent CR. It now renders the same danger state, naming the reason,
+  that Overview, Remediations, and Profiles already render.
+- The Overview "newly failing" banner and the Recent changes card disagreed
+  with each other. The banner counted only the regressions whose check result
+  was still present, so a scan whose failing rules had all been removed or
+  unbound read "0 checks newly failing" while the status behind it listed
+  them, and Recent changes then claimed there were no changes at all. Both now
+  fall back to the operator's own count and say how many of those have no
+  result left to open.
+- The Degraded and Progressing banners on Overview printed the condition
+  message with no `dir="auto"`, so a right-to-left message reordered the
+  punctuation around it, and a Degraded condition carrying no message rendered
+  a title with no explanation. Both render the message as its own element now,
+  with fallback text when the operator set none.
+- Apiserver and cluster-object text shown in error banners (Remediations
+  apply, unapply, batch, auto-apply and clipboard failures; the schedule
+  editor; baseline create) rendered without `dir="auto"`, unlike every other
+  banner in the plugin, so an RTL resource name inside the message could
+  reorder the text around it.
+- `Export HTML report` disappeared from the page header whenever no
+  `ClusterBaseline` existed, while `Rescan now` stayed visible, disabled, and
+  carrying its reason. The two header controls now behave the same way.
+- The Profiles tab hid `New tailored profile` from anyone without the create
+  verb, leaving no reason and no hint that tailored profiles exist. It renders
+  disabled with the permission reason now, like every other write control in
+  the plugin.
+- `hack/verify-backup.sh` computed the backup age with `date -u -d`, which is
+  GNU coreutils only. On a host with BSD `date` (macOS, which `hack/backup.sh`
+  and `hack/restore.sh` already support for the digest) the conversion failed,
+  the age check was skipped with a note on stderr, and the script exited 0: a
+  backup that had not been refreshed in a year verified as restorable, which
+  is the one failure it exists to catch. The age is now read off the stamp
+  itself (`hack/lib-timestamp.sh`, no external `date` call), and a MANIFEST
+  whose `takenAt` is missing or unparseable fails the check instead of
+  passing it, so an unmeasurable age can no longer be alerted on as a healthy
+  one. `hack/restore.sh` reports the same case as an unknown RPO rather than
+  printing no age at all.
+- `hack/verify-backup.sh` digested the artifact with `sha256sum` directly,
+  where the other two scripts go through `hack/lib-sha256.sh`, so the check
+  could not run at all on a host without GNU coreutils, which is the host the
+  doc tells an admin to pull the off-cluster copy back onto.
+- `hack/restore.sh` now refuses, before any write, an artifact taken at an
+  `apiVersion` the cluster's CRD does not serve. `oc apply` reports that as
+  `no matches for kind`, which during an incident points at RBAC rather than
+  at the version; the refusal names the artifact's version and the served
+  ones, and `--force` overrides it. A cluster whose CRD cannot be read (an
+  etcd restore still in progress) is left to the apply.
+
+
+- A failed `CatalogSource` read while auto-detecting the Compliance Operator
+  catalog was discarded with no log. Detection then fails safe to "assume the
+  catalog is present", so a persistent RBAC denial or apiserver error left the
+  `compliance-operator` Subscription pinned to a source that was never
+  verified, and the Subscription sync path declined to correct it for the same
+  reason. The only symptom was a `ScanConfigured` / `ComplianceOperatorReady`
+  stuck on `Installing` with nothing in the operator logs. The read failure is
+  now logged at Error (rate-limited to one line per 30m, V(1) in between) with
+  the CatalogSource name and the underlying cause, and the Subscription create
+  records when the source it wrote came from an unverified guess.
 
 - On a single-node cluster the console plugin rolled out with
   `maxUnavailable: 1` against a one-replica Deployment, so a plugin upgrade
@@ -1217,89 +1424,128 @@ depend on those tags.
   a success, for a copy the admin had already replaced. Both paths fence on a
   monotonic token and drop a result that a later action superseded.
 
-### Security
+### Added
 
-- `hack/must-gather.sh` no longer dumps a Secret into a support archive. It
-  collected every object named in `status.relatedObjects`, and the only filter
-  on that list was a character check, so a hand-edited or etcd-restored
-  `relatedObjects` entry naming `secrets` was collected like any other object,
-  putting the metrics TLS private key and the scraper service-account token
-  into an attachment the operator can no longer redact. Collection is now
-  pinned to the six kinds the reconciler actually writes.
+- A name filter on the Remediations tab. A full benchmark run lists thousands
+  of remediations and the tab had no way to narrow them, so finding one rule
+  meant scrolling the whole list; Results has had chips for the same reason.
+  The search matches on the remediation name, ignoring case and diacritics,
+  and reports how many of the total are shown. Batch apply is unaffected: it
+  still acts on every batchable remediation, not on the filtered view.
 
-- The operator built against `google.golang.org/grpc` v1.82.1, which is
-  affected by GO-2026-6348 (heap exhaustion from HTTP/2 DATA frame
-  fragmentation) and is fixed in v1.83.1. `govulncheck` reaches it from
-  `cmd/main.go` through the manager start, so an API server that fragments its
-  responses could drive the operator out of memory. Pinned to v1.83.1, which
-  brings the `go.opentelemetry.io/otel` core modules to v1.44.0 with it.
+- `hack/verify-backup.sh`, a cluster-free check that a backup directory is
+  still restorable: the artifact is present, non-empty, the right kind, matches
+  the sha256 in its MANIFEST, and is within an age limit. A scheduled backup
+  that stops running, whose off-cluster copy never landed, or that was
+  truncated in transit fails silently until an incident; this gives that
+  schedule something to alert on, and it runs against a copy pulled back from
+  remote storage. `--max-age-days` sets the limit.
 
-- The operator namespace now ships a `NetworkPolicy`. Any pod in the cluster
-  could previously open a TCP connection to the operator's metrics port 8443;
-  the bearer token was the only control. Ingress is now denied on every
-  operator port except 8443, and only for `openshift-monitoring` (the
-  platform Prometheus scrape) and the service-ca operator (which mints the
-  serving cert the scrape verifies against). Egress is deliberately left
-  unrestricted so the policy cannot intersect the platform's own policies and
-  cut the operator off from the API server.
+- `hack/backup.sh` and `hack/restore.sh`, a backup and restore path for
+  `ClusterBaseline/cluster`, the only durable state this operator owns. Before
+  them, recovering a lost or corrupted CR meant an out-of-band etcd restore,
+  and the DR plan in `docs/TEST-PLAN.md` AQ had never been executed. The
+  backup captures the object with its spec, status, and batch annotations plus
+  a sha256 MANIFEST, and refuses to write one for an empty or wrong-kind
+  capture. The restore validates that MANIFEST before it writes anything, and
+  replaces the status subresource rather than only applying, so the score,
+  conditions, score history, and an in-flight remediation batch come back
+  instead of being silently dropped. RPO and RTO are now stated in
+  `docs/RESTORE.md`. Both scripts are driven end to end by
+  `hack/backup_restore_test.go` on every `make test`.
 
-- The serialized-size budget that trims `status` failure lists under-counted
-  a string carrying ill-formed UTF-8 by up to 4 bytes per bad byte, because it
-  counted the three-byte replacement rune where `encoding/json` writes the
-  six-byte escape. A `ClusterBaseline` whose failure names came back from a
-  protobuf restore with lone continuation bytes could therefore exceed the
-  size bound and fail every subsequent status write, wedging conditions,
-  score, and phase. The count now uses the wider of the two forms, which can
-  only trim a list early.
+- `baseline_security_remediation_batches_total`, a counter of finished
+  remediation batches by outcome (`applied`, `cancelled`, `grace`, `orphaned`),
+  and a `RemediationBatchGraceResume` alert on it. A batch that ends on the
+  resume grace window or through crash/cancel recovery unpauses the
+  MachineConfigPools before every remediation has reported Applied, and then
+  clears `status.remediationBatch`, so nothing left in the cluster recorded
+  that the fixes may never have landed: the only trace was a log line at the
+  moment it happened. The new Observe panel counts the same event over 24h.
 
-- A console write is now denied while its access review is still in flight, not
-  only once the review comes back negative. `mayWrite` is the single chokepoint
-  every mutation passes through, and it read `allowed` alone, so a permission
-  revoked between the moment a control rendered and the moment it was clicked
-  could still be spent on the wire when the review had not resolved yet. The
-  check now fails closed on an unresolved review, matching what the plugin's
-  contributor rules already stated.
+- `make verify-reproducible` (in `make ci` and the GitHub Actions `operator`
+  job) builds the manager twice, from two different absolute paths and under a
+  different timezone, locale, and umask, and fails unless both binaries hash
+  identically. The `-trimpath`, `-buildvcs=false`, and `-buildid=` flags were
+  already set in the Makefile and both Dockerfiles, and the release claims the
+  local and in-image binaries match, but nothing checked it: a dropped or
+  misspelled flag produced a different binary and every image and test run
+  still passed.
 
-- `hack/restore.sh` now refuses a backup artifact that holds more than one YAML
-  document. `oc apply -f` and `oc replace -f` apply every document in a
-  multi-document file, so a backup directory with a second document appended
-  after the `ClusterBaseline` would have been written to the cluster with the
-  restoring operator's own credentials, whatever privilege it held. The
-  existing kind and apiVersion checks match on any line and could not see the
-  extra document, and the MANIFEST sha256 does not help: it lives in the same
-  directory and is recomputable by anyone who can edit the artifact. Backups
-  taken by `hack/backup.sh` are a single named object and never contain a
-  `---` separator, so no valid backup is affected.
+- The operator binary takes `--version` and prints the release version to
+  stdout, exiting 0 before any cluster or port work. The value is stamped by
+  the linker from the same `VERSION` the image label and the CSV carry, so
+  `manager --version` inside a running pod reports the build it came from
+  instead of a bare digest. A binary built without the stamp (plain `go
+  build`) reports `dev`.
 
-- `hack/restore.sh` now stops, changing nothing, when it cannot read the live
-  `ClusterBaseline/cluster`. A failed read left the resourceVersion comparison
-  with an empty value, which read the same as an absent object: the rollback
-  guard was skipped, and an out-of-date backup was applied over a live object
-  that had moved on, discarding every waiver edit and remediation batch
-  annotation made since, with no `--force` and no warning. `--force` does not
-  override it, since the operator cannot have meant to clobber an object whose
-  current resourceVersion was never read.
+- `yarn size` (in `yarn build` and `yarn ci`) reports the transferred size of
+  the built console plugin and fails over the ceilings in
+  `console-plugin/tools/size/budget.ts`: the initial JS the browser must
+  download before CompliancePage can paint, the largest async chunk, and the
+  whole `dist/` tree, all gzipped. Nothing measured page weight before, so a
+  library pulled back into the entry bundle accreted silently. The numbers
+  print into the CI log beside the commit that produced them.
 
-- Results CSV export hardened against a formula sigil hidden behind a leading
-  control character. `csvCell` dropped NULs and Unicode format characters, then
-  checked the cell for a formula starter, so a cell such as `\u0001=cmd` kept a
-  control prefix that a spreadsheet trims before deciding whether the cell is a
-  formula. A tampered `ComplianceCheckResult` name, description first line, or
-  `check-severity` label could therefore reach a downloaded export as an
-  evaluated formula. Export rows now drop the controls a spreadsheet trims
-  (tab, CR, and LF stay, since RFC 4180 quoting needs them). Cells that held a
-  control character other than a delimiter lose it from the export.
+- Observe dashboard gained a Reconcile loop row (reconcile errors against total
+  reconciles, and p50/p99 reconcile duration). The operator's own failure rate
+  and loop latency were visible only in pod logs, so a reconcile loop slowing
+  toward its 5m bound had no metric to graph before it started failing.
 
-- Console write controls were gated on `useAccessReview` through their
-  `isDisabled` prop alone. A tab holding an open confirm modal, a stopped
-  editor, or a pending form across a permission revocation would still send the
-  patch the button had already admitted. Every mutation now re-checks the
-  reviewed permission at the request boundary through one chokepoint
-  (`console-plugin/src/permissions.ts`), and an unresolved review denies rather
-  than defaulting to allow. Covered: rescan, profile toggle, schedule save,
-  waiver add and remove, TailoredProfile create, update, and bind, tailored
-  profile unbind, default baseline create, and every remediation path
-  (per-row apply, unapply, auto-apply, batch apply).
+- `docs/OBSERVABILITY.md` documents the log levels and the posture line, the
+  dashboard rows and the order to read them, and why the operator ships no
+  OpenTelemetry tracing.
+
+- Console plugin image ships `/licenses/THIRD-PARTY-NOTICES.txt` (and the same
+  file under `dist/`, so the console serves it). The bundle redistributes
+  PatternFly, victory, React, and the rest of the installed closure, and the
+  image previously carried only its own `LICENSE`, so a downstream consumer
+  could not trace those grants back to their origin. The file is generated by
+  `yarn licenses` from the installed tree, never hand-edited, and the build now
+  fails when any installed package declares a missing, unrecognised, or
+  copyleft license, or ships no license text to reproduce.
+
+- Alert `ClusterBaselineNotAvailable`: fires when the ClusterBaseline has been
+  `Available=False` for 1h without `Progressing`. Admin-owned steady states
+  (Compliance Operator not installed under `installComplianceOperator=Manual`,
+  compliance CRDs absent, console plugin image unset) never set `Degraded`, so
+  the operator previously reported healthy while producing no compliance score
+  and no alert fired.
+
+- Operator memory grew with the cluster, not with what it reconciles. The
+  manager's informer cache is cluster-wide per type, and the first typed read
+  is what starts the informer, so the scan-storage PVC check cached every
+  PersistentVolumeClaim in the cluster and the console-plugin check cached
+  every Deployment, Service, and PodDisruptionBudget. The cache is now scoped
+  to the namespaces those reads actually use (`openshift-compliance` for scan
+  storage, `openshift-baseline-security` for the plugin). `ClusterBaseline` is
+  cluster-scoped and stays cache-wide; foreign Compliance Operator objects are
+  read as unstructured and already bypass the cache. The compliance CRs the
+  event-driven watches follow (ComplianceSuite, ComplianceScan,
+  ComplianceRemediation, ComplianceCheckResult) are cached as metadata only and
+  cannot be named per type, so they took the cluster-wide default; the default
+  is now scoped to the same two namespaces, which keeps foreign compliance
+  objects out of the heap instead of only out of the reconcile queue.
+
+- Operator and console plugin pods: neither declared a `preStop` hook, so a
+  terminating pod kept its endpoint for the seconds between SIGTERM and
+  endpoint removal, and a scrape or console request could still land on a
+  draining pod. Both containers now sleep 5s in `preStop` before the process
+  sees SIGTERM, inside the existing 30s grace period.
+
+- Operator `/readyz` reported ready for the whole drain. A SIGTERM now flips
+  the readiness check to failing, so the pod leaves the Service endpoints as
+  soon as the process starts shutting down.
+
+- Console plugin rule and profile typeahead: typing `securite` did not find
+  `sécurité`, because the filter folded case with `toLowerCase()` and left
+  diacritics in place. The filter now ignores case and diacritics and keeps the
+  Turkish dotted and dotless I distinct, so a query matches in either case.
+
+- Console plugin rule and profile pickers: the option lists were sorted by byte
+  value, so an accented name sorted after every plain letter and embedded
+  numbers ordered `rule_10` before `rule_2`. They now sort by the session
+  locale's collation.
 
 ### Migration notes
 

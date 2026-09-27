@@ -342,7 +342,7 @@ describe('buildReportHtml', () => {
     status: {
       score: 94,
       lastScanTime: '2026-07-11T09:00:00Z',
-      profiles: [{ key: 'cis', profileNames: [], pass: 212, fail: 7, manual: 21, info: 0, error: 0, inconsistent: 37, waived: 0, notApplicable: 0 }],
+      profiles: [{ key: 'cis', pass: 212, fail: 7, manual: 21, info: 0, error: 0, inconsistent: 37, waived: 0, notApplicable: 0 }],
     },
   } satisfies ClusterBaseline;
   const now = new Date('2026-07-11T00:00:00Z');
@@ -486,7 +486,6 @@ describe('buildReportHtml', () => {
           profiles: [
             {
               key: hostile || 'cis',
-              profileNames: [],
               pass: 1,
               fail: 0,
               manual: 0,

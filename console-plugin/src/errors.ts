@@ -9,7 +9,6 @@ interface RejectionFields {
   message?: unknown;
   json?: unknown;
   reason?: unknown;
-  code?: unknown;
 }
 
 // One field off a RejectionFields carrier; keeps payload-parser signatures

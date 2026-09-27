@@ -12,7 +12,6 @@
     "build": "yarn check-node && yarn typecheck && yarn clean && NODE_ENV=production TZ=UTC LC_ALL=C SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-0} yarn ts-node node_modules/.bin/webpack && yarn licenses && yarn size && test -s dist/plugin-manifest.json && test -s dist/locales/en/plugin__baseline-security-console-plugin.json && test -s dist/THIRD-PARTY-NOTICES.txt && ls dist/plugin-entry*.min.js >/dev/null",
     "licenses": "yarn ts-node tools/attribution/generate.ts",
     "size": "yarn ts-node tools/size/check.ts",
-    "build-dev": "yarn check-node && yarn clean && yarn ts-node node_modules/.bin/webpack",
     "start": "yarn check-node && yarn ts-node node_modules/.bin/webpack serve",
     "ts-node": "ts-node -O '{\"module\":\"commonjs\"}'",
     "lint": "yarn check-node && eslint ./src ./e2e ./tools/attribution ./tools/size webpack.config.ts --max-warnings=0",

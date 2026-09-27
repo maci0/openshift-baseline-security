@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"maps"
 	"slices"
-	"strings"
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -37,11 +36,8 @@ func (r *ClusterBaselineReconciler) applyRemediationBatch(ctx context.Context, c
 func (r *ClusterBaselineReconciler) openRemediationBatch(
 	ctx context.Context, cb *baselinev1alpha1.ClusterBaseline, names string,
 ) error {
-	if strings.TrimSpace(names) == "" {
-		return r.resumeOrphanedBatch(ctx, cb)
-	}
 	list := batchRemediationNames(names)
-	// Annotation of only commas/whitespace: do not open an empty batch.
+	// Missing, empty, or only commas/whitespace: do not open an empty batch.
 	if len(list) == 0 {
 		return r.resumeOrphanedBatch(ctx, cb)
 	}
