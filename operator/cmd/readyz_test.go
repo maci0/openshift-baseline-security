@@ -6,7 +6,23 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"sigs.k8s.io/controller-runtime/pkg/cache"
 )
+
+// scriptedSyncCache stands in for cache.Cache in the readyz check: only
+// WaitForCacheSync runs; everything else would panic (and fail the test loudly).
+type scriptedSyncCache struct {
+	cache.Cache
+	calls int
+	// syncedAfter is the call number on which sync reports success.
+	syncedAfter int
+}
+
+func (c *scriptedSyncCache) WaitForCacheSync(context.Context) bool {
+	c.calls++
+	return c.calls >= c.syncedAfter
+}
 
 // The Deployment ships 2 replicas with leader election on, so the flag that
 // fails readyz on SIGTERM has to start on a standby too. A bare

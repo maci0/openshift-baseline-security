@@ -31,6 +31,19 @@ import (
 // marshaling. A fuzzer that only ever saw valid UTF-8 would miss the escape
 // classes and the U+FFFD coercion, so the seeds below walk every one of them and
 // the input is raw bytes (ill-formed sequences included).
+//
+// The property pinned here is the one the budget depends on: jsonStringLen must
+// never come in UNDER what the encoder writes, or the clamp admits a list past
+// the CRD bound and the next Status().Update freezes reconcile. Over-counting
+// only trims a list early, which costs entries, not liveness, so the bound is
+// one-sided by design.
+//
+// For well-formed input the model is byte-exact, and that is asserted, because
+// the escape arithmetic (\u00XX, two-byte forms, U+2028/U+2029) is the part this
+// function actually owns. For ill-formed input the two are allowed to differ:
+// how the encoder spells a bad byte is a toolchain detail, and it has changed
+// (Go 1.27 writes the raw three-byte U+FFFD where earlier releases wrote the
+// six-byte \ufffd escape, which is what the six-byte branch below counts).
 func FuzzJSONStringLenMatchesMarshal(f *testing.F) {
 	for _, seed := range []string{
 		"", "rule_1",
@@ -47,8 +60,14 @@ func FuzzJSONStringLenMatchesMarshal(f *testing.F) {
 		if err != nil {
 			t.Fatalf("json.Marshal(%q) failed: %v", s, err)
 		}
-		if got, want := jsonStringLen(s), len(b); got != want {
-			t.Fatalf("jsonStringLen(%q) = %d, json.Marshal wrote %d (%q)", s, got, want, b)
+		got := jsonStringLen(s)
+		if got < len(b) {
+			t.Fatalf("jsonStringLen(%q) = %d under-counts: json.Marshal wrote %d (%q)",
+				s, got, len(b), b)
+		}
+		if utf8.ValidString(s) && got != len(b) {
+			t.Fatalf("jsonStringLen(%q) = %d, json.Marshal wrote %d (%q) for well-formed input",
+				s, got, len(b), b)
 		}
 	})
 }

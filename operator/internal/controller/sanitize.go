@@ -464,12 +464,17 @@ const failureListsSizeBudget = 768 * 1024
 // never report a check as a regression that the budget simply hid.
 const failureListShareBudget = failureListsSizeBudget / 4
 
-// jsonStringLen returns the exact number of bytes encoding/json writes for the
-// string s, without allocating. It must stay equal to len(json.Marshal(s)) for
-// a string under the Go toolchain go.mod pins, and
-// FuzzJSONStringLenMatchesMarshal pins that against the real encoder over
-// every escape class below, including ill-formed UTF-8, which the encoder
-// coerces to U+FFFD rather than failing.
+// jsonStringLen returns an upper bound on the number of bytes encoding/json
+// writes for the string s, without allocating. It is byte-exact for well-formed
+// input and never under-counts for ill-formed input
+// (FuzzJSONStringLenMatchesMarshal pins the bound, and the exactness, against
+// the real encoder over every escape class below, including ill-formed UTF-8).
+// The bound is deliberately one-sided: the failure-list budget is computed from
+// it, so over-counting trims a list early and costs entries, while
+// under-counting is the apiserver-freeze case the budget exists to prevent.
+// How the encoder spells an ill-formed byte is a toolchain detail and has
+// changed (Go 1.27 emits the raw three-byte U+FFFD where earlier releases emitted
+// the six-byte \ufffd escape), so the ill-formed branch counts the wider form.
 //
 // An additive len(name)+constant estimate is wrong by up to 6x on names full of
 // '&', '<', '>' or control characters, which are exactly the names a hostile or

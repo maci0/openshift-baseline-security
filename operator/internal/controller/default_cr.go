@@ -1,4 +1,13 @@
-package main
+// Bootstrap layer: the manager Runnable that creates ClusterBaseline/cluster
+// when the cluster has none, so a fresh install reaches a CIS scan with no
+// CR the operator has to be told about. It lives here, not in cmd, because it
+// is a manager Runnable reconciling a ClusterBaseline, the same role
+// lazyComplianceWatch plays in clusterbaseline_controller.go.
+//
+// Not part of Reconcile: this is one-shot provisioning, not steady-state
+// convergence, so it runs once per process under leader election rather than
+// on every watch event.
+package controller
 
 import (
 	"context"
@@ -22,9 +31,9 @@ var errCacheNotSynced = errors.New("cache did not sync")
 // sync attempts.
 const defaultCRRetryDelay = 10 * time.Second
 
-// defaultClusterBaseline creates ClusterBaseline/cluster once when none exist.
+// DefaultClusterBaseline creates ClusterBaseline/cluster once when none exist.
 // NeedLeaderElection keeps HA replicas from racing the create.
-type defaultClusterBaseline struct {
+type DefaultClusterBaseline struct {
 	Client client.Client
 	Cache  cache.Cache
 	Log    logr.Logger
@@ -37,14 +46,14 @@ type defaultClusterBaseline struct {
 	retryDelay time.Duration
 }
 
-func (d *defaultClusterBaseline) delay() time.Duration {
+func (d *DefaultClusterBaseline) delay() time.Duration {
 	if d.retryDelay > 0 {
 		return d.retryDelay
 	}
 	return defaultCRRetryDelay
 }
 
-func (d *defaultClusterBaseline) Start(ctx context.Context) error {
+func (d *DefaultClusterBaseline) Start(ctx context.Context) error {
 	// Retry cache sync while the context stays live: a false return without
 	// shutdown means informers were not ready yet (or failed transiently).
 	// Giving up here would leave the cluster without the zero-config CR until
@@ -104,7 +113,7 @@ func (d *defaultClusterBaseline) Start(ctx context.Context) error {
 
 // waitForCacheSyncFn resolves the sync check: the test override when set, else
 // the real cache.
-func (d *defaultClusterBaseline) waitForCacheSyncFn() func(ctx context.Context) bool {
+func (d *DefaultClusterBaseline) waitForCacheSyncFn() func(ctx context.Context) bool {
 	if d.waitForCacheSync != nil {
 		return d.waitForCacheSync
 	}
@@ -121,7 +130,7 @@ func isPermanentDefaultCRError(err error) bool {
 	return apierrors.IsForbidden(err) || apierrors.IsUnauthorized(err) || apierrors.IsInvalid(err)
 }
 
-func (d *defaultClusterBaseline) ensureOnce(ctx context.Context) error {
+func (d *DefaultClusterBaseline) ensureOnce(ctx context.Context) error {
 	list := &baselinev1alpha1.ClusterBaselineList{}
 	if err := d.Client.List(ctx, list); err != nil {
 		// Caller (Start) rate-limits Error logs on retries; avoid double-logging.
@@ -144,4 +153,4 @@ func (d *defaultClusterBaseline) ensureOnce(ctx context.Context) error {
 	return nil
 }
 
-func (*defaultClusterBaseline) NeedLeaderElection() bool { return true }
+func (*DefaultClusterBaseline) NeedLeaderElection() bool { return true }

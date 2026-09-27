@@ -2,8 +2,11 @@
 //
 // Files in this package:
 //   - main.go: flag parse, scheme, manager, health probes, controller SetupWithManager
-//   - default_cr.go: leader-elected create of ClusterBaseline/cluster when none exist
 //   - metrics_cert.go: service-ca / self-signed TLS cert provider for secure metrics
+//
+// The leader-elected create of ClusterBaseline/cluster when none exist is a
+// manager Runnable, so it lives beside the reconciler in
+// internal/controller (default_cr.go), not here.
 package main
 
 import (
@@ -45,6 +48,11 @@ const envSkipDefaultCR = "BASELINE_SECURITY_SKIP_DEFAULT_CR"
 
 // errShuttingDown fails the readiness check once SIGTERM has been received.
 var errShuttingDown = errors.New("shutting down")
+
+// errCacheNotSynced fails the readiness check while the informers are still
+// catching up. Local to the readyz check; the default-CR runnable in
+// internal/controller keeps its own sentinel.
+var errCacheNotSynced = errors.New("cache did not sync")
 
 // shuttingDown is set by a manager runnable when the signal handler cancels the
 // manager context, so readyz reports 503 while the process drains.
@@ -284,7 +292,7 @@ func main() {
 	// Opt out with BASELINE_SECURITY_SKIP_DEFAULT_CR=true. Leader-only so
 	// HA replicas do not race the create on every pod.
 	if !skipDefaultCR {
-		utilruntime.Must(mgr.Add(&defaultClusterBaseline{
+		utilruntime.Must(mgr.Add(&controller.DefaultClusterBaseline{
 			Client: mgr.GetClient(),
 			Cache:  mgr.GetCache(),
 			Log:    setupLog,

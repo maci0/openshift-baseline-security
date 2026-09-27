@@ -11,6 +11,8 @@
 //
 // Files are split by concern (same package, no import cycles):
 //   - clusterbaseline_controller.go: Reconcile loop, reconcileOwned, SetupWithManager
+//   - default_cr.go: DefaultClusterBaseline, the zero-config ClusterBaseline/cluster
+//     bootstrap Runnable (leader-only, opt out with BASELINE_SECURITY_SKIP_DEFAULT_CR)
 //   - clock.go: the reconciler's wall-clock source (nil = real clock)
 //   - managercache.go: ManagerCacheOptions, the manager's namespace-scoped cache bounds
 //   - helpers.go: requeue cadence, createIfMissing, relatedObjectsFromSuites

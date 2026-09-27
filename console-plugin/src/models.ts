@@ -137,14 +137,15 @@ export const ProfileGVK: K8sGroupVersionKind = {
 
 export const ClusterBaselineModel = model(ClusterBaselineGVK, 'clusterbaselines', false);
 
-// Singleton name enforced by CRD CEL (operator default_cr.go creates this).
+// Singleton name enforced by CRD CEL (created by the operator's
+// internal/controller/default_cr.go).
 // Shared by the SAR gate and any client that must address the singleton
 // without repeating the string.
 export const CLUSTER_BASELINE_NAME = 'cluster';
 
 // Manifest the operator default-creates when no ClusterBaseline exists
-// (operator/cmd/default_cr.go). The empty-state Create action writes the same
-// object so a stuck first-run can recover without YAML.
+// (operator/internal/controller/default_cr.go). The empty-state Create
+// action writes the same object so a stuck first-run can recover without YAML.
 export type DefaultClusterBaselineManifest = {
   apiVersion: string;
   kind: string;

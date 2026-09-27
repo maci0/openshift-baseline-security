@@ -1,4 +1,4 @@
-package main
+package controller
 
 import (
 	"context"
@@ -45,7 +45,7 @@ func crScheme(t *testing.T) *runtime.Scheme {
 func TestEnsureOnceCreatesWhenEmpty(t *testing.T) {
 	s := crScheme(t)
 	c := fake.NewClientBuilder().WithScheme(s).Build()
-	d := &defaultClusterBaseline{Client: c, Log: logr.Discard()}
+	d := &DefaultClusterBaseline{Client: c, Log: logr.Discard()}
 	if err := d.ensureOnce(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +74,7 @@ func TestEnsureOnceNoopWhenPresent(t *testing.T) {
 				return cl.Create(ctx, obj, opts...)
 			},
 		}).Build()
-	d := &defaultClusterBaseline{Client: c, Log: logr.Discard()}
+	d := &DefaultClusterBaseline{Client: c, Log: logr.Discard()}
 	if err := d.ensureOnce(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +101,7 @@ func TestEnsureOnceToleratesAlreadyExists(t *testing.T) {
 				return apierrors.NewAlreadyExists(gvr, "cluster")
 			},
 		}).Build()
-	d := &defaultClusterBaseline{Client: c, Log: logr.Discard()}
+	d := &DefaultClusterBaseline{Client: c, Log: logr.Discard()}
 	if err := d.ensureOnce(context.Background()); err != nil {
 		t.Fatalf("AlreadyExists must be tolerated, got %v", err)
 	}
@@ -118,7 +118,7 @@ func TestEnsureOnceListErrorPropagates(t *testing.T) {
 				return boom
 			},
 		}).Build()
-	d := &defaultClusterBaseline{Client: c, Log: logr.Discard()}
+	d := &DefaultClusterBaseline{Client: c, Log: logr.Discard()}
 	if err := d.ensureOnce(context.Background()); err == nil {
 		t.Fatal("list error must propagate so Start retries")
 	}
@@ -151,7 +151,7 @@ func TestIsPermanentDefaultCRError(t *testing.T) {
 func TestStartRetriesWhenCacheSyncsLate(t *testing.T) {
 	s := crScheme(t)
 	c := fake.NewClientBuilder().WithScheme(s).Build()
-	d := &defaultClusterBaseline{
+	d := &DefaultClusterBaseline{
 		Client: c,
 		Cache:  &scriptedSyncCache{syncedAfter: 3},
 		Log:    logr.Discard(),
@@ -184,7 +184,7 @@ func TestStartStopsOnShutdownDuringSyncRetry(t *testing.T) {
 	s := crScheme(t)
 	c := fake.NewClientBuilder().WithScheme(s).Build()
 	ctx, cancel := context.WithCancel(context.Background())
-	d := &defaultClusterBaseline{
+	d := &DefaultClusterBaseline{
 		Client: c,
 		Cache:  &scriptedSyncCache{}, // never syncs
 		Log:    logr.Discard(),
