@@ -73,7 +73,7 @@ import {
 } from '../waivers';
 import BaselineNotConfigured from './BaselineNotConfigured';
 import LoadingCards from './LoadingCards';
-import { regionFocusProps } from './DisabledTip';
+import { regionFocusProps, withDisabledTip } from './DisabledTip';
 import { ChunkError } from './ChunkError';
 import { useChunk } from './chunkLoad';
 import { useAutoDismiss } from './useAutoDismiss';
@@ -151,12 +151,18 @@ const ScheduleEditor: React.FC<{ baseline: ClusterBaseline }> = ({ baseline }) =
           <SplitItem>
             <code>{current}</code>
           </SplitItem>
-          {canEdit && !canEditLoading && (
-            <SplitItem>
+          <SplitItem>
+            {withDisabledTip(
+              canEditLoading
+                ? t('Checking permissions…')
+                : canEdit
+                  ? undefined
+                  : t('You do not have permission to edit the schedule.'),
               <Button
                 ref={editButtonRef}
                 variant="link"
                 isInline
+                isDisabled={!canEdit || canEditLoading}
                 // Named action: bare "Edit" is ambiguous next to other page links.
                 aria-label={t('Edit schedule')}
                 onClick={() => {
@@ -167,9 +173,9 @@ const ScheduleEditor: React.FC<{ baseline: ClusterBaseline }> = ({ baseline }) =
                 }}
               >
                 {t('Edit')}
-              </Button>
-            </SplitItem>
-          )}
+              </Button>,
+            )}
+          </SplitItem>
         </Split>
         {saved && (
           <HelperText role="status">
@@ -546,6 +552,9 @@ const Overview: React.FC<{
   const fixedItems = recentChanges[1];
   // List punctuation for the alert's inline link list of check links.
   const newlyFailedSeparators = listSeparators(newlyFailedItems.length, locale);
+  // Names in status.newlyFailed with no current check result: nothing to link,
+  // so the alert reports them apart from the ones it can name.
+  const unresolvedNewlyFailed = newlyFailed.length - newlyFailedItems.length;
 
   // Main score-trend chart: same CCR-churn stability as MiniTrend (Date objects
   // and Victory path data must not rebuild when history content is unchanged).
@@ -763,9 +772,11 @@ const Overview: React.FC<{
           isLiveRegion
           title={t('{{count}} check newly failing since the last scan', {
             // count must stay numeric for i18next plural selection; formattedCount
-            // is the locale-aware display value in the translated string.
-            count: newlyFailed.length,
-            formattedCount: formatCount(newlyFailed.length, locale),
+            // is the locale-aware display value in the translated string. It is
+            // the resolved count, the same one the Recent changes card shows, so
+            // the banner and the card cannot report two different totals.
+            count: newlyFailedItems.length,
+            formattedCount: formatCount(newlyFailedItems.length, locale),
           })}
           style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}
         >
@@ -789,12 +800,23 @@ const Overview: React.FC<{
           ) : (
             <a href="/baseline-security/results">{t('Review check results')}</a>
           )}
+          {/* A name in status.newlyFailed with no current check result cannot be
+              linked; say so instead of silently dropping it from the count. */}
+          {unresolvedNewlyFailed > 0 && newlyFailedItems.length > 0 && (
+            <>
+              {' '}
+              {t('({{count}} no longer in the results)', {
+                count: unresolvedNewlyFailed,
+                formattedCount: formatCount(unresolvedNewlyFailed, locale),
+              })}
+            </>
+          )}
           {fixed.length > 0 && (
             <>
               {' '}
               {t('({{count}} fixed)', {
-                count: fixed.length,
-                formattedCount: formatCount(fixed.length, locale),
+                count: fixedItems.length,
+                formattedCount: formatCount(fixedItems.length, locale),
               })}
             </>
           )}

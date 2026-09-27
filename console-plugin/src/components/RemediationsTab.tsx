@@ -270,6 +270,11 @@ const RemediationsTab: React.FC<{
   // never chose.
   if (batchConfirming && batchable.length === 0) {
     setBatchConfirming(false);
+    // Say why: without a message the confirm modal vanishes under the admin and
+    // Batch apply looks like a dead click.
+    setSuccess(
+      t('The pending batch is empty now. Those remediations were applied or filtered out.'),
+    );
   }
 
   const doBatchApply = () => {

@@ -20,6 +20,7 @@ import {
 } from '../models';
 import { errorMessage, isAlreadyExists } from '../errors';
 import { mayWrite } from '../permissions';
+import { withDisabledTip } from './DisabledTip';
 
 const BaselineNotConfigured: React.FC<{ style?: React.CSSProperties }> = ({ style }) => {
   const { t } = useTranslation('plugin__baseline-security-console-plugin');
@@ -56,6 +57,16 @@ const BaselineNotConfigured: React.FC<{ style?: React.CSSProperties }> = ({ styl
     }
   };
 
+  // The create action stays visible without the create verb: hiding it leaves
+  // a viewer with an empty state and no reason, and every other write control
+  // in the plugin renders disabled with its reason instead.
+  const createDisabled = busy || !canCreate || canCreateLoading;
+  const createDisabledReason = canCreateLoading
+    ? t('Checking permissions…')
+    : !canCreate
+      ? t('You do not have permission to create the baseline.')
+      : undefined;
+
   return (
     <EmptyState titleText={t('Baseline not configured')} headingLevel="h2" style={style}>
       <EmptyStateBody>
@@ -73,15 +84,16 @@ const BaselineNotConfigured: React.FC<{ style?: React.CSSProperties }> = ({ styl
             style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}
           />
         )}
-        {canCreate && !canCreateLoading && (
+        {withDisabledTip(
+          createDisabledReason,
           <Button
             variant="primary"
-            isDisabled={busy}
+            isDisabled={createDisabled}
             isLoading={busy}
             onClick={() => void create()}
           >
             {t('Create default baseline')}
-          </Button>
+          </Button>,
         )}
       </EmptyStateFooter>
     </EmptyState>
