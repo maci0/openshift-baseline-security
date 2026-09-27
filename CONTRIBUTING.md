@@ -39,7 +39,12 @@ yarn install --immutable
 yarn lint && yarn lint:oxlint && yarn typecheck && yarn test
 ```
 
-`make -C operator help` and `make -C console-plugin help` list the rest.
+From the repo root, `make check` names anything the setup above is missing
+(wrong Node major, no Yarn 4, no `node_modules`, no docker) before a build
+starts, and `make test`, `make lint`, and `make ci` run both halves. It only
+delegates to the per-module Makefiles; there is no second copy of a rule.
+`make help`, `make -C operator help`, and `make -C console-plugin help` list
+the rest.
 
 ## Edit-test loop
 
@@ -75,11 +80,11 @@ that step needs root, so it is not part of the per-clone loop.
    `operator/bundle/manifests/`): `cd operator && make generate manifests`.
    Other `config/rbac/` files and the CSV are hand-maintained; do not generate them.
 
-`cd operator && make ci` is the single command that matches the GitHub Actions
-`operator` job (unit tests, lint, govulncheck, alert tests, generated-file
-drift, binary reproducibility, bundle validate). `cd console-plugin && yarn ci`
-matches the `console-plugin` job except `yarn npm audit`. Image builds stay in
-CI.
+`make ci` at the repo root runs both: `operator/Makefile ci` (unit tests,
+lint, govulncheck, alert tests, generated-file drift, binary reproducibility,
+bundle validate) and `console-plugin` `yarn ci`. Together they match the
+GitHub Actions `operator` and `console-plugin` jobs; the plugin side excludes
+`yarn npm audit`, which is CI-only. Image and catalog builds stay in CI.
 
 `cd operator && make verify-reproducible` on its own rebuilds the manager from
 a second absolute path with a different timezone, locale, and umask and fails

@@ -324,7 +324,9 @@ is the product config; see `operator/config/samples/` and the CRD.
 ## Development
 
 Commands from a clean clone through a first PR: [CONTRIBUTING.md](CONTRIBUTING.md).
-`make -C operator help` and `make -C console-plugin help` list them.
+`make help` at the repo root runs both modules; `make check` reports a missing
+tool before a build starts, and `make -C operator help` /
+`make -C console-plugin help` list the per-module targets.
 
 ```sh
 # operator: unit test + lint. Makefile sets GOTOOLCHAIN from go.mod (1.26.x);
@@ -354,8 +356,8 @@ applies the CRD first).
   `cd operator && go test ./internal/controller/ -count=1 -run TestName`.
 - Unit (TypeScript): `cd console-plugin && yarn test`. One file:
   `cd console-plugin && yarn test src/scoring.test.ts`. Watch: `yarn test:watch`.
-- Full GHA replica: `cd operator && make ci` (needs docker);
-  `cd console-plugin && yarn ci`.
+- Full GHA replica: `make ci` at the repo root (needs docker), which is
+  `cd operator && make ci` plus `cd console-plugin && yarn ci`.
 - E2E, live cluster (Go): `cd operator && make test-e2e` with `KUBECONFIG`
   set. Asserts the ClusterBaseline reaches `Available` with a score and
   healthy conditions, the owned ScanSetting/bindings and console plugin

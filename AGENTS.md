@@ -18,19 +18,21 @@ deviations from them; `docs/DESIGN-DECISIONS.md` holds the ADRs.
 Both halves must be green before a change lands. Neither runs the other's.
 
 ```sh
+make check                                    # preflight, both modules
 cd operator       && make test test-race lint  # + make fuzz before a release
 cd console-plugin && yarn lint && yarn lint:oxlint && yarn typecheck && yarn test
 ```
 
-`make -C operator ci` is the local replica of the GHA `operator` job (also
-build, the reproducible-binary check, `govulncheck`, `mod-tidy-check`, alert tests, generated-file drift,
-`make bundle`; needs docker). `cd console-plugin && yarn ci` is the replica of the GHA
+`make ci` at the repo root runs both local replicas: `operator/Makefile ci`, the
+GHA `operator` job (also build, the reproducible-binary check, `govulncheck`,
+`mod-tidy-check`, alert tests, generated-file drift, `make bundle`; needs
+docker), and `console-plugin` `yarn ci`, the replica of the GHA
 `console-plugin` job except `yarn npm audit`. The required `images` and
 `catalog` jobs have no local replica beyond `make bundle` and
 `make catalog-prepare` (both need docker); a Dockerfile, bundle, or CSV change
 should have run those first. Extended fuzzing and live-cluster e2e are
-scheduled or on-demand, never per-PR. `make help` in each directory lists the
-rest. Human clone-to-PR path: `CONTRIBUTING.md`.
+scheduled or on-demand, never per-PR. `make help` at the root and in each
+module directory lists the rest. Human clone-to-PR path: `CONTRIBUTING.md`.
 
 ## Version lockstep
 
@@ -88,6 +90,10 @@ standalone channel head, so there is no `PREV_VERSION` anywhere. CSV
 
 ## Layout
 
+- root `Makefile`: contributor entry point. `help`, `check` (preflight), and
+  `test` / `lint` / `ci` wrappers that delegate to the two module Makefiles.
+  It holds no rule of its own, so add a target here only when both modules
+  want it.
 - `operator/`: Go operator (kubebuilder go/v4), OLM bundle, file-based catalog
 - `console-plugin/`: React 18 / PatternFly 6 dynamic plugin
 - `docs/`: SPEC, STANDARDS, PATTERNS, DESIGN-DECISIONS, TEST-PLAN,
