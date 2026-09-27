@@ -631,14 +631,12 @@ func (l *lazyComplianceWatch) Start(ctx context.Context) error {
 			return nil
 		}
 		pending = still
-		// NewTimer (not time.After): stop on ctx cancel so a shutdown mid-wait
-		// does not leave the retry timer holding the Runnable goroutine's stack.
-		timer := time.NewTimer(watchRetryInterval)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
+		// The wait runs on the injected clock, so a simulated run spends
+		// simulated time here; sleep stops on ctx cancel, so a shutdown
+		// mid-wait does not leave the retry holding the Runnable goroutine's
+		// stack.
+		if err := l.sleep(ctx, watchRetryInterval); err != nil {
 			return nil
-		case <-timer.C:
 		}
 	}
 }

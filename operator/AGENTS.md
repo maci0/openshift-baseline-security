@@ -85,6 +85,10 @@ than guessing.
   rule-specific `//nolint:nilerr` and its reason. `nolintlint` requires both.
 - Every threshold and grace period is a named package-level constant with a
   comment saying what breaks at the boundary. No bare durations at call sites.
+- No real timers in a runnable. A retry wait goes through the injected clock
+  (`clock.Sleep` via `r.sleep` / `l.sleep` / `DefaultClusterBaseline.sleep`), so
+  a simulated run spends simulated time on it. `time.NewTimer` in a reconcile
+  or Runnable loop makes a seeded replay depend on wall time.
 - Fuzz any parser of cluster-supplied text (suite labels, scan names, CSV
   versions, timestamps). Commit corpus files under `testdata/fuzz/`; a crasher
   written during the fuzz CI job fails the run.

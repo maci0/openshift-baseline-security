@@ -766,6 +766,9 @@ an accepted risk neither inflates nor tanks the score.
       none exists, after cache sync, and tolerates AlreadyExists
       (`TestEnsureOnceCreatesWhenEmpty`, `TestEnsureOnceToleratesAlreadyExists`,
       `TestStartRetriesWhenCacheSyncsLate`).
+- [x] **Bootstrap retry wait runs on the injected clock**: with a virtual clock
+      the sync-retry loop advances two default delays and creates the CR with
+      no wall-clock time spent (`TestStartSyncRetryRunsOnTheInjectedClock`).
 - [x] **Default creation opt-out**:
       `BASELINE_SECURITY_SKIP_DEFAULT_CR=true` (and 1/yes/on) is truthy;
       false/0/no/off/unset are falsy; unknown values error so start fails

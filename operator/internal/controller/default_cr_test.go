@@ -178,6 +178,42 @@ func TestStartRetriesWhenCacheSyncsLate(t *testing.T) {
 	}
 }
 
+// The sync-retry wait runs on the injected clock, not a real timer: with a
+// virtual clock the two retries below cost no wall time, and the clock lands
+// exactly two delays past its start. Left on the real clock the same run would
+// sit in two 10s timers, which is what the deadline here catches.
+func TestStartSyncRetryRunsOnTheInjectedClock(t *testing.T) {
+	s := crScheme(t)
+	c := fake.NewClientBuilder().WithScheme(s).Build()
+	start := time.Date(2024, 3, 1, 0, 0, 0, 0, time.UTC)
+	clk := &virtualClock{at: start}
+	d := &DefaultClusterBaseline{
+		Client: c,
+		Cache:  &scriptedSyncCache{syncedAfter: 3},
+		Log:    logr.Discard(),
+		Clock:  clk,
+		// retryDelay left at zero on purpose: the production 10s default is
+		// what a real timer would have slept through.
+	}
+	done := make(chan error, 1)
+	go func() { done <- d.Start(context.Background()) }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Start: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Start blocked on a real retry timer; the wait must run on the injected clock")
+	}
+	if want := start.Add(2 * defaultCRRetryDelay); !clk.Now().Equal(want) {
+		t.Fatalf("clock at %s after 2 retries, want %s", clk.Now(), want)
+	}
+	got := &baselinev1alpha1.ClusterBaseline{}
+	if err := c.Get(context.Background(), client.ObjectKey{Name: "cluster"}, got); err != nil {
+		t.Fatalf("default CR missing after cache recovered: %v", err)
+	}
+}
+
 // A cancelled context during the sync-retry loop exits cleanly instead of
 // spinning or erroring.
 func TestStartStopsOnShutdownDuringSyncRetry(t *testing.T) {

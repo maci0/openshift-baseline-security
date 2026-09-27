@@ -21,6 +21,17 @@ type virtualClock struct{ at time.Time }
 
 func (c *virtualClock) Now() time.Time { return c.at }
 
+// Sleep advances simulated time instead of blocking, so a retry loop driven by
+// this clock reaches its next attempt in no wall time at all. A real deadline
+// still wins: a cancelled context ends the wait the way a real timer would.
+func (c *virtualClock) Sleep(ctx context.Context, d time.Duration) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	c.at = c.at.Add(d)
+	return nil
+}
+
 func (c *virtualClock) advance(d time.Duration) { c.at = c.at.Add(d) }
 
 // TestReconcileReadsTheInjectedClock pins the seam every time-based decision

@@ -38,6 +38,10 @@ type DefaultClusterBaseline struct {
 	Cache  cache.Cache
 	Log    logr.Logger
 
+	// Clock carries the retry waits between attempts. Production nil (real
+	// time); a simulated run injects a virtual clock so the loop advances
+	// simulated time instead of blocking on it.
+	Clock clock
 	// waitForCacheSync overrides Cache.WaitForCacheSync (tests only) so the
 	// sync-retry loop can be driven without manager machinery. Production nil.
 	waitForCacheSync func(ctx context.Context) bool
@@ -51,6 +55,14 @@ func (d *DefaultClusterBaseline) delay() time.Duration {
 		return d.retryDelay
 	}
 	return defaultCRRetryDelay
+}
+
+// sleep waits out the inter-attempt pause on the injected clock.
+func (d *DefaultClusterBaseline) sleep(ctx context.Context) error {
+	if d.Clock == nil {
+		return realClock{}.Sleep(ctx, d.delay())
+	}
+	return d.Clock.Sleep(ctx, d.delay())
 }
 
 func (d *DefaultClusterBaseline) Start(ctx context.Context) error {
@@ -72,12 +84,8 @@ func (d *DefaultClusterBaseline) Start(ctx context.Context) error {
 				"cache did not sync; deferring default ClusterBaseline creation",
 				"syncAttempt", syncAttempt)
 		}
-		timer := time.NewTimer(d.delay())
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return nil
-		case <-timer.C:
+		if err := d.sleep(ctx); err != nil {
+			return nil // graceful shutdown, not a runtime failure
 		}
 	}
 	// Retry on transient list/create failures so a brief API blip does not
@@ -101,12 +109,8 @@ func (d *DefaultClusterBaseline) Start(ctx context.Context) error {
 			d.Log.Error(err, "default ClusterBaseline ensure failed; will retry",
 				"attempt", attempt)
 		}
-		timer := time.NewTimer(d.delay())
-		select {
-		case <-ctx.Done():
-			timer.Stop()
+		if err := d.sleep(ctx); err != nil {
 			return nil
-		case <-timer.C:
 		}
 	}
 }
