@@ -2962,7 +2962,7 @@ __metadata:
     copy-webpack-plugin: "npm:^14.0.0"
     eslint: "npm:^10.9.1"
     eslint-plugin-react-hooks: "npm:^7.1.1"
-    i18next: "npm:~25.6.2"
+    i18next: "npm:~26.4.2"
     jest: "npm:^30.4.2"
     oxlint: "npm:1.79.0"
     oxlint-tsgolint: "npm:7.0.2001"
@@ -4504,17 +4504,15 @@ __metadata:
   languageName: node
   linkType: hard
 
-"i18next@npm:~25.6.2":
-  version: 25.6.3
-  resolution: "i18next@npm:25.6.3"
-  dependencies:
-    "@babel/runtime": "npm:^7.28.4"
+"i18next@npm:~26.4.2":
+  version: 26.4.2
+  resolution: "i18next@npm:26.4.2"
   peerDependencies:
-    typescript: ^5
+    typescript: ^5 || ^6 || ^7
   peerDependenciesMeta:
     typescript:
       optional: true
-  checksum: 10c0/cbeaff5641247ef724dbf1b609df2bc24306b610cfefc6afab1f574e3c6e4171731a1959915c82c606bdb9a535da374ac14d43c7849e680482e9b0d8a93c19fb
+  checksum: 10c0/f2c9613e03e09e56a84aee939d8fbe3442a58622915e11f97e47f9ab358dfa65be783230b37a21483152711f786fccfe697d7f5ea9269c54f16179dc59960e4b
   languageName: node
   linkType: hard
 
