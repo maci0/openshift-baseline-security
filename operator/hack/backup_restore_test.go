@@ -508,12 +508,9 @@ func backupDir(t *testing.T, work, name, takenAt string) string {
 	if err := os.WriteFile(path, []byte(baselineYAML), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	sum, err := exec.CommandContext(t.Context(), "sha256sum", path).Output()
-	if err != nil {
-		t.Fatalf("sha256sum: %v", err)
-	}
-	digest := strings.SplitN(string(sum), " ", 2)[0]
-	manifest := "takenAt=" + takenAt + "\nresourceVersion=41237\nuid=6f0b1c2a\nsha256=" + digest + "\n"
+	// sha256Hex, not a `sha256sum` subprocess: coreutils is GNU and macOS
+	// ships none, so a shelling-out helper fails the suite on a supported host.
+	manifest := "takenAt=" + takenAt + "\nresourceVersion=41237\nuid=6f0b1c2a\nsha256=" + sha256Hex(t, path) + "\n"
 	if err := os.WriteFile(filepath.Join(dir, "MANIFEST"), []byte(manifest), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -919,12 +916,7 @@ func TestVerifyBackup(t *testing.T) {
 				if err := os.WriteFile(path, []byte(other), 0o600); err != nil {
 					t.Fatal(err)
 				}
-				sum, err := exec.CommandContext(t.Context(), "sha256sum", path).Output()
-				if err != nil {
-					t.Fatal(err)
-				}
-				digest := strings.SplitN(string(sum), " ", 2)[0]
-				manifest := "takenAt=" + now.Format(time.RFC3339) + "\nsha256=" + digest + "\n"
+				manifest := "takenAt=" + now.Format(time.RFC3339) + "\nsha256=" + sha256Hex(t, path) + "\n"
 				if err := os.WriteFile(filepath.Join(dir, "MANIFEST"), []byte(manifest), 0o600); err != nil {
 					t.Fatal(err)
 				}

@@ -77,6 +77,43 @@ jobs:
       - name: validate OLM bundle
         run: make bundle
 
+  # The operator ships as a Linux container, but its scripts and its test suite
+  # are run by hand on whatever a contributor has. macOS is a documented host
+  # (operator/AGENTS.md, docs/RESTORE.md) and it is where the portability work
+  # actually bites: no GNU coreutils, BSD date(1), a BSD make, and an arm64
+  # host. Without this lane those claims are asserted and never tested, and the
+  # ubuntu-only jobs cannot see a regression introduced here.
+  portability:
+    runs-on: macos-14
+    timeout-minutes: 30
+    env:
+      GOFLAGS: -mod=readonly
+    defaults:
+      run:
+        working-directory: operator
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: operator/go.mod
+          cache-dependency-path: operator/go.sum
+      # The Makefile refuses GNU Make < 3.82 (its .SHELLFLAGS is ignored by the
+      # 3.81 BSD make that ships as /usr/bin/make), so use Homebrew's gmake.
+      - name: install gmake
+        run: brew install gmake
+      # `make test` is the target the docs claim macOS supports: fmt-check, vet,
+      # go test ./... (which drives hack/*.sh through a fake oc) and the
+      # must-gather self-test. No docker needed, so it runs on a developer
+      # laptop the same way it does here.
+      - name: make test
+        run: gmake test
+      # The scripts are the portable surface; lint them on the host where the
+      # fallback branches (shasum, BSD date) are the ones a developer hits.
+      - name: shellcheck
+        run: gmake lint-shell
+
   console-plugin:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -404,7 +441,7 @@ jobs:
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
-    needs: [operator, console-plugin, images, catalog]
+    needs: [operator, portability, console-plugin, images, catalog]
     steps:
       - name: all required jobs passed
         run: |
@@ -412,6 +449,7 @@ jobs:
           failed=0
           for pair in \
             "operator=${{ needs.operator.result }}" \
+            "portability=${{ needs.portability.result }}" \
             "console-plugin=${{ needs.console-plugin.result }}" \
             "images=${{ needs.images.result }}" \
             "catalog=${{ needs.catalog.result }}"; do
