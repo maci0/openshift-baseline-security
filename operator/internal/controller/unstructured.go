@@ -57,6 +57,5 @@ func unstructuredName(obj map[string]any) string {
 	if meta == nil {
 		return ""
 	}
-	s, _ := meta["name"].(string)
-	return s
+	return stringMapValue(meta, "name")
 }

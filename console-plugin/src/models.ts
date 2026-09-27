@@ -466,22 +466,17 @@ const ownedSuiteLabels = (
   profiles: readonly string[] | undefined,
   tailoredProfiles: readonly string[] | undefined,
 ): string[] => {
-  // Pre-size for typical multi-profile + tailored baselines (watch selector rebuild).
-  const out: string[] = Array.from({
-    length: (profiles?.length ?? 0) + (tailoredProfiles?.length ?? 0),
-  });
-  let n = 0;
+  const out: string[] = [];
   for (const p of profiles ?? []) {
     if (p) {
-      out[n++] = `baseline-${p}`;
+      out.push(`baseline-${p}`);
     }
   }
   for (const name of tailoredProfiles ?? []) {
     if (name) {
-      out[n++] = `baseline-tp-${name}`;
+      out.push(`baseline-tp-${name}`);
     }
   }
-  out.length = n;
   return out;
 };
 
