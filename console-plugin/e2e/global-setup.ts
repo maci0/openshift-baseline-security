@@ -1,6 +1,7 @@
 import { chromium, FullConfig } from '@playwright/test';
 import { chmod, mkdir } from 'fs/promises';
 import { existsSync } from 'node:fs';
+import { writeFile } from 'node:fs/promises';
 
 // Logs into the OpenShift console once and saves the authenticated storage
 // state so each spec starts already logged in.
@@ -48,6 +49,13 @@ export default async function globalSetup(_config: FullConfig) {
 
   await mkdir('e2e/.auth', { recursive: true, mode: 0o700 });
   const statePath = 'e2e/.auth/state.json';
+  // The state file holds live kubeadmin session cookies. Playwright creates it
+  // with the process umask (0644 on a default host) and only the chmod below
+  // narrows it, so on a shared host another local user can read the session
+  // for the length of that write. Create the file owner-only first: storageState
+  // truncates an existing path, so it never loosens the mode, and the chmod
+  // still tightens a file left behind by an older run.
+  await writeFile(statePath, '', { mode: 0o600 });
   await page.context().storageState({ path: statePath });
   // Session cookies: owner-only (gitignored path; still tighten on shared hosts).
   await chmod(statePath, 0o600);

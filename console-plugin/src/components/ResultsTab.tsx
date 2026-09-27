@@ -1093,6 +1093,11 @@ const ResultsTab: React.FC<{
                               // Match ClusterBaseline CRD waiver field MaxLength
                               // (same constant the patch validator enforces).
                               maxLength={WAIVER_REASON_MAX_LEN}
+                              // Same reason as the attribution inputs below: the
+                              // reason is free text persisted in a cluster-scoped
+                              // CR and in every exported report, so browser
+                              // autofill must not offer the operator's own name.
+                              autoComplete="off"
                               rows={2}
                             />
                           </FormGroup>
