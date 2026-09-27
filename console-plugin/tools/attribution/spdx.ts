@@ -2,12 +2,23 @@
 // plugin bundle. The project license is Apache-2.0; the shipped bundle mixes in
 // whatever the dependency closure brings, so the gate is an allowlist rather
 // than a denylist: an identifier nobody has read here is a build failure, not
-// a silent grant.
+// a silent grant. Each identifier outside the familiar OSI list carries the
+// reason it was read and accepted.
 export const PERMISSIVE_SPDX: ReadonlySet<string> = new Set([
 	'0BSD',
 	'Apache-2.0',
 	'BSD-2-Clause',
 	'BSD-3-Clause',
+	// Blue Oak Council's model license: permissive, no copyleft and no
+	// source-availability term. Read for glob, lru-cache, minimatch, minipass,
+	// and path-scurry, which the `resolutions` entries pin for the audit fixes.
+	'BlueOak-1.0.0',
+	// Creative Commons attribution licenses, carried by data packages rather
+	// than code (caniuse-lite, spdx-exceptions). Redistribution and modification
+	// are permitted with attribution, which the notices file reproduces next to
+	// the identifier; there is no copyleft and no non-commercial term.
+	'CC-BY-3.0',
+	'CC-BY-4.0',
 	'CC0-1.0',
 	'ISC',
 	'MIT',

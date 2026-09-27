@@ -1236,6 +1236,23 @@ depend on those tags.
   (`operator/hack/normalize-mtimes.sh`), and `make verify-versions` fails if a
   clamp is dropped.
 
+- `yarn build` failed on the console plugin's installed dependency closure with
+  "no LICENSE file to reproduce" for 120 packages, most of which do ship their
+  license text: npm's canonical spelling is the lowercase `license`, and the
+  gate only looked for `LICENSE` and its upper-case siblings. The lookup is now
+  case-insensitive, and a package that ships no license file at all no longer
+  fails the build when its `package.json` declares an identifier the project
+  already accepts: the notice records `(no file shipped)` and the declared
+  grant is the entry. The gate still refuses a copyleft term, an identifier
+  nobody has read here, free text, and a missing license field, whether or not
+  a file ships. Three identifiers the closure needed were read and added to the
+  accepted list with their reasons: `BlueOak-1.0.0` (glob, lru-cache,
+  minimatch, minipass, path-scurry) and `CC-BY-3.0` / `CC-BY-4.0` (caniuse-lite,
+  spdx-exceptions, both data packages). None is copyleft or source-available,
+  and each ships its license text into the notices file.
+  `dist/THIRD-PARTY-NOTICES.txt` therefore lists more packages with a file name,
+  and names the fileless ones.
+
 ### Security
 
 - The console plugin's dependency tree carried two advisories the audit step

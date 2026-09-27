@@ -2,11 +2,26 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 
 import { classifyLicense, PERMISSIVE_SPDX } from './spdx';
-import { collectNotices, findProjectRoot, readProjectVersion, renderNotices } from './collect';
+import {
+	collectNotices,
+	findProjectRoot,
+	NO_LICENSE_FILE,
+	readProjectVersion,
+	renderNotices,
+} from './collect';
 
 const FIXTURE_ROOT = path.resolve(__dirname, '../../../.scratch/attribution-fixture');
 
-function writePackage(dir: string, manifest: Record<string, unknown>, licenseFile?: string): void {
+// The manifest fields the fixtures write. The collector reads this back off disk
+// as untrusted JSON, so the fixture declares what a published tarball carries,
+// not what the collector's parser accepts.
+interface FixtureManifest {
+	name: string;
+	version: string;
+	license?: string;
+}
+
+function writePackage(dir: string, manifest: FixtureManifest, licenseFile?: string): void {
 	fs.mkdirSync(dir, { recursive: true });
 	fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify(manifest));
 	if (licenseFile !== undefined) {
@@ -33,6 +48,17 @@ function makeFixture(): void {
 	writePackage(path.join(modules, 'copyleft-bait'), { name: 'copyleft-bait', version: '0.1.0', license: 'GPL-3.0-only' }, 'LICENSE');
 	writePackage(path.join(modules, 'mystery'), { name: 'mystery', version: '2.0.0' }, 'LICENSE');
 	writePackage(path.join(modules, 'terse'), { name: 'terse', version: '1.0.0', license: 'SEE LICENSE IN COPYING' }, 'COPYING');
+	// npm's canonical lowercase spelling, which is what most tarballs ship.
+	writePackage(
+		path.join(modules, 'lowercase-license'),
+		{ name: 'lowercase-license', version: '1.0.0', license: 'MIT' },
+		'license',
+	);
+	// No license file at all, with each verdict the gate has to reach.
+	writePackage(path.join(modules, 'bare-permissive'), { name: 'bare-permissive', version: '1.0.0', license: 'MIT' });
+	writePackage(path.join(modules, 'bare-copyleft'), { name: 'bare-copyleft', version: '1.0.0', license: 'AGPL-3.0-only' });
+	writePackage(path.join(modules, 'bare-unread'), { name: 'bare-unread', version: '1.0.0', license: 'WTFPL-2.0' });
+	writePackage(path.join(modules, 'bare-silent'), { name: 'bare-silent', version: '1.0.0' });
 }
 
 describe('classifyLicense', () => {
@@ -95,8 +121,13 @@ describe('collectNotices', () => {
 		const names = report.notices.map((notice) => notice.name);
 		expect(names).toEqual([
 			'@patternfly/react-core',
+			'bare-copyleft',
+			'bare-permissive',
+			'bare-silent',
+			'bare-unread',
 			'copyleft-bait',
 			'loose-envify',
+			'lowercase-license',
 			'mystery',
 			'react',
 			'terse',
@@ -119,6 +150,28 @@ describe('collectNotices', () => {
 		const report = collectNotices(FIXTURE_ROOT);
 		const react = report.notices.find((notice) => notice.name === 'react');
 		expect(react?.licenseFile).toBe('LICENSE');
+	});
+
+	it('matches the license file case-insensitively and reports its spelling', () => {
+		const report = collectNotices(FIXTURE_ROOT);
+		const notice = report.notices.find((entry) => entry.name === 'lowercase-license');
+		expect(notice?.licenseFile).toBe('license');
+		expect(report.failures.some((failure) => failure.startsWith('lowercase-license'))).toBe(false);
+	});
+
+	it('accepts a declared permissive identifier when the package ships no file', () => {
+		const report = collectNotices(FIXTURE_ROOT);
+		const notice = report.notices.find((entry) => entry.name === 'bare-permissive');
+		expect(notice?.licenseFile).toBe(NO_LICENSE_FILE);
+		expect(notice?.ids).toEqual(['MIT']);
+		expect(report.failures.some((failure) => failure.startsWith('bare-permissive'))).toBe(false);
+	});
+
+	it('still fails a fileless package on a copyleft or unread identifier', () => {
+		const failures = collectNotices(FIXTURE_ROOT).failures.join('\n');
+		expect(failures).toContain('bare-copyleft@1.0.0');
+		expect(failures).toContain('bare-unread@1.0.0: unapproved identifier: WTFPL-2.0');
+		expect(failures).toContain('bare-silent@1.0.0: no license field');
 	});
 
 	it('fails rather than emitting an empty grant set when nothing is installed', () => {
