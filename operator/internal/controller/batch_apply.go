@@ -85,24 +85,41 @@ func (r *ClusterBaselineReconciler) openRemediationBatch(
 	// Transient Get/API errors still return so the request is retried.
 	// Build owned suites once for the whole list (up to batchMaxRemediations).
 	suites := ownedSuites(cb)
+	// One paged List replaces a Get per name, matching the wait path. Opening a
+	// maximum batch validated 256 remediations through 256 sequential live
+	// apiserver round trips (unstructured reads bypass the manager cache) before
+	// a single pool was paused. Paging stops as soon as every name is found.
+	rems, lerr := r.listRemediationsForBatch(ctx, list)
+	if lerr != nil {
+		// NoMatch (CRDs absent) and transient read failures both retry the one-shot
+		// request rather than looking like every target was missing. Wrap with a
+		// name so the log still identifies which request was not resolved.
+		return fmt.Errorf("listing remediation %q for batch: %w", list[0], lerr)
+	}
 	pools := map[string]bool{}
 	keep := make([]string, 0, len(list))
 	for _, name := range list {
-		rem, err := r.getBatchRemediation(ctx, name, suites)
-		if err != nil {
+		rem, found := rems[name]
+		if !found {
+			// Race-deleted between UI submit and start: log each drop so a
+			// partial batch (started with fewer remediations) is explainable.
+			log.FromContext(ctx).Info("remediation batch: target not found, skipping",
+				"remediation", name, "name", cb.Name)
+			continue
+		}
+		if !remediationOwnedByBaseline(suites, rem) {
+			err := fmt.Errorf("remediation %q: %w", name, errBatchForeignSuite)
+			log.FromContext(ctx).Info("remediation batch: permanent target reject, skipping",
+				"name", cb.Name, "remediation", name, "error", err.Error())
+			continue
+		}
+		if err := validateBatchTarget(rem); err != nil {
 			if isPermanentBatchTargetReject(err) {
 				log.FromContext(ctx).Info("remediation batch: permanent target reject, skipping",
 					"name", cb.Name, "remediation", name, "error", err.Error())
 				continue
 			}
 			return err
-		}
-		if rem == nil {
-			// Race-deleted between UI submit and start: log each drop so a
-			// partial batch (started with fewer remediations) is explainable.
-			log.FromContext(ctx).Info("remediation batch: target not found, skipping",
-				"remediation", name, "name", cb.Name)
-			continue
 		}
 		keep = append(keep, name)
 		if p := poolFromRemediation(rem); p != "" {

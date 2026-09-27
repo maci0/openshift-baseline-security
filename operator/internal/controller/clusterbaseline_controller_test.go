@@ -530,11 +530,12 @@ func TestRemediationBatchNoMatchPropagates(t *testing.T) {
 		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(cb).
 			WithStatusSubresource(&baselinev1alpha1.ClusterBaseline{}).
 			WithInterceptorFuncs(interceptor.Funcs{
-				Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
-					if u, ok := obj.(*unstructured.Unstructured); ok && u.GroupVersionKind() == remediationGVK {
+				List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+					gvk := list.GetObjectKind().GroupVersionKind()
+					if gvk.Group == remediationGVK.Group && gvk.Kind == remediationGVK.Kind+"List" {
 						return noMatch
 					}
-					return c.Get(ctx, key, obj, opts...)
+					return c.List(ctx, list, opts...)
 				},
 			}).Build(),
 		Scheme: scheme,
@@ -547,6 +548,50 @@ func TestRemediationBatchNoMatchPropagates(t *testing.T) {
 	}
 	if cb.Status.RemediationBatch != nil {
 		t.Fatal("batch must not start when CRDs are missing")
+	}
+}
+
+// Opening a batch must not re-Get every target it just Listed. Validation reads
+// the whole request through one paged List (as the wait path does); the only
+// per-name read left is the one applyOwnedRemediation needs for its
+// optimistic-lock patch, which it must re-read on every conflict retry.
+func TestRemediationBatchOpenListsInsteadOfGettingPerName(t *testing.T) {
+	scheme := testScheme(t)
+	cb := newBatchCB()
+	cb.SetAnnotations(map[string]string{batchApplyAnnotation: "rem1,rem2,rem3"})
+	objs := []client.Object{cb, machineConfigPool("worker")}
+	for _, n := range []string{"rem1", "rem2", "rem3"} {
+		objs = append(objs, nodeRemediation(n, "worker"))
+	}
+	gets, lists := 0, 0
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(objs...).
+			WithStatusSubresource(&baselinev1alpha1.ClusterBaseline{}).
+			WithInterceptorFuncs(interceptor.Funcs{
+				Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+					if u, ok := obj.(*unstructured.Unstructured); ok && u.GroupVersionKind() == remediationGVK {
+						gets++
+					}
+					return c.Get(ctx, key, obj, opts...)
+				},
+				List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+					gvk := list.GetObjectKind().GroupVersionKind()
+					if gvk.Group == remediationGVK.Group && gvk.Kind == remediationGVK.Kind+"List" {
+						lists++
+					}
+					return c.List(ctx, list, opts...)
+				},
+			}).Build(),
+		Scheme: scheme,
+	}
+	if err := r.openRemediationBatch(context.Background(), cb, cb.Annotations[batchApplyAnnotation]); err != nil {
+		t.Fatalf("openRemediationBatch: %v", err)
+	}
+	if lists == 0 {
+		t.Fatal("remediation Lists = 0, want at least 1: validation must read the request with one paged List")
+	}
+	if gets != 3 {
+		t.Fatalf("remediation Gets = %d, want 3 (one per applied name, none for validation)", gets)
 	}
 }
 

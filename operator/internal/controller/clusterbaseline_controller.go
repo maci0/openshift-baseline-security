@@ -260,6 +260,13 @@ func (r *ClusterBaselineReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	// only in memory, and it must be written durably only after Status().Update
 	// persists the rings it guards (see persistHistoryScoringMode).
 	preReconcileMode := cb.Annotations[historyScoringModeAnn]
+	// Snapshot the status as stored, so a reconcile that derives exactly what is
+	// already persisted can skip the write. The four failure lists are budgeted
+	// to 768 KiB (sanitize.go), so the unconditional PUT below was up to 800 KB
+	// through admission, structural-schema validation, set-uniqueness checking,
+	// and etcd once per poll (four times a minute while Progressing) purely to
+	// store identical bytes. See statusUnchanged.
+	persistedStatus := cb.Status.DeepCopy()
 
 	if err := r.reconcileOwned(ctx, cb); err != nil {
 		// Persist a Degraded condition (best-effort) so a persistently failing
@@ -308,10 +315,12 @@ func (r *ClusterBaselineReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	// preReconcileMode and the durable stamp would silently stop advancing,
 	// wiping history rings again on every completed scan after a mode flip.
 	stamped := cb.Annotations[historyScoringModeAnn]
-	if err := r.Status().Update(ctx, cb); err != nil {
-		logger.Error(err, "status update failed",
-			"name", cb.Name, "generation", cb.Generation, "duration", r.elapsed(started))
-		return ctrl.Result{}, err
+	if !statusUnchanged(persistedStatus, &cb.Status, stamped, preReconcileMode) {
+		if err := r.Status().Update(ctx, cb); err != nil {
+			logger.Error(err, "status update failed",
+				"name", cb.Name, "generation", cb.Generation, "duration", r.elapsed(started))
+			return ctrl.Result{}, err
+		}
 	}
 	publishMetrics(cb, r.now())
 	// Persist the history scoring-mode stamp only now that the rings it guards are

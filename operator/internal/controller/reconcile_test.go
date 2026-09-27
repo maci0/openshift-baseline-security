@@ -1733,6 +1733,102 @@ func TestReconcileStatusUpdateFailurePropagates(t *testing.T) {
 	}
 }
 
+// A poll that re-derives exactly the status the apiserver already holds must
+// not PUT it back. The four failure lists are budgeted to 768 KiB, so the
+// unconditional status write shipped up to 800 KB per tick through admission,
+// structural-schema validation, set-uniqueness checking, and etcd, four times
+// a minute while Progressing, purely to store identical bytes.
+func TestReconcileSkipsUnchangedStatusWrite(t *testing.T) {
+	scheme := testScheme(t)
+	resetMetrics(t)
+	scheme.AddKnownTypeWithName(scanSettingGVK, &unstructured.Unstructured{})
+	bindingList := uList(bindingGVK)
+	scheme.AddKnownTypeWithName(bindingGVK, &unstructured.Unstructured{})
+	scheme.AddKnownTypeWithName(bindingList.GroupVersionKind(), bindingList)
+
+	sub := u(subscriptionGVK)
+	sub.SetName("compliance-operator")
+	sub.SetNamespace(complianceNamespace)
+	_ = unstructured.SetNestedField(sub.Object, "compliance-operator.v1.9.1", "status", "installedCSV")
+	csv := u(csvGVK)
+	csv.SetName("compliance-operator.v1.9.1")
+	csv.SetNamespace(complianceNamespace)
+	_ = unstructured.SetNestedField(csv.Object, "Succeeded", "status", "phase")
+
+	cb := newCB("cis")
+	cb.Finalizers = []string{finalizerName}
+	t.Setenv("RELATED_IMAGE_CONSOLE_PLUGIN", "example.test/plugin:1")
+
+	foreign := []client.Object{sub, csv, consoleCluster("other"),
+		checkResult("a", "baseline-cis", "PASS"),
+		checkResult("b", "baseline-cis", "FAIL")}
+
+	// First reconcile from an empty status: the write must happen.
+	writes := 0
+	build := func(objs ...client.Object) *ClusterBaselineReconciler {
+		return &ClusterBaselineReconciler{
+			Client: fake.NewClientBuilder().WithScheme(scheme).
+				WithObjects(append(objs, foreign...)...).
+				WithStatusSubresource(&baselinev1alpha1.ClusterBaseline{}).
+				WithInterceptorFuncs(interceptor.Funcs{
+					SubResourceUpdate: func(ctx context.Context, c client.Client, subResourceName string, obj client.Object, opts ...client.SubResourceUpdateOption) error {
+						if subResourceName == "status" {
+							if _, ok := obj.(*baselinev1alpha1.ClusterBaseline); ok {
+								writes++
+							}
+						}
+						return c.SubResource(subResourceName).Update(ctx, obj, opts...)
+					},
+				}).Build(),
+			Scheme: scheme,
+		}
+	}
+	r := build(cb)
+	if _, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: "cluster"},
+	}); err != nil {
+		t.Fatalf("first reconcile: %v", err)
+	}
+	if writes != 1 {
+		t.Fatalf("status writes = %d, want 1: a first reconcile must persist derived status", writes)
+	}
+
+	// Replay the stored object unchanged: nothing moved on the cluster, so the
+	// rollup comes out identical and the write must be skipped.
+	stored := &baselinev1alpha1.ClusterBaseline{}
+	if err := r.Client.Get(context.Background(), types.NamespacedName{Name: "cluster"}, stored); err != nil {
+		t.Fatalf("get stored ClusterBaseline: %v", err)
+	}
+	stored.Finalizers = []string{finalizerName}
+	writes = 0
+	r = build(stored)
+	if _, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: "cluster"},
+	}); err != nil {
+		t.Fatalf("second reconcile: %v", err)
+	}
+	if writes != 0 {
+		t.Fatalf("status writes = %d, want 0: an unchanged reconcile must not rewrite identical status", writes)
+	}
+
+	// A real change must still be written, or the skip would strand status.
+	changed := stored.DeepCopy()
+	changed.Status.Conditions = append(changed.Status.Conditions, metav1.Condition{
+		Type: "ScanStorageReady", Status: metav1.ConditionFalse, Reason: "NoPVC",
+		Message: "seeded", LastTransitionTime: metav1.Now(),
+	})
+	writes = 0
+	r = build(changed)
+	if _, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: "cluster"},
+	}); err != nil {
+		t.Fatalf("third reconcile: %v", err)
+	}
+	if writes == 0 {
+		t.Fatal("status writes = 0, want at least 1: a changed status must be persisted")
+	}
+}
+
 // Compliance CRDs absent (Compliance Operator not yet installed): the
 // NoKindMatch tolerance paths must let Reconcile finish and persist status.
 // The fake client fabricates unknown kinds, so interceptors return the

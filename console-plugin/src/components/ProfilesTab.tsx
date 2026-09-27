@@ -176,6 +176,10 @@ const RuleMultiSelect: React.FC<{
     return allMatches.slice(0, RULE_OPTION_CAP);
   }, [allMatches, q, searchOnly]);
   const truncated = !(searchOnly && !q) && allMatches.length > matches.length;
+  // One Set per selection instead of a linear scan per rendered option: up to
+  // RULE_OPTION_CAP options each testing membership against every selected
+  // rule, on every render of the typeahead.
+  const selectedSet = React.useMemo(() => new Set(selected), [selected]);
 
   const pick = (value: string) => {
     onChange(selected.includes(value) ? selected.filter((v) => v !== value) : [...selected, value]);
@@ -259,7 +263,7 @@ const RuleMultiSelect: React.FC<{
           <SelectOption isDisabled>{q ? noResultsText : promptText}</SelectOption>
         ) : (
           matches.map((o) => (
-            <SelectOption key={o} value={o} hasCheckbox isSelected={selected.includes(o)}>
+            <SelectOption key={o} value={o} hasCheckbox isSelected={selectedSet.has(o)}>
               {o}
             </SelectOption>
           ))

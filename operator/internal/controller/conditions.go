@@ -10,6 +10,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -96,6 +97,21 @@ func prevCondState(cb *baselinev1alpha1.ClusterBaseline, typ string) (status met
 // "condition is True" so call sites cannot drift on the nil guard.
 func condIsTrue(c *metav1.Condition) bool {
 	return c != nil && c.Status == metav1.ConditionTrue
+}
+
+// statusUnchanged reports whether a reconcile derived exactly the status the
+// apiserver already holds, so the Status().Update can be skipped. The poll
+// re-derives the same rollup every time nothing on the cluster moved, and the
+// status carries four failure lists budgeted to 768 KiB, so the unconditional
+// write cost a large PUT through admission, structural-schema validation,
+// set-uniqueness checking, and etcd on every tick.
+//
+// The history scoring-mode stamp is part of the decision: recordHistory advances
+// it in memory before the rings it guards are durable, so a status that compares
+// equal but carries an advanced stamp still has to be written, or the stamp
+// would never persist.
+func statusUnchanged(persisted *baselinev1alpha1.ClusterBaselineStatus, derived *baselinev1alpha1.ClusterBaselineStatus, stamped, preReconcileMode string) bool {
+	return stamped == preReconcileMode && equality.Semantic.DeepEqual(persisted, derived)
 }
 
 // condTrue is true when the named status condition is present and True.

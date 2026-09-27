@@ -376,22 +376,34 @@ func (r *ClusterBaselineReconciler) getBatchRemediation(
 	if !remediationOwnedByBaseline(suites, rem) {
 		return nil, fmt.Errorf("remediation %q: %w", name, errBatchForeignSuite)
 	}
+	if err := validateBatchTarget(rem); err != nil {
+		return nil, err
+	}
+	return rem, nil
+}
+
+// validateBatchTarget applies the confused-deputy and corruption checks to an
+// already-read remediation, so the open path can validate a whole paged List
+// without a Get per name. Split out of getBatchRemediation, which is the
+// read-then-validate wrapper the conflict-retry apply path still needs.
+func validateBatchTarget(rem *unstructured.Unstructured) error {
+	name := rem.GetName()
 	state, _, err := unstructured.NestedString(rem.Object, "status", "applicationState")
 	if err != nil {
 		// Wrong-type status will not heal without an external rewrite; treat as
 		// permanent so a hand-edited rem cannot sticky-Degrade every reconcile.
-		return nil, fmt.Errorf("remediation %q: %w: %w", name, errBatchCorruptStatus, err)
+		return fmt.Errorf("remediation %q: %w: %w", name, errBatchCorruptStatus, err)
 	}
 	if state == "MissingDependencies" {
-		return nil, fmt.Errorf("remediation %q: %w", name, errBatchMissingDeps)
+		return fmt.Errorf("remediation %q: %w", name, errBatchMissingDeps)
 	}
 	// Validate apply shape at start (not only at applyOwnedRemediation) so corrupt
 	// remediations never enter status.remediationBatch.Remediations and pin the
 	// wait path until grace.
 	if _, _, err := unstructured.NestedBool(rem.Object, "spec", "apply"); err != nil {
-		return nil, fmt.Errorf("remediation %q: %w: %w", name, errBatchCorruptStatus, err)
+		return fmt.Errorf("remediation %q: %w: %w", name, errBatchCorruptStatus, err)
 	}
-	return rem, nil
+	return nil
 }
 
 // applyOwnedRemediation sets spec.apply=true on one owned remediation.
