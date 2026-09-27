@@ -42,6 +42,18 @@ depend on those tags.
 
 ## [Unreleased]
 
+### Changed
+
+- Threat model: the manager pod was described as running under Restricted PSS.
+  The pod spec satisfies Restricted, but no
+  `pod-security.kubernetes.io/enforce` label exists anywhere in the repo, so
+  nothing enforces it. The model now records it as defense in depth and lists
+  the missing label as a named gap, alongside the unbounded
+  `machineconfigpools` patch and full CRUD on `scansettingbindings` in the
+  operator ClusterRole, the platform-Prometheus scrape as a boundary, and the
+  remediation clipboard copy as an untrusted-output sink. Every file reference
+  was re-read against 0.6.1.
+
 ## [0.6.1] - 2026-09-02
 
 ### Fixed
