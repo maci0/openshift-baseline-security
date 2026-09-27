@@ -1,4 +1,4 @@
-import { codePointLength, compareForDisplay, foldForSearch, formatList, listSeparators, matchesSearch, textCollator } from './text';
+import { codePointLength, compareForDisplay, foldForSearch, foldSearchQuery, formatList, listSeparators, matchesFolded, textCollator } from './text';
 
 describe('foldForSearch', () => {
   it('folds case and strips diacritics', () => {
@@ -21,65 +21,74 @@ describe('foldForSearch', () => {
   });
 });
 
-describe('matchesSearch', () => {
+// The typeahead folds the catalog once per catalog change and the query once per
+// keystroke, so these cases run over the two pre-folded halves: the option is
+// folded as it is added to the catalog, the query as it is typed, and only the
+// substring test runs per option.
+const search = (option: string, query: string): boolean =>
+  matchesFolded(foldForSearch(option), foldSearchQuery(query));
+
+describe('matchesFolded over pre-folded input', () => {
   it('matches an exact option', () => {
-    expect(matchesSearch('no_empty_passwords', 'no_empty_passwords')).toBe(true);
+    expect(search('no_empty_passwords', 'no_empty_passwords')).toBe(true);
   });
 
   it('matches a substring at the start, middle, and end', () => {
-    expect(matchesSearch('no_empty_passwords', 'no_emp')).toBe(true);
-    expect(matchesSearch('no_empty_passwords', 'empty')).toBe(true);
-    expect(matchesSearch('no_empty_passwords', 'passwords')).toBe(true);
+    expect(search('no_empty_passwords', 'no_emp')).toBe(true);
+    expect(search('no_empty_passwords', 'empty')).toBe(true);
+    expect(search('no_empty_passwords', 'passwords')).toBe(true);
   });
 
   it('ignores case', () => {
-    expect(matchesSearch('ocp4-cis', 'OCP4')).toBe(true);
-    expect(matchesSearch('ocp4-cis', 'Cis')).toBe(true);
+    expect(search('ocp4-cis', 'OCP4')).toBe(true);
+    expect(search('ocp4-cis', 'Cis')).toBe(true);
   });
 
   // toLowerCase().includes() misses both of these.
   it('ignores diacritics so an unaccented query finds an accented name', () => {
-    expect(matchesSearch('règles_de_sécurité', 'securite')).toBe(true);
-    expect(matchesSearch('règles_de_sécurité', 'REGLES')).toBe(true);
+    expect(search('règles_de_sécurité', 'securite')).toBe(true);
+    expect(search('règles_de_sécurité', 'REGLES')).toBe(true);
   });
 
   it('applies the same case rules in every locale', () => {
-    expect(matchesSearch('Istanbul_kuralı', 'istanbul')).toBe(true);
-    expect(matchesSearch('İzmir', 'izmir')).toBe(true);
+    expect(search('Istanbul_kuralı', 'istanbul')).toBe(true);
+    expect(search('İzmir', 'izmir')).toBe(true);
   });
 
   // The dotless ı is a different letter, not another case of i, so a query
   // typed on a Turkish keyboard matches and an English-case query does not.
   it('keeps the Turkish dotless I distinct from the dotted one', () => {
-    expect(matchesSearch('Izmir', 'ızmir')).toBe(false);
-    expect(matchesSearch('ıstanbul_kuralı', 'ıstanbul')).toBe(true);
+    expect(search('Izmir', 'ızmir')).toBe(false);
+    expect(search('ıstanbul_kuralı', 'ıstanbul')).toBe(true);
   });
 
   it('rejects a query that is not a substring', () => {
-    expect(matchesSearch('no_empty_passwords', 'audit')).toBe(false);
-    expect(matchesSearch('short', 'a much longer query')).toBe(false);
+    expect(search('no_empty_passwords', 'audit')).toBe(false);
+    expect(search('short', 'a much longer query')).toBe(false);
   });
 
   it('treats a blank or whitespace-only query as match-all', () => {
-    expect(matchesSearch('anything', '')).toBe(true);
-    expect(matchesSearch('anything', '   ')).toBe(true);
+    expect(foldSearchQuery('')).toBe('');
+    expect(foldSearchQuery('   ')).toBe('');
+    expect(search('anything', '')).toBe(true);
+    expect(search('anything', '   ')).toBe(true);
   });
 
   it('trims the query', () => {
-    expect(matchesSearch('no_empty_passwords', '  empty  ')).toBe(true);
+    expect(search('no_empty_passwords', '  empty  ')).toBe(true);
   });
 
   it('matches a substring that abuts an astral character', () => {
-    expect(matchesSearch('a👍b_rule', 'b_rule')).toBe(true);
-    expect(matchesSearch('a👍b_rule', '👍b')).toBe(true);
-    expect(matchesSearch('👍', 'a')).toBe(false);
+    expect(search('a👍b_rule', 'b_rule')).toBe(true);
+    expect(search('a👍b_rule', '👍b')).toBe(true);
+    expect(search('👍', 'a')).toBe(false);
   });
 
   // The catalog holds Compliance Operator rule names, which are CJK in a
   // localized cluster; folding must not break a script with no case.
   it('matches in a caseless script', () => {
-    expect(matchesSearch('パッケージ_ルール', 'ケージ')).toBe(true);
-    expect(matchesSearch('правило_без_пароля', 'без_парол')).toBe(true);
+    expect(search('パッケージ_ルール', 'ケージ')).toBe(true);
+    expect(search('правило_без_пароля', 'без_парол')).toBe(true);
   });
 });
 

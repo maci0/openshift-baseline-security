@@ -103,6 +103,21 @@ describe('dates throw-safety (fuzz sweep)', () => {
     }
   });
 
+  // safeLocale memoizes each tag so the formatters, collators, and list
+  // formats below it pay one canonicalization per locale, not one per call. A
+  // cached answer must equal the uncached one, including for a tag that is
+  // invalid (cached as "no tag", not as a miss that recomputes).
+  it('safeLocale returns the same answer for a repeated tag', () => {
+    const tags = ['', 'en', 'en_US', 'en-US', 'tr', 'ar', 'de-DE', '!!bad!!', 'en_US_'];
+    const first = tags.map((t) => safeLocale(t));
+    expect(tags.map((t) => safeLocale(t))).toEqual(first);
+    // Sweep well past the cache bound so entries are dropped and repopulated.
+    for (let i = 0; i < 200; i++) {
+      expect(safeLocale('en_US')).toBe('en-US');
+      expect(safeLocale('!!bad!!')).toBeUndefined();
+    }
+  });
+
   it('dateInputEndOfDayIso rejects non-calendar-dates and end-of-days the rest', () => {
     for (const s of HOSTILE) {
       const iso = dateInputEndOfDayIso(s);

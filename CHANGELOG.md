@@ -74,6 +74,18 @@ depend on those tags.
   main thread. `formatCount`, `formatLocalDate`, and `formatChartDate` now hold
   one formatter per locale tag, matching how the display collator is already
   cached. Output is unchanged, including the fallback for an invalid tag.
+- Console plugin re-canonicalized the console locale on every count, date label,
+  collator comparison, and list join: `safeLocale` ran `Intl.getCanonicalLocales`
+  per call, and `compareForDisplay` calls it once per comparison, so sorting the
+  rule catalog canonicalized the tag thousands of times per sort. `safeLocale`
+  now holds one entry per locale tag, like the formatters above it. Output is
+  unchanged, including the invalid-tag fallback.
+- Profiles typeahead re-folded the whole rule catalog, plus the query once per
+  option, on every keystroke, so typing in the enable-rules picker redid a
+  thousand NFD normalizations per character over unchanged names. The catalog
+  is now folded when it changes and the query when it is typed, leaving a
+  substring test per option. Matching is unchanged, including diacritic and
+  Turkish dotted/dotless i handling.
 
 ### Added
 

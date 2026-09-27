@@ -92,7 +92,7 @@ import { withDisabledTip } from './DisabledTip';
 import { restoreFocus } from './focus';
 import { useAutoDismiss } from './useAutoDismiss';
 import { isString } from '../parse';
-import { compareForDisplay, matchesSearch } from '../text';
+import { compareForDisplay, foldForSearch, foldSearchQuery, matchesFolded } from '../text';
 
 // Inline danger alert for the tab's single watch / action error, shared by the
 // page-top slot and every modal so the presentation cannot drift per call site.
@@ -149,12 +149,28 @@ const RuleMultiSelect: React.FC<{
   // Folds case and diacritics, and keeps the Turkish dotted/dotless i
   // distinct the way a search box must; toLowerCase().includes() does neither.
   const q = input.trim();
+  // Fold the catalog once per catalog change and the query once per keystroke.
+  // Folding is a lowercase plus an NFD normalize plus a regex replace, so
+  // folding inside the filter loop redid a thousand of them per keystroke over
+  // a ~1k-rule catalog, half of them for a query that never changed. The two
+  // sides are independent, so fold each once and keep the substring test alone
+  // in the loop.
+  const foldedQuery = React.useMemo(() => foldSearchQuery(q), [q]);
+  const foldedOptions = React.useMemo(() => options.map(foldForSearch), [options]);
   // Cap rendered options for a ~1k-rule catalog; keep the pre-cap count so a
   // truncated list says so instead of silently hiding rules past the cap.
-  const allMatches = React.useMemo(
-    () => (q ? options.filter((o) => matchesSearch(o, q)) : options),
-    [options, q],
-  );
+  const allMatches = React.useMemo(() => {
+    if (!q) {
+      return options;
+    }
+    const hits: string[] = [];
+    for (let i = 0; i < options.length; i++) {
+      if (matchesFolded(foldedOptions[i], foldedQuery)) {
+        hits.push(options[i]);
+      }
+    }
+    return hits;
+  }, [options, foldedOptions, q, foldedQuery]);
   const matches = React.useMemo(() => {
     if (searchOnly && !q) return [];
     return allMatches.slice(0, RULE_OPTION_CAP);

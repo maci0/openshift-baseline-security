@@ -47,20 +47,23 @@ export const textCollator = (locale?: string): Intl.Collator => {
 // to 'e' and 'İ' (folded to 'i' + U+0307) compares equal to 'i'. Letters that
 // are genuinely distinct letters in a locale have no canonical decomposition
 // and survive intact, which is what keeps Turkish 'i' and 'ı' apart.
+// Folding a name is a toLowerCase plus an NFD normalize plus a regex replace,
+// so a keystroke over a ~1k-rule catalog cannot afford to redo it per option
+// (nor redo the query per option). Split the search into a once-per-catalog
+// fold and a once-per-keystroke fold, then a pure substring test over the two.
 export const foldForSearch = (value: string): string =>
   value.toLowerCase().normalize('NFD').replace(/\p{M}/gu, '');
 
-// Case- and accent-insensitive substring match. Folding the whole option
-// rather than windowing keeps one code path for every script; a Kubernetes
-// name is capped at 253 characters by isValidK8sName, so a linear indexOf per
-// option is bounded.
-export const matchesSearch = (haystack: string, needle: string): boolean => {
-  const query = foldForSearch(needle).trim();
-  if (query.length === 0) {
-    return true;
-  }
-  return foldForSearch(haystack).includes(query);
-};
+// The query half: folded and trimmed once, then matched against every
+// pre-folded option. Trimming happens here, so a whitespace-only query is empty
+// and matches everything.
+export const foldSearchQuery = (query: string): string => foldForSearch(query).trim();
+
+// Substring test between an already-folded option and an already-folded query.
+// A linear indexOf per option is bounded: a Kubernetes name is capped at 253
+// characters by isValidK8sName.
+export const matchesFolded = (foldedOption: string, foldedQuery: string): boolean =>
+  foldedQuery.length === 0 || foldedOption.includes(foldedQuery);
 
 // Display order for a user-facing list of names. The locale's collation
 // decides where letters sit, so a Turkish list interleaves ı and i, an accented

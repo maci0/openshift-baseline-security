@@ -75,14 +75,37 @@ export const expiresAtMs = (iso: string): number => {
 // normalize that, and validate: toLocale*String throws RangeError on a
 // structurally invalid tag, so a malformed document/i18n locale would otherwise
 // crash formatting. Fall back to the runtime default (undefined) when invalid.
+//
+// Canonicalization is a pure function of the input, and every formatter below
+// (count, date, collator, list) calls this on each use: once per card, per
+// waiver row, per chart tick, and once per comparison of a sorted rule catalog.
+// Intl.getCanonicalLocales allocates and normalizes, so the uncached form spent
+// that on strings a console session offers a handful of. Keep one entry per
+// distinct tag, the way the formatter maps below keep one per locale. undefined
+// (no locale) is returned without touching the map.
+const localeTags = new Map<string, string | undefined>();
+
+// Above this many distinct tags the input is not a console locale list (a
+// caller feeding unbounded text), so stop growing: drop everything and let the
+// few live locales repopulate. Keeps the cache bounded without a TTL on a map
+// whose entries never go stale.
+const localeTagCacheMax = 64;
+
 export const safeLocale = (locale?: string): string | undefined => {
   if (!locale) return undefined;
+  if (localeTags.has(locale)) return localeTags.get(locale);
   const tag = locale.replace(/_/g, '-');
+  let canonical: string | undefined;
   try {
-    return Intl.getCanonicalLocales(tag)[0];
+    canonical = Intl.getCanonicalLocales(tag)[0];
   } catch {
-    return undefined;
+    canonical = undefined;
   }
+  if (localeTags.size >= localeTagCacheMax) {
+    localeTags.clear();
+  }
+  localeTags.set(locale, canonical);
+  return canonical;
 };
 
 // CSS/HTML dir from a BCP 47 tag. Used when document.dir is unset (report
