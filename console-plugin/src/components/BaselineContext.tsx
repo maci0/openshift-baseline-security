@@ -55,7 +55,8 @@ const loadProfilesTab = () =>
 // Module-level route components keep HorizontalNav page types stable across
 // CR watch updates while still re-rendering when the context value changes.
 export function OverviewRoute() {
-  const { baseline, loaded, baselineError, checkResults } = React.useContext(BaselineContext);
+  const { baseline, loaded, baselineError, checkResults, checkResultsError } =
+    React.useContext(BaselineContext);
   return (
     <TabErrorBoundary name="Overview">
       <Overview
@@ -63,6 +64,7 @@ export function OverviewRoute() {
         loaded={loaded}
         baselineError={baselineError}
         checkResults={checkResults}
+        checkResultsError={checkResultsError}
       />
     </TabErrorBoundary>
   );

@@ -461,7 +461,11 @@ const Overview: React.FC<{
   // Shared from CompliancePage (single watch); used for Recent changes titles
   // and SeverityWeighted per-profile scores.
   checkResults?: ComplianceCheckResult[];
-}> = ({ baseline, loaded, baselineError, checkResults }) => {
+  // Set when the check-results watch failed. The list is then empty for a
+  // reason that has nothing to do with the checks, so "no longer in the
+  // results" would be a false statement about why a name is unmatched.
+  checkResultsError?: unknown;
+}> = ({ baseline, loaded, baselineError, checkResults, checkResultsError }) => {
   const { t, i18n } = useTranslation('plugin__baseline-security-console-plugin');
   // One BCP 47 tag for all score/count formatting (same path as report / dates).
   const locale = safeLocale(i18n.language);
@@ -617,6 +621,9 @@ const Overview: React.FC<{
   // Names in status.newlyFailed with no current check result: nothing to link,
   // so the alert reports them apart from the ones it can name.
   const unresolvedNewlyFailed = newlyFailed.length - newlyFailedItems.length;
+  // An unreadable results list makes every name unmatched. Say so rather than
+  // attributing it to a removed rule.
+  const resultsUnreadable = !!checkResultsError;
 
   // Main score-trend chart: same CCR-churn stability as MiniTrend (Date objects
   // and Victory path data must not rebuild when history content is unchanged).
@@ -899,10 +906,15 @@ const Overview: React.FC<{
           {unresolvedNewlyFailed > 0 && (
             <>
               {' '}
-              {t('({{count}} no longer in the results)', {
-                count: unresolvedNewlyFailed,
-                formattedCount: formatCount(unresolvedNewlyFailed, locale),
-              })}
+              {resultsUnreadable
+                ? t('({{count}} unmatched: check results could not be read)', {
+                    count: unresolvedNewlyFailed,
+                    formattedCount: formatCount(unresolvedNewlyFailed, locale),
+                  })
+                : t('({{count}} no longer in the results)', {
+                    count: unresolvedNewlyFailed,
+                    formattedCount: formatCount(unresolvedNewlyFailed, locale),
+                  })}
             </>
           )}
           {fixed.length > 0 && (
@@ -1061,10 +1073,15 @@ const Overview: React.FC<{
                   // gone. Claiming "no changes" there contradicts the banner
                   // above, which counts it.
                   unresolvedNewlyFailed > 0
-                    ? t('{{count}} newly failing check is no longer in the results', {
-                        count: unresolvedNewlyFailed,
-                        formattedCount: formatCount(unresolvedNewlyFailed, locale),
-                      })
+                    ? resultsUnreadable
+                      ? t('{{count}} newly failing checks could not be matched to results', {
+                          count: unresolvedNewlyFailed,
+                          formattedCount: formatCount(unresolvedNewlyFailed, locale),
+                        })
+                      : t('{{count}} newly failing check is no longer in the results', {
+                          count: unresolvedNewlyFailed,
+                          formattedCount: formatCount(unresolvedNewlyFailed, locale),
+                        })
                     : hasPriorScan
                       ? t('No changes since the last scan')
                       : t('No previous scan to compare yet')
@@ -1073,9 +1090,13 @@ const Overview: React.FC<{
               >
                 <EmptyStateBody>
                   {unresolvedNewlyFailed > 0
-                    ? t(
-                        'The rule was removed or its profile unbound, so there is no result to open. The count stays on the banner above until the next scan.',
-                      )
+                    ? resultsUnreadable
+                      ? t(
+                          'Check results could not be read, so the count on the banner above could not be matched to a result. It stays until the list loads again.',
+                        )
+                      : t(
+                          'The rule was removed or its profile unbound, so there is no result to open. The count stays on the banner above until the next scan.',
+                        )
                     : hasPriorScan
                       ? t('Fail and fix deltas will appear here after the next completed scan.')
                       : t('Recent changes appear after two completed scans.')}

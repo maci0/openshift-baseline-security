@@ -110,7 +110,9 @@ export const inconsistentSources = (
   result: ComplianceCheckResult,
 ): InconsistentSources => {
   const ann = result.metadata?.annotations ?? {};
-  const raw = ann[inconsistentSourceAnn] ?? '';
+  // An annotation is untyped CR text: narrow before the string methods, or a
+  // hand-edited non-string value throws inside the row reducers and CSV export.
+  const raw = isString(ann[inconsistentSourceAnn]) ? ann[inconsistentSourceAnn] : '';
   const sources = raw
     .split(',')
     .map((s) => trimGoSpace(s))
@@ -121,7 +123,8 @@ export const inconsistentSources = (
         ? { node: s, status: '' }
         : { node: trimGoSpace(s.slice(0, i)), status: upperStatusToken(trimGoSpace(s.slice(i + 1))) };
     });
-  const mostCommon = upperStatusToken(trimGoSpace(ann[mostCommonStatusAnn] ?? ''));
+  const rawMostCommon = ann[mostCommonStatusAnn];
+  const mostCommon = upperStatusToken(trimGoSpace(isString(rawMostCommon) ? rawMostCommon : ''));
   return { sources, mostCommon: mostCommon || null };
 };
 
@@ -162,7 +165,10 @@ export const effectiveStatus = (
   }
   // One annotations object read for both CO keys (filter/CSV/score hot path).
   const ann = r.metadata?.annotations;
-  const raw = ann?.[inconsistentSourceAnn] ?? '';
+  // Non-string annotation values are not narrowed at the type, so guard both
+  // reads rather than trusting Record<string, string>.
+  const rawAnn = ann?.[inconsistentSourceAnn];
+  const raw = isString(rawAnn) ? rawAnn : '';
   let hasPass = false;
   let hasFail = false;
   let hasError = false;
@@ -208,7 +214,8 @@ export const effectiveStatus = (
     }
     start = comma + 1;
   }
-  const mostCommon = trimGoSpace(ann?.[mostCommonStatusAnn] ?? '');
+  const rawMostCommon = ann?.[mostCommonStatusAnn];
+  const mostCommon = trimGoSpace(isString(rawMostCommon) ? rawMostCommon : '');
   if (mostCommon) {
     add(upperStatusToken(mostCommon));
   }

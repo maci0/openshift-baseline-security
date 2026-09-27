@@ -769,9 +769,13 @@ const ResultsTab: React.FC<{
 
   const [data, filteredData, onFilterChange] = useListPageFilter(ownedResults, rowFilters);
 
-  const exportCsvDisabled = !loaded || filteredData.length === 0;
+  const exportCsvDisabled = !loaded || !!resultsError || filteredData.length === 0;
   let exportCsvDisabledReason: string | undefined;
-  if (!loaded) {
+  if (resultsError) {
+    // A failed check-results watch never sets loaded, so without this branch the
+    // button stays pinned with a message claiming it is still loading.
+    exportCsvDisabledReason = t('Export is unavailable while check results fail to load.');
+  } else if (!loaded) {
     exportCsvDisabledReason = t('Waiting for check results to load.');
   } else if (filteredData.length === 0) {
     exportCsvDisabledReason = t('No results to export.');

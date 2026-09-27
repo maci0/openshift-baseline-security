@@ -31,6 +31,13 @@ var errCacheNotSynced = errors.New("cache did not sync")
 // sync attempts.
 const defaultCRRetryDelay = 10 * time.Second
 
+// defaultCRAttemptTimeout bounds one ensure attempt. The manager context lives
+// until shutdown, so a hung apiserver connection would otherwise park the List
+// or Create forever: the retry loop never comes round again, nothing is
+// logged, and the cluster silently never gets its zero-config CR. A deadline
+// turns that hang into an ordinary retryable error.
+const defaultCRAttemptTimeout = 30 * time.Second
+
 // DefaultClusterBaseline creates ClusterBaseline/cluster once when none exist.
 // NeedLeaderElection keeps HA replicas from racing the create.
 type DefaultClusterBaseline struct {
@@ -96,7 +103,9 @@ func (d *DefaultClusterBaseline) Start(ctx context.Context) error {
 	// outage does not fill the log stream every 10s with the same stack.
 	var attempt int
 	for {
-		err := d.ensureOnce(ctx)
+		attemptCtx, cancel := context.WithTimeout(ctx, defaultCRAttemptTimeout)
+		err := d.ensureOnce(attemptCtx)
+		cancel()
 		if err == nil {
 			return nil
 		}

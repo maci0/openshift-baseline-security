@@ -1,6 +1,7 @@
 // K8s types, GVKs, CRD-aligned constants, profile display metadata, and ownership
 // selectors. Keep MaxItems / ProfileKey values in lockstep with the operator API.
 import { K8sGroupVersionKind, K8sModel } from '@openshift-console/dynamic-plugin-sdk';
+import { isString } from './parse';
 
 // ProfileKey matches ClusterBaselineSpec.profiles CRD enum. Keep in lockstep with
 // the operator ProfileKey constants / AllProfileKeys and Profiles MaxItems=8.
@@ -436,7 +437,9 @@ export const suiteFilterKey = (
   labels: Record<string, string> | undefined,
 ): string | undefined => {
   const suite = labels?.[SUITE_LABEL];
-  if (!suite?.startsWith('baseline-')) {
+  // Label values are untyped cluster text: a non-string must not throw on
+  // startsWith, it is simply not a suite this baseline owns.
+  if (!isString(suite) || !suite.startsWith('baseline-')) {
     return undefined;
   }
   if (suite.startsWith('baseline-tp-')) {

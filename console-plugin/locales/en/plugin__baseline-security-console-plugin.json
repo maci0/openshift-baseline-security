@@ -41,6 +41,9 @@
   "{{count}} newly failing check is no longer in the results_one": "{{formattedCount}} newly failing check is no longer in the results",
   "{{count}} newly failing check is no longer in the results_other": "{{formattedCount}} newly failing checks are no longer in the results",
   "The rule was removed or its profile unbound, so there is no result to open. The count stays on the banner above until the next scan.": "The rule was removed or its profile unbound, so there is no result to open. The count stays on the banner above until the next scan.",
+  "{{count}} newly failing checks could not be matched to results_one": "{{formattedCount}} newly failing check could not be matched to results",
+  "{{count}} newly failing checks could not be matched to results_other": "{{formattedCount}} newly failing checks could not be matched to results",
+  "Check results could not be read, so the count on the banner above could not be matched to a result. It stays until the list loads again.": "Check results could not be read, so the count on the banner above could not be matched to a result. It stays until the list loads again.",
   "Unapply remediation?": "Unapply remediation?",
   "will stop being applied. A rescan is required afterwards for results to reflect the change.": "will stop being applied. A rescan is required afterwards for results to reflect the change.",
   "Enable auto-apply remediations?": "Enable auto-apply remediations?",
@@ -175,6 +178,8 @@
   "{{count}} check newly failing since the last scan_other": "{{formattedCount}} checks newly failing since the last scan",
   "({{count}} no longer in the results)_one": "({{formattedCount}} no longer in the results)",
   "({{count}} no longer in the results)_other": "({{formattedCount}} no longer in the results)",
+  "({{count}} unmatched: check results could not be read)_one": "({{formattedCount}} unmatched: check results could not be read)",
+  "({{count}} unmatched: check results could not be read)_other": "({{formattedCount}} unmatched: check results could not be read)",
 
   "{{count}} waiver expiring within two weeks_one": "{{formattedCount}} waiver expiring within two weeks",
   "{{count}} waiver expiring within two weeks_other": "{{formattedCount}} waivers expiring within two weeks",
