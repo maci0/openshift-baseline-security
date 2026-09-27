@@ -669,8 +669,12 @@ const ResultsTab: React.FC<{
       }))
       .sort((a, b) => compareForDisplay(a.title, b.title, i18n.language));
     // profiles/tailored read when keys change; ownedResults only when discovering.
+    // The collation locale is part of the value, so the key carries the language
+    // and not the i18n instance: that object is the same one across a console
+    // language switch, so as a dependency it never fires and the chips kept the
+    // previous language's titles and order.
     // eslint-disable-next-line react-hooks/exhaustive-deps -- content keys
-  }, [profilesKey, tailoredKey, suiteKeysFromBaseline ? null : ownedResults, i18n, t]);
+  }, [profilesKey, tailoredKey, suiteKeysFromBaseline ? null : ownedResults, i18n.language, t]);
 
   const rowFilters: RowFilter<ComplianceCheckResult>[] = React.useMemo(
     () => [
