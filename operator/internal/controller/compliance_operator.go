@@ -373,29 +373,17 @@ func (r *ClusterBaselineReconciler) findComplianceOperatorCSV(ctx context.Contex
 // paged through a cluster-wide List cannot keep every page resident, so each
 // page is folded in and dropped. Ties go to the incumbent, so the winner does
 // not depend on how the pages were split. Only the winners are DeepCopied, and
-// only when one actually replaces the incumbent.
-//
-// A CSV carries the whole install spec plus the alm-examples annotation, so a
-// DeepCopy is a copy of a large object. Copying the leader on every improvement
-// (the shape the loop had) made the copy count equal the number of ascending
-// compliance-operator CSVs, and the apiserver returns a name-sorted page, which
-// is ascending by version: the common order copied every one. The page is walked
-// for its best index per tier and copied at most once per tier when it actually
-// beats the incumbent, the same shape pickComplianceOperatorCSV uses.
-//
-// Each candidate's version is parsed once and the held leader's once, rather
-// than re-parsing both on every comparison: complianceCSVVersion allocates a
-// parts slice and a Split result per call, and the old comparison ran both
-// sides per item.
+// only when one actually replaces the incumbent: a CSV carries the whole
+// install spec plus the alm-examples annotation, and the apiserver returns a
+// name-sorted page, so a page walked in that order would make every CSV a new
+// leader and copy the lot.
 func foldComplianceOperatorCSVs(
 	ctx context.Context,
 	items []unstructured.Unstructured,
 	bestSucceeded, bestOther *unstructured.Unstructured,
 ) (*unstructured.Unstructured, *unstructured.Unstructured) {
 	// Leader per tier. idx is the page-local index of the current leader, or -1
-	// while the leader is still the incumbent carried in from an earlier page
-	// (whose name and parsed version seed the comparison). A leader found on
-	// this page is copied once, at the end, not on every improvement.
+	// while the leader is still the incumbent carried in from an earlier page.
 	type leader struct {
 		idx    int
 		name   string
@@ -419,8 +407,6 @@ func foldComplianceOperatorCSVs(
 		}
 		ver, parsed := complianceCSVVersion(csv.GetName())
 		phase := csvPhase(ctx, csv)
-		// Replaces only on > 0, so an equal version keeps the leader: the
-		// winner must not depend on how the apiserver split the walk.
 		if phase == "Succeeded" {
 			if !hasLeader(succeeded) ||
 				compareCSVVersionParsed(csv.GetName(), ver, parsed, succeeded.name, succeeded.ver, succeeded.parsed) > 0 {

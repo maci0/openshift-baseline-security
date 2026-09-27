@@ -149,9 +149,8 @@ const isParseableTime = (s: string): boolean => {
   }
   // UTC calendar check so 2026-02-31 cannot pass via Date overflow.
   // setUTCFullYear on the epoch, not Date.UTC: Date.UTC applies the legacy
-  // two-digit-year rule, so a year 0000-0099 (four digits, and accepted by the
-  // apiserver's RFC3339 parser) was read back as 1900-0099 and rejected, which
-  // silently dropped the waiver patch instead of saving it.
+  // two-digit-year rule, reading a year 0000-0099 (four digits, and accepted by
+  // the apiserver's RFC3339 parser) as 1900-0099.
   const cal = new Date(0);
   cal.setUTCFullYear(year, month - 1, day);
   if (

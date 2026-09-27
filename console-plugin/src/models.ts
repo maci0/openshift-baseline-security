@@ -528,22 +528,18 @@ const nameIn = (list: NameSet | undefined, name: string): boolean => {
  * a selected profile, or a tailored suite for a bound TailoredProfile.
  * Callers that filter thousands of results should pass Set instances so
  * membership is O(1) per check instead of a linear includes scan.
- * Parses the suite label once, in one pass over the two prefixes.
  */
 export const isOwnedByBaseline = (
   labels: Record<string, string> | undefined,
   profiles: NameSet | undefined,
   tailoredProfiles?: NameSet,
 ): boolean => {
-  const suite = labels?.[SUITE_LABEL];
-  if (!suite?.startsWith('baseline-')) {
+  const key = suiteFilterKey(labels);
+  if (key === undefined) {
     return false;
   }
-  if (suite.startsWith('baseline-tp-')) {
-    const name = suite.slice('baseline-tp-'.length);
-    return !!name && nameIn(tailoredProfiles, name);
-  }
-  const key = suite.slice('baseline-'.length);
-  return !!key && nameIn(profiles, key);
+  return key.startsWith('tp-')
+    ? nameIn(tailoredProfiles, key.slice('tp-'.length))
+    : nameIn(profiles, key);
 };
 

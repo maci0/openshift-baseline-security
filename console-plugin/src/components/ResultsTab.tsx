@@ -609,7 +609,7 @@ const ResultsTab: React.FC<{
       { title: t('Status'), id: 'status', sort: sortByStatus },
       { title: t('Severity'), id: 'severity', sort: sortBySeverity },
     ],
-    [t, sortByString, sortByStatus, sortBySeverity, rowFilterStatus],
+    [t, sortByString, sortByStatus, sortBySeverity],
   );
 
   const Row = React.useCallback(

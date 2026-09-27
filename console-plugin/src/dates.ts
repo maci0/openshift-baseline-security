@@ -131,8 +131,7 @@ export const intlCached = <T>(cache: Map<string, T>, key: string, make: () => T)
   }
   const built = make();
   if (cache.size >= INTL_CACHE_MAX) {
-    // Map iterates in insertion order, so the first key is the oldest. It exists
-    // whenever size >= the cap.
+    // Map iterates in insertion order, so the first key is the oldest.
     for (const oldest of cache.keys()) {
       cache.delete(oldest);
       break;

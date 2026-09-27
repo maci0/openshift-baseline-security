@@ -27,6 +27,20 @@ redactor="$script_dir/redact-yaml.awk"
 _redact_yaml_dump() {
   local f="$1" policy="$2"
   [ -s "$f" ] || return 0
+  # kubectl emits each mapping key on its own line, and a value containing a
+  # newline (allowed: the CRD caps length only) as a literal/folded block, with
+  # the text on the following more-indented lines. Deleting the key line alone
+  # would leave that text in the dump, so a dropped key also swallows its
+  # continuation. last-applied-configuration is a single JSON blob per key, so
+  # its continuation is kept and the JSON substitutions redact it instead.
+  # Rewrite via a temp file: GNU sed -i is not accepted by BSD sed (macOS),
+  # which treats the next argument as a required backup suffix.
+  #
+  # The rewrite runs in a subshell that owns the temp file, whose EXIT trap
+  # removes it on every exit, including on a signal: the pre-redaction copy in
+  # TMPDIR still carries the requestedBy / approvedBy identities this function
+  # exists to strip. The signal traps turn a signal into an ordinary exit so the
+  # EXIT trap still runs.
   (
     local tmp
     tmp="$(mktemp)"
@@ -36,7 +50,7 @@ _redact_yaml_dump() {
     trap 'exit 143' TERM
     awk -v policy="$policy" -f "$redactor" "$f" > "$tmp" || exit 1
     # The subshell's exit status is the function's return value, so a failed
-    # cat still fails the caller under set -e exactly as `return 1` did.
+    # cat fails the caller under set -e.
     cat "$tmp" > "$f"
   )
 }

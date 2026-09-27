@@ -94,8 +94,7 @@ build() {
 build "$work/first"
 # Build 2: a different absolute path (so an untrimmed -trimpath would leak a
 # different module prefix), a different timezone and locale, and a different
-# umask. The second copy is made read-only afterwards so the build cannot
-# mutate the tree it is measuring.
+# umask.
 mkdir -p "$work/second"
 for path in "${required[@]}"; do
   cp -a "$ROOT/$path" "$work/second/"

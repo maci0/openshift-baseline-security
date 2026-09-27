@@ -105,6 +105,14 @@ depend on those tags.
   instead of a bare digest. A binary built without the stamp (plain `go
   build`) reports `dev`.
 
+- `hack/must-gather.sh` no longer dumps a Secret into a support archive. It
+  collected every object named in `status.relatedObjects`, and the only filter
+  on that list was a character check, so a hand-edited or etcd-restored
+  `relatedObjects` entry naming `secrets` was collected like any other object,
+  putting the metrics TLS private key and the scraper service-account token
+  into an attachment the operator can no longer redact. Collection is now
+  pinned to the six kinds the reconciler actually writes.
+
 - `yarn size` (in `yarn build` and `yarn ci`) reports the transferred size of
   the built console plugin and fails over the ceilings in
   `console-plugin/tools/size/budget.ts`: the initial JS the browser must
@@ -625,7 +633,6 @@ depend on those tags.
   on those two fields, so a MANIFEST without them restores with the guards
   silently off. `backup.sh` now refuses to write one, and `verify-backup.sh`
   fails a directory whose MANIFEST is missing either.
-
 
 - A Compliance Operator CSV name whose prerelease segment was a run of digits
   wider than int64 was compared as a string instead of as a number, so
@@ -1308,7 +1315,6 @@ depend on those tags.
   the other profile; a clipboard copy that resolved late reported a failure, or
   a success, for a copy the admin had already replaced. Both paths fence on a
   monotonic token and drop a result that a later action superseded.
-
 
 - The bundle, catalog, and console plugin image digests followed the clock.
   `SOURCE_DATE_EPOCH` clamps image and layer creation timestamps, not the

@@ -146,7 +146,6 @@ const listSeparatorPattern = (
 // array and the items simply sit side by side. One fewer element than the item
 // count is guaranteed for count >= 2; the count-0 and count-1 cases return
 // nothing, since there is no pair to separate.
-
 export const listSeparators = (count: number, locale?: string): string[] => {
   if (count < 2) {
     return [];
