@@ -15,6 +15,10 @@
 # carries its own copy of the build recipe.
 set -euo pipefail
 
+# shellcheck source-path=SCRIPTDIR
+# shellcheck source=lib-sha256.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib-sha256.sh"
+
 prog="$(basename "$0")"
 
 usage() {
@@ -53,6 +57,11 @@ fi
 
 command -v go >/dev/null || {
   echo "${prog}: go is required on PATH" >&2
+  exit 1
+}
+
+sha256_init || {
+  echo "${prog}: no SHA-256 tool to compare the builds with" >&2
   exit 1
 }
 
@@ -103,8 +112,8 @@ for out in "$work/first" "$work/second-out"; do
   fi
 done
 
-first_sum="$(sha256sum "$work/first" | cut -d' ' -f1)"
-second_sum="$(sha256sum "$work/second-out" | cut -d' ' -f1)"
+first_sum="$(sha256_file "$work/first")"
+second_sum="$(sha256_file "$work/second-out")"
 
 if [ "$first_sum" != "$second_sum" ]; then
   echo "${prog}: build is NOT reproducible" >&2

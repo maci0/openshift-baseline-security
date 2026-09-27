@@ -10,7 +10,10 @@ package hack_test
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -101,6 +104,23 @@ func ocCalls(t *testing.T, logfile string) string {
 	return string(b)
 }
 
+// sha256Hex digests a file with the standard library. The tests must not
+// shell out to a checksum tool: `sha256sum` is GNU coreutils and absent on
+// macOS, which is a supported host for `make test`.
+func sha256Hex(t *testing.T, path string) string {
+	t.Helper()
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		t.Fatal(err)
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
 // runScript runs a hack/ script with a controlled working directory. The
 // script path is resolved against the test's own directory first: cmd.Dir
 // moves the child off it, so a relative path would not resolve.
@@ -170,6 +190,76 @@ func TestBackupRestoreRoundTripPreservesDurableState(t *testing.T) {
 	// and the in-flight batch.
 	if !strings.Contains(calls, "replace --subresource=status -f") {
 		t.Errorf("restore did not replace the status subresource; oc calls:\n%s", calls)
+	}
+}
+
+// pathWithoutSHA256Sum symlinks every executable on the current PATH into a
+// fresh directory, minus `sha256sum`, and puts that directory on PATH. It
+// reproduces a host with no GNU coreutils (macOS, unless Homebrew installed
+// them), where the digest has to come from shasum or openssl instead.
+func pathWithoutSHA256Sum(t *testing.T) {
+	t.Helper()
+	if _, err := exec.LookPath("sha256sum"); err != nil {
+		t.Skip("host has no sha256sum; the fallback is already the only path")
+	}
+	farm := t.TempDir()
+	for _, dir := range filepath.SplitList(os.Getenv("PATH")) {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			if e.IsDir() || e.Name() == "sha256sum" {
+				continue
+			}
+			info, err := e.Info()
+			if err != nil || info.Mode()&0o111 == 0 {
+				continue
+			}
+			link := filepath.Join(farm, e.Name())
+			if _, err := os.Lstat(link); err == nil {
+				continue
+			}
+			if err := os.Symlink(filepath.Join(dir, e.Name()), link); err != nil {
+				t.Fatalf("symlinking %s: %v", e.Name(), err)
+			}
+		}
+	}
+	for _, fallback := range []string{"shasum", "openssl"} {
+		if _, err := os.Stat(filepath.Join(farm, fallback)); err == nil {
+			t.Setenv("PATH", farm)
+			return
+		}
+	}
+	t.Skip("host has neither shasum nor openssl; no fallback to exercise")
+}
+
+func TestBackupRestoreWithoutGNUCoreutils(t *testing.T) {
+	bin := t.TempDir()
+	log := fakeOC(t, bin, baselineYAML)
+	work := t.TempDir()
+	pathWithoutSHA256Sum(t)
+
+	if _, stderr, code := runScript(t, "backup.sh", work, "bdir"); code != 0 {
+		t.Fatalf("backup.sh without sha256sum: exit %d, want 0; stderr=%s", code, stderr)
+	}
+	artifact := filepath.Join(work, "bdir", "clusterbaseline.yaml")
+	manifest, err := os.ReadFile(filepath.Join(work, "bdir", "MANIFEST"))
+	if err != nil {
+		t.Fatalf("no MANIFEST: %v", err)
+	}
+	want := "sha256=" + sha256Hex(t, artifact) + "\n"
+	if !strings.Contains(string(manifest), want) {
+		t.Errorf("MANIFEST digest is not the artifact's; want it to contain %q:\n%s", want, manifest)
+	}
+
+	// A digest written by the fallback must still verify: restore recomputes
+	// it and has to reach the apply.
+	if _, stderr, code := runScript(t, "restore.sh", work, "bdir"); code != 0 {
+		t.Fatalf("restore.sh without sha256sum: exit %d, want 0; stderr=%s", code, stderr)
+	}
+	if calls := ocCalls(t, log); !strings.Contains(calls, "apply -f") {
+		t.Errorf("restore did not apply the spec; oc calls:\n%s", calls)
 	}
 }
 
@@ -301,11 +391,7 @@ func TestRestoreWarnsOnFutureLastScanTime(t *testing.T) {
 	if err := os.WriteFile(path, []byte(future), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	sum, err := exec.Command("sha256sum", path).Output()
-	if err != nil {
-		t.Fatalf("sha256sum: %v", err)
-	}
-	manifest := strings.SplitN(string(sum), " ", 2)[0]
+	manifest := sha256Hex(t, path)
 	if err := os.WriteFile(filepath.Join(work, "bdir", "MANIFEST"),
 		[]byte("takenAt=2026-09-20T12:00:00Z\nsha256="+manifest+"\n"), 0o600); err != nil {
 		t.Fatal(err)

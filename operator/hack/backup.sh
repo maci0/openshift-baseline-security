@@ -17,6 +17,10 @@
 #        hack/backup.sh --help
 set -euo pipefail
 
+# shellcheck source-path=SCRIPTDIR
+# shellcheck source=lib-sha256.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib-sha256.sh"
+
 usage() {
   cat <<'EOF'
 Usage: backup.sh [output-dir]
@@ -55,6 +59,11 @@ fi
 
 command -v oc >/dev/null || {
   echo "backup.sh: oc not on PATH" >&2
+  exit 1
+}
+
+sha256_init || {
+  echo "backup.sh: cannot compute the MANIFEST digest" >&2
   exit 1
 }
 
@@ -100,7 +109,7 @@ fi
 # so the quotes are stripped to keep the MANIFEST greppable.
 RESOURCE_VERSION="$(sed -n 's/^  resourceVersion: *"\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' "$TMP" | head -1)"
 UID_VALUE="$(sed -n 's/^  uid: *"\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' "$TMP" | head -1)"
-DIGEST="$(command sha256sum < "$TMP" | cut -d' ' -f1)"
+DIGEST="$(sha256_file "$TMP")"
 
 {
   printf 'takenAt=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"

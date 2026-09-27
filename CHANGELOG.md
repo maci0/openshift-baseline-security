@@ -294,6 +294,13 @@ depend on those tags.
 
 ### Fixed
 
+- The failure-list size budget over-counted a name carrying ill-formed UTF-8 by
+  four bytes per bad byte, so a list of such names was truncated well before
+  the status limit it is clamped against. `encoding/json` writes the
+  three-byte U+FFFD replacement character for an ill-formed byte; the estimate
+  still assumed the six-byte `\ufffd` escape it emitted in older toolchains.
+  A `newlyFailed` / `fixed` list built from a restored protobuf backup, which
+  can carry lone continuation bytes, now keeps the names it used to drop.
 - A waiver reason, a remediation error message, and the text in the printable
   report lost their zero-width joiners and non-joiners on the way in and out.
   The invisible-character filter dropped every Unicode format character, so a

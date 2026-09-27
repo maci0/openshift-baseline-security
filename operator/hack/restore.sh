@@ -16,6 +16,10 @@
 #        hack/restore.sh --help
 set -euo pipefail
 
+# shellcheck source-path=SCRIPTDIR
+# shellcheck source=lib-sha256.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib-sha256.sh"
+
 usage() {
   cat <<'EOF'
 Usage: restore.sh [backup-dir]
@@ -55,6 +59,11 @@ command -v oc >/dev/null || {
   exit 1
 }
 
+sha256_init || {
+  echo "restore.sh: cannot verify the artifact digest" >&2
+  exit 1
+}
+
 ARTIFACT="$DIR/clusterbaseline.yaml"
 MANIFEST="$DIR/MANIFEST"
 
@@ -87,7 +96,7 @@ if [[ -z "$EXPECTED" ]]; then
   echo "restore.sh: MANIFEST has no sha256; refusing to restore an unverifiable backup" >&2
   exit 1
 fi
-ACTUAL="$(command sha256sum < "$ARTIFACT" | cut -d' ' -f1)"
+ACTUAL="$(sha256_file "$ARTIFACT")"
 if [[ "$ACTUAL" != "$EXPECTED" ]]; then
   echo "restore.sh: checksum mismatch; artifact was modified or truncated in transit" >&2
   echo "restore.sh:   expected $EXPECTED" >&2

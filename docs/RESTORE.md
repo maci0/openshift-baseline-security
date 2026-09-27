@@ -36,8 +36,9 @@ Stated, so they are decisions rather than surprises:
   day of waiver edits, and the score history is gone for the scans since the
   last capture (it is recomputed forward from the next scan, not backfilled).
 - **RTO: under two minutes** for a `restore.sh` run against a reachable
-  apiserver. It is two API calls plus a `sha256sum`. A full etcd restore is
-  OpenShift's, not this project's, and is orders of magnitude slower.
+  apiserver. It is two API calls plus one SHA-256 digest (`sha256sum`, or
+  `shasum`/`openssl` where coreutils is absent, as on macOS). A full etcd
+  restore is OpenShift's, not this project's, and is orders of magnitude slower.
 - **RPO for the Compliance Operator's own data is zero** here, because this
   project has no copy of it. If the Compliance Operator's results are the loss,
   a fresh scan rebuilds them, at the cost of one scan interval.
