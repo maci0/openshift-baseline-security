@@ -1310,6 +1310,40 @@ func TestVerifyBackup(t *testing.T) {
 	}
 }
 
+// The age limit bounds the RPO, so it is compared in seconds. Truncating to
+// whole days first would accept anything up to a full day past the limit, and
+// the whole point of a 7-day limit is that a backup 7d23h old already
+// discards a week of scan and waiver history.
+func TestBackupAgeLimitIsNotTruncatedToWholeDays(t *testing.T) {
+	now := time.Now().UTC()
+	work := t.TempDir()
+	bin := t.TempDir()
+	fakeOC(t, bin, baselineYAML)
+	// 7 days minus a second is inside the limit; 7 days and a second is past
+	// it. The stamp is second-granular, so a plain 7-day stamp is the boundary.
+	atLimit := backupDir(t, work, "at", now.Add(-7*24*time.Hour).Format(time.RFC3339))
+	if _, stderr, code := runScript(t, "verify-backup.sh", work, atLimit); code != 0 {
+		t.Errorf("verify-backup.sh on a backup exactly 7 days old: exit %d, want 0; stderr=%s", code, stderr)
+	}
+	overLimit := backupDir(t, work, "over", now.Add(-7*24*time.Hour-time.Hour).Format(time.RFC3339))
+	_, stderr, code := runScript(t, "verify-backup.sh", work, overLimit)
+	if code == 0 {
+		t.Fatal("verify-backup.sh passed a backup an hour past the 7-day limit")
+	}
+	if !strings.Contains(stderr, "7 days 1 hour old") {
+		t.Errorf("stderr %q, want the age reported to the hour", stderr)
+	}
+	// restore.sh warns rather than refuses, but it must not warn at 7d23h and
+	// stay silent.
+	_, stderr, code = runScript(t, "restore.sh", bin, overLimit)
+	if code != 0 {
+		t.Fatalf("restore.sh: exit %d, want 0; stderr=%s", code, stderr)
+	}
+	if !strings.Contains(stderr, "7 days 1 hour old") {
+		t.Errorf("stderr %q, want the stale age called out to the hour", stderr)
+	}
+}
+
 func TestBackupRestoreUsage(t *testing.T) {
 	for _, name := range []string{"backup.sh", "restore.sh", "verify-backup.sh"} {
 		script := scriptPath(t, name)

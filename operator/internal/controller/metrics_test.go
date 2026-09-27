@@ -66,8 +66,8 @@ func TestPublishMetrics(t *testing.T) {
 	}
 	// Freshness comes from the injected clock, so the gauge must be exactly the
 	// reading this publish saw: a hardcoded constant would leave StatusStale paging.
-	if got := testutil.ToFloat64(statusObservedTimestamp); got != float64(metricsTestNow.UnixNano())/1e9 {
-		t.Fatalf("status observation timestamp = %v, want the clock reading %v", got, float64(metricsTestNow.UnixNano())/1e9)
+	if got := testutil.ToFloat64(statusObservedTimestamp); got != unixSeconds(metricsTestNow) {
+		t.Fatalf("status observation timestamp = %v, want the clock reading %v", got, unixSeconds(metricsTestNow))
 	}
 	if got := testutil.ToFloat64(remediationBatchActive); got != 1 {
 		t.Fatalf("batch active gauge = %v, want 1", got)
@@ -376,7 +376,7 @@ func TestClearPublishedMetrics(t *testing.T) {
 	if got := testutil.ToFloat64(newlyFailedCount); got != 0 {
 		t.Fatalf("newly failed after clear = %v, want 0", got)
 	}
-	if got := testutil.ToFloat64(statusObservedTimestamp); got != float64(metricsTestNow.UnixNano())/1e9 {
+	if got := testutil.ToFloat64(statusObservedTimestamp); got != unixSeconds(metricsTestNow) {
 		t.Fatalf("observation timestamp after clear = %v, want the clock reading %v (avoid StatusStale; a stale constant must not pass)", got, float64(metricsTestNow.UnixNano())/1e9)
 	}
 }
@@ -419,5 +419,26 @@ func TestClearPublishedMetricsKeepsPluginManaged(t *testing.T) {
 	clearPublishedMetrics(metricsTestNow)
 	if got := testutil.ToFloat64(consolePluginManaged); got != 1 {
 		t.Fatalf("consolePluginManaged after clear = %v, want 1", got)
+	}
+}
+
+// UnixNano overflows its int64 outside 1678-2262, so a reading taken through it
+// wraps negative and ComplianceStatusStale sees a replica that stopped
+// publishing the moment the clock passes 2262. Unix() plus the nanosecond
+// remainder is exact for any instant the clock can hold.
+func TestUnixSecondsDoesNotWrap(t *testing.T) {
+	for _, at := range []time.Time{
+		metricsTestNow,
+		time.Unix(0, 0).UTC(),
+		time.Date(2262, time.April, 11, 23, 47, 16, 854775807, time.UTC),
+		time.Date(9999, time.December, 31, 23, 59, 59, 999999999, time.UTC),
+	} {
+		got := unixSeconds(at)
+		if want := float64(at.Unix()) + float64(at.Nanosecond())/1e9; got != want {
+			t.Errorf("unixSeconds(%s) = %v, want %v", at, got, want)
+		}
+		if got < 0 {
+			t.Errorf("unixSeconds(%s) = %v, want a non-negative epoch second", at, got)
+		}
 	}
 }

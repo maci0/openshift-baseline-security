@@ -2566,6 +2566,21 @@ depend on those tags.
   score or a failure list is no longer complete on such a cluster. No stored
   object changes shape; the lists are shorter and self-consistent.
 
+### Fixed
+
+- The backup age limit accepted a full extra day. `verify-backup.sh` and
+  `restore.sh` truncated the age to whole days before comparing it to the
+  limit, so a backup taken 7 days 23 hours ago passed a 7-day limit and
+  `restore.sh` said nothing about it, while the RPO that limit exists to
+  bound is the whole time since the capture, not the number of midnights it
+  spans. Both now compare the age in seconds, and report it to the hour.
+
+- `baseline_security_status_observed_timestamp_seconds` was computed from
+  `UnixNano()`, whose int64 nanosecond count overflows in 2262. Past that
+  instant the gauge reads negative, and ComplianceStatusStale reads it as a
+  replica that stopped publishing and pages forever. The gauge now takes the
+  epoch second plus the nanosecond remainder, which is exact at any instant.
+
 - Moving from an installed 0.6.x CSV is not an OLM auto-upgrade (no `replaces`
   graph since 0.5.5). Point the CatalogSource at the new catalog tag and install
   that head; delete a leftover Subscription/CSV. ClusterBaseline CRs stay, and

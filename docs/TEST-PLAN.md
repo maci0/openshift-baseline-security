@@ -518,6 +518,10 @@ an accepted risk neither inflates nor tanks the score.
 - [x] **Remediation batch started-at gauge**: tracks
       `status.remediationBatch.startedAt`, clears when the batch ends
       (`TestPublishMetricsBatchStartedTimestamp`).
+- [x] **Publish-freshness gauge does not wrap**: the epoch second is taken as
+      `Unix()` plus the nanosecond remainder, not `UnixNano()/1e9`, which
+      overflows outside 1678-2262 and would read as a replica that stopped
+      publishing (`TestUnixSecondsDoesNotWrap`).
 - [x] **Batch outcome counter**: `baseline_security_remediation_batches_total`
       counts the outcome once the pools are free and not on batch start
       (`TestRemediationBatchCountsOutcome`). A finish retried because the
@@ -1569,7 +1573,10 @@ unrecoverable waivers, `verify-backup.sh` against a good directory and every
 way a scheduled backup fails quietly, the same round trip on a PATH with
 no GNU `sha256sum` (the macOS shape, where the digest falls back to `shasum`
 or `openssl`), the reported and enforced age on a PATH whose `date` has no
-GNU `-d`, the refusal of an artifact whose `apiVersion` the CRD does not
+GNU `-d`, the age limit compared in seconds rather than in whole days (a
+backup an hour past a 7-day limit fails `verify-backup.sh` and is called out
+by `restore.sh`; one taken exactly 7 days ago passes), the refusal of an
+artifact whose `apiVersion` the CRD does not
 serve (and the restore that goes ahead when the CRD cannot be read), and the
 refusal to pass a backup whose age cannot be measured. The `hack/` cases
 below still need a live cluster.

@@ -146,10 +146,16 @@ AGE_NOTE="${TAKEN_AT:-unknown}"
 if (( $(date -u +%s) < TAKEN_EPOCH )); then
   fail "takenAt $TAKEN_AT is in the future; the host clock was wrong when the backup was taken"
 else
-  AGE_DAYS=$(( ($(date -u +%s) - TAKEN_EPOCH) / 86400 ))
+  AGE_SECONDS=$(( $(date -u +%s) - TAKEN_EPOCH ))
+  AGE_DAYS=$(( AGE_SECONDS / 86400 ))
   AGE_NOTE="$TAKEN_AT, ${AGE_DAYS}d old"
-  if (( AGE_DAYS > MAX_AGE_DAYS )); then
-    fail "backup is ${AGE_DAYS} days old, past the ${MAX_AGE_DAYS}-day limit; schedule is not running or its copy is stale"
+  (( AGE_SECONDS % 86400 >= 3600 )) && AGE_NOTE+=" (+$(( (AGE_SECONDS % 86400) / 3600 ))h)"
+  # Compare in seconds, not in truncated days: AGE_DAYS > MAX_AGE_DAYS accepts
+  # anything up to a full day past the limit, so a backup 7d23h old passes a
+  # 7-day limit that exists to bound the RPO. Exactly MAX_AGE_DAYS is still
+  # inside the limit; anything past it is not.
+  if (( AGE_SECONDS > MAX_AGE_DAYS * 86400 )); then
+    fail "backup is $(format_age "$AGE_SECONDS") old, past the ${MAX_AGE_DAYS}-day limit; schedule is not running or its copy is stale"
   fi
 fi
 

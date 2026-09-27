@@ -68,3 +68,21 @@ iso8601_to_epoch() {
 
   echo $(( days * 86400 + 10#$hour * 3600 + 10#$minute * 60 + 10#$second ))
 }
+
+# format_age prints an age in seconds as "<n> day(s)[ <h> hour(s)]", the hour
+# part only when nonzero. The sub-day part is there because the age limits are
+# compared in seconds, not in truncated days: a 7-day limit enforced as
+# "whole days > 7" passes a backup taken 7 days 23 hours ago, which is the RPO
+# it claims to bound, silently extended by nearly a full day.
+format_age() {
+  local seconds="${1:-0}"
+  local days=$(( seconds / 86400 ))
+  local hours=$(( (seconds % 86400) / 3600 ))
+  local text="${days} day"
+  (( days != 1 )) && text+="s"
+  if (( hours > 0 )); then
+    text+=" ${hours} hour"
+    (( hours != 1 )) && text+="s"
+  fi
+  printf '%s' "$text"
+}

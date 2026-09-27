@@ -231,7 +231,16 @@ func publishMetrics(cb *baselinev1alpha1.ClusterBaseline, now time.Time) {
 
 	// Publish freshness last so a concurrent scrape cannot select this replica as
 	// newest before its score and check gauges have been refreshed.
-	statusObservedTimestamp.Set(float64(now.UnixNano()) / 1e9)
+	statusObservedTimestamp.Set(unixSeconds(now))
+}
+
+// unixSeconds is the epoch second with sub-second precision, the unit the
+// PromQL `time()` function and every *_timestamp_seconds gauge use. Not
+// now.UnixNano()/1e9: UnixNano is an int64 nanosecond count, so it overflows
+// outside 1678-2262 and wraps to a negative number, which reads as a freshness
+// timestamp far in the past and makes ComplianceStatusStale page permanently.
+func unixSeconds(t time.Time) float64 {
+	return float64(t.Unix()) + float64(t.Nanosecond())/1e9
 }
 
 func setCheckCounts(profile string, c baselinev1alpha1.ResultCounts, desired map[[2]string]struct{}) {

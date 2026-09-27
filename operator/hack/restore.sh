@@ -188,8 +188,11 @@ else
   AGE_SECONDS=$(( $(date -u +%s) - TAKEN_EPOCH ))
   AGE_DAYS=$(( AGE_SECONDS / 86400 ))
   AGE_NOTE="$TAKEN_AT, ${AGE_DAYS}d old"
-  if (( AGE_DAYS > STALE_BACKUP_MAX_AGE_DAYS )); then
-    echo "restore.sh: note: this backup is ${AGE_DAYS} days old, so it discards at" >&2
+  (( AGE_SECONDS % 86400 >= 3600 )) && AGE_NOTE+=" (+$(( (AGE_SECONDS % 86400) / 3600 ))h)"
+  # Same seconds-based comparison as verify-backup.sh, for the same reason: a
+  # truncated whole-day count warns about a 7d23h backup not at all.
+  if (( AGE_SECONDS > STALE_BACKUP_MAX_AGE_DAYS * 86400 )); then
+    echo "restore.sh: note: this backup is $(format_age "$AGE_SECONDS") old, so it discards at" >&2
     echo "restore.sh: least that much waiver and scan history. Any newer backup?" >&2
   fi
 fi
