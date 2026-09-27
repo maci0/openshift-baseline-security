@@ -378,7 +378,7 @@ describe('buildReportHtml', () => {
     expect(html).toContain('class="sev-high"');
     expect(html).toContain('font-family:system-ui');
     expect(html).toContain('#b1380b');
-    expect(html).toContain('#1e4f18');
+    expect(html).toContain('#204d00');
     expect(html).not.toContain('#ccc');
     expect(html).not.toContain('#666');
   });

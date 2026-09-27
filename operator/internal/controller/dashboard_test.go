@@ -83,13 +83,17 @@ func TestDashboardConfigMapCurrent(t *testing.T) {
 // below assert on. Unknown fields are ignored, so a console schema change does
 // not fail the test.
 type dashboardPanel struct {
-	ID         int
-	Title      string
-	Type       string
-	Span       int
-	Colors     []string `json:"colors"`
-	Thresholds string   `json:"thresholds"`
-	Targets    []struct {
+	ID              int
+	Title           string
+	Type            string
+	Span            int
+	Colors          []string `json:"colors"`
+	Thresholds      string   `json:"thresholds"`
+	SeriesOverrides []struct {
+		Match  string `json:"match"`
+		Colors []string
+	} `json:"seriesOverrides"`
+	Targets []struct {
 		Expr string
 	} `json:"targets"`
 }
@@ -108,23 +112,32 @@ type dashboardSpec struct {
 var promIdent = regexp.MustCompile(`[a-zA-Z_][a-zA-Z0-9_]*`)
 
 // dashboardStatusPalette is the one status palette the whole product paints
-// with: the resolved PatternFly 6 light-theme values of the icon status tokens
-// the console plugin reads live (--pf-t--global--icon--color--status--* and
-// --pf-t--global--icon--color--disabled), plus the nonstatus orangered tint the
-// composition donut uses to keep Error apart from Fail. The console Overview,
-// the exported HTML report (console-plugin/src/report.ts REPORT_TOKENS), and
-// this dashboard are three views of the same numbers, so a status that is red
-// in one is red in all three. Unstyled panels fall back to the Grafana default
-// categorical palette, where Fail can render green and Pass blue: a color that
-// contradicts the label on the same chart.
+// with: the resolved PatternFly 6 light-theme values of the tokens the console
+// plugin reads live, plus the nonstatus teal the composition donut uses to keep
+// Waived apart from Not-applicable. The console Overview, the exported HTML
+// report (console-plugin/src/report.ts REPORT_TOKENS), and this dashboard are
+// three views of the same numbers, so a status that is red in one is red in all
+// three. Unstyled panels fall back to the Grafana default categorical palette,
+// where Fail can render green and Pass blue: a color that contradicts the label
+// on the same chart.
+//
+// The values are read out of @patternfly/react-tokens, not chosen: a series
+// color is the icon token the console donut paints that status with
+// (--pf-t--global--icon--color--status--*, --pf-t--global--icon--color--disabled,
+// --pf-t--global--color--nonstatus--*), except for warning, where a chart
+// series is a filled area and wants the text-status amber #73480b rather than
+// the icon-token amber #dca614 the donut wedge takes. The report's status type
+// uses the text tokens for the same reason: colored type, so the text family.
 var dashboardStatusPalette = map[string]string{
-	"#3d7317": "status success / pass",
-	"#b1380b": "status danger / fail, error, newly failed",
-	"#dca614": "status warning / manual",
-	"#5e40be": "status info",
-	"#147878": "status custom / inconsistent",
+	"#3d7317": "icon status success / pass",
+	"#b1380b": "icon status danger / fail, error, newly failed",
+	"#73480b": "text status warning / manual series",
+	"#dca614": "status warning 200 / the middle step of a three-step threshold scale",
+	"#5e40be": "icon status info",
+	"#147878": "icon status custom / inconsistent",
 	"#fbbea8": "nonstatus orangered / error, distinct from fail",
-	"#a3a3a3": "icon disabled / waived, not-applicable, neutral age",
+	"#b9e5e5": "nonstatus teal / waived, distinct from not-applicable",
+	"#a3a3a3": "icon disabled / not-applicable, neutral age",
 }
 
 // hexLiteral matches a CSS color in the embedded payload.
@@ -187,6 +200,65 @@ func TestDashboardScoreBandsShared(t *testing.T) {
 			t.Errorf("panel %q thresholds = %q, want %q", title, p.Thresholds, bands)
 		}
 	}
+}
+
+// TestDashboardStatusSeriesCoverEveryStatus keeps the Checks-by-status panel
+// able to tell the eight statuses apart. The console composition donut gives
+// each one its own color, two of them nonstatus tints (orangered for Error,
+// teal for Waived) precisely so a reader cannot confuse it with its neighbor.
+// A dashboard override that folds two statuses into one regex, or drops one and
+// leaves it on Grafana's index palette, reintroduces the confusion the console
+// already solved.
+func TestDashboardStatusSeriesCoverEveryStatus(t *testing.T) {
+	var spec dashboardSpec
+	if err := json.Unmarshal([]byte(complianceDashboardJSON), &spec); err != nil {
+		t.Fatalf("embedded dashboard is not valid JSON: %v", err)
+	}
+	var panel *dashboardPanel
+	for _, row := range spec.Rows {
+		for i := range row.Panels {
+			if row.Panels[i].Title == "Checks by status" {
+				panel = &row.Panels[i]
+			}
+		}
+	}
+	if panel == nil {
+		t.Fatal("dashboard lost the Checks by status panel")
+	}
+	colorOf := make(map[string]string, len(panel.SeriesOverrides))
+	for _, o := range panel.SeriesOverrides {
+		for _, status := range dashboardCheckStatuses {
+			if o.Match != "^"+status+"$" {
+				continue
+			}
+			if prev, dup := colorOf[status]; dup {
+				t.Fatalf("status %q has two overrides (%s and %s)", status, prev, o.Colors)
+			}
+			if len(o.Colors) != 1 {
+				t.Fatalf("override for %q has %d colors, want 1", status, len(o.Colors))
+			}
+			colorOf[status] = o.Colors[0]
+		}
+	}
+	for _, status := range dashboardCheckStatuses {
+		if _, ok := colorOf[status]; !ok {
+			t.Errorf("status %q has no exact override and falls back to the index palette", status)
+		}
+	}
+	// The pair the console separates with a nonstatus tint. Sharing one color
+	// here is what made a waived check and a not-applicable one read as one
+	// band in the stack.
+	if colorOf["notApplicable"] != "" && colorOf["waived"] == colorOf["notApplicable"] {
+		t.Errorf("waived and notApplicable share %s, so the stack cannot tell them apart",
+			colorOf["waived"])
+	}
+}
+
+// dashboardCheckStatuses is every status value the operator publishes on
+// baseline_security_checks, in the order the console composition donut lists
+// them.
+var dashboardCheckStatuses = []string{
+	"pass", "fail", "manual", "info", "inconsistent", "error", "waived", "notApplicable",
 }
 
 // dashboardMetricNames is every metric the embedded dashboard may query: the

@@ -132,15 +132,16 @@
           "datasource": "$datasource",
           "span": 6,
           "stack": true,
-          "colors": ["#fbbea8", "#b1380b", "#147878", "#5e40be", "#dca614", "#a3a3a3", "#3d7317", "#a3a3a3"],
+          "colors": ["#3d7317", "#b1380b", "#73480b", "#5e40be", "#147878", "#fbbea8", "#b9e5e5", "#a3a3a3"],
           "seriesOverrides": [
             { "match": "^pass$", "colors": ["#3d7317"] },
             { "match": "^fail$", "colors": ["#b1380b"] },
             { "match": "^error$", "colors": ["#fbbea8"] },
-            { "match": "^manual$", "colors": ["#dca614"] },
+            { "match": "^manual$", "colors": ["#73480b"] },
             { "match": "^info$", "colors": ["#5e40be"] },
             { "match": "^inconsistent$", "colors": ["#147878"] },
-            { "match": "^(waived|notApplicable)$", "colors": ["#a3a3a3"] }
+            { "match": "^waived$", "colors": ["#b9e5e5"] },
+            { "match": "^notApplicable$", "colors": ["#a3a3a3"] }
           ],
           "targets": [
             { "expr": "sum by (status) (baseline_security_checks and on(instance) topk(1, baseline_security_status_observed_timestamp_seconds))", "legendFormat": "{{status}}", "refId": "A" }

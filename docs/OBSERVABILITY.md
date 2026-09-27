@@ -58,18 +58,27 @@ rows to look at, in the order an incident usually needs them:
 every panel query names a metric in the table above, so a renamed or removed
 gauge cannot leave a blank panel behind.
 
-Panels are colored from one status palette, the resolved PatternFly 6
-light-theme values of the icon status tokens the console plugin reads live:
-success `#3d7317`, danger `#b1380b`, warning `#dca614`, info `#5e40be`, custom
-`#147878`, the nonstatus orangered `#fbbea8` that keeps Error apart from Fail,
-and the disabled neutral `#a3a3a3` for waived, not-applicable, and the age
-gauges. The console Overview, the exported HTML report, and this dashboard are
-three views of the same numbers, so a status is one color in all three. A graph
-panel with no `colors` falls back to Grafana's default categorical palette,
-where a failing series can render green, so `TestDashboardUsesStatusPalette`
-fails the build on a color outside the palette or an uncolored graph panel. The
-score singlestat and the 30-day trend share the 60/90 bands
-(`TestDashboardScoreBandsShared`), so the trend is never a second verdict.
+Panels are colored from one status palette, read out of
+`@patternfly/react-tokens` rather than chosen: the values below are what the
+PatternFly 6 light-theme tokens the console plugin reads live resolve to, so a
+status is one color in the console Overview, the exported HTML report, and this
+dashboard. Icon status success `#3d7317`, danger `#b1380b`, info `#5e40be`,
+custom `#147878`, the disabled neutral `#a3a3a3` for not-applicable and the age
+gauges, and two nonstatus tints that keep a status from being read as its
+neighbor: orangered `#fbbea8` for Error, apart from Fail, and teal `#b9e5e5` for
+Waived, apart from Not applicable. Manual is the one series that does not take
+its icon token: a chart series is a filled area, so it takes the text-status
+amber `#73480b` rather than the icon-token amber the donut wedge uses. The
+middle step of a three-step threshold scale is the warning-200 tint `#dca614`,
+which is a different job from the Manual series and is listed in the guard
+separately. The report's score and severity type use the text status tokens
+(`#b1380b`, `#73480b`, `#204d00`) for the same reason, colored type wants the
+text family. A graph panel with no `colors` falls back to Grafana's default
+categorical palette, where a failing series can render green, so
+`TestDashboardUsesStatusPalette` fails the build on a color outside the palette
+or an uncolored graph panel. The score singlestat and the 30-day trend share the
+60/90 bands (`TestDashboardScoreBandsShared`), so the trend is never a second
+verdict.
 
 ## Logs
 

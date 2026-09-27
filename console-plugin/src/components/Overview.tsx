@@ -118,14 +118,22 @@ const ClusterTimestamp: React.FC<{ value: string; locale?: string }> = ({
   );
 };
 
-// Donut segment colors (module-level so CCR churn does not rebind CSS var strings).
+// Donut segment colors (module-level so CCR churn does not rebind CSS var
+// strings). Named for the token each one reads, not for the hue it resolves to:
+// the custom token lands on a teal and the info token on a purple, so a
+// color-named constant here would read as the wrong status.
 const DONUT_GREEN = 'var(--pf-t--global--icon--color--status--success--default)';
 const DONUT_RED = 'var(--pf-t--global--icon--color--status--danger--default)';
 const DONUT_ORANGE = 'var(--pf-t--global--icon--color--status--warning--default)';
-const DONUT_PURPLE = 'var(--pf-t--global--icon--color--status--custom--default)';
+const DONUT_CUSTOM = 'var(--pf-t--global--icon--color--status--custom--default)';
 const DONUT_GREY = 'var(--pf-t--global--icon--color--disabled)';
-const DONUT_BLUE = 'var(--pf-t--global--icon--color--status--info--default)';
-// Distinct hues so Error is not confused with Fail, nor Waived with N/A.
+const DONUT_INFO = 'var(--pf-t--global--icon--color--status--info--default)';
+// Distinct hues so Error is not confused with Fail, nor Waived with N/A. The
+// Observe dashboard stacks the same eight statuses, where two adjacent
+// same-colored bands are just as unreadable, so it paints these last two from
+// the same tokens
+// (operator/internal/controller/assets/compliance-dashboard.json, pinned by
+// TestDashboardUsesStatusPalette).
 const DONUT_ORANGERED = 'var(--pf-t--global--color--nonstatus--orangered--default)';
 const DONUT_TEAL = 'var(--pf-t--global--color--nonstatus--teal--default)';
 
@@ -615,8 +623,8 @@ const Overview: React.FC<{
       { label: t('Pass'), value: totals.pass, color: DONUT_GREEN, filter: 'PASS' },
       { label: t('Fail'), value: totals.fail, color: DONUT_RED, filter: 'FAIL' },
       { label: t('Manual'), value: totals.manual, color: DONUT_ORANGE, filter: 'MANUAL' },
-      { label: t('Info'), value: totals.info, color: DONUT_BLUE, filter: 'INFO' },
-      { label: t('Inconsistent'), value: totals.inconsistent, color: DONUT_PURPLE, filter: 'INCONSISTENT' },
+      { label: t('Info'), value: totals.info, color: DONUT_INFO, filter: 'INFO' },
+      { label: t('Inconsistent'), value: totals.inconsistent, color: DONUT_CUSTOM, filter: 'INCONSISTENT' },
       { label: t('Error'), value: totals.error, color: DONUT_ORANGERED, filter: 'ERROR' },
       { label: t('Waived'), value: totals.waived, color: DONUT_TEAL, filter: 'WAIVED' },
       { label: t('Not applicable'), value: totals.notApplicable, color: DONUT_GREY, filter: 'NOT-APPLICABLE' },

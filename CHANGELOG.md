@@ -91,6 +91,17 @@ depend on those tags.
 
 ### Fixed
 
+- The same check status was drawn in different colors depending on which view
+  read it. `MANUAL` was the icon-token amber on the console composition donut
+  and a brighter yellow in the Observe dashboard; `WAIVED` was teal on the
+  console (donut wedge and Results status chip) and the same grey as
+  not-applicable in the dashboard, which stacks the two adjacent. The dashboard
+  now paints both from the same PatternFly 6 tokens the console reads, and the
+  exported HTML report's score and severity type now uses the text status
+  tokens it claimed to use (the warning amber and the success green were
+  hand-picked values that matched no token), so a status is one color across
+  the console, the report, and the dashboard. `TestDashboardUsesStatusPalette`
+  pins the widened set.
 - `hack/verify-backup.sh` computed the backup age with `date -u -d`, which is
   GNU coreutils only. On a host with BSD `date` (macOS, which `hack/backup.sh`
   and `hack/restore.sh` already support for the digest) the conversion failed,

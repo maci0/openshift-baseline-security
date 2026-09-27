@@ -82,25 +82,34 @@ export type ReportTranslate = (key: string, options?: ReportVars) => string;
 // the CSS below is a value that can drift into a second role with nothing to
 // notice the split.
 const REPORT_TOKENS = {
-  // Neutrals, PatternFly 6 light theme. textSubtle and every text status value
-  // sit at or above the 4.5:1 text ratio the console's own status tokens are
-  // calibrated for (see scoreColor in src/scoring.ts).
+  // Neutrals. text is --pf-t--global--text--color--regular and textSubtle is
+  // --pf-t--global--text--color--subtle; every text status value below sits at
+  // or above the 4.5:1 text ratio those two are calibrated for (see
+  // scoreColor in src/scoring.ts). border and the two surfaces are the
+  // document's own, not a PatternFly token: the export is a printed page, and
+  // its rules and fills are tuned to the table grid rather than to a control.
   text: '#151515',
-  textSubtle: '#4d4d4d',
+  textSubtle: '#383838',
   border: '#c7c7c7',
   surface: '#fff',
   surfaceSubtle: '#f2f2f2',
-  // Text bands for a 0-100 score, same 60/90 thresholds as the console.
+  // Text bands for a 0-100 score, same 60/90 thresholds as the console, and the
+  // resolved PatternFly 6 light-theme values of the text status tokens: danger
+  // and success are #b1380b and #204d00, so a band is the same ink the console
+  // paints the matching score.
   statusDanger: '#b1380b',
-  statusWarning: '#795600',
-  statusSuccess: '#1e4f18',
+  statusWarning: '#73480b',
+  statusSuccess: '#204d00',
   // The accent rule is decorative: it carries no text and nothing depends on
-  // it, so it takes the PatternFly icon/status tokens rather than the 4.5:1
-  // text ones. These are the resolved PatternFly 6 light-theme values of
-  // --pf-t--global--icon--color--status--{danger,warning,success}--default
-  // (#b1380b, #dca614, #3d7317), the same tokens the console donut and the
-  // per-profile badges read live, and the same hexes the Observe dashboard
-  // thresholds and series use
+  // it, so it takes the PatternFly status tokens rather than the text ones
+  // above. The first and third are the resolved light-theme values of
+  // --pf-t--global--icon--color--status--{danger,success}--default (#b1380b,
+  // #3d7317). The warning step is the brighter
+  // --pf-t--global--color--status--warning--200 (#dca614) rather than the
+  // icon-token amber, because a 4px rule in #73480b reads as the same weight of
+  // color as the success green beside it, and the whole point of the rule is to
+  // be told apart from the score printed under it. Same hexes the Observe
+  // dashboard thresholds use
   // (operator/internal/controller/assets/compliance-dashboard.json), so the
   // report and the dashboards a cluster admin reads read as one product. The
   // rule follows the score instead of being a fixed brand color: a red frame on
@@ -110,7 +119,7 @@ const REPORT_TOKENS = {
   accentWarning: '#dca614',
   accentSuccess: '#3d7317',
   // A report with no computable score is unscored, not failing. Its frame is
-  // the neutral the console paints waived and not-applicable checks in
+  // the neutral the console paints not-applicable checks in
   // (--pf-t--global--icon--color--disabled), the same value that renders "—"
   // in the score line.
   accentNone: '#a3a3a3',
