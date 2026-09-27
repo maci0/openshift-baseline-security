@@ -85,3 +85,28 @@ func TestManagerCacheOptionsExpectedTypes(t *testing.T) {
 		t.Error("ClusterBaseline is cluster-scoped and must not be namespace-scoped")
 	}
 }
+
+// TestManagerCacheOptionsDefaultNamespaces pins the default scope for namespaced
+// types with no ByObject entry, which is every compliance CR lazyComplianceWatch
+// watches as a metadata-only informer. Those informers cannot be named in
+// ByObject (a bare *metav1.PartialObjectMetadata has no resolvable GVK), so
+// without DefaultNamespaces they list and watch every namespace in the cluster
+// and the reconciler's foreign-namespace filter in enqueueSingleton is the only
+// thing standing between a scan and a heap full of unrelated compliance objects.
+func TestManagerCacheOptionsDefaultNamespaces(t *testing.T) {
+	opts := ManagerCacheOptions()
+	if len(opts.DefaultNamespaces) != 2 {
+		t.Fatalf("DefaultNamespaces = %v, want exactly %q and %q",
+			opts.DefaultNamespaces, complianceNamespace, pluginNS)
+	}
+	for ns := range opts.DefaultNamespaces {
+		if ns != complianceNamespace && ns != pluginNS {
+			t.Errorf("DefaultNamespaces caches %q, which the reconciler never reads", ns)
+		}
+	}
+	// A catch-all re-admits the named namespaces through a field selector, so
+	// the compliance informers would be back to watching everything.
+	if _, ok := opts.DefaultNamespaces[cache.AllNamespaces]; ok {
+		t.Error("DefaultNamespaces must not carry the cache.AllNamespaces catch-all")
+	}
+}

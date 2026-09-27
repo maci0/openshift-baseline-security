@@ -67,7 +67,12 @@ depend on those tags.
   to the namespaces those reads actually use (`openshift-compliance` for scan
   storage, `openshift-baseline-security` for the plugin). `ClusterBaseline` is
   cluster-scoped and stays cache-wide; foreign Compliance Operator objects are
-  read as unstructured and already bypass the cache.
+  read as unstructured and already bypass the cache. The compliance CRs the
+  event-driven watches follow (ComplianceSuite, ComplianceScan,
+  ComplianceRemediation, ComplianceCheckResult) are cached as metadata only and
+  cannot be named per type, so they took the cluster-wide default; the default
+  is now scoped to the same two namespaces, which keeps foreign compliance
+  objects out of the heap instead of only out of the reconcile queue.
 - Operator and console plugin pods: neither declared a `preStop` hook, so a
   terminating pod kept its endpoint for the seconds between SIGTERM and
   endpoint removal, and a scrape or console request could still land on a
@@ -124,6 +129,12 @@ depend on those tags.
 
 ### Fixed
 
+- `status.relatedObjects` listed the console plugin Deployment,
+  PodDisruptionBudget, and ConsolePlugin even with
+  `spec.console.managementState: Removed`, where the operator has deleted them
+  and refuses to recreate them. The list declares what the baseline owns, so it
+  now tracks the management state and must-gather stops chasing disowned
+  objects.
 - Operator and console plugin pods: neither declared a `preStop` hook, so a
   terminating pod kept its endpoint for the seconds between SIGTERM and
   endpoint removal, and a scrape or console request could still land on a

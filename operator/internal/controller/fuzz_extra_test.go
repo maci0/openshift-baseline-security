@@ -477,25 +477,45 @@ func FuzzOwnedSuitesRelatedObjects(f *testing.F) {
 				t.Fatalf("missing tailored suite for %q", name)
 			}
 		}
-		refs := relatedObjectsFromSuites(suites)
-		// 4 fixed core refs + one ScanSettingBinding per owned suite.
-		if len(refs) != 4+len(suites) {
-			t.Fatalf("relatedObjectsFromSuites len %d want %d", len(refs), 4+len(suites))
-		}
-		// Binding names after the fixed prefix must be sorted.
-		var names []string
-		for _, ref := range refs[4:] {
-			if ref.Resource != "scansettingbindings" {
-				t.Fatalf("unexpected resource %q", ref.Resource)
+		// The plugin refs track console.managementState: with Removed the operator
+		// deletes the Deployment/PDB/ConsolePlugin, so it must not claim them.
+		for _, state := range []baselinev1alpha1.ManagementState{baselinev1alpha1.Managed, baselinev1alpha1.Removed} {
+			cb.Spec.Console.ManagementState = state
+			refs := relatedObjectsFromSuites(cb, suites)
+			fixed := 4
+			if state == baselinev1alpha1.Removed {
+				fixed = 1
 			}
-			names = append(names, ref.Name)
-			if !suites[ref.Name] {
-				t.Fatalf("relatedObjectsFromSuites name %q not in ownedSuites", ref.Name)
+			// Fixed core refs + one ScanSettingBinding per owned suite.
+			if len(refs) != fixed+len(suites) {
+				t.Fatalf("relatedObjectsFromSuites len %d want %d", len(refs), fixed+len(suites))
 			}
-		}
-		for i := 1; i < len(names); i++ {
-			if names[i-1] > names[i] {
-				t.Fatalf("relatedObjectsFromSuites bindings unsorted: %v", names)
+			for _, ref := range refs[:fixed] {
+				if ref.Resource == "deployments" || ref.Resource == "poddisruptionbudgets" || ref.Resource == "consoleplugins" {
+					if state == baselinev1alpha1.Removed {
+						t.Fatalf("plugin ref %q advertised while managementState=Removed", ref.Resource)
+					}
+					continue
+				}
+				if ref.Resource != "scansettings" {
+					t.Fatalf("unexpected fixed resource %q", ref.Resource)
+				}
+			}
+			// Binding names after the fixed prefix must be sorted.
+			var names []string
+			for _, ref := range refs[fixed:] {
+				if ref.Resource != "scansettingbindings" {
+					t.Fatalf("unexpected resource %q", ref.Resource)
+				}
+				names = append(names, ref.Name)
+				if !suites[ref.Name] {
+					t.Fatalf("relatedObjectsFromSuites name %q not in ownedSuites", ref.Name)
+				}
+			}
+			for i := 1; i < len(names); i++ {
+				if names[i-1] > names[i] {
+					t.Fatalf("relatedObjectsFromSuites bindings unsorted: %v", names)
+				}
 			}
 		}
 	})

@@ -75,15 +75,24 @@ func createIfMissing(ctx context.Context, c client.Client, obj client.Object) er
 // relatedObjectsFromSuites lists the resources this baseline owns or drives
 // (must-gather / support tooling) from an already-built owned suite map so
 // reconcile does not allocate ownedSuites twice.
-func relatedObjectsFromSuites(suites map[string]bool) []baselinev1alpha1.ObjectRef {
+//
+// The list declares ownership, so it must track what the reconciler actually
+// holds. With console.managementState=Removed, removeConsolePlugin deletes the
+// plugin Deployment, PDB, and ConsolePlugin, so advertising them would send
+// must-gather after objects the operator has disowned.
+func relatedObjectsFromSuites(cb *baselinev1alpha1.ClusterBaseline, suites map[string]bool) []baselinev1alpha1.ObjectRef {
 	// Cap at fixed refs + suite count so the slice does not thrash under multi-profile.
 	refs := make([]baselinev1alpha1.ObjectRef, 0, 4+len(suites))
 	refs = append(refs,
 		baselinev1alpha1.ObjectRef{Group: "compliance.openshift.io", Resource: "scansettings", Name: scanSettingName, Namespace: complianceNamespace},
-		baselinev1alpha1.ObjectRef{Group: "apps", Resource: "deployments", Name: pluginName, Namespace: pluginNS},
-		baselinev1alpha1.ObjectRef{Group: "policy", Resource: "poddisruptionbudgets", Name: pluginName, Namespace: pluginNS},
-		baselinev1alpha1.ObjectRef{Group: "console.openshift.io", Resource: "consoleplugins", Name: pluginName},
 	)
+	if cb.Spec.Console.ManagementState != baselinev1alpha1.Removed {
+		refs = append(refs,
+			baselinev1alpha1.ObjectRef{Group: "apps", Resource: "deployments", Name: pluginName, Namespace: pluginNS},
+			baselinev1alpha1.ObjectRef{Group: "policy", Resource: "poddisruptionbudgets", Name: pluginName, Namespace: pluginNS},
+			baselinev1alpha1.ObjectRef{Group: "console.openshift.io", Resource: "consoleplugins", Name: pluginName},
+		)
+	}
 	// Deterministic order so status does not flap.
 	for _, name := range slices.Sorted(maps.Keys(suites)) {
 		refs = append(refs, baselinev1alpha1.ObjectRef{

@@ -188,7 +188,7 @@ func (r *ClusterBaselineReconciler) aggregateStatus(ctx context.Context, cb *bas
 					cb.Status.NewlyFailed = nil
 					cb.Status.Fixed = nil
 					// Keep relatedObjects in sync with desired ownership even when CO is absent.
-					cb.Status.RelatedObjects = relatedObjectsFromSuites(suites)
+					cb.Status.RelatedObjects = relatedObjectsFromSuites(cb, suites)
 					return nil
 				}
 				return fmt.Errorf("listing ComplianceCheckResults in %s: %w", complianceNamespace, err)
@@ -298,7 +298,7 @@ func (r *ClusterBaselineReconciler) aggregateStatus(ctx context.Context, cb *bas
 	// Fill deterministic status fields before history so a scan-list failure
 	// still leaves a coherent rollup on the error-path status update.
 	// Reuse suites from the CCR selector (avoids a second ownedSuites alloc).
-	cb.Status.RelatedObjects = relatedObjectsFromSuites(suites)
+	cb.Status.RelatedObjects = relatedObjectsFromSuites(cb, suites)
 	// No profiles and no tailored profiles: scanning is intentionally off.
 	// Clear live regression display and next-scan (nothing will fire without
 	// bindings). Keep History, LastScanTime, and PreviousFailures so re-enable
