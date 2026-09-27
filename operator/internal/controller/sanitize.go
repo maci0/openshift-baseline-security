@@ -44,7 +44,8 @@ const (
 	// are accounted at their actual JSON-marshaled size, so multi-byte runes and
 	// escape inflation cannot slip past the budget. The operator's own 7 types
 	// always fit: their messages are re-clamped to the 1024-byte condMessage cap
-	// the operator itself writes under, ~3 KiB serialized each worst case.
+	// the operator itself writes under, which marshals to ~2.1 KiB each at worst,
+	// so all seven together stay under 16 KiB.
 	conditionsSizeBudget = 256 * 1024
 )
 

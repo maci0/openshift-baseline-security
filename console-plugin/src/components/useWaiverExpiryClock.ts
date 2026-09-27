@@ -12,9 +12,9 @@ import { futureWaiverDeadlineMs, soonestDeadlineDelayMs } from '../waivers';
 
 // Content key for spec.waivers: identity deps would rebuild waiver sets (and
 // reschedule the expiry timer) on every reconcile even when nothing changed.
-// Encoded, not interpolated: a waiver name or expiresAt carrying the old
-// separator forged another waiver set's key, and the effect then never
-// rescheduled, leaving an expiring waiver's label stuck at its old value.
+// Encoded, not interpolated: a name or expiresAt containing the separator
+// would otherwise forge another waiver set's key, leaving an expiring waiver's
+// label stuck at its old value.
 export const waiversContentKey = (waivers: Waiver[] | undefined): string =>
   (waivers ?? [])
     .map((w) => encodeKeyPart(w.name) + encodeKeyPart(w.expiresAt))

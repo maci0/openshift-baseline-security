@@ -1,7 +1,7 @@
 // Shown when the ClusterBaseline watch failed, so no baseline can be read. The
 // page forces `loaded` true on a watch error to stop skeletoning forever, which
 // left every tab falling into BaselineNotConfigured: a 403 on
-// clusterbaselines.compliance.openshift.io or a missing CRD rendered "Baseline
+// clusterbaselines.baselinesecurity.openshift.io or a missing CRD rendered "Baseline
 // not configured" plus a Create button, claiming a resource the operator may
 // have already created. A failure and an absent CR need different words, so
 // this is the branch that carries the reason.

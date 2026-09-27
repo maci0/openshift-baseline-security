@@ -123,9 +123,9 @@ const REPORT_TOKENS = {
   heading: '1.5rem',
   subheading: '1.125rem',
   score: '2.25rem',
-  // Measure. The waiver table has six columns of free text; full-bleed on a
-  // wide monitor stretches a reason across a thousand pixels. 72rem keeps the
-  // longest table at a readable column width and centers the rest.
+  // Measure. The waiver table's Reason, Requested by, and Approved by columns
+  // hold free text; full-bleed on a wide monitor stretches a reason across a
+  // thousand pixels. 72rem keeps those cells readable and centers the rest.
   measure: '72rem',
 } as const;
 

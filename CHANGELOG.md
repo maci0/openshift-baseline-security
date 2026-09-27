@@ -61,6 +61,14 @@ depend on those tags.
   size bound and fail every subsequent status write, wedging conditions,
   score, and phase. The count now uses the wider of the two forms, which can
   only trim a list early.
+- A console write is now denied while its access review is still in flight, not
+  only once the review comes back negative. `mayWrite` is the single chokepoint
+  every mutation passes through, and it read `allowed` alone, so a permission
+  revoked between the moment a control rendered and the moment it was clicked
+  could still be spent on the wire when the review had not resolved yet. The
+  check now fails closed on an unresolved review, matching what the plugin's
+  contributor rules already stated.
+
 - `hack/restore.sh` now refuses a backup artifact that holds more than one YAML
   document. `oc apply -f` and `oc replace -f` apply every document in a
   multi-document file, so a backup directory with a second document appended

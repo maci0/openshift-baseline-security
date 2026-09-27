@@ -31,7 +31,7 @@ const dashboardJSONKey = "baseline-security-compliance.json"
 //
 // Steady-state reconcilers hit this every poll. When the ConfigMap already has
 // the embedded JSON, labels, and our owner ref, skip CreateOrUpdate (avoids a
-// full Semantic.DeepEqual of ~9KB JSON every minute).
+// full Semantic.DeepEqual of ~11KB JSON every minute).
 func (r *ClusterBaselineReconciler) ensureComplianceDashboard(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline) {
 	existing := &corev1.ConfigMap{}
 	err := r.Get(ctx, types.NamespacedName{Name: dashboardName, Namespace: dashboardNS}, existing)

@@ -108,6 +108,8 @@ Describes `main`; install from published OLM tags for only the released surface.
 - `docs/DESIGN-DECISIONS.md`: ADR-style product design tradeoffs
 - `docs/PATTERNS.md`: OpenShift addon patterns this repo follows
 - `docs/STANDARDS.md`: coding standards reference with authoritative links
+- `docs/RESTORE.md`: backup and restore runbook for the `ClusterBaseline` and
+  Compliance Operator state (`operator/hack/{backup,restore,verify-backup}.sh`)
 - `docs/TEST-PLAN.md`: unit/e2e coverage catalog, run ledger, and tiers
 - `docs/OBSERVABILITY.md`: Prometheus metrics and alert reference
 - `operator/`: Go operator (kubebuilder go/v4) reconciling the

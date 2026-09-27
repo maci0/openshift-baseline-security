@@ -1203,9 +1203,8 @@ const ProfilesTab: React.FC<{
           </Button>
         </ModalFooter>
       </Modal>
-      {/* Bound tailored profiles: create alone was a dead end (no list, no
-          unbind). Surface membership and let admins stop scanning a suite
-          without deleting the TailoredProfile CR. */}
+      {/* Bound tailored profiles: surface membership and let admins stop
+          scanning a suite without deleting the TailoredProfile CR. */}
       {boundTailored.length > 0 && (
         <div style={{ marginTop: 'var(--pf-t--global--spacer--lg)' }}>
           <Title headingLevel="h2" size="lg">

@@ -958,10 +958,8 @@ const RemediationsTab: React.FC<{
               title={t('This is a node remediation')}
               style={{ marginTop: 'var(--pf-t--global--spacer--md)' }}
             >
-              {/* Point at this tab's own Batch apply control: the manual
-                  Compute -> MachineConfigPools dance it used to describe is
-                  what that button automates, and sending the admin to another
-                  page hid the affordance sitting at the top of this one. */}
+              {/* Point at this tab's own Batch apply control, which automates
+                  the manual Compute -> MachineConfigPools dance. */}
               {t(
                 'It renders into a MachineConfig; applying it reboots the affected nodes one by one. Use Batch apply above instead to apply node remediations together, so the pool reboots once.',
               )}

@@ -20,4 +20,4 @@ export type AccessGate = {
  * True only when the reviewed permission is confirmed. An unresolved review is
  * not an authorization, so `loading` denies as well.
  */
-export const mayWrite = (gate: AccessGate): boolean => gate.allowed;
+export const mayWrite = (gate: AccessGate): boolean => gate.allowed && !gate.loading;

@@ -244,10 +244,12 @@ export const flatProfileScore = (pass?: number, fail?: number): number | null =>
   const p = pass ?? 0;
   const f = fail ?? 0;
   // Finite operands can still overflow the arithmetic: p + f wraps past
-  // 1.8e308 to Infinity and p * 100 past ~1.8e306. The operator's int64/128-bit
-  // score() fails closed (nil) on exactly that mass, so mirror it here rather
-  // than leak NaN / Infinity into badges (Infinity/Infinity -> NaN painted
-  // green by threshold comparisons that are all false for NaN).
+  // 1.8e308 to Infinity. The operator's score64() fails closed (nil) on that
+  // mass and negatives, so mirror it here rather than leak NaN / Infinity into
+  // badges (Infinity/Infinity -> NaN painted green by threshold comparisons
+  // that are all false for NaN). The operator's p*100 half does not need to
+  // fail closed: it uses 128-bit arithmetic and floors into [0,100], so on the
+  // huge-but-finite mass this guard rejects the plugin is stricter.
   const total = p + f;
   if (
     !Number.isFinite(p) ||

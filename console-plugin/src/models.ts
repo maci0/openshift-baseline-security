@@ -397,8 +397,9 @@ export type ClusterBaseline = {
       namespace?: string;
     }[];
     // Operator-internal scan-diff bookkeeping (not a consumer contract; may
-    // change in 0.x). Overview only treats presence as "a prior scan exists"
-    // when history is still thin; prefer newlyFailed/fixed for regressions.
+    // change in 0.x). Its presence alone means "a prior scan exists"; the
+    // history-length fallback covers a first scan that scored nothing. Prefer
+    // newlyFailed/fixed for regressions.
     diffBaseScanTime?: string;
     remediationBatch?: {
       phase: string;

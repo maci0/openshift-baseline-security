@@ -221,6 +221,7 @@ func (r *ClusterBaselineReconciler) openRemediationBatch(
 // must never stay paused forever). Also track whether any remediation is still
 // apply=true: if none are (the user reverted them all), the batch is cancelled
 // and we resume at once.
+
 // remediationListPageSize bounds one apiserver List of ComplianceRemediations.
 // The namespace also holds remediations CO created for foreign scans, so the
 // page caps what a single response pins while the batch polls every 15s.
@@ -322,9 +323,10 @@ func (r *ClusterBaselineReconciler) finishRemediationBatch(
 	rems, lerr := r.listRemediationsForBatch(ctx, names)
 	// Compliance CRDs uninstalled mid-batch: every name is unknowable, but the
 	// pools must still be released, so take the same terminal path as a NotFound
-	// rather than holding them paused until the grace deadline. Logged once with
-	// its own cause so the finish reason=applied is not attributed to individual
-	// remediations that were in fact never observed again.
+	// rather than holding them paused until the grace deadline. Every name then
+	// counts as missing, which leaves anyApplying false and getErr nil, so the
+	// batch finishes with reason=cancelled. The Error line above carries the real
+	// cause; reason alone would read as the user reverting the remediations.
 	crdsAbsent := errors.Is(lerr, errComplianceCRDsAbsent)
 	if crdsAbsent {
 		log.FromContext(ctx).Error(lerr,
