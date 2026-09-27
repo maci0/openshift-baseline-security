@@ -45,6 +45,15 @@ depend on those tags.
 
 ### Fixed
 
+- Release images stamped `org.opencontainers.image.version` from the
+  `ARG VERSION` default in each Dockerfile rather than the version being
+  published. The release job replaced `DOCKER_BUILD_FLAGS` to drop the
+  buildx-only `--provenance`/`--sbom`, and the replacement also dropped
+  `--build-arg VERSION`, so all four images fell back to the default. The two
+  values were kept equal by `verify-versions`, so nothing shipped mislabeled,
+  but the label depended on that gate rather than on what was built. The flags
+  are now assembled after `resolve-release-version.sh` has resolved the
+  version, so every image is built with it explicitly.
 - Console plugin image failed to build. The `COPY` that places
   `THIRD-PARTY-NOTICES.txt` in `/licenses/` named a path from the build stage
   without `--from=build`, so it resolved against the build context instead,

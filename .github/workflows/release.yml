@@ -27,11 +27,6 @@ jobs:
     timeout-minutes: 60
     env:
       REGISTRY: quay.io/openshift-baseline-security
-      # Classic docker driver (build then push, image lands in the local store).
-      # Drop the buildx-only --provenance/--sbom from the Makefile default; the
-      # release does not need reproducible-digest parity with the CI images job.
-      # ?= in the Makefile defers to this exported value.
-      DOCKER_BUILD_FLAGS: --pull --build-arg SOURCE_DATE_EPOCH=0
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -61,6 +56,21 @@ jobs:
           set -euo pipefail
           operator/hack/resolve-release-version.sh
           make -C operator RELEASE_GATE=1 REQUIRE_GIT_TAGS=1 verify-versions
+
+      # Its own step because VERSION only becomes an environment variable once
+      # the step above has written it to GITHUB_ENV; within a single step the
+      # export is not visible to the shell that asked for it.
+      #
+      # Classic docker driver (build then push, image lands in the local store),
+      # so the buildx-only --provenance/--sbom are dropped from the Makefile
+      # default: the release does not need reproducible-digest parity with the
+      # CI images job. ?= in both Makefiles defers to this exported value.
+      # --build-arg VERSION is what makes org.opencontainers.image.version say
+      # what is being published rather than each Dockerfile's ARG default.
+      - name: export image build flags
+        run: |
+          set -euo pipefail
+          echo "DOCKER_BUILD_FLAGS=--pull --build-arg SOURCE_DATE_EPOCH=0 --build-arg VERSION=$VERSION" >> "$GITHUB_ENV"
 
       # Publishing is gated on the tagged commit's own tests, not only on
       # whatever CI run happened to be green when the tag was cut.
@@ -111,9 +121,12 @@ jobs:
         run: |
           set -euo pipefail
           img="$REGISTRY/baseline-security-console-plugin:$VERSION"
-          docker build $DOCKER_BUILD_FLAGS -f console-plugin/Dockerfile -t "$img" console-plugin
+          # The Makefile target, not a hand-rolled `docker build`: it is the one
+          # place the plugin image flags live, and it refuses an empty VERSION
+          # before the (slow) build starts.
+          make -C console-plugin docker-build IMG="$img"
           operator/hack/verify-image-metadata.sh "$img"
-          docker push "$img"
+          make -C console-plugin docker-push IMG="$img"
           docker tag "$img" "$REGISTRY/baseline-security-console-plugin:latest"
           docker push "$REGISTRY/baseline-security-console-plugin:latest"
 
