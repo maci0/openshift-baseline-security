@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Cut version matching Makefile VERSION and git tag vX.Y.Z (not a re-tag of a published cut)'
+        description: 'Cut version matching Makefile VERSION and git tag vX.Y.Z (MAJOR.MINOR.PATCH; a leading v is accepted. Not a re-tag of a published cut)'
         required: true
 
 permissions:

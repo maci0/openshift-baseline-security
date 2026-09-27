@@ -1,6 +1,8 @@
 // Contract tests for the scripts in this directory: --help is pipeable and
 // exits 0, an unknown option exits 2 with usage on stderr, and extra
-// arguments are rejected. The manager's own flag handling lives in ../cmd.
+// arguments are rejected. resolve-release-version.sh additionally pins how a
+// version from the dispatch input or the tag ref is parsed. The manager's own
+// flag handling lives in ../cmd.
 package hack_test
 
 import (
@@ -123,6 +125,98 @@ func TestHackScriptHelp(t *testing.T) {
 		if code != 2 {
 			t.Errorf("%s --not-a-flag: exit %d, want 2; stderr=%q", name, code, stderr)
 		}
+	}
+}
+
+// runScriptEnv runs a script with env replaced by exactly the given
+// key=value pairs, so a case cannot pass or fail on an inherited value.
+func runScriptEnv(t *testing.T, name string, env []string, args ...string) (stdout, stderr string, code int) {
+	t.Helper()
+	cmd := exec.CommandContext(t.Context(), name, args...)
+	cmd.Env = env
+	var out, errb bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &errb
+	err := cmd.Run()
+	if err == nil {
+		return out.String(), errb.String(), 0
+	}
+	var ee *exec.ExitError
+	if errors.As(err, &ee) {
+		return out.String(), errb.String(), ee.ExitCode()
+	}
+	t.Fatalf("%s %v: %v\nstdout:\n%s\nstderr:\n%s", name, args, err, out.String(), errb.String())
+	return "", "", -1
+}
+
+// makefileVersion reads the VERSION the release script must agree with, so the
+// test does not pin a version of its own.
+func makefileVersion(t *testing.T) string {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join("..", "Makefile"))
+	if err != nil {
+		t.Fatalf("reading ../Makefile: %v", err)
+	}
+	for _, line := range strings.Split(string(b), "\n") {
+		if v, ok := strings.CutPrefix(line, "VERSION ?= "); ok {
+			return strings.TrimSpace(v)
+		}
+	}
+	t.Fatal("../Makefile has no VERSION ?= line")
+	return ""
+}
+
+// TestResolveReleaseVersionInput: a version that is not MAJOR.MINOR.PATCH is
+// rejected by shape, naming the source it came from, and the spellings a
+// maintainer types into the dispatch box (leading v, pasted whitespace) resolve
+// to the same cut as the bare version instead of reading as a mismatch.
+func TestResolveReleaseVersionInput(t *testing.T) {
+	script := scriptPath(t, "resolve-release-version.sh")
+	ver := makefileVersion(t)
+
+	// Provenance failures vary with the clone (a missing tag, or a tag that is
+	// not at HEAD), so a well-formed input is pinned only on not being rejected
+	// for its shape and on naming the resolved version.
+	for _, tc := range []struct{ name, input string }{
+		{"bare", ver},
+		{"leading-v", "v" + ver},
+		{"padded", "  v" + ver + " \t\n"},
+	} {
+		_, stderr, code := runScriptEnv(t, script, []string{"INPUT_VERSION=" + tc.input})
+		if code != 1 {
+			t.Errorf("%s: exit %d, want 1 (provenance); stderr=%q", tc.name, code, stderr)
+		}
+		if strings.Contains(stderr, "invalid release version") {
+			t.Errorf("%s: rejected a well-formed version: %q", tc.name, stderr)
+		}
+		if !strings.Contains(stderr, " "+ver) {
+			t.Errorf("%s: stderr does not name the resolved version %s: %q", tc.name, ver, stderr)
+		}
+	}
+
+	for _, tc := range []struct{ name, env, wantSource string }{
+		{"short", "INPUT_VERSION=0.6", "INPUT_VERSION"},
+		{"prerelease", "INPUT_VERSION=0.6.1-rc.1", "INPUT_VERSION"},
+		{"not-a-version", "INPUT_VERSION=latest", "INPUT_VERSION"},
+		{"newline", "INPUT_VERSION=0.6.1\nINJECTED=1", "INPUT_VERSION"},
+		{"branch-ref", "GITHUB_REF_NAME=refs/heads/main", "GITHUB_REF_NAME"},
+	} {
+		_, stderr, code := runScriptEnv(t, script, []string{tc.env})
+		if code != 2 {
+			t.Errorf("%s: exit %d, want 2; stderr=%q", tc.name, code, stderr)
+		}
+		if !strings.Contains(stderr, "invalid release version from "+tc.wantSource) {
+			t.Errorf("%s: stderr does not name the source: %q", tc.name, stderr)
+		}
+	}
+
+	// No version from either source is a resolution failure, not a shape one.
+	_, stderr, code := runScriptEnv(t, script, []string{"INPUT_VERSION=", "GITHUB_REF_NAME="})
+	if code != 1 {
+		t.Errorf("unset: exit %d, want 1; stderr=%q", code, stderr)
+	}
+	if !strings.Contains(stderr, "no release version") {
+		t.Errorf("unset: stderr=%q", stderr)
 	}
 }
 

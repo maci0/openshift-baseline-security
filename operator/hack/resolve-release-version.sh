@@ -24,6 +24,11 @@ Resolves the release version from the workflow_dispatch INPUT_VERSION or the
 vX.Y.Z tag in GITHUB_REF_NAME, proves it matches operator/Makefile VERSION and
 that the tag points at HEAD, then writes VERSION= and TAG= to GITHUB_ENV
 (stdout when GITHUB_ENV is unset). Takes no arguments.
+
+Either source accepts surrounding whitespace and an optional leading v, and
+must be MAJOR.MINOR.PATCH; anything else exits 2 naming the source and value.
+Exit 1 is a resolution or provenance failure (no version, a version that
+disagrees with the Makefile, a tag that is missing or not at HEAD).
 EOF
 }
 
@@ -47,18 +52,42 @@ esac
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
+# Strip surrounding whitespace: a value pasted into the dispatch box, or read
+# from a file with a trailing CR, must not fail the release for whitespace.
+trim() {
+  local v="$1"
+  v="${v#"${v%%[![:space:]]*}"}"
+  v="${v%"${v##*[![:space:]]}"}"
+  printf '%s' "$v"
+}
+
+# The v prefix is stripped from both sources (the tag ref carries it, and a
+# maintainer types it into the dispatch box), so "v0.6.2" and "0.6.2" resolve
+# to the same cut instead of one failing with a version-mismatch message.
 if [ -n "${INPUT_VERSION:-}" ]; then
-  ver="$INPUT_VERSION"
+  src=INPUT_VERSION
+  ver="$(trim "$INPUT_VERSION")"
+  ver="${ver#v}"
 else
   # ":-" so a local run (no Actions env at all) reaches the diagnostic below
   # instead of dying on an unbound variable under `set -u`.
-  ver="${GITHUB_REF_NAME:-}"
+  src=GITHUB_REF_NAME
+  ver="$(trim "${GITHUB_REF_NAME:-}")"
   ver="${ver#v}"
 fi
 
 if [ -z "$ver" ]; then
   echo "${prog}: no release version: neither INPUT_VERSION nor a vX.Y.Z tag ref" >&2
   exit 1
+fi
+
+# The version is a release coordinate: it becomes an image tag, the CSV
+# version, and a git tag. Reject anything that is not MAJOR.MINOR.PATCH here
+# with the value and its source named, instead of letting it reach the
+# Makefile comparison and read as a mismatch between two unrelated strings.
+if ! [[ "$ver" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  echo "${prog}: invalid release version from ${src}: want MAJOR.MINOR.PATCH (for example 0.6.2), got '${ver}'" >&2
+  exit 2
 fi
 
 # The image labels, the CSV, and console-plugin/package.json all derive from

@@ -70,7 +70,9 @@ Cutting a release:
    `operator/hack/resolve-release-version.sh`; the publish and SBOM jobs both
    call it so they cannot disagree about what is being released. Its
    `INPUT_VERSION` env is the `workflow_dispatch` `version` input, so a manual
-   cut is the version that ships, not the ref it was dispatched from.
+   cut is the version that ships, not the ref it was dispatched from. Either
+   source accepts surrounding whitespace and an optional leading `v`, and must
+   be `MAJOR.MINOR.PATCH`; anything else exits 2 naming the source and value.
 
 Published image, tag, and CSV version strings are immutable: never re-push,
 re-tag, or force-move one. OLM unpack caches serve stale content on a same-tag
