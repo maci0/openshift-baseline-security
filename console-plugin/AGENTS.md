@@ -14,6 +14,13 @@ a `package-lock.json` beside `yarn.lock`.
 Node 22 exactly, pinned by `.nvmrc` to the same patch as the digest-pinned
 `ubi9/nodejs-22` build image. `yarn build` refuses any other major.
 
+`i18next` and `react-i18next` are the one pair held on a tilde range, and it
+has to stay that way. The console supplies both at runtime and the plugin's
+copy has to be the one it binds to: `react-i18next` is a no-fallback singleton
+shared module, so a version the console 4.22 line does not provide
+(`react-i18next` ~16.5.8, `i18next` ~25.6.2) builds clean and then breaks in
+the browser. No unit test can catch that mismatch.
+
 ## Gate
 
 ```sh

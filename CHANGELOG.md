@@ -45,6 +45,13 @@ depend on those tags.
 
 ### Security
 
+- The operator built against `google.golang.org/grpc` v1.82.1, which is
+  affected by GO-2026-6348 (heap exhaustion from HTTP/2 DATA frame
+  fragmentation) and is fixed in v1.83.1. `govulncheck` reaches it from
+  `cmd/main.go` through the manager start, so an API server that fragments its
+  responses could drive the operator out of memory. Pinned to v1.83.1, which
+  brings the `go.opentelemetry.io/otel` core modules to v1.44.0 with it.
+
 - The operator namespace now ships a `NetworkPolicy`. Any pod in the cluster
   could previously open a TCP connection to the operator's metrics port 8443;
   the bearer token was the only control. Ingress is now denied on every
@@ -300,6 +307,23 @@ depend on those tags.
   numbers ordered `rule_10` before `rule_2`. They now sort by the session
   locale's collation.
 ### Changed
+
+- The two OpenTelemetry OTLP trace exporter modules move from v1.40.0 to
+  v1.44.0, onto the same version as the `go.opentelemetry.io/otel` core
+  modules. The exporter builds on the core trace SDK and the two are released
+  together, so leaving the exporters two minors behind is skew the graph only
+  tolerated. It brings `go.opentelemetry.io/proto/otlp` to v1.10.0 and
+  `grpc-ecosystem/grpc-gateway/v2` to v2.29.0.
+
+- The operator builds against `k8s.io/streaming` v0.36.4, matching the rest of
+  the `k8s.io/*` set (v0.36.4 for api, apimachinery, client-go; v0.36.0 for the
+  apiserver staging modules), instead of v0.37.0. The 0.37 line arrived with the
+  dependency bump as an indirect and is compiled into the binary, because
+  client-go's exec and port-forward paths build on `k8s.io/streaming`'s
+  `httpstream` and `wsstream` packages. Kubernetes 0.37 is not adoptable yet:
+  no controller-runtime release targets it, and its client-go adds
+  `HasSyncedChecker` to an interface v0.24.1 does not implement. No observable
+  behavior change.
 
 - The CRD and manager ClusterRole are generated with controller-gen v0.21.0
   instead of v0.20.1. The Makefile asks for the controller-tools release whose
