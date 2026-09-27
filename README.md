@@ -328,8 +328,8 @@ is the product config; see `operator/config/samples/` and the CRD.
 ## Development
 
 Commands from a clean clone through a first PR: [CONTRIBUTING.md](CONTRIBUTING.md).
-`make help` at the repo root runs both modules; `make check` reports a missing
-tool before a build starts, and `make -C operator help` /
+`make help` at the repo root lists the repo-level targets; `make check`
+reports a missing tool before a build starts, and `make -C operator help` /
 `make -C console-plugin help` list the per-module targets.
 
 ```sh

@@ -16,11 +16,12 @@ SHELL := /usr/bin/env bash
 # Node major from console-plugin/.nvmrc, the same file setup-node reads in CI.
 NODE_MAJOR := $(shell cut -d. -f1 console-plugin/.nvmrc)
 
-.PHONY: help check test lint ci operator-test plugin-test operator-lint plugin-lint operator-ci plugin-ci
+.PHONY: help setup check test lint ci operator-test plugin-test operator-lint plugin-lint operator-ci plugin-ci
 
 help:
 	@echo "Repository contributor targets (run from the repo root):"
-	@echo "  make check        preflight: toolchain present, node major == $(NODE_MAJOR), plugin deps installed"
+	@echo "  make setup        install the console-plugin dependencies, then run check"
+	@echo "  make check        preflight: toolchain present, node major == $(NODE_MAJOR), plugin deps installed (docker only warns)"
 	@echo "  make test         cd operator && make test;  cd console-plugin && yarn test"
 	@echo "  make lint         cd operator && make lint;  cd console-plugin && yarn lint && yarn lint:oxlint"
 	@echo "  make ci           local replica of the GHA operator + console-plugin jobs (needs docker)"
@@ -31,8 +32,28 @@ help:
 	@echo "Per-module targets and single-test invocations:"
 	@echo "  make -C operator help             make -C console-plugin help"
 
+# One command from a clean clone to a runnable tree. The operator half needs
+# nothing but Go: GOTOOLCHAIN downloads the go.mod toolchain on first use, so
+# `make -C operator test` is already the install. The plugin half needs the
+# project-local dependency install; the Node/Yarn versions come from
+# console-plugin/.nvmrc and package.json, not from here, so the target names
+# them instead of installing anything outside the tree (corepack enable writes
+# to the Node prefix, which is the contributor's call to make).
+.PHONY: setup
+setup:
+	@echo "console plugin: Node major $(NODE_MAJOR) (console-plugin/.nvmrc pins the patch), Yarn 4 via corepack:"
+	@echo "  corepack enable"
+	@echo "  corepack prepare \$$(node -p \"require('./console-plugin/package.json').packageManager\") --activate"
+	@command -v yarn >/dev/null 2>&1 || { echo "yarn not on PATH: enable Yarn 4 with the two commands above, then re-run 'make setup'" >&2; exit 1; }
+	cd console-plugin && yarn install --immutable
+	@$(MAKE) --no-print-directory check
+
 # Fail before any build, naming what is missing, instead of surfacing a
 # "jest: command not found" or a toolchain download halfway through a run.
+# docker is the one exception: it only warns, because the per-PR loop
+# (make test, make lint) runs without it and a contributor on a machine that
+# has none is not blocked from the gate this preflight fronts.
+# The recipe is one continued shell, so no comment line may sit inside it.
 check:
 	@missing=0; \
 	if ! command -v go >/dev/null 2>&1; then \
@@ -54,9 +75,16 @@ check:
 		echo "console-plugin/node_modules missing: run 'cd console-plugin && yarn install --immutable'" >&2; \
 		missing=1; \
 	fi; \
-	if ! command -v docker >/dev/null 2>&1; then \
-		echo "docker not on PATH: needed by 'make ci' (alert unit tests, bundle validate); 'make test' and 'make lint' do not need it" >&2; \
+	if ! command -v shellcheck >/dev/null 2>&1; then \
+		echo "shellcheck not on PATH: needed by 'make lint' (operator/hack/*.sh); brew install shellcheck / apt-get install shellcheck" >&2; \
 		missing=1; \
+	fi; \
+	if ! command -v uvx >/dev/null 2>&1; then \
+		echo "uvx not on PATH: needed by 'make lint' (ruff and yamllint over operator/hack, .github, operator/config); install uv" >&2; \
+		missing=1; \
+	fi; \
+	if ! command -v docker >/dev/null 2>&1; then \
+		echo "warning: docker not on PATH: 'make ci', 'make -C operator bundle', test-alerts and the image builds need it; 'make test' and 'make lint' do not" >&2; \
 	fi; \
 	exit $$missing
 
