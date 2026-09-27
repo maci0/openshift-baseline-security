@@ -18,6 +18,20 @@ linters:
     - nosprintfhostport
     - gomoddirectives
     - promlinter
+    # Correctness and bug-prone groups the tree passes as written, each proven
+    # by a run rather than assumed. Nothing here is a style preference.
+    - exhaustive     # enum switch without a case for a member
+    - errname        # a sentinel error not named Err... hides it from grep
+    - durationcheck  # two durations multiplied together
+    - fatcontext     # a context derived inside a loop
+    - errchkjson     # a json encode whose error cannot be ignored anyway
+    - nakedret       # a naked return in a long function
+    - gochecksumtype # a sum-type interface with an unhandled member
+    - contextcheck   # a function that drops the context it was handed
+    - asasalint      # []any spread into a variadic
+    - iface          # a duplicate or unused interface
+    - testifylint    # a testify assertion that does not test what it reads as
+    - tparallel      # a t.Parallel() whose range variable is captured
   settings:
     staticcheck:
       checks: ["all", "-ST1000"]

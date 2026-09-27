@@ -43,6 +43,16 @@ select = [
   "S",    # bandit
   "PT",   # flake8-pytest-style
   "FBT",  # flake8-boolean-trap
+  "A",    # flake8-builtins: a parameter shadowing a builtin hides the call
+  "RUF",  # ruff-specific correctness (RUF100 alone kills a stale noqa)
+  "PLW",  # pylint warnings; PLR stays off, see below
+  "TCH",  # flake8-type-checking: a runtime-only import used in an annotation
+  "PGH",  # blanket noqa / type-ignore without a code or a reason
+  "FURB", # refurb: the rewrite ruff itself would suggest
+  "SLF",  # private member access from outside its class or module
+  "EXE",  # shebang and executable-bit agreement
+  "PYI",  # the subset of typing rules that apply to runtime .py files
+  "FA",   # flake8-future-annotations: a PEP 604 union that needs `from __future__`
 ]
 
 # Categories left off, each with the reason it cannot pass or does not apply:

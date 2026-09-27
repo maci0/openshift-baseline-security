@@ -257,13 +257,17 @@ SHELLCHECK ?= shellcheck
 # The rule set is ../ruff.toml; lint-python fails if it is gone, rather than
 # letting ruff fall back to its default pyflakes-only set.
 RUFF_VERSION ?= 0.16.4
-# yamllint covers the hand-maintained YAML: the GitHub workflows and the
-# kustomize manifests. Generated output is excluded in ../.yamllint.yaml, not
-# reformatted here. uvx is already a lint dependency (see lint-python).
+# yamllint covers the hand-maintained YAML: the GitHub workflows, the kustomize
+# manifests, and the tool configs that are themselves YAML. Generated output is
+# excluded in ../.yamllint.yaml, not reformatted here. uvx is already a lint
+# dependency (see lint-python).
 YAMLLINT_VERSION ?= 1.38.0
 # Paths are repo-root-relative, matching the ignore globs in .yamllint.yaml,
-# so the target runs from the root rather than from this directory.
-YAML_PATHS ?= operator/config .github
+# so the target runs from the root rather than from this directory. The
+# tool configs are listed explicitly: a directory glob would sweep in
+# operator/bundle and operator/catalog, which .yamllint.yaml ignores anyway,
+# and would miss the root-level ones that no directory covers.
+YAML_PATHS ?= operator/config .github .yamllint.yaml .ci-operator.yaml operator/.golangci.yml console-plugin/.yarnrc.yml
 .PHONY: lint
 lint: lint-go lint-shell lint-python lint-yaml
 
