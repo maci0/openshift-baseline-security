@@ -98,6 +98,69 @@ func TestMustGatherSelfTestRejectsExtraArgs(t *testing.T) {
 	}
 }
 
+// TestHackScriptUsageContract pins the contract every hack/ script shares:
+// --help is pipeable (stdout, exit 0), a bad invocation is a usage error
+// (stderr, exit 2, empty stdout) that names the script before the usage text,
+// and the Usage line names the script by basename, not by a hack/ path. It
+// walks the directory rather than a hand-maintained list, so a new script has
+// to satisfy it too.
+func TestHackScriptUsageContract(t *testing.T) {
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ran := 0
+	for _, e := range entries {
+		name := e.Name()
+		// lib-*.sh are sourced libraries with no argument parsing, and
+		// prometheusrule_to_rules.py has its own test below.
+		if e.IsDir() || !strings.HasSuffix(name, ".sh") || strings.HasPrefix(name, "lib-") {
+			continue
+		}
+		ran++
+		script := scriptPath(t, name)
+		t.Run(name, func(t *testing.T) {
+			stdout, stderr, code := runCmd(t, script, "--help")
+			if code != 0 || stderr != "" {
+				t.Fatalf("--help: exit %d, want 0; stderr=%q", code, stderr)
+			}
+			usageLine := firstLine(stdout)
+			if want := "Usage: " + name; !strings.HasPrefix(usageLine, want) {
+				t.Errorf("--help first line %q, want prefix %q", usageLine, want)
+			}
+			if strings.Contains(usageLine, "/") {
+				t.Errorf("--help Usage line %q names a path, want the bare script name", usageLine)
+			}
+
+			for _, args := range [][]string{{"--help", "extra"}, {"--not-a-flag"}} {
+				stdout, stderr, code := runCmd(t, script, args...)
+				if code != 2 {
+					t.Errorf("%v: exit %d, want 2; stderr=%q", args, code, stderr)
+				}
+				if stdout != "" {
+					t.Errorf("%v: stdout %q, want empty", args, stdout)
+				}
+				if want := name + ": "; !strings.HasPrefix(stderr, want) {
+					t.Errorf("%v: stderr starts %q, want prefix %q", args, firstLine(stderr), want)
+				}
+				if !strings.Contains(stderr, "Usage:") {
+					t.Errorf("%v: stderr missing the usage text:\n%s", args, stderr)
+				}
+			}
+		})
+	}
+	if ran == 0 {
+		t.Fatal("no scripts found; the contract test would pass vacuously")
+	}
+}
+
+func firstLine(s string) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		return s[:i]
+	}
+	return s
+}
+
 func TestHackScriptHelp(t *testing.T) {
 	for _, name := range []string{
 		"resolve-release-version.sh",
@@ -119,7 +182,7 @@ func TestHackScriptHelp(t *testing.T) {
 		if !strings.Contains(stdout, "Usage:") {
 			t.Errorf("%s --help: stdout missing Usage:\n%s", name, stdout)
 		}
-		if strings.Contains(stdout, "verify-product-lockstep: ok") {
+		if strings.Contains(stdout, " ok\n") {
 			t.Errorf("%s --help ran the check instead of printing usage", name)
 		}
 		_, stderr, code = runCmd(t, script, "--not-a-flag")
@@ -251,19 +314,30 @@ func TestPrometheusRuleToRulesHelp(t *testing.T) {
 	if !strings.Contains(stdout, "Usage:") || !strings.Contains(stdout, "prometheusrule.yaml") {
 		t.Errorf("stdout missing usage:\n%s", stdout)
 	}
-	_, stderr, code = runCmd(t, py, script)
-	if code != 2 {
+	if _, stderr, code = runCmd(t, py, script); code != 2 {
 		t.Fatalf("no args: exit %d, want 2; stderr=%q", code, stderr)
 	}
 	if !strings.Contains(stderr, "expected 2 arguments") {
 		t.Errorf("no args stderr=%q", stderr)
 	}
-	_, stderr, code = runCmd(t, py, script, "--bogus")
+	stdout, stderr, code = runCmd(t, py, script, "--bogus")
 	if code != 2 {
 		t.Fatalf("unknown option: exit %d, want 2; stderr=%q", code, stderr)
 	}
 	if !strings.Contains(stderr, "unknown option") {
 		t.Errorf("unknown option stderr=%q", stderr)
+	}
+	// The same contract the shell scripts keep: stdout empty, the diagnostic
+	// names the script, and the usage follows it rather than preceding it.
+	if stdout != "" {
+		t.Errorf("unknown option: stdout %q, want empty", stdout)
+	}
+	const want = "prometheusrule_to_rules.py: "
+	if !strings.HasPrefix(stderr, want) {
+		t.Errorf("stderr starts %q, want prefix %q", firstLine(stderr), want)
+	}
+	if i, j := strings.Index(stderr, want), strings.Index(stderr, "Usage:"); i < 0 || j < i {
+		t.Errorf("usage must follow the diagnostic:\n%s", stderr)
 	}
 }
 

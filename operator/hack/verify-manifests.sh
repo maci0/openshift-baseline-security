@@ -22,9 +22,12 @@
 # Run from operator/ (make verify-manifests) or with REPO_ROOT set.
 set -euo pipefail
 
+# Every diagnostic is prefixed with the script name, as in the other hack/ scripts.
+prog="$(basename "$0")"
+
 usage() {
-	cat <<'EOF'
-Usage: hack/verify-manifests.sh
+	cat <<EOF
+Usage: ${prog}
 
 Build the kustomize tree and check the render against its sources.
 Run from operator/ (make verify-manifests) or with REPO_ROOT set.
@@ -33,7 +36,7 @@ EOF
 
 if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
 	if [ "$#" -ne 1 ]; then
-		echo "verify-manifests.sh: --help takes no arguments" >&2
+		echo "${prog}: --help takes no arguments" >&2
 		usage >&2
 		exit 2
 	fi
@@ -41,7 +44,7 @@ if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
 	exit 0
 fi
 if [ "$#" -ne 0 ]; then
-	echo "verify-manifests.sh: unexpected arguments: $*" >&2
+	echo "${prog}: unexpected arguments: $*" >&2
 	usage >&2
 	exit 2
 fi
@@ -65,7 +68,7 @@ if [ -z "${KUSTOMIZE:-}" ]; then
 	elif command -v oc >/dev/null 2>&1; then
 		KUSTOMIZE="oc kustomize"
 	else
-		echo "verify-manifests.sh: no kustomize, kubectl or oc on PATH" >&2
+		echo "${prog}: no kustomize, kubectl or oc on PATH" >&2
 		exit 1
 	fi
 fi
@@ -99,7 +102,7 @@ function push(indent, k) {
 }
 
 function fail(msg) {
-	print "verify-manifests: " msg > "/dev/stderr"
+	print "${prog}: " msg > "/dev/stderr"
 	bad = 1
 }
 
@@ -241,10 +244,10 @@ END {
 AWK
 
 for e in $ENTRY_POINTS; do
-	[ -d "$CONFIG/$e" ] || { echo "verify-manifests: missing entry point config/$e" >&2; exit 1; }
+	[ -d "$CONFIG/$e" ] || { echo "${prog}: missing entry point config/$e" >&2; exit 1; }
 	# shellcheck disable=SC2086 # KUSTOMIZE is a command plus a fixed subcommand.
 	if ! $KUSTOMIZE "$CONFIG/$e" >"$work/$e.yaml"; then
-		echo "verify-manifests: kustomize build config/$e failed" >&2
+		echo "${prog}: kustomize build config/$e failed" >&2
 		exit 1
 	fi
 done
@@ -261,10 +264,10 @@ for src in "$CONFIG"/crd/bases/*.yaml "$CONFIG"/manager/*.yaml \
 	if [ "$(basename "$src")" = kustomization.yaml ]; then continue; fi
 	while read -r _ objkey; do
 		grep -qxF "OBJ $objkey" "$work/render-objs.txt" || {
-			echo "verify-manifests: ${src#"$OP"/} declares $objkey, which no kustomization includes" >&2
+			echo "${prog}: ${src#"$OP"/} declares $objkey, which no kustomization includes" >&2
 			exit 1
 		}
 	done < <(awk -f "$work/facts.awk" "$src")
 done
 
-echo "verify-manifests: $(grep -c '^OBJ ' "$work/render-objs.txt") objects rendered from config/default; every source included, every tree reference resolved"
+echo "${prog}: $(grep -c '^OBJ ' "$work/render-objs.txt") objects rendered from config/default; every source included, every tree reference resolved"

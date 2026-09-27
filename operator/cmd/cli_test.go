@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"flag"
+	"os"
 	"strings"
 	"testing"
 
@@ -63,6 +64,94 @@ func TestPrintUsageIncludesEnv(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("printUsage missing %q\n%s", want, got)
 		}
+	}
+}
+
+// Every flag the process registers is spelled --long in the help, matching the
+// README, the CSV args, and the usage errors. The flag package's own renderer
+// would print -long, and a reader who has just been told "--metrics-secure
+// takes no separate value" should not then see -metrics-secure in the help.
+// TestMain registers the real process flag surface on the test binary's
+// FlagSet, so the help assertions below run against the flags the manager
+// actually accepts rather than only the ones a package init happens to add.
+func TestMain(m *testing.M) {
+	registerFlags(flag.CommandLine)
+	os.Exit(m.Run())
+}
+
+func TestPrintUsageUsesLongFlags(t *testing.T) {
+	var buf bytes.Buffer
+	if err := printUsage(&buf); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	lines := strings.Split(got, "\n")
+	for _, name := range []string{
+		"health-probe-bind-address",
+		"kubeconfig",
+		"leader-elect",
+		"metrics-bind-address",
+		"metrics-cert-dir",
+		"metrics-secure",
+		"version",
+		"zap-devel",
+		"zap-encoder",
+		"zap-log-level",
+	} {
+		if !hasHelpLine(lines, "  --"+name) {
+			t.Errorf("help does not render --%s in long form:\n%s", name, got)
+		}
+	}
+	// A default worth documenting is shown; a zero default is not noise.
+	if !strings.Contains(got, "--leader-elect") || !strings.Contains(got, "(default true)") {
+		t.Errorf("help hides the leader-elect default:\n%s", got)
+	}
+	if strings.Contains(got, "(default false)") {
+		t.Errorf("help shows a zero default:\n%s", got)
+	}
+}
+
+// hasHelpLine reports whether any help line starts with the given prefix. The
+// flag column is padded, so a short flag is followed by spaces and a long one
+// by the flag's own usage text.
+// An undefined flag is reported in the long form the help and the docs use,
+// with the nearest real flag named when the miss is close enough that the
+// guess is worth making.
+func TestUnknownFlagError(t *testing.T) {
+	for _, tc := range []struct{ given, want string }{
+		{"--metrcs-secure", "unknown flag: --metrcs-secure; did you mean --metrics-secure?"},
+		{"--leadre-elect", "unknown flag: --leadre-elect; did you mean --leader-elect?"},
+		{"--nope", "unknown flag: --nope"},
+		{"--zzzzzzzzzz", "unknown flag: --zzzzzzzzzz"},
+	} {
+		got := unknownFlagError(errors.New("flag provided but not defined: -" + strings.TrimPrefix(tc.given, "--")))
+		if got.Error() != tc.want {
+			t.Errorf("%s: %q, want %q", tc.given, got, tc.want)
+		}
+	}
+	// An error from somewhere else is passed through untouched.
+	other := errors.New("invalid value for flag")
+	if got := unknownFlagError(other); !errors.Is(got, other) {
+		t.Errorf("non-flag error: %v, want it returned unchanged", got)
+	}
+}
+
+func hasHelpLine(lines []string, prefix string) bool {
+	for _, l := range lines {
+		if strings.HasPrefix(l, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// The KUBECONFIG env var is only meaningful if --kubeconfig is a real flag:
+// the help documents one precedence, so the flag set must carry both. The flag
+// comes from clientconfig, so pin it rather than trusting the import.
+func TestKubeconfigFlagIsDefined(t *testing.T) {
+	if flag.Lookup(clientconfig.KubeconfigFlagName) == nil {
+		t.Fatalf("--%s is not registered; the documented KUBECONFIG precedence is unreachable",
+			clientconfig.KubeconfigFlagName)
 	}
 }
 

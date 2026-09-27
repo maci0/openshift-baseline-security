@@ -5,6 +5,9 @@
 #        hack/must-gather.sh --help
 set -euo pipefail
 
+# Every diagnostic is prefixed with the script name, as in the other hack/ scripts.
+prog="$(basename "$0")"
+
 # spec.waivers[].requestedBy and approvedBy identify cluster users (audit
 # attribution). kubectl last-applied-configuration can embed the same fields
 # as a JSON blob. Strip both from a ClusterBaseline YAML dump so those
@@ -386,10 +389,10 @@ EOF
 }
 
 usage() {
-  cat <<'EOF'
-Usage: hack/must-gather.sh [output-dir]
-       hack/must-gather.sh --self-test
-       hack/must-gather.sh --help
+  cat <<EOF
+Usage: ${prog} [output-dir]
+       ${prog} --self-test
+       ${prog} --help
 
 Collect baseline-security operator and Compliance Operator state for support.
 Writes YAML and logs into output-dir (default: ./must-gather). Requires an
@@ -398,13 +401,13 @@ are omitted.
 
 Options:
   --self-test   Run redaction unit tests; no cluster required
-  -h, --help    Show this help
+  -h, --help    print this usage and exit 0
 EOF
 }
 
 if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
   if [ "$#" -ne 1 ]; then
-    echo "must-gather.sh: --help takes no arguments" >&2
+    echo "${prog}: --help takes no arguments" >&2
     usage >&2
     exit 2
   fi
@@ -414,7 +417,7 @@ fi
 
 if [ "${1:-}" = "--self-test" ]; then
   if [ "$#" -ne 1 ]; then
-    echo "must-gather.sh: --self-test takes no arguments" >&2
+    echo "${prog}: --self-test takes no arguments" >&2
     usage >&2
     exit 2
   fi
@@ -423,7 +426,7 @@ if [ "${1:-}" = "--self-test" ]; then
 fi
 
 if [ "$#" -gt 1 ]; then
-  echo "must-gather.sh: unexpected arguments: $*" >&2
+  echo "${prog}: unexpected arguments: $*" >&2
   usage >&2
   exit 2
 fi
@@ -432,12 +435,12 @@ OUT="${1:-must-gather}"
 # Refuse empty, stdout marker, or flag-shaped paths so a bad invocation cannot
 # mkdir "-" / "" or treat an option as a directory.
 if [ -z "$OUT" ] || [ "$OUT" = "-" ]; then
-  echo "invalid output directory: ${OUT:-<empty>}" >&2
+  echo "${prog}: invalid output directory: ${OUT:-<empty>}" >&2
   usage >&2
   exit 2
 fi
 if [[ "$OUT" == -* ]]; then
-  echo "must-gather.sh: unknown option: $OUT" >&2
+  echo "${prog}: unknown option: $OUT" >&2
   usage >&2
   exit 2
 fi
@@ -456,7 +459,7 @@ oc() { command oc --request-timeout=30s "$@"; }
 # Fail fast when the kubeconfig is missing or expired so support does not get
 # an empty directory that looks like a successful collection.
 if ! oc whoami >/dev/null 2>&1; then
-  echo "oc is not authenticated (oc whoami failed); refusing empty must-gather" >&2
+  echo "${prog}: oc is not authenticated (oc whoami failed); refusing empty must-gather" >&2
   exit 1
 fi
 

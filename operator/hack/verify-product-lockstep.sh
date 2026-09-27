@@ -3,9 +3,11 @@
 # Run from operator/ (make verify-product-lockstep) or any cwd with REPO_ROOT set.
 set -euo pipefail
 
+prog="$(basename "$0")"
+
 usage() {
-  cat <<'EOF'
-Usage: hack/verify-product-lockstep.sh
+  cat <<EOF
+Usage: ${prog}
 
 Fail if operator Go and console TypeScript product contracts drift.
 Run from operator/ (make verify-product-lockstep) or with REPO_ROOT set.
@@ -14,7 +16,7 @@ EOF
 
 if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
   if [ "$#" -ne 1 ]; then
-    echo "verify-product-lockstep.sh: --help takes no arguments" >&2
+    echo "${prog}: --help takes no arguments" >&2
     usage >&2
     exit 2
   fi
@@ -22,7 +24,7 @@ if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
   exit 0
 fi
 if [ "$#" -ne 0 ]; then
-  echo "verify-product-lockstep.sh: unexpected arguments: $*" >&2
+  echo "${prog}: unexpected arguments: $*" >&2
   usage >&2
   exit 2
 fi
@@ -41,7 +43,7 @@ NGINX_CONF="${ROOT}/console-plugin/nginx.conf"
 PLUGIN_DOCKERFILE="${ROOT}/console-plugin/Dockerfile"
 
 fail=0
-die() { echo "verify-product-lockstep: $*" >&2; fail=1; }
+die() { echo "${prog}: $*" >&2; fail=1; }
 
 need() {
   local f="$1"
@@ -247,4 +249,4 @@ fi
 if [[ "$fail" -ne 0 ]]; then
   exit 1
 fi
-echo "verify-product-lockstep: ok"
+echo "${prog}: ok"

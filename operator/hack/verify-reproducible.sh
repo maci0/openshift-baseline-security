@@ -32,14 +32,15 @@ EOF
 }
 
 case "${1:-}" in
--h | --help)
-  if [ "$#" -ne 1 ]; then
-    echo "${prog}: --help takes no arguments" >&2
-    exit 2
-  fi
-  usage
-  exit 0
-  ;;
+  -h | --help)
+    if [ "$#" -ne 1 ]; then
+      echo "${prog}: --help takes no arguments" >&2
+      usage >&2
+      exit 2
+    fi
+    usage
+    exit 0
+    ;;
 esac
 
 if [ "$#" -ne 2 ]; then
@@ -52,6 +53,7 @@ ldflags="$2"
 
 if [ -z "$build_flags" ] || [ -z "$ldflags" ]; then
   echo "${prog}: build flags and ldflags must both be non-empty" >&2
+  usage >&2
   exit 2
 fi
 

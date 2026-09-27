@@ -15,9 +15,12 @@
 # Run from operator/ (make verify-bundle-static) or with REPO_ROOT set.
 set -euo pipefail
 
+# Every diagnostic is prefixed with the script name, as in the other hack/ scripts.
+prog="$(basename "$0")"
+
 usage() {
-	cat <<'EOF'
-Usage: hack/verify-bundle-static.sh
+	cat <<EOF
+Usage: ${prog}
 
 Fail if a hand-copied bundle manifest drifted from its config/ source.
 Run from operator/ (make verify-bundle-static) or with REPO_ROOT set.
@@ -26,7 +29,7 @@ EOF
 
 if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
 	if [ "$#" -ne 1 ]; then
-		echo "verify-bundle-static.sh: --help takes no arguments" >&2
+		echo "${prog}: --help takes no arguments" >&2
 		usage >&2
 		exit 2
 	fi
@@ -34,7 +37,7 @@ if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
 	exit 0
 fi
 if [ "$#" -ne 0 ]; then
-	echo "verify-bundle-static.sh: unexpected arguments: $*" >&2
+	echo "${prog}: unexpected arguments: $*" >&2
 	usage >&2
 	exit 2
 fi
@@ -65,8 +68,8 @@ while IFS=$'\t' read -r bfile csrc; do
 	[ -n "$bfile" ] || continue
 	b="${BUNDLE}/${bfile}"
 	s="${OP}/${csrc}"
-	if [ ! -f "$b" ]; then echo "verify-bundle-static: missing bundle file $b" >&2; fail=1; continue; fi
-	if [ ! -f "$s" ]; then echo "verify-bundle-static: missing config source $s" >&2; fail=1; continue; fi
+	if [ ! -f "$b" ]; then echo "${prog}: missing bundle file $b" >&2; fail=1; continue; fi
+	if [ ! -f "$s" ]; then echo "${prog}: missing config source $s" >&2; fail=1; continue; fi
 	awk -v src="$s" '
 		function norm(l){ sub(/[[:space:]]+$/,"",l); return l }
 		{
@@ -77,7 +80,7 @@ while IFS=$'\t' read -r bfile csrc; do
 			if (FILENAME==src) S=S norm($0) "\n"; else B=B norm($0) "\n"
 		}
 		END{ if (index(S,B)==0) exit 1 }
-	' "$s" "$b" || { echo "verify-bundle-static: $bfile drifted from $csrc (re-copy the object)" >&2; fail=1; }
+	' "$s" "$b" || { echo "${prog}: $bfile drifted from $csrc (re-copy the object)" >&2; fail=1; }
 done <<< "$PAIRS"
 
 test "$fail" -eq 0

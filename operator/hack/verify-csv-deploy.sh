@@ -22,9 +22,12 @@
 # Run from operator/ (make verify-csv-deploy) or with REPO_ROOT set.
 set -euo pipefail
 
+# Every diagnostic is prefixed with the script name, as in the other hack/ scripts.
+prog="$(basename "$0")"
+
 usage() {
-	cat <<'EOF'
-Usage: hack/verify-csv-deploy.sh
+	cat <<EOF
+Usage: ${prog}
 
 Fail if the CSV install.spec.deployments[].spec drifted from
 config/manager/manager.yaml. Run from operator/ (make verify-csv-deploy) or
@@ -34,7 +37,7 @@ EOF
 
 if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
 	if [ "$#" -ne 1 ]; then
-		echo "verify-csv-deploy.sh: --help takes no arguments" >&2
+		echo "${prog}: --help takes no arguments" >&2
 		usage >&2
 		exit 2
 	fi
@@ -42,7 +45,7 @@ if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
 	exit 0
 fi
 if [ "$#" -ne 0 ]; then
-	echo "verify-csv-deploy.sh: unexpected arguments: $*" >&2
+	echo "${prog}: unexpected arguments: $*" >&2
 	usage >&2
 	exit 2
 fi
@@ -53,7 +56,7 @@ BASE="${OP}/config/manager/manager.yaml"
 CSV="${OP}/bundle/manifests/baseline-security-operator.clusterserviceversion.yaml"
 
 for f in "$BASE" "$CSV"; do
-	[ -f "$f" ] || { echo "verify-csv-deploy: missing $f" >&2; exit 1; }
+	[ -f "$f" ] || { echo "${prog}: missing $f" >&2; exit 1; }
 done
 
 # csv-spec normalizes install.spec.deployments[0].spec out of the CSV.
@@ -116,7 +119,7 @@ extract_base_spec | normalize >"$tmp/base"
 
 if ! diff -u "$tmp/base" "$tmp/csv"; then
 	echo "" >&2
-	echo "verify-csv-deploy: the CSV deployment spec drifted from config/manager/manager.yaml." >&2
+	echo "${prog}: the CSV deployment spec drifted from config/manager/manager.yaml." >&2
 	echo "Apply the same change to both. The image tag, imagePullPolicy, and the" >&2
 	echo "app.kubernetes.io/version label are normalized away; anything else" >&2
 	echo "printed above is real drift." >&2

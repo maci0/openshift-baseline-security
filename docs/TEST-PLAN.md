@@ -813,8 +813,10 @@ an accepted risk neither inflates nor tanks the score.
       skips them rather than asserting a parse result.
 - [x] **Manager CLI usage**: leftover positional args are rejected
       (`TestUnexpectedArgsError`); `--help` lists process env vars
-      (`TestPrintUsageIncludesEnv`) and writes to stdout while a bad
-      invocation writes nothing there (`TestParseArgsWriters`).
+      (`TestPrintUsageIncludesEnv`), renders every flag in the `--long` form
+      the README and the usage errors use (`TestPrintUsageUsesLongFlags`), and
+      writes to stdout while a bad invocation writes nothing there
+      (`TestParseArgsWriters`).
 - [ ] **Leader-only default creation**: two operator replicas do not race the
       default CR creation; only the elected leader runs the runnable.
 - [ ] **Leader loss**: demoted process exits (controller-runtime safety);
@@ -1089,12 +1091,11 @@ stale Available or eternal Progressing.
 - [x] **prometheusrule_to_rules.py CLI**: `--help` exits 0 on stdout; wrong
       argc or unknown options exit 2; extract writes a top-level `groups:`
       file (`TestPrometheusRuleToRulesHelp`, `TestPrometheusRuleToRulesExtract`).
-- [x] **hack script --help**: `resolve-release-version.sh`, `test-alerts.sh`,
-      `verify-bundle-static.sh`, `verify-csv-deploy.sh`,
-      `verify-image-metadata.sh`, `verify-manifests.sh`, and
-      `verify-product-lockstep.sh` print usage
-      and exit 0 instead of running; unknown options exit 2
-      (`TestHackScriptHelp`).
+- [x] **hack script --help**: every non-library script in `operator/hack/`
+      prints usage naming itself by basename and exits 0 instead of running; a
+      bad invocation writes the diagnostic and then the usage to stderr, leaves
+      stdout empty, and exits 2, including an extra argument after `--help`
+      (`TestHackScriptUsageContract`, `TestHackScriptHelp`).
 - [ ] **Must-gather smoke**: `operator/hack/must-gather.sh` runs without
       cluster-admin-only assumptions beyond documented RBAC and redacts or
       avoids secrets.

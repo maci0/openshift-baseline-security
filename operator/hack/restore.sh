@@ -63,6 +63,11 @@ EOF
 FORCE=false
 case "${1:-}" in
   -h | --help)
+    if [[ $# -ne 1 ]]; then
+      echo "restore.sh: --help takes no arguments" >&2
+      usage >&2
+      exit 2
+    fi
     usage
     exit 0
     ;;
@@ -71,6 +76,11 @@ DIRS=()
 for arg in "$@"; do
   case "$arg" in
     -f | --force) FORCE=true ;;
+    -h | --help)
+      echo "restore.sh: unexpected argument after backup-dir: $arg" >&2
+      usage >&2
+      exit 2
+      ;;
     -*)
       echo "restore.sh: unknown option: $arg" >&2
       usage >&2

@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -103,26 +104,46 @@ func init() {
 	utilruntime.Must(baselinev1alpha1.AddToScheme(scheme))
 }
 
-func main() {
-	var metricsAddr, probeAddr, metricsCertDir string
-	var enableLeaderElection, secureMetrics, showVersion bool
+// options holds every flag the process accepts. It is registered through
+// registerFlags rather than inside main so a test can drive the real flag
+// surface: the help text and the documented defaults are only worth asserting
+// against the flags the process actually registers.
+type options struct {
+	metricsAddr          string
+	probeAddr            string
+	metricsCertDir       string
+	enableLeaderElection bool
+	secureMetrics        bool
+	showVersion          bool
+	zap                  zap.Options
+}
+
+// registerFlags declares the whole process flag surface on fs. The list is
+// complete here on purpose: the help text, the README table, and the CSV args
+// are all written against it.
+func registerFlags(fs *flag.FlagSet) *options {
+	o := &options{}
 	// HTTPS + authn/authz (TokenReview / SubjectAccessReview), matching
 	// kubebuilder / Operator SDK defaults and OpenShift CONVENTIONS.md.
 	// Disable the endpoint with --metrics-bind-address=0.
-	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8443", "Metrics endpoint address. Use 0 to disable.")
-	flag.BoolVar(&secureMetrics, "metrics-secure", true, "Serve metrics over HTTPS with authentication and authorization.")
-	flag.StringVar(&metricsCertDir, "metrics-cert-dir", "/var/run/metrics-certs", "Directory with tls.crt/tls.key for metrics (service-ca). Empty or missing files fall back to self-signed.")
-	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "Health probe endpoint address.")
-	flag.BoolVar(&enableLeaderElection, "leader-elect", true, "Enable leader election.")
-	flag.BoolVar(&showVersion, "version", false, "Print the version and exit.")
-	opts := zap.Options{}
-	opts.BindFlags(flag.CommandLine)
+	fs.StringVar(&o.metricsAddr, "metrics-bind-address", ":8443", "Metrics endpoint address. Use 0 to disable.")
+	fs.BoolVar(&o.secureMetrics, "metrics-secure", true, "Serve metrics over HTTPS with authentication and authorization.")
+	fs.StringVar(&o.metricsCertDir, "metrics-cert-dir", "/var/run/metrics-certs", "Directory with tls.crt/tls.key for metrics (service-ca). Empty or missing files fall back to self-signed.")
+	fs.StringVar(&o.probeAddr, "health-probe-bind-address", ":8081", "Health probe endpoint address.")
+	fs.BoolVar(&o.enableLeaderElection, "leader-elect", true, "Enable leader election.")
+	fs.BoolVar(&o.showVersion, "version", false, "Print the version and exit.")
+	o.zap.BindFlags(fs)
 	// clientconfig registers --kubeconfig on the default FlagSet from a package
 	// init, so the flag a reconcile depends on would exist only because a
 	// transitive package has a side effect. Register it here instead: the
 	// process flag surface is then the list above plus this one. ctrl.GetConfigOrDie
 	// resolves it in the order --kubeconfig, KUBECONFIG, in-cluster, $HOME/.kube/config.
-	clientconfig.RegisterFlags(flag.CommandLine)
+	clientconfig.RegisterFlags(fs)
+	return o
+}
+
+func main() {
+	opts := registerFlags(flag.CommandLine)
 	// --help must be pipeable (`manager --help | less`), so the help text goes
 	// to stdout. Everything that reports a bad invocation (unknown flag,
 	// unexpected argument) is an error: it goes to stderr with the usage text,
@@ -134,6 +155,9 @@ func main() {
 		usageError(err)
 	}
 
+	metricsAddr, probeAddr, metricsCertDir := opts.metricsAddr, opts.probeAddr, opts.metricsCertDir
+	enableLeaderElection, secureMetrics, showVersion := opts.enableLeaderElection, opts.secureMetrics, opts.showVersion
+
 	// --version is data for a script or a support bundle, so it goes to stdout
 	// and exits 0 before any cluster, config, or port work.
 	if showVersion {
@@ -141,7 +165,7 @@ func main() {
 		os.Exit(0)
 	}
 
-	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
+	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts.zap)))
 
 	// Normalize flag strings so padding from shell/YAML does not change bind
 	// semantics or bypass loopback checks (e.g. " 0 " vs "0").
@@ -204,7 +228,7 @@ func main() {
 		"metricsCertDir", metricsCertDir,
 		"healthProbeBindAddress", probeAddr,
 		"leaderElect", enableLeaderElection,
-		"zapDevelopment", opts.Development,
+		"zapDevelopment", opts.zap.Development,
 		"zapEncoder", lookupFlag("zap-encoder"),
 		"zapLogLevel", lookupFlag("zap-log-level"),
 		"zapStacktraceLevel", lookupFlag("zap-stacktrace-level"),
@@ -219,7 +243,7 @@ func main() {
 		// Deployment ships 2 replicas; without a lease both leaders reconcile.
 		setupLog.Info("leader election disabled; multi-replica Deployments may race on reconcile and default CR create")
 	}
-	if opts.Development {
+	if opts.zap.Development {
 		// Development mode is a zap flag for local debugging; warn so a
 		// mis-set CSV/Deployment arg is obvious in production pod logs.
 		setupLog.Info("zap development logging enabled (--zap-devel); not recommended for production")
@@ -467,7 +491,7 @@ func parseArgs(args []string, w io.Writer) error {
 	flag.CommandLine.SetOutput(io.Discard)
 	if err := flag.CommandLine.Parse(args); err != nil {
 		if !errors.Is(err, flag.ErrHelp) {
-			return err
+			return unknownFlagError(err)
 		}
 		if err := printUsage(w); err != nil {
 			return err
@@ -475,6 +499,72 @@ func parseArgs(args []string, w io.Writer) error {
 		return flag.ErrHelp
 	}
 	return unexpectedArgsError(flag.Args())
+}
+
+// unknownFlagMessage is the prefix the flag package puts on an undefined flag.
+const unknownFlagMessage = "flag provided but not defined: -"
+
+// unknownFlagError rewrites the flag package's undefined-flag error into the
+// project's own form: the long spelling the help, the README, and the CSV args
+// all use, plus the closest real flag when the name is a near miss. Go accepts
+// both spellings but reports only the short one, and "flag provided but not
+// defined: -metrcs-secure" leaves the reader to guess which flag was meant.
+func unknownFlagError(err error) error {
+	msg := err.Error()
+	if !strings.HasPrefix(msg, unknownFlagMessage) {
+		return err
+	}
+	given := strings.TrimPrefix(msg, unknownFlagMessage)
+	out := "unknown flag: --" + given
+	if best := closestFlag(given); best != "" {
+		out += fmt.Sprintf("; did you mean --%s?", best)
+	}
+	return errors.New(out)
+}
+
+// suggestionMaxDistance is the edit distance within which a misspelled flag
+// name is close enough to be worth naming as a suggestion. Above it the
+// nearest name is unrelated and the hint misleads.
+const suggestionMaxDistance = 3
+
+// closestFlag returns the registered flag name nearest to given, or "" when
+// none is within suggestionMaxDistance. Names within a distance of each other
+// are left in VisitAll's sorted order, so the suggestion is stable across runs.
+func closestFlag(given string) string {
+	best, bestDistance := "", suggestionMaxDistance+1
+	flag.VisitAll(func(f *flag.Flag) {
+		if f.Name == "help" {
+			return
+		}
+		if d := editDistance(given, f.Name); d < bestDistance {
+			best, bestDistance = f.Name, d
+		}
+	})
+	if bestDistance > suggestionMaxDistance {
+		return ""
+	}
+	return best
+}
+
+// editDistance is the Levenshtein distance between a and b.
+func editDistance(a, b string) int {
+	prev := make([]int, len(b)+1)
+	cur := make([]int, len(b)+1)
+	for j := range prev {
+		prev[j] = j
+	}
+	for i := 1; i <= len(a); i++ {
+		cur[0] = i
+		for j := 1; j <= len(b); j++ {
+			cost := 1
+			if a[i-1] == b[j-1] {
+				cost = 0
+			}
+			cur[j] = min(prev[j]+1, min(cur[j-1]+1, prev[j-1]+cost))
+		}
+		prev, cur = cur, prev
+	}
+	return prev[len(b)]
 }
 
 // usageError reports a bad invocation and exits 2 (usage error, not a runtime
@@ -502,10 +592,9 @@ func printUsage(w io.Writer) error {
 	if _, err := fmt.Fprintf(w, "Flags:\n"); err != nil {
 		return err
 	}
-	orig := flag.CommandLine.Output()
-	flag.CommandLine.SetOutput(w)
-	flag.PrintDefaults()
-	flag.CommandLine.SetOutput(orig)
+	if err := printFlagDefaults(w); err != nil {
+		return err
+	}
 	if _, err := fmt.Fprintf(w, "\nEnvironment:\n"); err != nil {
 		return err
 	}
@@ -517,6 +606,43 @@ func printUsage(w io.Writer) error {
 	}
 	_, err := fmt.Fprintf(w, "  KUBECONFIG\n        Out-of-cluster kubeconfig. Precedence: --kubeconfig, KUBECONFIG, in-cluster, $HOME/.kube/config.\n")
 	return err
+}
+
+// printFlagDefaults writes the flag list in the GNU long-option form the rest
+// of the project spells every flag in. The flag package's own PrintDefaults
+// renders "-metrics-secure", which contradicts the README, the CSV args, and
+// the usage errors, where the same flag is "--metrics-secure". Go's parser
+// accepts both, so the mismatch is cosmetic but it is the one place a reader
+// looks first.
+func printFlagDefaults(w io.Writer) error {
+	var flags []*flag.Flag
+	flag.VisitAll(func(f *flag.Flag) { flags = append(flags, f) })
+	for _, f := range flags {
+		// UnquoteUsage gives "" for a bool flag, so the placeholder is the
+		// flag's own argument name and boolean flags stay bare.
+		placeholder, usage := flag.UnquoteUsage(f)
+		spec := "--" + f.Name
+		if placeholder != "" {
+			spec += " " + placeholder
+		}
+		if !isZeroFlagValue(f) {
+			usage += fmt.Sprintf(" (default %s)", f.DefValue)
+		}
+		if _, err := fmt.Fprintf(w, "  %-28s %s\n", spec, usage); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// isZeroFlagValue reports whether the flag's default is the zero value of its
+// own type, so a default worth documenting is not shown and one that is not
+// (leader-elect=true) is. flag.Value implementations are pointers, so the zero
+// value is a fresh zero of the same type.
+func isZeroFlagValue(f *flag.Flag) bool {
+	zero := reflect.New(reflect.TypeOf(f.Value).Elem())
+	zv, ok := zero.Interface().(flag.Value)
+	return ok && zv.String() == f.DefValue
 }
 
 // cacheSyncReadyz is the readyz check: the pod serves only once the informers

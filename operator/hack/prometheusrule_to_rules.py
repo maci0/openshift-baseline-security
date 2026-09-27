@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from typing import NoReturn
 
 
 def extract_groups(text: str) -> str:
@@ -48,25 +49,28 @@ def fail(message: str) -> None:
     print(f"{Path(sys.argv[0]).name}: {message}", file=sys.stderr)
 
 
+def usage_error(message: str) -> NoReturn:
+    """Report a bad invocation and exit 2: the diagnostic first, then the
+    usage, on stderr, matching hack/*.sh so a caller piping stdout sees
+    nothing on the error path."""
+    fail(message)
+    print(usage(), file=sys.stderr)
+    raise SystemExit(2)
+
+
 def main() -> int:
     args = sys.argv[1:]
     if args and args[0] in ("-h", "--help"):
         if len(args) != 1:
-            print(usage(), file=sys.stderr)
-            fail("error: --help takes no arguments")
-            return 2
+            usage_error("--help takes no arguments")
         print(__doc__.strip())
         print()
         print(usage())
         return 0
     if args and args[0].startswith("-"):
-        print(usage(), file=sys.stderr)
-        fail(f"error: unknown option: {args[0]}")
-        return 2
+        usage_error(f"unknown option: {args[0]}")
     if len(args) != 2:
-        print(usage(), file=sys.stderr)
-        fail(f"error: expected 2 arguments, got {len(args)}")
-        return 2
+        usage_error(f"expected 2 arguments, got {len(args)}")
     src, dst = Path(args[0]), Path(args[1])
     try:
         # encoding= so LC_ALL=C (Makefile) does not decode as ASCII.

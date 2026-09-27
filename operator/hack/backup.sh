@@ -42,7 +42,15 @@ EOF
 }
 
 case "${1:-}" in
-  -h | --help) usage; exit 0 ;;
+  -h | --help)
+    if [[ $# -ne 1 ]]; then
+      echo "backup.sh: --help takes no arguments" >&2
+      usage >&2
+      exit 2
+    fi
+    usage
+    exit 0
+    ;;
 esac
 
 OUT="${1:-./baseline-backup}"

@@ -43,9 +43,13 @@ func (r *ClusterBaselineReconciler) poolPausedBy(ctx context.Context, pool, owne
 		}
 		return false, err
 	}
+	// A type mismatch in spec.paused means the pool is not in the shape this
+	// code assumes, so it cannot be read as "not paused": swallowing it would
+	// let a batch unpause a pool it never verified it owns. The caller already
+	// turns a returned error into a Degraded reconcile.
 	paused, _, err := unstructured.NestedBool(mcp.Object, "spec", "paused")
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("reading spec.paused from MachineConfigPool %q: %w", pool, err)
 	}
 	if !paused {
 		return false, nil

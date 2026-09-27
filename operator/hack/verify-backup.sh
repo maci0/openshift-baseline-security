@@ -51,6 +51,11 @@ EOF
 DIR=""
 case "${1:-}" in
   -h | --help)
+    if [[ $# -ne 1 ]]; then
+      echo "verify-backup.sh: --help takes no arguments" >&2
+      usage >&2
+      exit 2
+    fi
     usage
     exit 0
     ;;
@@ -67,8 +72,9 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     -h | --help)
-      usage
-      exit 0
+      echo "verify-backup.sh: unexpected argument after backup-dir: $1" >&2
+      usage >&2
+      exit 2
       ;;
     -*)
       echo "verify-backup.sh: unknown option: $1" >&2
