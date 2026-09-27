@@ -500,6 +500,18 @@ describe('waivers', () => {
       { op: 'add', path: '/spec/waivers', value: [{ name: 'a'.repeat(253) }] },
     ]);
   });
+  // The bound is a code-point count, what the apiserver applies to MaxLength. A
+  // reason of 1024 emoji is 1024 code points but 2048 UTF-16 code units, so a
+  // String#length check refuses text the CRD admits and the waiver silently
+  // cannot be saved.
+  it('addWaiverPatch counts astral characters once against the CRD MaxLength', () => {
+    const reason = '💩'.repeat(1024);
+    expect(reason.length).toBe(2048);
+    expect(addWaiverPatch(undefined, { name: 'chk', reason })).toEqual([
+      { op: 'add', path: '/spec/waivers', value: [{ name: 'chk', reason }] },
+    ]);
+    expect(addWaiverPatch(undefined, { name: 'chk', reason: '💩'.repeat(1025) })).toEqual([]);
+  });
   // expiresAt/reviewBy must be RFC3339 (metav1.Time); free-form Date.parse
   // successes and invalid calendar days fail closed before admission.
   it('addWaiverPatch is a no-op for unparseable expiresAt or reviewBy', () => {

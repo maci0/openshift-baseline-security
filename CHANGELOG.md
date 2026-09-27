@@ -207,6 +207,13 @@ depend on those tags.
   rather than a snapshot threw while the history was read, blanking the page
   instead of drawing the ring. Such an entry is now dropped with the rest of the
   unparseable ones.
+- Console plugin, waive form: a waiver reason, requestedBy, or approvedBy
+  longer than 1024 / 253 characters was refused client-side with "fields are
+  invalid or exceed length limits" whenever the text was mostly non-ASCII, and
+  a waiver the apiserver would have admitted could not be saved. The bound was
+  counted in UTF-16 code units while a CRD `MaxLength` counts Unicode code
+  points, so an emoji (one code point, two code units) counted double. Both
+  bounds are now counted in code points, the unit the apiserver applies.
 - `console-plugin/.env` (live-console Playwright run): a key other than the four
   the runner reads, a duplicate key, a line that is not `KEY=value`, or an
   unterminated quote was dropped without a word, so a misspelled `CONSOLE_URL`

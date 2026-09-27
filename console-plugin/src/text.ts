@@ -1,5 +1,6 @@
 // Locale-aware text matching and display ordering for the typeahead option
-// lists (profile and rule pickers).
+// lists (profile and rule pickers), plus the code-point length a CRD maxLength
+// is counted in.
 //
 // Raw toLowerCase() is the wrong fold for user-typed search: it leaves
 // diacritics in place, so a user typing "securite" never finds "sécurité", and
@@ -110,3 +111,13 @@ export const listSeparators = (count: number, locale?: string): string[] => {
   );
   return parts.filter((p) => p.type === 'literal').map((p) => p.value);
 };
+
+// Length in Unicode code points, the unit a CRD maxLength is expressed in: the
+// API server counts runes (utf8.RuneCountInString on the operator's side, the
+// same clamp in sanitize.go), not bytes and not UTF-16 code units.
+// String#length counts code units, so every astral character counts double: a
+// waiver reason of 600 emoji is 600 code points (admitted under MaxLength=1024)
+// but 1200 units, and a unit check refuses text the apiserver would have
+// accepted. Array.from walks code points, so a surrogate pair counts once and a
+// lone surrogate still counts once rather than throwing.
+export const codePointLength = (value: string): number => Array.from(value).length;

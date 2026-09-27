@@ -1,4 +1,6 @@
 // Cron expression validation for ClusterBaseline.spec.schedule (5-field form).
+import { codePointLength } from './text';
+
 const cronMonths = {
   jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6,
   jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12,
@@ -67,10 +69,13 @@ const validCronField = <T extends Record<string, number>>(
 // Match the operator's five-field robfig cron parser, including named months /
 // weekdays and '?', while rejecting descriptors and out-of-range values before
 // the UI patches the CR. Also enforce the CRD MaxLength=128 so a long-but-parseable
-// string is not accepted client-side only to fail apiserver admission.
+// string is not accepted client-side only to fail apiserver admission. Counted in
+// code points, the unit the apiserver applies to MaxLength; a schedule the field
+// grammar accepts is ASCII anyway, so the two counts agree on every input that
+// gets past the field checks below.
 export const isValidCron = (s: string): boolean => {
   const trimmed = s.trim();
-  if (!trimmed || trimmed.length > 128) {
+  if (!trimmed || codePointLength(trimmed) > 128) {
     return false;
   }
   const fields = trimmed.split(/\s+/);

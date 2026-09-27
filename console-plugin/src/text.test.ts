@@ -1,4 +1,4 @@
-import { compareForDisplay, foldForSearch, formatList, listSeparators, matchesSearch, textCollator } from './text';
+import { codePointLength, compareForDisplay, foldForSearch, formatList, listSeparators, matchesSearch, textCollator } from './text';
 
 describe('foldForSearch', () => {
   it('folds case and strips diacritics', () => {
@@ -177,5 +177,38 @@ describe('listSeparators', () => {
 
   it('falls back to the runtime default on an invalid locale tag', () => {
     expect(listSeparators(3, 'not a tag')).toEqual(listSeparators(3));
+  });
+});
+
+describe('codePointLength', () => {
+  it('counts an astral character once, not as its two UTF-16 units', () => {
+    expect('💩'.length).toBe(2);
+    expect(codePointLength('💩')).toBe(1);
+    expect(codePointLength('a💩b')).toBe(3);
+  });
+
+  // A CRD maxLength is a code-point bound, so 600 emoji is admissible where a
+  // UTF-16 code-unit count (1200) would refuse it.
+  it('admits a 1024-emoji reason and refuses 1025', () => {
+    const admitted = '💩'.repeat(1024);
+    const refused = '💩'.repeat(1025);
+    expect(codePointLength(admitted)).toBe(1024);
+    expect(admitted.length).toBe(2048);
+    expect(codePointLength(refused)).toBe(1025);
+  });
+
+  // NFD 'e' + combining acute is two code points; the composed form is one.
+  it('counts a combining sequence by code point, not by grapheme', () => {
+    expect(codePointLength('e\u0301')).toBe(2);
+    expect(codePointLength('\u00e9')).toBe(1);
+  });
+
+  it('counts a lone surrogate instead of throwing', () => {
+    expect(codePointLength('a\ud800b')).toBe(3);
+  });
+
+  it('agrees with .length on ASCII', () => {
+    expect(codePointLength('no_empty_passwords')).toBe('no_empty_passwords'.length);
+    expect(codePointLength('')).toBe(0);
   });
 });

@@ -3,6 +3,7 @@ import { isValidCron } from './cron';
 import { TAILORED_PROFILE_MAX_ITEMS, WAIVER_MAX_ITEMS, Waiver } from './models';
 import { isValidK8sName, isValidTailoredProfileName } from './names';
 import { isString, stripControlAndFormat } from './parse';
+import { codePointLength } from './text';
 
 // One RFC 6902 operation emitted by the patch builders in this module. value
 // is the JSON payload written at path; tests assert exact shapes.
@@ -156,9 +157,12 @@ const isParseableTime = (s: string): boolean => {
   return !Number.isNaN(Date.parse(trimmed));
 };
 
-// ClusterBaseline CRD bounds for waiver text fields. Shared by the patch
-// validator and the waive form's maxLength attributes so the widget can never
-// allow what the validator rejects (or vice versa).
+// ClusterBaseline CRD bounds for waiver text fields, in the CRD's own unit:
+// Unicode code points (codePointLength), which is what the API server counts
+// for maxLength. Shared by the patch validator and the waive form's maxLength
+// attributes so the widget can never allow what the validator rejects (or vice
+// versa): the DOM attribute counts UTF-16 code units, so it is never looser
+// than a code-point bound.
 export const WAIVER_REASON_MAX_LEN = 1024;
 export const WAIVER_ATTRIBUTION_MAX_LEN = 253;
 
@@ -183,9 +187,9 @@ export const addWaiverPatch = (waivers: Waiver[] | undefined | null, entry: Waiv
   // here (empty ops) instead of only at apiserver admission.
   if (
     !isValidK8sName(name) ||
-    reason.length > WAIVER_REASON_MAX_LEN ||
-    requestedBy.length > WAIVER_ATTRIBUTION_MAX_LEN ||
-    approvedBy.length > WAIVER_ATTRIBUTION_MAX_LEN ||
+    codePointLength(reason) > WAIVER_REASON_MAX_LEN ||
+    codePointLength(requestedBy) > WAIVER_ATTRIBUTION_MAX_LEN ||
+    codePointLength(approvedBy) > WAIVER_ATTRIBUTION_MAX_LEN ||
     (entry.expiresAt != null && entry.expiresAt !== '' && !isParseableTime(entry.expiresAt)) ||
     (entry.reviewBy != null && entry.reviewBy !== '' && !isParseableTime(entry.reviewBy))
   ) {
