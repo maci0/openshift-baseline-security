@@ -83,10 +83,13 @@ func TestDashboardConfigMapCurrent(t *testing.T) {
 // below assert on. Unknown fields are ignored, so a console schema change does
 // not fail the test.
 type dashboardPanel struct {
-	ID      int
-	Title   string
-	Span    int
-	Targets []struct {
+	ID         int
+	Title      string
+	Type       string
+	Span       int
+	Colors     []string `json:"colors"`
+	Thresholds string   `json:"thresholds"`
+	Targets    []struct {
 		Expr string
 	} `json:"targets"`
 }
@@ -103,6 +106,88 @@ type dashboardSpec struct {
 // query appends to it. Label names (`on(instance)`) and function names carry no
 // metric prefix, so the prefix filter in the test leaves them out.
 var promIdent = regexp.MustCompile(`[a-zA-Z_][a-zA-Z0-9_]*`)
+
+// dashboardStatusPalette is the one status palette the whole product paints
+// with: the resolved PatternFly 6 light-theme values of the icon status tokens
+// the console plugin reads live (--pf-t--global--icon--color--status--* and
+// --pf-t--global--icon--color--disabled), plus the nonstatus orangered tint the
+// composition donut uses to keep Error apart from Fail. The console Overview,
+// the exported HTML report (console-plugin/src/report.ts REPORT_TOKENS), and
+// this dashboard are three views of the same numbers, so a status that is red
+// in one is red in all three. Unstyled panels fall back to the Grafana default
+// categorical palette, where Fail can render green and Pass blue: a color that
+// contradicts the label on the same chart.
+var dashboardStatusPalette = map[string]string{
+	"#3d7317": "status success / pass",
+	"#b1380b": "status danger / fail, error, newly failed",
+	"#dca614": "status warning / manual",
+	"#5e40be": "status info",
+	"#147878": "status custom / inconsistent",
+	"#fbbea8": "nonstatus orangered / error, distinct from fail",
+	"#a3a3a3": "icon disabled / waived, not-applicable, neutral age",
+}
+
+// hexLiteral matches a CSS color in the embedded payload.
+var hexLiteral = regexp.MustCompile(`#[0-9a-fA-F]{6}`)
+
+// TestDashboardUsesStatusPalette pins the palette: every color literal in the
+// payload is a named status token, and every graph panel carries an explicit
+// series color instead of inheriting the Grafana default palette. A panel
+// added without colors renders in defaults, which is the drift this guards.
+func TestDashboardUsesStatusPalette(t *testing.T) {
+	var spec dashboardSpec
+	if err := json.Unmarshal([]byte(complianceDashboardJSON), &spec); err != nil {
+		t.Fatalf("embedded dashboard is not valid JSON: %v", err)
+	}
+	for _, h := range hexLiteral.FindAllString(complianceDashboardJSON, -1) {
+		if _, ok := dashboardStatusPalette[strings.ToLower(h)]; !ok {
+			t.Errorf("color %s is not in the shared status palette", h)
+		}
+	}
+	graphs := 0
+	for _, row := range spec.Rows {
+		for _, p := range row.Panels {
+			if p.Type != "graph" {
+				continue
+			}
+			graphs++
+			if len(p.Colors) == 0 {
+				t.Errorf("graph panel %d (%q) has no colors: series fall back to the Grafana default palette",
+					p.ID, p.Title)
+			}
+		}
+	}
+	if graphs == 0 {
+		t.Fatal("no graph panels: the palette guard proved nothing")
+	}
+}
+
+// TestDashboardScoreBandsShared keeps the score panels on the same 60/90 bands
+// the console, the report, and the Prometheus alerts use (ADR-017). The
+// singlestat and the 30d trend read one gauge; a trend drawn in a different
+// band colors than the number beside it reads as a second verdict.
+func TestDashboardScoreBandsShared(t *testing.T) {
+	const bands = "60,90"
+	var spec dashboardSpec
+	if err := json.Unmarshal([]byte(complianceDashboardJSON), &spec); err != nil {
+		t.Fatalf("embedded dashboard is not valid JSON: %v", err)
+	}
+	byTitle := map[string]dashboardPanel{}
+	for _, row := range spec.Rows {
+		for _, p := range row.Panels {
+			byTitle[p.Title] = p
+		}
+	}
+	for _, title := range []string{"Compliance score", "Compliance score (30d)"} {
+		p, ok := byTitle[title]
+		if !ok {
+			t.Fatalf("dashboard lost the %q panel", title)
+		}
+		if p.Thresholds != bands {
+			t.Errorf("panel %q thresholds = %q, want %q", title, p.Thresholds, bands)
+		}
+	}
+}
 
 // dashboardMetricNames is every metric the embedded dashboard may query: the
 // operator's own gauges plus the controller-runtime reconcile series the

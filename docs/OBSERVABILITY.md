@@ -58,6 +58,19 @@ rows to look at, in the order an incident usually needs them:
 every panel query names a metric in the table above, so a renamed or removed
 gauge cannot leave a blank panel behind.
 
+Panels are colored from one status palette, the resolved PatternFly 6
+light-theme values of the icon status tokens the console plugin reads live:
+success `#3d7317`, danger `#b1380b`, warning `#dca614`, info `#5e40be`, custom
+`#147878`, the nonstatus orangered `#fbbea8` that keeps Error apart from Fail,
+and the disabled neutral `#a3a3a3` for waived, not-applicable, and the age
+gauges. The console Overview, the exported HTML report, and this dashboard are
+three views of the same numbers, so a status is one color in all three. A graph
+panel with no `colors` falls back to Grafana's default categorical palette,
+where a failing series can render green, so `TestDashboardUsesStatusPalette`
+fails the build on a color outside the palette or an uncolored graph panel. The
+score singlestat and the 30-day trend share the 60/90 bands
+(`TestDashboardScoreBandsShared`), so the trend is never a second verdict.
+
 ## Logs
 
 Structured JSON (zap, `--zap-encoder`) to stderr, readable from the pod logs.

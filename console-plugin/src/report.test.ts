@@ -377,7 +377,6 @@ describe('buildReportHtml', () => {
     expect(html).toContain('class="score score-success"');
     expect(html).toContain('class="sev-high"');
     expect(html).toContain('font-family:system-ui');
-    expect(html).toContain('#c9190b');
     expect(html).toContain('#b1380b');
     expect(html).toContain('#1e4f18');
     expect(html).not.toContain('#ccc');
@@ -387,10 +386,10 @@ describe('buildReportHtml', () => {
     // A passing report must not be framed in danger red: the rule is
     // decoration, and decoration that contradicts the score is a false signal.
     expect(html).toContain('<body class="accent-success">');
-    expect(html).toContain('.accent-danger{--report-accent:#c9190b}');
-    expect(html).toContain('.accent-warning{--report-accent:#f0ab00}');
-    expect(html).toContain('.accent-success{--report-accent:#3e8635}');
-    expect(html).toContain('.accent-none{--report-accent:#8a8d90}');
+    expect(html).toContain('.accent-danger{--report-accent:#b1380b}');
+    expect(html).toContain('.accent-warning{--report-accent:#dca614}');
+    expect(html).toContain('.accent-success{--report-accent:#3d7317}');
+    expect(html).toContain('.accent-none{--report-accent:#a3a3a3}');
   });
   it('escapes untrusted waiver text (no raw script tag)', () => {
     expect(html).toContain('&lt;script&gt;');

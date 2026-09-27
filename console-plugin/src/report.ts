@@ -93,18 +93,24 @@ const REPORT_TOKENS = {
   statusSuccess: '#1e4f18',
   // The accent rule is decorative: it carries no text and nothing depends on
   // it, so it takes the PatternFly icon/status tokens rather than the 4.5:1
-  // text ones. Same three hexes the Grafana dashboard thresholds already use
+  // text ones. These are the resolved PatternFly 6 light-theme values of
+  // --pf-t--global--icon--color--status--{danger,warning,success}--default
+  // (#b1380b, #dca614, #3d7317), the same tokens the console donut and the
+  // per-profile badges read live, and the same hexes the Observe dashboard
+  // thresholds and series use
   // (operator/internal/controller/assets/compliance-dashboard.json), so the
   // report and the dashboards a cluster admin reads read as one product. The
   // rule follows the score instead of being a fixed brand color: a red frame on
   // a passing report contradicts the number printed under it, and the report is
   // read by people deciding whether a cluster passed.
-  accentDanger: '#c9190b',
-  accentWarning: '#f0ab00',
-  accentSuccess: '#3e8635',
+  accentDanger: '#b1380b',
+  accentWarning: '#dca614',
+  accentSuccess: '#3d7317',
   // A report with no computable score is unscored, not failing. Its frame is
-  // the neutral, the same value that renders "—" in the score line.
-  accentNone: '#8a8d90',
+  // the neutral the console paints waived and not-applicable checks in
+  // (--pf-t--global--icon--color--disabled), the same value that renders "—"
+  // in the score line.
+  accentNone: '#a3a3a3',
   // Type scale, in rem off the 16px root. Each level is a named step, not a
   // default: the score sits a clear step above the page title because it is
   // the one number the report exists to communicate, and section titles get a

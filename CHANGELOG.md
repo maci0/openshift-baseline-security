@@ -121,6 +121,16 @@ depend on those tags.
   downloads, and the locale bundle the first paint waits on was invisible to
   the report. No shipped bytes changed.
 
+- The Observe → Dashboards view and the exported HTML report now paint statuses
+  in the same colors the console paints them in. Every dashboard graph panel
+  took Grafana's default categorical palette, where a failing-check series can
+  render green and a passing one blue, and the report and dashboard carried
+  PatternFly 4-era hexes while the console plugin reads PatternFly 6 status
+  tokens. All three surfaces share one palette now (success `#3d7317`, danger
+  `#b1380b`, warning `#dca614`, info `#5e40be`, custom `#147878`, orangered
+  `#fbbea8` for Error, neutral `#a3a3a3`), and the 30-day score trend follows
+  the same 60/90 bands as the score beside it.
+
 - `docs/THREAT_MODEL.md` brought back in line with the code. The commit stamp
   and eleven line citations across `role.yaml`, `cmd/main.go`, `plugin.go`,
   `plugin_pod.go`, `nginx.conf`, both Dockerfiles, `CompliancePage.tsx`,

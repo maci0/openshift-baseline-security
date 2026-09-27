@@ -32,7 +32,7 @@
           "valueName": "current",
           "thresholds": "60,90",
           "colorValue": true,
-          "colors": ["#c9190b", "#f0ab00", "#3e8635"],
+          "colors": ["#b1380b", "#dca614", "#3d7317"],
           "targets": [
             { "expr": "max((baseline_security_compliance_score >= 0) and on(instance) topk(1, baseline_security_status_observed_timestamp_seconds))", "refId": "A" }
           ]
@@ -47,7 +47,7 @@
           "valueName": "current",
           "thresholds": "0.5,0.5",
           "colorValue": true,
-          "colors": ["#3e8635", "#c9190b", "#c9190b"],
+          "colors": ["#3d7317", "#b1380b", "#b1380b"],
           "targets": [
             { "expr": "max(baseline_security_condition{type=\"Degraded\"} and on(instance) topk(1, baseline_security_status_observed_timestamp_seconds))", "refId": "A" }
           ]
@@ -62,7 +62,7 @@
           "valueName": "current",
           "thresholds": "0.5,0.5",
           "colorValue": true,
-          "colors": ["#3e8635", "#f0ab00", "#c9190b"],
+          "colors": ["#3d7317", "#dca614", "#b1380b"],
           "targets": [
             { "expr": "max(baseline_security_remediation_batch_active and on(instance) topk(1, baseline_security_status_observed_timestamp_seconds))", "refId": "A" }
           ]
@@ -77,7 +77,7 @@
           "valueName": "current",
           "thresholds": "600,1200",
           "colorValue": true,
-          "colors": ["#3e8635", "#f0ab00", "#c9190b"],
+          "colors": ["#3d7317", "#dca614", "#b1380b"],
           "targets": [
             { "expr": "(max(baseline_security_remediation_batch_active and on(instance) topk(1, baseline_security_status_observed_timestamp_seconds)) == 1) * (time() - max((baseline_security_remediation_batch_started_timestamp_seconds > 0) and on(instance) topk(1, baseline_security_status_observed_timestamp_seconds))) or vector(0)", "refId": "A" }
           ]
@@ -92,7 +92,7 @@
           "valueName": "current",
           "thresholds": "0.5,0.5",
           "colorValue": true,
-          "colors": ["#3e8635", "#c9190b", "#c9190b"],
+          "colors": ["#3d7317", "#b1380b", "#b1380b"],
           "targets": [
             { "expr": "sum(increase(baseline_security_remediation_batches_total{outcome=~\"grace|orphaned\"}[24h])) or vector(0)", "refId": "A" }
           ]
@@ -111,6 +111,9 @@
           "datasource": "$datasource",
           "span": 12,
           "yaxes": [ { "format": "none", "min": 0, "max": 100 }, { "show": false } ],
+          "thresholds": "60,90",
+          "colorValue": true,
+          "colors": ["#b1380b", "#dca614", "#3d7317"],
           "targets": [
             { "expr": "max((baseline_security_compliance_score >= 0) and on(instance) topk(1, baseline_security_status_observed_timestamp_seconds))", "legendFormat": "score", "refId": "A" }
           ]
@@ -129,6 +132,16 @@
           "datasource": "$datasource",
           "span": 6,
           "stack": true,
+          "colors": ["#fbbea8", "#b1380b", "#147878", "#5e40be", "#dca614", "#a3a3a3", "#3d7317", "#a3a3a3"],
+          "seriesOverrides": [
+            { "match": "^pass$", "colors": ["#3d7317"] },
+            { "match": "^fail$", "colors": ["#b1380b"] },
+            { "match": "^error$", "colors": ["#fbbea8"] },
+            { "match": "^manual$", "colors": ["#dca614"] },
+            { "match": "^info$", "colors": ["#5e40be"] },
+            { "match": "^inconsistent$", "colors": ["#147878"] },
+            { "match": "^(waived|notApplicable)$", "colors": ["#a3a3a3"] }
+          ],
           "targets": [
             { "expr": "sum by (status) (baseline_security_checks and on(instance) topk(1, baseline_security_status_observed_timestamp_seconds))", "legendFormat": "{{status}}", "refId": "A" }
           ]
@@ -139,6 +152,7 @@
           "type": "graph",
           "datasource": "$datasource",
           "span": 6,
+          "colors": ["#b1380b"],
           "targets": [
             { "expr": "sum by (profile) (baseline_security_checks{status=\"fail\"} and on(instance) topk(1, baseline_security_status_observed_timestamp_seconds))", "legendFormat": "{{profile}}", "refId": "A" }
           ]
@@ -157,6 +171,13 @@
           "datasource": "$datasource",
           "span": 2,
           "yaxes": [ { "format": "none", "min": 0, "max": 1 }, { "show": false } ],
+          "colors": ["#a3a3a3", "#5e40be", "#b1380b", "#a3a3a3", "#a3a3a3", "#a3a3a3", "#a3a3a3"],
+          "seriesOverrides": [
+            { "match": "^Available$", "colors": ["#3d7317"] },
+            { "match": "^Progressing$", "colors": ["#5e40be"] },
+            { "match": "^Degraded$", "colors": ["#b1380b"] },
+            { "match": "^(ComplianceOperatorReady|ScanConfigured|ScanStorageReady|ConsolePluginReady)$", "colors": ["#a3a3a3"] }
+          ],
           "targets": [
             { "expr": "max by (type) (baseline_security_condition and on(instance) topk(1, baseline_security_status_observed_timestamp_seconds))", "legendFormat": "{{type}}", "refId": "A" }
           ]
@@ -168,6 +189,7 @@
           "datasource": "$datasource",
           "span": 2,
           "yaxes": [ { "format": "s", "min": 0 }, { "show": false } ],
+          "colors": ["#a3a3a3"],
           "targets": [
             { "expr": "time() - max(baseline_security_status_observed_timestamp_seconds)", "legendFormat": "publish age", "refId": "A" }
           ]
@@ -179,6 +201,7 @@
           "datasource": "$datasource",
           "span": 2,
           "yaxes": [ { "format": "s", "min": 0 }, { "show": false } ],
+          "colors": ["#a3a3a3"],
           "targets": [
             { "expr": "time() - max((baseline_security_last_scan_timestamp_seconds > 0) and on(instance) topk(1, baseline_security_status_observed_timestamp_seconds))", "legendFormat": "scan age", "refId": "A" }
           ]
@@ -190,6 +213,7 @@
           "datasource": "$datasource",
           "span": 2,
           "yaxes": [ { "format": "none", "min": 0 }, { "show": false } ],
+          "colors": ["#b1380b"],
           "targets": [
             { "expr": "max(baseline_security_newly_failed and on(instance) topk(1, baseline_security_status_observed_timestamp_seconds))", "legendFormat": "newly failed", "refId": "A" }
           ]
@@ -204,7 +228,7 @@
           "valueName": "current",
           "thresholds": "0.5,1",
           "colorValue": true,
-          "colors": ["#3e8635", "#f0ab00", "#c9190b"],
+          "colors": ["#3d7317", "#dca614", "#b1380b"],
           "targets": [
             { "expr": "sum(baseline_security_checks{status=\"error\"} and on(instance) topk(1, baseline_security_status_observed_timestamp_seconds)) or vector(0)", "refId": "A" }
           ]
@@ -219,7 +243,7 @@
           "valueName": "current",
           "thresholds": "0.5,1",
           "colorValue": true,
-          "colors": ["#3e8635", "#f0ab00", "#c9190b"],
+          "colors": ["#3d7317", "#dca614", "#b1380b"],
           "targets": [
             { "expr": "sum(baseline_security_checks{status=\"inconsistent\"} and on(instance) topk(1, baseline_security_status_observed_timestamp_seconds)) or vector(0)", "refId": "A" }
           ]
@@ -238,6 +262,11 @@
           "datasource": "$datasource",
           "span": 6,
           "yaxes": [ { "format": "ops", "min": 0 }, { "show": false } ],
+          "colors": ["#b1380b", "#5e40be"],
+          "seriesOverrides": [
+            { "match": "^errors$", "colors": ["#b1380b"] },
+            { "match": "^reconciles$", "colors": ["#5e40be"] }
+          ],
           "targets": [
             {
               "expr": "sum(rate(controller_runtime_reconcile_errors_total[15m]))",
@@ -258,6 +287,7 @@
           "datasource": "$datasource",
           "span": 6,
           "yaxes": [ { "format": "s", "min": 0 }, { "show": false } ],
+          "colors": ["#5e40be", "#147878"],
           "targets": [
             {
               "expr": "histogram_quantile(0.99, sum by (le) (rate(controller_runtime_reconcile_time_seconds_bucket[10m])))",
