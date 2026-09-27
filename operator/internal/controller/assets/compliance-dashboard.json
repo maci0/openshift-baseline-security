@@ -210,6 +210,53 @@
           ]
         }
       ]
+    },
+    {
+      "title": "Reconcile loop",
+      "showTitle": false,
+      "height": "200px",
+      "panels": [
+        {
+          "id": 14,
+          "title": "Reconcile errors",
+          "type": "graph",
+          "datasource": "$datasource",
+          "span": 6,
+          "yaxes": [ { "format": "ops", "min": 0 }, { "show": false } ],
+          "targets": [
+            {
+              "expr": "sum(rate(controller_runtime_reconcile_errors_total[15m]))",
+              "legendFormat": "errors",
+              "refId": "A"
+            },
+            {
+              "expr": "sum(rate(controller_runtime_reconcile_total[15m]))",
+              "legendFormat": "reconciles",
+              "refId": "B"
+            }
+          ]
+        },
+        {
+          "id": 15,
+          "title": "Reconcile duration",
+          "type": "graph",
+          "datasource": "$datasource",
+          "span": 6,
+          "yaxes": [ { "format": "s", "min": 0 }, { "show": false } ],
+          "targets": [
+            {
+              "expr": "histogram_quantile(0.99, sum by (le) (rate(controller_runtime_reconcile_time_seconds_bucket[10m])))",
+              "legendFormat": "p99",
+              "refId": "A"
+            },
+            {
+              "expr": "histogram_quantile(0.50, sum by (le) (rate(controller_runtime_reconcile_time_seconds_bucket[10m])))",
+              "legendFormat": "p50",
+              "refId": "B"
+            }
+          ]
+        }
+      ]
     }
   ]
 }

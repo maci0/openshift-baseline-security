@@ -28,6 +28,62 @@ it, discovery finds zero targets and nothing is scraped (`ComplianceStatusStale`
 | `baseline_security_remediation_batch_active` | 1 while a remediation batch is in progress (MCPs may be paused). |
 | `baseline_security_remediation_batch_started_timestamp_seconds` | When the active batch started (batch-age alerting); 0 when none. |
 
+The same endpoint also serves the controller-runtime series for the reconciler
+itself, which the dashboard's Reconcile-loop row reads:
+`controller_runtime_reconcile_total` (by `result`), `controller_runtime_reconcile_errors_total`,
+and the `controller_runtime_reconcile_time_seconds` histogram. Only the leader
+reconciles, so these are zero on a standby replica.
+
+## Dashboards
+
+The `Baseline Security / Compliance` ConfigMap dashboard (Observe → Dashboards,
+`openshift-config-managed/baseline-security-compliance-dashboard`) has four
+things to look at, in the order an incident usually needs them:
+
+1. **Score** row: current score, Degraded flag, remediation batch state and age.
+2. **Score trend** row: 30-day score history, the regression check after a change.
+3. **Checks by status** row: totals per status, failing checks per profile.
+4. **Operator health** row: rollup and detail conditions, metric freshness, last
+   scan age, regressions, ERROR and INCONSISTENT counts.
+5. **Reconcile loop** row: reconcile error rate against the total reconcile rate,
+   and p50/p99 reconcile duration. A duration climbing toward the 5m
+   `reconcileTimeout` bound means the loop is about to start failing reconciles;
+   the error-rate series says whether it already has.
+
+`operator/internal/controller/dashboard_test.go` pins the panel grid and asserts
+every panel query names a metric in the table above, so a renamed or removed
+gauge cannot leave a blank panel behind.
+
+## Logs
+
+Structured JSON (zap, `--zap-encoder`) to stdout, scraped from the pod. Levels:
+
+- **Error**: a reconcile step failed. Each carries the CR `name`, its
+  `generation`, and the `duration` of the whole reconcile so far, so a failure
+  burst is attributable to a spec change.
+- **Info (default level)**: transitions only. A Degraded or not-Available posture
+  logs once on entry (with `score`, `fail`, `error`, `inconsistent`,
+  `newlyFailed`, `available`, `progressing`, `batchActive`) and the same posture
+  repeats at V(1) while it persists, so a steady failure does not emit a line per
+  1m poll. Setup-time configuration, watch registration, MachineConfigPool
+  pause-state changes, and CR deletion are also Info.
+- **V(1)**: the per-reconcile `reconciled` line and the steady-state repeats
+  above. Raise verbosity with `--zap-log-level=1` for a live investigation; do
+  not run the operator at that level permanently.
+
+There is no request ID: the reconciler is a single singleton worker driven by one
+cluster-scoped CR, so `name` plus `generation` and the log timestamp identify
+the pass. `generation` is the pivot back to the CR: it tells you which spec
+version a failure belongs to.
+
+## Tracing
+
+There is deliberately no OpenTelemetry tracing. The operator serves no inbound
+request: its work is one periodic reconcile loop plus the compliance CRDs it
+watches, and every step is already visible as a log line with a `duration` and a
+`generation`. Spans would add a collector dependency and sampling configuration
+without adding a signal that metrics plus logs do not already carry.
+
 ## Alerts (PrometheusRule)
 
 | Alert | Fires when |

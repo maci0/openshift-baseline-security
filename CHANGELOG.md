@@ -44,6 +44,14 @@ depend on those tags.
 
 ### Added
 
+- Observe dashboard gained a Reconcile loop row (reconcile errors against total
+  reconciles, and p50/p99 reconcile duration). The operator's own failure rate
+  and loop latency were visible only in pod logs, so a reconcile loop slowing
+  toward its 5m bound had no metric to graph before it started failing.
+- `docs/OBSERVABILITY.md` documents the log levels and the posture line, the
+  dashboard rows and the order to read them, and why the operator ships no
+  OpenTelemetry tracing.
+
 - Console plugin image ships `/licenses/THIRD-PARTY-NOTICES.txt` (and the same
   file under `dist/`, so the console serves it). The bundle redistributes
   PatternFly, victory, React, and the rest of the installed closure, and the
