@@ -43,6 +43,16 @@ depend on those tags.
 
 ## [Unreleased]
 
+### Changed
+
+- `docs/THREAT_MODEL.md` brought back in line with the code. The commit stamp
+  and eleven line citations across `role.yaml`, `cmd/main.go`, `plugin.go`,
+  `plugin_pod.go`, `nginx.conf`, both Dockerfiles, `CompliancePage.tsx`,
+  `RemediationsTab.tsx`, and the e2e dotenv loader were stale, and two surfaces
+  the model never named are now covered: the leader-election Lease and its
+  separate Role, and the operator's cluster-wide RBAC grants. No shipped
+  behavior changed.
+
 ### Fixed
 
 - Release images stamped `org.opencontainers.image.version` from the
