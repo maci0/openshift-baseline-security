@@ -74,6 +74,13 @@ depend on those tags.
   alone. The walk is now anchored to a fixed epoch, so the value is a function
   of `spec.schedule` and nothing else. The `ComplianceScanStale` threshold moves
   by at most one day, and only for annual schedules.
+- `manager --help` documented the `KUBECONFIG` fallback without pinning the
+  `--kubeconfig` flag it sits behind. The flag was registered by a transitive
+  package's `init`, which upstream marks for removal, so the documented
+  precedence could have outlived the flag. It is now registered by the binary
+  itself, the help names the full resolution order, the start-up
+  `configuration` log records whether a kubeconfig was passed (not its path),
+  and a test fails if the flag ever goes missing again.
 - Release images stamped `org.opencontainers.image.version` from the
   `ARG VERSION` default in each Dockerfile rather than the version being
   published. The release job replaced `DOCKER_BUILD_FLAGS` to drop the

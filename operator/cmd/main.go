@@ -29,6 +29,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	clientconfig "sigs.k8s.io/controller-runtime/pkg/client/config"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
@@ -85,6 +86,12 @@ func main() {
 	flag.BoolVar(&enableLeaderElection, "leader-elect", true, "Enable leader election.")
 	opts := zap.Options{}
 	opts.BindFlags(flag.CommandLine)
+	// clientconfig registers --kubeconfig on the default FlagSet from a package
+	// init, so the flag a reconcile depends on would exist only because a
+	// transitive package has a side effect. Register it here instead: the
+	// process flag surface is then the list above plus this one. ctrl.GetConfigOrDie
+	// resolves it in the order --kubeconfig, KUBECONFIG, in-cluster, $HOME/.kube/config.
+	clientconfig.RegisterFlags(flag.CommandLine)
 	// --help must be pipeable (`manager --help | less`), so the help text goes
 	// to stdout. Everything that reports a bad invocation (unknown flag,
 	// unexpected argument) is an error: it goes to stderr with the usage text,
@@ -167,6 +174,9 @@ func main() {
 		"relatedImageConsolePluginSet", relatedImageSet,
 		"relatedImageConsolePluginValid", relatedImageValid,
 		"skipDefaultClusterBaseline", skipDefaultCR,
+		// Set/unset only: the path names a developer's home directory, which the
+		// operator has no reason to print into a log shipped in must-gather.
+		"kubeconfigFlagSet", lookupFlag(clientconfig.KubeconfigFlagName) != "",
 	)
 	if !enableLeaderElection {
 		// Deployment ships 2 replicas; without a lease both leaders reconcile.
@@ -454,7 +464,7 @@ func printUsage(w io.Writer) error {
 	if _, err := fmt.Fprintf(w, "  %s\n        Console plugin image to deploy. Unset leaves ImageMissing.\n", controller.EnvRelatedImageConsolePlugin); err != nil {
 		return err
 	}
-	_, err := fmt.Fprintf(w, "  KUBECONFIG\n        Out-of-cluster kubeconfig. --kubeconfig wins if both are set.\n")
+	_, err := fmt.Fprintf(w, "  KUBECONFIG\n        Out-of-cluster kubeconfig. Precedence: --kubeconfig, KUBECONFIG, in-cluster, $HOME/.kube/config.\n")
 	return err
 }
 

@@ -6,6 +6,8 @@ import (
 	"flag"
 	"strings"
 	"testing"
+
+	clientconfig "sigs.k8s.io/controller-runtime/pkg/client/config"
 )
 
 func TestUnexpectedArgsError(t *testing.T) {
@@ -38,11 +40,21 @@ func TestPrintUsageIncludesEnv(t *testing.T) {
 		envSkipDefaultCR,
 		"RELATED_IMAGE_CONSOLE_PLUGIN",
 		"KUBECONFIG",
-		"--kubeconfig wins",
+		"--kubeconfig",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("printUsage missing %q\n%s", want, got)
 		}
+	}
+}
+
+// The KUBECONFIG env var is only meaningful if --kubeconfig is a real flag:
+// the help documents one precedence, so the flag set must carry both. The flag
+// comes from clientconfig, so pin it rather than trusting the import.
+func TestKubeconfigFlagIsDefined(t *testing.T) {
+	if flag.Lookup(clientconfig.KubeconfigFlagName) == nil {
+		t.Fatalf("--%s is not registered; the documented KUBECONFIG precedence is unreachable",
+			clientconfig.KubeconfigFlagName)
 	}
 }
 
