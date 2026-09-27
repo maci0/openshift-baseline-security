@@ -18,9 +18,25 @@ import (
 // one-shot self-signed cert so the metrics server can start before the Secret
 // exists (optional volume).
 //
-// GetCertificate is called from concurrent TLS handshakes. File I/O and
-// X509KeyPair parsing run outside the mutex so one slow reload cannot stall
-// every metrics connection; only the cache pointer swap is serialized.
+// GetCertificate is called from concurrent TLS handshakes. The steady-state
+// path is a cache hit under the mutex: one file read, no parse, no lock held
+// across I/O.
+//
+// A cache miss (startup, or service-ca rotation) does the expensive work
+// outside the mutex: the read and the X509KeyPair parse never hold it, so a
+// slow reload cannot stall concurrent handshakes that are still serving the
+// last known-good certificate.
+//
+// One read IS taken under the mutex, and it is load-bearing, not an oversight:
+// the freshness re-read that guards against installing a stale parse. A
+// handshake that read the old pair, parsed it, and blocked on the mutex can
+// otherwise overwrite a newer pair a concurrent handshake already published,
+// leaving the cache on rotated-out material. Re-reading inside the critical
+// section is what makes "still on disk" and "about to install" atomic. Do not
+// hoist it out to shorten the critical section: a pre-lock read cannot
+// distinguish "disk still holds my pair" from "another handshake won the
+// rotation while I was parsing", and TestMetricsCertProviderConcurrentReload
+// covers exactly that interleaving.
 type metricsCertProvider struct {
 	certDir string
 
@@ -38,6 +54,10 @@ type metricsCertProvider struct {
 	loggedMissing bool
 
 	// readPair overrides on-disk reads (tests only). Production leaves nil.
+	// It is invoked with p.mu held on the freshness re-read path, so an
+	// implementation that takes its own lock to serialize simulated disk
+	// rotation inverts lock order and deadlocks every concurrent handshake.
+	// Serialize test-side state outside readPair, not inside it.
 	readPair func(certPath, keyPath string) ([]byte, []byte, [sha256.Size]byte, error)
 }
 
