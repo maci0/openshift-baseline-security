@@ -174,7 +174,9 @@ tests:
         alertname: ComplianceChecksInconsistent
         exp_alerts: []
 
-  # Never-published metrics (timestamp seed 0) fire ComplianceStatusStale.
+  # A zero reading on the freshness gauge (never-published guard) fires
+  # ComplianceStatusStale. The gauge itself is not seeded, so a replica that has
+  # not published is covered by the absent() case below.
   - interval: 1m
     input_series:
       - series: 'baseline_security_status_observed_timestamp_seconds{instance="op-1"}'

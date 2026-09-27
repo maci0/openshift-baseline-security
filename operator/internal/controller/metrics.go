@@ -97,8 +97,10 @@ func init() {
 	// Seed the "no score yet" sentinel so a never-reconciled or
 	// error-before-aggregation state reads as -1, not the gauge default of 0
 	// (which the ComplianceScoreLow alert's `>= 0 and < 80` would treat as a
-	// real low score). Every other gauge already reads 0 until published; the
-	// condition series need the touch so each labelled child exists from the
+	// real low score). The other gauges need no seed: publishMetrics writes
+	// every one of them on each pass, and a gauge that has never been written
+	// is absent, which the alerts read as no data rather than as 0. The
+	// condition series do get the touch so each labelled child exists from the
 	// start instead of appearing only after the first reconcile.
 	complianceScore.Set(-1)
 	for _, typ := range publishedConditionTypes {

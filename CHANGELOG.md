@@ -162,6 +162,42 @@ depend on those tags.
 
 ### Changed
 
+- The operator seeded every gauge to 0 at startup, and
+  `baseline_security_status_observed_timestamp_seconds` was seeded to 0 as a
+  "never published" sentinel. Only `baseline_security_compliance_score` (the -1
+  sentinel of ADR-018) and the `baseline_security_condition` children need that;
+  every other gauge is written on each publish, and a published timestamp is a
+  wall clock, never 0. The seeds are gone, so on a replica that has not
+  reconciled yet `baseline_security_last_scan_timestamp_seconds`,
+  `baseline_security_newly_failed`, `baseline_security_remediation_batch_active`,
+  `baseline_security_remediation_batch_started_timestamp_seconds`, and
+  `baseline_security_scan_interval_seconds` are absent rather than 0. A
+  dashboard panel or recording rule that read one of them as 0 in that window
+  now sees no series; add `or vector(0)` in PromQL where the zero is the answer
+  you want. Alert firing is unchanged: `ComplianceStatusStale` catches the
+  never-published case through its `absent()` disjunct, which the seed removal
+  makes the primary path, and the HA newest-publisher selection every other
+  alert uses simply matches nothing until the first publish.
+- Console plugin built a fresh `Intl.NumberFormat` / `Intl.DateTimeFormat` on
+  every count, date label, and chart tick. A console session sets an explicit
+  locale, and the engine only caches the runtime default, so each card, waiver
+  row, remediation row, and axis label paid a formatter construction on the
+  main thread. `formatCount`, `formatLocalDate`, and `formatChartDate` now hold
+  one formatter per locale tag, matching how the display collator is already
+  cached. Output is unchanged, including the fallback for an invalid tag.
+- Console plugin re-canonicalized the console locale on every count, date label,
+  collator comparison, and list join: `safeLocale` ran `Intl.getCanonicalLocales`
+  per call, and `compareForDisplay` calls it once per comparison, so sorting the
+  rule catalog canonicalized the tag thousands of times per sort. `safeLocale`
+  now holds one entry per locale tag, like the formatters above it. Output is
+  unchanged, including the invalid-tag fallback.
+- Profiles typeahead re-folded the whole rule catalog, plus the query once per
+  option, on every keystroke, so typing in the enable-rules picker redid a
+  thousand NFD normalizations per character over unchanged names. The catalog
+  is now folded when it changes and the query when it is typed, leaving a
+  substring test per option. Matching is unchanged, including diacritic and
+  Turkish dotted/dotless i handling.
+
 - The console plugin's nginx access log no longer uses the `combined` format.
   It logged the admin's client IP, the referring console URL, and the browser
   user agent, none of which triage a failed static-asset fetch, and the log
@@ -249,6 +285,32 @@ depend on those tags.
   a baseline-only patch created and rewrote objects the operator then consumed.
 
 ### Fixed
+
+- A paged apiserver `List` that returned the continue token it had just been
+  given replayed the same page until `reconcileTimeout`, so the reconcile failed
+  with a deadline instead of the real cause. The three paged read paths
+  (ComplianceCheckResult aggregation, remediation batch selection, scan-diff
+  history) now stop when the token does not advance, write the partial rollup
+  they have, and re-list from the start on the next reconcile.
+- The console plugin's startup, readiness, and liveness probes were a bare TCP
+  connect on 9443, so an nginx pod holding the listener open over an unreadable
+  asset tree (a bad `fsGroup`, a truncated image) reported ready and drew console
+  traffic while every asset 404ed. The probes now request `/healthz` over HTTPS
+  on the serving path, which nginx answers from a constant return that touches no
+  asset.
+- The Remediations tab read `metadata.name`, `metadata.labels`, and
+  `status.errorMessage` off a `ComplianceRemediation` without narrowing, so one
+  object that arrived without `metadata` (hand-edited, or a partial list) threw
+  during render and took the whole tab down, and a `status.errorMessage` that was
+  not a string, or carried Unicode format characters, reached the table
+  unfiltered. Name and labels are read through optional access, the error detail
+  through the same `isString` and `stripFormatChars` guards the rest of the
+  console applies to untrusted status.
+- Console plugin image failed to build. The `COPY` that places
+  `THIRD-PARTY-NOTICES.txt` in `/licenses/` named a path from the build stage
+  without `--from=build`, so it resolved against the build context instead,
+  where `dist/` is excluded by `.dockerignore`. The file the build stage
+  generated was never reachable from the runtime stage.
 
 - Release workflow: the `version` input of a manual `workflow_dispatch` run was
   never read, so the cut published whatever the dispatched ref resolved to and a
@@ -434,6 +496,28 @@ depend on those tags.
   consumes it already caught and showed Retry. A stale cached console after a
   plugin upgrade is the common way to hit it, and the unhandled rejection
   obscured the Retry control for the same failure.
+
+### Security
+
+- Results CSV export hardened against a formula sigil hidden behind a leading
+  control character. `csvCell` dropped NULs and Unicode format characters, then
+  checked the cell for a formula starter, so a cell such as `\u0001=cmd` kept a
+  control prefix that a spreadsheet trims before deciding whether the cell is a
+  formula. A tampered `ComplianceCheckResult` name, description first line, or
+  `check-severity` label could therefore reach a downloaded export as an
+  evaluated formula. Export rows now drop the controls a spreadsheet trims
+  (tab, CR, and LF stay, since RFC 4180 quoting needs them). Cells that held a
+  control character other than a delimiter lose it from the export.
+- Console write controls were gated on `useAccessReview` through their
+  `isDisabled` prop alone. A tab holding an open confirm modal, a stopped
+  editor, or a pending form across a permission revocation would still send the
+  patch the button had already admitted. Every mutation now re-checks the
+  reviewed permission at the request boundary through one chokepoint
+  (`console-plugin/src/permissions.ts`), and an unresolved review denies rather
+  than defaulting to allow. Covered: rescan, profile toggle, schedule save,
+  waiver add and remove, TailoredProfile create, update, and bind, tailored
+  profile unbind, default baseline create, and every remediation path
+  (per-row apply, unapply, auto-apply, batch apply).
 
 ## [0.6.1] - 2026-09-02
 
