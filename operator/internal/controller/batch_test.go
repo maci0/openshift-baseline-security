@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -227,4 +228,99 @@ func FuzzBatchPastGrace(f *testing.F) {
 			t.Fatalf("batchPastGrace(%v) = %v, want %v", started.Time, past, want)
 		}
 	})
+}
+
+// FuzzValidateBatchTarget: validateBatchTarget is the confused-deputy gate
+// before the operator applies spec.apply with its own service account, and
+// both fields it reads off a hand-editable ComplianceRemediation are untyped
+// in an unstructured object. A wrong type must come back as a permanent
+// reject (isPermanentBatchTargetReject) so a corrupt remediation cannot enter
+// status.remediationBatch.Remediations and pin the wait path until grace, and
+// a well-formed remediation must never be rejected.
+func FuzzValidateBatchTarget(f *testing.F) {
+	f.Add("Enabled", fuzzFieldString, fuzzFieldBool)
+	f.Add("MissingDependencies", fuzzFieldString, fuzzFieldBool)
+	f.Add("", fuzzFieldString, fuzzFieldBool)
+	f.Add("Enabled", fuzzFieldString, fuzzFieldMissing)
+	f.Add("Enabled", fuzzFieldInt, fuzzFieldBool)
+	f.Add("Enabled", fuzzFieldString, fuzzFieldInt)
+	f.Add("Enabled", fuzzFieldMap, fuzzFieldList)
+	f.Add("Enabled", fuzzFieldMissing, fuzzFieldMissing)
+	f.Add("Enabled", fuzzFieldNull, fuzzFieldString)
+	f.Fuzz(func(t *testing.T, state string, stateField, applyField int) {
+		if len(state) > 256 {
+			state = state[:256]
+		}
+		rem := &unstructured.Unstructured{Object: map[string]any{}}
+		rem.SetName("remediation")
+		rem.Object["status"] = map[string]any{
+			"applicationState": fuzzFieldValue(stateField, state),
+		}
+		spec := map[string]any{}
+		if applyField != fuzzFieldMissing {
+			spec["apply"] = fuzzFieldValue(applyField, state)
+		}
+		rem.Object["spec"] = spec
+
+		err := validateBatchTarget(rem)
+		stateOK := stateField == fuzzFieldString && state != "MissingDependencies"
+		applyOK := applyField == fuzzFieldBool || applyField == fuzzFieldMissing
+		if stateOK && applyOK {
+			if err != nil {
+				t.Fatalf("well-formed remediation rejected: state=%q stateField=%d applyField=%d: %v",
+					state, stateField, applyField, err)
+			}
+			return
+		}
+		if err == nil {
+			t.Fatalf("corrupt remediation accepted: state=%q stateField=%d applyField=%d",
+				state, stateField, applyField)
+		}
+		if !isPermanentBatchTargetReject(err) {
+			t.Fatalf("reject is not permanent (it retries and wedges the batch wait): %v", err)
+		}
+	})
+}
+
+const (
+	fuzzFieldString = iota
+	fuzzFieldBool
+	fuzzFieldInt
+	fuzzFieldFloat
+	fuzzFieldMap
+	fuzzFieldList
+	fuzzFieldNull
+	fuzzFieldMissing
+)
+
+// fuzzFieldValue renders one JSON-typed field. A fuzzer mutating a single
+// string never reaches the type-confusion branches of NestedString and
+// NestedBool, so the field type is an explicit dimension here.
+func fuzzFieldValue(kind int, s string) any {
+	switch kind {
+	case fuzzFieldString:
+		return s
+	case fuzzFieldBool:
+		return s == "true"
+	case fuzzFieldInt:
+		n, err := strconv.ParseInt(s, 10, 64)
+		if err != nil {
+			n = 42
+		}
+		return n
+	case fuzzFieldFloat:
+		f, err := strconv.ParseFloat(s, 64)
+		if err != nil {
+			f = 1.5
+		}
+		return f
+	case fuzzFieldMap:
+		return map[string]any{"key": s}
+	case fuzzFieldList:
+		return []any{s}
+	case fuzzFieldNull:
+		return nil
+	default:
+		return nil
+	}
 }

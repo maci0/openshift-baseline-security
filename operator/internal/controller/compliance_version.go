@@ -89,19 +89,17 @@ func comparePrerelease(a, b string) int {
 	bp := strings.Split(b, ".")
 	n := min(len(ap), len(bp))
 	for i := range n {
-		ai, aNum := parsePrereleaseNumber(ap[i])
-		bi, bNum := parsePrereleaseNumber(bp[i])
+		aNum, bNum := isNumericSegment(ap[i]), isNumericSegment(bp[i])
 		switch {
-		case aNum && bNum && ai != bi:
-			if ai > bi {
-				return 1
+		case aNum && bNum:
+			if cmp := compareNumericSegment(ap[i], bp[i]); cmp != 0 {
+				return cmp
 			}
+		case aNum:
 			return -1
-		case aNum && !bNum:
-			return -1
-		case !aNum && bNum:
+		case bNum:
 			return 1
-		case !aNum && !bNum:
+		default:
 			if cmp := strings.Compare(ap[i], bp[i]); cmp != 0 {
 				return cmp
 			}
@@ -117,15 +115,29 @@ func comparePrerelease(a, b string) int {
 	}
 }
 
-func parsePrereleaseNumber(s string) (int, bool) {
+func isNumericSegment(s string) bool {
 	if s == "" {
-		return 0, false
+		return false
 	}
 	for _, r := range s {
 		if r < '0' || r > '9' {
-			return 0, false
+			return false
 		}
 	}
-	n, err := strconv.Atoi(s)
-	return n, err == nil
+	return true
+}
+
+// compareNumericSegment orders two digit-only segments by value. A run of
+// digits longer than int64 is still numeric (semver puts no bound on it), so
+// the comparison goes by significant-digit count and then lexically instead of
+// through a machine int: an overflowed segment must not degrade to string
+// order, which ranked a 20-digit segment below a 19-digit one and could let
+// pickComplianceOperatorCSV settle on the older of the two CSVs.
+func compareNumericSegment(a, b string) int {
+	a = strings.TrimLeft(a, "0")
+	b = strings.TrimLeft(b, "0")
+	if len(a) != len(b) {
+		return cmp.Compare(len(a), len(b))
+	}
+	return strings.Compare(a, b)
 }

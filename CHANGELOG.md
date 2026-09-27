@@ -231,6 +231,12 @@ depend on those tags.
 
 ### Fixed
 
+- A Compliance Operator CSV name whose prerelease segment was a run of digits
+  wider than int64 was compared as a string instead of as a number, so
+  `compliance-operator.v1.2.3-rc.18446744073709551616` sorted below
+  `compliance-operator.v1.2.3-rc.9223372036854775808` and the older CSV could
+  win the newest-version selection. Such a segment is now ordered by value, by
+  significant-digit count and then lexically, with no machine int in the path.
 - Unbinding a tailored profile while its Edit form was still loading left the
   modal open on a profile no scan includes any more, and saving it reported
   `Tailored profile updated.` for a TailoredProfile nothing bound. Edit and

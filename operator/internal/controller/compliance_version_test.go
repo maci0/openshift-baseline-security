@@ -26,6 +26,8 @@ func TestCompareComplianceCSVVersion(t *testing.T) {
 		{name: "numeric prerelease segment by number", a: "compliance-operator.v1.2.3-alpha.10", b: "compliance-operator.v1.2.3-alpha.2", want: 1},
 		{name: "non-numeric prerelease segment after numeric", a: "compliance-operator.v1.2.3-rc.rc", b: "compliance-operator.v1.2.3-rc.1", want: 1},
 		{name: "alpha prerelease segment by string order", a: "compliance-operator.v1.2.3-rc10", b: "compliance-operator.v1.2.3-rc2", want: -1},
+		{name: "prerelease segment wider than int64 by value", a: "compliance-operator.v1.2.3-rc.18446744073709551616", b: "compliance-operator.v1.2.3-rc.9223372036854775808", want: 1},
+		{name: "prerelease segment wider than int64 against a machine int", a: "compliance-operator.v1.2.3-rc.18446744073709551616", b: "compliance-operator.v1.2.3-rc.9223372036854775807", want: 1},
 		{name: "longer prerelease wins on a shared prefix", a: "compliance-operator.v1.2.3-rc.1", b: "compliance-operator.v1.2.3-rc", want: 1},
 		{name: "build metadata ties to string order", a: "compliance-operator.v1.2.3+build.7", b: "compliance-operator.v1.2.3", want: 1},
 		{name: "build metadata differs", a: "compliance-operator.v1.2.3+build.2", b: "compliance-operator.v1.2.3+build.1", want: 1},
@@ -138,4 +140,64 @@ func TestComplianceCSVVersionParse(t *testing.T) {
 			}
 		})
 	}
+}
+
+// FuzzComplianceCSVVersionTotalOrder: pickComplianceOperatorCSV selects the
+// newest CSV by folding compareComplianceCSVVersion over the List, so a
+// non-transitive comparator makes the winner depend on the order the apiserver
+// returned the names in. Every name here is untrusted cluster text, including
+// prerelease fields with an unbounded digit run. Asserts the order properties
+// (reflexive, antisymmetric, transitive) plus the documented parseable-beats-
+// unparseable rule, since a fuzzer needs an oracle to be worth running.
+func FuzzComplianceCSVVersionTotalOrder(f *testing.F) {
+	for _, seed := range [][3]string{
+		{"compliance-operator.v1.2.3", "compliance-operator.v1.2.4", "compliance-operator.v1.3.0"},
+		{"compliance-operator.v1.2.3-rc.1", "compliance-operator.v1.2.3", "compliance-operator.v1.2.4"},
+		{"compliance-operator.v1.2.3-rc.1", "compliance-operator.v1.2.3-rc.2", "compliance-operator.v1.2.3-rc.10"},
+		{"compliance-operator.v1.2.3", "compliance-operator.other", "compliance-operator.v9"},
+		{"compliance-operator.v1.2.3-1", "compliance-operator.v1.2.3-a", "compliance-operator.v1.2.3-0"},
+		// A digit run past int64: an overflowed segment used to fall back to
+		// string order, ranking a 20-digit prerelease below a 19-digit one.
+		{"compliance-operator.v1.2.3-18446744073709551616", "compliance-operator.v1.2.3-9223372036854775808", "compliance-operator.v1.2.3-1"},
+		{"", "compliance-operator.v", "compliance-operator.v1"},
+	} {
+		f.Add(seed[0], seed[1], seed[2])
+	}
+	f.Fuzz(func(t *testing.T, a, b, c string) {
+		for _, s := range []*string{&a, &b, &c} {
+			if len(*s) > 128 {
+				*s = (*s)[:128]
+			}
+		}
+		ab, ac, bc := sign(compareComplianceCSVVersion(a, b)),
+			sign(compareComplianceCSVVersion(a, c)),
+			sign(compareComplianceCSVVersion(b, c))
+		if got := compareComplianceCSVVersion(a, a); got != 0 {
+			t.Fatalf("compareComplianceCSVVersion(%q, %q) = %d, want 0", a, a, got)
+		}
+		if ab != -sign(compareComplianceCSVVersion(b, a)) {
+			t.Fatalf("antisymmetry broken: cmp(%q,%q)=%d cmp(%q,%q)=%d", a, b, ab, b, a, -ab)
+		}
+		if ab < 0 && bc < 0 && ac >= 0 {
+			t.Fatalf("transitivity broken: %q < %q < %q but cmp(%q,%q)=%d",
+				a, b, c, a, c, ac)
+		}
+		if ac < 0 && bc > 0 && ab >= 0 {
+			t.Fatalf("transitivity broken: %q < %q < %q but cmp(%q,%q)=%d",
+				c, b, a, a, b, ab)
+		}
+		// The two rank partitions: a parseable name beats an unparseable one
+		// whichever side it is on.
+		_, aParse := complianceCSVVersion(a)
+		_, bParse := complianceCSVVersion(b)
+		if aParse != bParse {
+			want := 1
+			if bParse {
+				want = -1
+			}
+			if ab != want {
+				t.Fatalf("cmp(%q,%q) = %d, want %d (parseable=%v,%v)", a, b, ab, want, aParse, bParse)
+			}
+		}
+	})
 }

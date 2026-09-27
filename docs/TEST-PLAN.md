@@ -568,6 +568,19 @@ an accepted risk neither inflates nor tanks the score.
 - [x] Paged CSV search: folding each List page into the incumbent picks the same
       CSV as the single-shot search at every page boundary, including
       wrong-typed phases and non-CSV names (`FuzzFoldComplianceOperatorCSVs`).
+- [x] **CSV name comparison is a total order for arbitrary names**: three
+      fuzzed CSV names compare reflexively, antisymmetrically, and
+      transitively, and a parseable name still beats an unparseable one from
+      either side, so `pickComplianceOperatorCSV` cannot settle on a different
+      CSV because the apiserver returned the names in another order
+      (`FuzzComplianceCSVVersionTotalOrder`; the fixed-name table is
+      `TestCompareComplianceCSVVersionTotalOrder`). A prerelease segment wider
+      than int64 is ordered by value, not by string.
+- [x] **Batch target gate is type-confusion proof**: a hand-editable
+      remediation whose `status.applicationState` or `spec.apply` carries a
+      non-string, non-bool, null, or absent value is a permanent reject
+      (`isPermanentBatchTargetReject`), and a well-formed one is never rejected
+      (`FuzzValidateBatchTarget`).
 - [x] **Status sanitize, text side**: a fuzzed status (profile names, tailored
       names, object refs, the four failure lists, condition type/reason/message,
       the remediation batch) sanitizes to a CRD-admissible object under every

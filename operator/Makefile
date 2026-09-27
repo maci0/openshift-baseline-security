@@ -244,6 +244,8 @@ fuzz:
 	go test ./internal/controller/ -run=^$$ -fuzz=^FuzzSortedDiff$$ -fuzztime=5s
 	go test ./internal/controller/ -run=^$$ -fuzz=^FuzzJSONStringLenMatchesMarshal$$ -fuzztime=5s
 	go test ./internal/controller/ -run=^$$ -fuzz=^FuzzSanitizeStatusUntrustedText$$ -fuzztime=5s
+	go test ./internal/controller/ -run=^$$ -fuzz=^FuzzComplianceCSVVersionTotalOrder$$ -fuzztime=5s
+	go test ./internal/controller/ -run=^$$ -fuzz=^FuzzValidateBatchTarget$$ -fuzztime=5s
 
 GOLANGCI_LINT_VERSION ?= v2.12.2
 # golangci-lint's default cache is the user cache dir, shared by every checkout
