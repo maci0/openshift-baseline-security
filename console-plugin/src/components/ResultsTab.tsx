@@ -904,7 +904,9 @@ const ResultsTab: React.FC<{
                       count: ownedResults.length,
                       formattedCount: formatCount(ownedResults.length, i18n.language),
                     })
-                  : t('Showing {{formattedShown}} of {{formattedTotal}} checks', {
+                  : t('Showing {{formattedShown}} of {{count}} checks', {
+                      count: ownedResults.length,
+                      formattedCount: formatCount(ownedResults.length, i18n.language),
                       formattedShown: formatCount(filteredData.length, i18n.language),
                       formattedTotal: formatCount(ownedResults.length, i18n.language),
                     })}

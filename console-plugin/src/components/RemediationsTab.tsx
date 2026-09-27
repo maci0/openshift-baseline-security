@@ -528,7 +528,9 @@ const RemediationsTab: React.FC<{
         <HelperText>
           <HelperTextItem>
             {foldedQuery
-              ? t('Showing {{formattedShown}} of {{formattedTotal}} remediations', {
+              ? t('Showing {{formattedShown}} of {{count}} remediations', {
+                  count: owned.length,
+                  formattedCount: formatCount(owned.length, i18n.language),
                   formattedShown: formatCount(visible.length, i18n.language),
                   formattedTotal: formatCount(owned.length, i18n.language),
                 })

@@ -148,6 +148,14 @@ depend on those tags.
   confirmed only "Results downloaded as compliance-results.csv.", so a subset
   was indistinguishable from a full export. The confirmation now names the row
   count written.
+- The "Showing X of Y checks" and "Showing X of Y remediations" search counts
+  carried no plural form, so a set of one read "Showing 1 of 1 remediations" in
+  English and gave a translator no form to pick for languages that inflect the
+  noun by count. Both are plural keys now, selected by the total.
+- The singular form of the filtered-export confirmation read "Exported 1 of N
+  filtered checks" with a hardcoded numeral. French counts zero in its
+  singular form, so exporting an empty filtered set told a French session it
+  had exported one row. The form interpolates the locale-formatted count.
 - Removing an orphaned waiver reported "The check counts toward the score
   again", which is false for a waiver that matches no result. The button in the
   orphan list now shows a progress spinner on the click that is in flight and
