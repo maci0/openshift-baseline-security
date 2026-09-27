@@ -177,9 +177,41 @@ export const textDirection = (locale?: string): 'ltr' | 'rtl' => {
   return 'ltr';
 };
 
+// The leading calendar day of an ISO date-time ("2026-02-31T00:00:00Z"). The
+// trailing [T ] keeps a bare YYYY-MM-DD out: parsedLocalDate only reaches a
+// date-only value on the formatLocalDate path, where parseLocalDateOnly already
+// owns the calendar check, and V8 rejects an impossible date-only value itself.
+const isoDayRe = /^(\d{4})-(\d{2})-(\d{2})[T ]/;
+
+// True unless the value spells out a day that does not exist. `new Date` is
+// lenient with the calendar and rolls an impossible day forward
+// (2026-02-31T00:00:00Z parses as 2026-03-03), so a corrupt cluster timestamp
+// would read as a real instant days away from the one the object claims.
+// setUTCFullYear, not `new Date(y, m, d)`, so years 0000-0099 stay those years.
+const isoDayExists = (iso: string): boolean => {
+  const match = isoDayRe.exec(iso);
+  if (!match) {
+    return true;
+  }
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const probe = new Date(0);
+  probe.setUTCFullYear(year, month - 1, day);
+  probe.setUTCHours(0, 0, 0, 0);
+  return (
+    probe.getUTCFullYear() === year &&
+    probe.getUTCMonth() === month - 1 &&
+    probe.getUTCDate() === day
+  );
+};
+
 // Display helpers for ISO timestamps from CR/user text. Unparseable values
 // return the raw string instead of "Invalid Date" so hand-edits stay debuggable.
 const parsedLocalDate = (iso: string): Date | null => {
+  if (!isoDayExists(iso)) {
+    return null;
+  }
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? null : d;
 };

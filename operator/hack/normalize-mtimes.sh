@@ -69,6 +69,20 @@ if [ "$#" -eq 0 ]; then
   exit 2
 fi
 
+# This script takes no options, so a leading `-` is a bad invocation rather
+# than a path. Without this the flag falls through to the path loop and comes
+# back as "no such path: --foo" with exit 1, which reads as a missing tree
+# rather than the typo it is.
+for arg in "$@"; do
+  case "${arg}" in
+  -*)
+    echo "${prog}: unknown option: ${arg}" >&2
+    usage >&2
+    exit 2
+    ;;
+  esac
+done
+
 epoch="${SOURCE_DATE_EPOCH:-0}"
 case "$epoch" in
 '' | *[!0-9]*)

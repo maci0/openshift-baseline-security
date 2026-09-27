@@ -6,7 +6,6 @@ import {
   isOwnedByBaseline,
   ResultCounts,
   RESULT_COUNT_KEYS,
-  ScoreSnapshot,
   suiteFilterKey,
   Waiver,
 } from './models';
@@ -77,11 +76,21 @@ export const normalizeScore = (v: unknown): number | null => {
  * wrote; it only stops a hand-edited fractional point from disagreeing with the
  * integer status.score rendered beside it.
  */
-export const latestSnapshotScore = (history?: ScoreSnapshot[]): number | undefined => {
+// A ring point as it arrives off a watch. status.profiles[].history is typed
+// ScoreSnapshot, but that is the shape the operator writes: a restored or
+// hand-edited ring can carry a point with a missing or non-string time and a
+// missing or non-finite score, and the reader below is written to survive both.
+// Read-only, because callers hold the status ring as a ReadonlyArray and the
+// reader has no reason to copy it.
+export type HistoryPoint = { time?: string; score?: number };
+
+export const latestSnapshotScore = (history?: readonly HistoryPoint[]): number | undefined => {
   let latestMs = Number.NEGATIVE_INFINITY;
   let latest: number | undefined;
   for (const h of history ?? []) {
-    const ms = new Date(h?.time).getTime();
+    // Date.parse, not new Date(...).getTime(): a missing time is a plain
+    // unparseable value here, and the constructor overloads do not take one.
+    const ms = Date.parse(h?.time ?? '');
     const score = normalizeScore(h?.score);
     if (Number.isNaN(ms) || score === null) {
       continue;
@@ -285,7 +294,7 @@ export const profileScore = (
     // Per-profile history ring (status.profiles[].history). Used only when
     // SeverityWeighted and the CCR list is still empty so badges use the last
     // operator-written weighted point instead of a flat pass/fail approximation.
-    history?: ReadonlyArray<{ score?: number }>;
+    history?: ReadonlyArray<HistoryPoint>;
   },
 ): number | null => {
   // profiles may be empty (tailored-only baseline); ownership still filters via

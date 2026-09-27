@@ -59,6 +59,34 @@ depend on those tags.
   schedule something to alert on, and it runs against a copy pulled back from
   remote storage. `--max-age-days` sets the limit.
 
+- A cluster timestamp naming a day that does not exist (`2026-02-31T00:00:00Z`)
+  rendered as a real instant several days later, because `new Date` rolls an
+  impossible calendar day forward instead of rejecting it. A corrupt
+  `status.lastScanTime` or scan end timestamp therefore read as a scan that had
+  already run, and the row moved on every mount. Such a value now resolves to
+  no date, the same as any other unparseable timestamp.
+
+- `yarn typecheck` and `yarn build` failed in the console plugin: the cluster
+  Overview score item closed a raw `<a>` with `</ConsoleLink>`, and the
+  Remediations tab imported `BaselineUnavailable` by name from a module that
+  only has a default export. The score item's link is now the same
+  SPA-navigating `ConsoleLink` the rest of the component uses, so a plain click
+  on it no longer leaves the console and reloads the shell.
+
+- `hack/normalize-mtimes.sh` treated any argument as a path, so a mistyped
+  option came back as `no such path: --flag` with exit 1, reading as a missing
+  tree rather than the typo it was, and a usage error did not print the usage
+  text. It now rejects option-shaped arguments and prints the usage, matching
+  the contract every other `hack/` script already follows.
+
+- A `MachineConfigPool` whose `spec.paused` is not a bool was read as "not
+  paused" instead of as a failed read. A pool named in the
+  `batch-pools` annotation is re-admitted to a re-opened batch only when it
+  carries that batch's own pause marker, and a malformed field answered that
+  question wrongly, so the pool dropped out of the pause set, the batch status,
+  and every resume path, and was left paused with no path back. The batch start
+  now fails and Degrades instead, which retries.
+
 - `hack/backup.sh` and `hack/restore.sh`, a backup and restore path for
   `ClusterBaseline/cluster`, the only durable state this operator owns. Before
   them, recovering a lost or corrupted CR meant an out-of-band etcd restore,

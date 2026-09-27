@@ -135,7 +135,7 @@ const formulaRe = /^\s*[=+\-@|\t\r\n＝＋－＠−]/;
 // What a spreadsheet actually decides on: leading controls and whitespace
 // trimmed, then the sigil test. A cell that still looks like a formula after
 // that trim escaped the hardening.
-const trimmedFormulaRe = /^[\s\p{Cc}]*[=+\-@|＝＋－＠−]/;
+const trimmedFormulaRe = /^[\s\p{Cc}]*[=+\-@|＝＋－＠−]/u;
 
 describe('resultsCsv fuzz sweep', () => {
   it('keeps CSV structure and neutralizes formulas under hostile input', () => {
