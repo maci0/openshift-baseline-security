@@ -9,9 +9,11 @@
 # reads Compliance Operator and OLM objects cluster-wide, and narrowing that
 # needs a live cluster to enumerate every path, which is not a manifest change.
 #
-# The console-plugin Deployment lives in openshift-console, not here, so this
-# policy does not cover plugin traffic; the plugin is a static asset server on
-# :9443 with GET/HEAD only and a 1k body cap (console-plugin/nginx.conf).
+# The console-plugin Deployment shares this namespace but is selected by
+# app=baseline-security-console-plugin, so this policy does not cover plugin
+# traffic on :9443. The plugin is a static asset server with GET/HEAD only and
+# a 1k body cap (console-plugin/nginx.conf), and the operator does not hold
+# create rights on networkpolicies, so no policy guards those pods.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:

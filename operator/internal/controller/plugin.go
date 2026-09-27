@@ -271,10 +271,17 @@ func (r *ClusterBaselineReconciler) ensureConsolePlugin(ctx context.Context, cb 
 		dep.Spec.Replicas = ptr.To(replicas)
 		// maxUnavailable=1 makes DeploymentAvailable True at 1/2 ready, matching
 		// pluginReadyMin=1: a single drained node must not false-Degrade the plugin.
+		// With one replica (SingleReplica) that same value lets a rollout take the
+		// only pod down, so pin it to 0 there; maxSurge=1 brings the replacement up
+		// first and the console keeps serving the old pod until it is ready.
+		maxUnavailable := int32(1)
+		if replicas < 2 {
+			maxUnavailable = 0
+		}
 		dep.Spec.Strategy = appsv1.DeploymentStrategy{
 			Type: appsv1.RollingUpdateDeploymentStrategyType,
 			RollingUpdate: &appsv1.RollingUpdateDeployment{
-				MaxUnavailable: ptr.To(intstr.FromInt32(1)),
+				MaxUnavailable: ptr.To(intstr.FromInt32(maxUnavailable)),
 				MaxSurge:       ptr.To(intstr.FromInt32(1)),
 			},
 		}

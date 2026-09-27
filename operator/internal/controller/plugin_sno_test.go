@@ -74,6 +74,15 @@ func TestEnsureConsolePluginSingleNodeDropsPDB(t *testing.T) {
 	if dep.Spec.Replicas == nil || *dep.Spec.Replicas != 1 {
 		t.Fatalf("SNO replicas = %v, want 1", dep.Spec.Replicas)
 	}
+	// With one replica, maxUnavailable=1 lets a rollout take the only pod down
+	// and blank the console until the replacement is ready.
+	ru := dep.Spec.Strategy.RollingUpdate
+	if ru == nil || ru.MaxUnavailable == nil || ru.MaxUnavailable.IntValue() != 0 {
+		t.Fatalf("SNO rolling update MaxUnavailable = %v, want 0", ru)
+	}
+	if ru.MaxSurge == nil || ru.MaxSurge.IntValue() != 1 {
+		t.Fatalf("SNO rolling update MaxSurge = %v, want 1", ru)
+	}
 	pdb := &policyv1.PodDisruptionBudget{}
 	err := r.Get(context.Background(), types.NamespacedName{Name: pluginName, Namespace: pluginNS}, pdb)
 	if !apierrors.IsNotFound(err) {
@@ -100,6 +109,12 @@ func TestEnsureConsolePluginHAKeepsPDB(t *testing.T) {
 	}
 	if dep.Spec.Replicas == nil || *dep.Spec.Replicas != pluginReplicas {
 		t.Fatalf("HA replicas = %v, want %d", dep.Spec.Replicas, pluginReplicas)
+	}
+	// Two replicas: one may be unavailable during a rollout, so Available stays
+	// True at 1/2 ready and a drained node does not false-Degrade the plugin.
+	ru := dep.Spec.Strategy.RollingUpdate
+	if ru == nil || ru.MaxUnavailable == nil || ru.MaxUnavailable.IntValue() != 1 {
+		t.Fatalf("HA rolling update MaxUnavailable = %v, want 1", ru)
 	}
 	pdb := &policyv1.PodDisruptionBudget{}
 	if err := r.Get(context.Background(), types.NamespacedName{Name: pluginName, Namespace: pluginNS}, pdb); err != nil {

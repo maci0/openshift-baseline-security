@@ -43,6 +43,140 @@ depend on those tags.
 
 ## [Unreleased]
 
+### Security
+
+- The operator namespace now ships a `NetworkPolicy`. Any pod in the cluster
+  could previously open a TCP connection to the operator's metrics port 8443;
+  the bearer token was the only control. Ingress is now denied on every
+  operator port except 8443, and only for `openshift-monitoring` (the
+  platform Prometheus scrape) and the service-ca operator (which mints the
+  serving cert the scrape verifies against). Egress is deliberately left
+  unrestricted so the policy cannot intersect the platform's own policies and
+  cut the operator off from the API server.
+- The serialized-size budget that trims `status` failure lists under-counted
+  a string carrying ill-formed UTF-8 by up to 4 bytes per bad byte, because it
+  counted the three-byte replacement rune where `encoding/json` writes the
+  six-byte escape. A `ClusterBaseline` whose failure names came back from a
+  protobuf restore with lone continuation bytes could therefore exceed the
+  size bound and fail every subsequent status write, wedging conditions,
+  score, and phase. The count now uses the wider of the two forms, which can
+  only trim a list early.
+- A console write is now denied while its access review is still in flight, not
+  only once the review comes back negative. `mayWrite` is the single chokepoint
+  every mutation passes through, and it read `allowed` alone, so a permission
+  revoked between the moment a control rendered and the moment it was clicked
+  could still be spent on the wire when the review had not resolved yet. The
+  check now fails closed on an unresolved review, matching what the plugin's
+  contributor rules already stated.
+
+- `hack/restore.sh` now refuses a backup artifact that holds more than one YAML
+  document. `oc apply -f` and `oc replace -f` apply every document in a
+  multi-document file, so a backup directory with a second document appended
+  after the `ClusterBaseline` would have been written to the cluster with the
+  restoring operator's own credentials, whatever privilege it held. The
+  existing kind and apiVersion checks match on any line and could not see the
+  extra document, and the MANIFEST sha256 does not help: it lives in the same
+  directory and is recomputable by anyone who can edit the artifact. Backups
+  taken by `hack/backup.sh` are a single named object and never contain a
+  `---` separator, so no valid backup is affected.
+
+- `hack/restore.sh` now stops, changing nothing, when it cannot read the live
+  `ClusterBaseline/cluster`. A failed read left the resourceVersion comparison
+  with an empty value, which read the same as an absent object: the rollback
+  guard was skipped, and an out-of-date backup was applied over a live object
+  that had moved on, discarding every waiver edit and remediation batch
+  annotation made since, with no `--force` and no warning. `--force` does not
+  override it, since the operator cannot have meant to clobber an object whose
+  current resourceVersion was never read.
+
+### Fixed
+
+- On a single-node cluster the console plugin rolled out with
+  `maxUnavailable: 1` against a one-replica Deployment, so a plugin upgrade
+  could take the only pod down and blank Administration → Compliance until its
+  replacement was ready. The plugin Deployment now pins `maxUnavailable: 0`
+  whenever it runs a single replica; two-replica clusters keep `1`, which is
+  what keeps the Deployment Available while a node is drained.
+- The Overview tab rendered one link per newly failing and per fixed check on
+  first paint, and `status.newlyFailed` / `status.fixed` hold up to 4096 names
+  each, so a large scan delta put thousands of elements into the DOM before the
+  rest of the page painted. Both surfaces now render the first 25 of each group
+  and the Recent changes card shows the remainder on request; the counts in the
+  alert and the group headings still report the full totals. The compliance
+  score card on the cluster Overview also passed a fresh watch options object
+  on every render, re-subscribing to the `ClusterBaseline` list each time.
+- A render failure in Administration → Compliance left a blank page. The
+  console mounts an extension page with no error boundary, so a throw while
+  rendering a tab or the page shell unmounted the whole route, and the browser
+  console carried no record of what threw. Every tab route and the page shell
+  now sit behind an error boundary that names the view, reports the reason and
+  the error object to the browser console, and offers Retry, so a bad
+  `ClusterBaseline` or Compliance Operator object an admin fixes no longer
+  needs a full page reload to recover from.
+- The same check status was drawn in different colors depending on which view
+  read it. `MANUAL` was the icon-token amber on the console composition donut
+  and a brighter yellow in the Observe dashboard; `WAIVED` was teal on the
+  console (donut wedge and Results status chip) and the same grey as
+  not-applicable in the dashboard, which stacks the two adjacent. The dashboard
+  now paints both from the same PatternFly 6 tokens the console reads, and the
+  exported HTML report's score and severity type now uses the text status
+  tokens it claimed to use (the warning amber and the success green were
+  hand-picked values that matched no token), so a status is one color across
+  the console, the report, and the dashboard. `TestDashboardUsesStatusPalette`
+  pins the widened set.
+- The Results tab reported "Baseline not configured" with a Create button when
+  the `ClusterBaseline` watch failed, for example on a 403 or a missing CRD.
+  The page forces its loaded flag true on a watch error so the tabs stop
+  skeletonning, and Results was the one tab that did not read
+  `baselineError` off the shared context, so it could not tell a failed read
+  from an absent CR. It now renders the same danger state, naming the reason,
+  that Overview, Remediations, and Profiles already render.
+- The Overview "newly failing" banner and the Recent changes card disagreed
+  with each other. The banner counted only the regressions whose check result
+  was still present, so a scan whose failing rules had all been removed or
+  unbound read "0 checks newly failing" while the status behind it listed
+  them, and Recent changes then claimed there were no changes at all. Both now
+  fall back to the operator's own count and say how many of those have no
+  result left to open.
+- The Degraded and Progressing banners on Overview printed the condition
+  message with no `dir="auto"`, so a right-to-left message reordered the
+  punctuation around it, and a Degraded condition carrying no message rendered
+  a title with no explanation. Both render the message as its own element now,
+  with fallback text when the operator set none.
+- Apiserver and cluster-object text shown in error banners (Remediations
+  apply, unapply, batch, auto-apply and clipboard failures; the schedule
+  editor; baseline create) rendered without `dir="auto"`, unlike every other
+  banner in the plugin, so an RTL resource name inside the message could
+  reorder the text around it.
+- `Export HTML report` disappeared from the page header whenever no
+  `ClusterBaseline` existed, while `Rescan now` stayed visible, disabled, and
+  carrying its reason. The two header controls now behave the same way.
+- The Profiles tab hid `New tailored profile` from anyone without the create
+  verb, leaving no reason and no hint that tailored profiles exist. It renders
+  disabled with the permission reason now, like every other write control in
+  the plugin.
+- `hack/verify-backup.sh` computed the backup age with `date -u -d`, which is
+  GNU coreutils only. On a host with BSD `date` (macOS, which `hack/backup.sh`
+  and `hack/restore.sh` already support for the digest) the conversion failed,
+  the age check was skipped with a note on stderr, and the script exited 0: a
+  backup that had not been refreshed in a year verified as restorable, which
+  is the one failure it exists to catch. The age is now read off the stamp
+  itself (`hack/lib-timestamp.sh`, no external `date` call), and a MANIFEST
+  whose `takenAt` is missing or unparseable fails the check instead of
+  passing it, so an unmeasurable age can no longer be alerted on as a healthy
+  one. `hack/restore.sh` reports the same case as an unknown RPO rather than
+  printing no age at all.
+- `hack/verify-backup.sh` digested the artifact with `sha256sum` directly,
+  where the other two scripts go through `hack/lib-sha256.sh`, so the check
+  could not run at all on a host without GNU coreutils, which is the host the
+  doc tells an admin to pull the off-cluster copy back onto.
+- `hack/restore.sh` now refuses, before any write, an artifact taken at an
+  `apiVersion` the cluster's CRD does not serve. `oc apply` reports that as
+  `no matches for kind`, which during an incident points at RBAC rather than
+  at the version; the refusal names the artifact's version and the served
+  ones, and `--force` overrides it. A cluster whose CRD cannot be read (an
+  etcd restore still in progress) is left to the apply.
+
 ### Added
 
 - A name filter on the Remediations tab. A full benchmark run lists thousands

@@ -736,7 +736,11 @@ an accepted risk neither inflates nor tanks the score.
 - [x] **Insecure metrics guard**: non-loopback insecure metrics forced secure
       (`TestIsLoopbackMetricsAddr`).
 - [x] **Plugin HA strategy**: Deployment maxUnavailable=1 so Available stays
-      True at 1/2 ready (`TestEnsureConsolePlugin` strategy assert).
+      True at 1/2 ready (`TestEnsureConsolePlugin` strategy assert); on a
+      single-replica (SingleReplica) Deployment maxUnavailable drops to 0 with
+      maxSurge=1 so a rollout never takes the only pod down
+      (`TestEnsureConsolePluginSingleNodeDropsPDB`,
+      `TestEnsureConsolePluginHAKeepsPDB`).
 - [x] **preStop on both pods**: the plugin container declares a 5s preStop
       sleep handler inside the 30s grace period, never an exec hook (the
       images do not guarantee a shell)
