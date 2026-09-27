@@ -464,6 +464,10 @@ verify-versions:
 	if [ -n "$$unrel_line" ] && [ -n "$$ver_line" ] && [ "$$unrel_line" -ge "$$ver_line" ]; then \
 		echo "CHANGELOG.md ## [Unreleased] must appear above ## [$(VERSION)] (Keep a Changelog order)"; fail=1; \
 	fi; \
+	dup_sections=$$(awk '/^## /{sec=$$0} /^### /{if (++count[sec SUBSEP $$0] > 1) print sec " has a second " $$0}' "$$cl"); \
+	if [ -n "$$dup_sections" ]; then \
+		echo "CHANGELOG.md repeats a section heading inside one release: $$dup_sections; Keep a Changelog has one section per kind and a repeat hides entries from consumers reading the first one"; fail=1; \
+	fi; \
 	grep -qE '"@console/pluginAPI": ">=4\.22\.0-0 <4\.23\.0-0"' "$$pkg" \
 		|| { echo "console-plugin package.json @console/pluginAPI must be >=4.22.0-0 <4.23.0-0 (matches =v4.22 host pin); looser ranges would load on untested consoles"; fail=1; }; \
 	grep -qE "^\[$(VERSION_RE)\]: .*compare/.*v$(VERSION_RE)$$" "$$cl" \
