@@ -24,6 +24,17 @@ describe('toTrendData', () => {
     expect(points[0].y).toBe(80);
     expect(points[0].x.getTime()).toBe(Date.parse('2026-01-01T00:00:00.000Z'));
   });
+
+  it('clamps out-of-range scores into the CRD bounds', () => {
+    // A restored or hand-edited snapshot: the trend must not label, color, or
+    // plot a score the operator's clampHistory would never have written.
+    expect(
+      toTrendData([
+        { time: '2026-01-01T00:00:00Z', score: 5000 },
+        { time: '2026-01-02T00:00:00Z', score: -20 },
+      ]).map((p) => p.y),
+    ).toEqual([100, 0]);
+  });
 });
 
 // The separator the previous key builder interpolated, spelled out so the
@@ -114,11 +125,13 @@ describe('history ring fuzz (untrusted status.history)', () => {
         throw new Error(`seed ${seed} threw: ${String(e)}`);
       }
       // Every surviving point must be one Victory can plot: a real instant and a
-      // finite score. A NaN y compares false against every threshold and would
-      // paint the badge green.
+      // score inside the CRD [0,100] bounds. A NaN y compares false against
+      // every threshold and would paint the badge green.
       for (const p of points) {
         expect(Number.isNaN(p.x.getTime())).toBeFalsy();
         expect(Number.isFinite(p.y)).toBeTruthy();
+        expect(p.y).toBeGreaterThanOrEqual(0);
+        expect(p.y).toBeLessThanOrEqual(100);
       }
       expect(points.length).toBeLessThanOrEqual(ring.length);
     }

@@ -585,11 +585,13 @@ an accepted risk neither inflates nor tanks the score.
 - [x] **Download filename cap** does not split a surrogate pair (jest
       `downloadBlob`).
 - [x] **History sparkline input** drops unparseable times and non-finite
-      scores (jest `toTrendData`); content key is stable across reallocations
+      scores, and clamps a finite out-of-range score into `[0,100]` (jest
+      `toTrendData`); content key is stable across reallocations
       (jest `historyContentKey`).
 - [x] **History ring fuzz**: a hostile `status.history` (null entries, string
       scores, NUL and `\x01` in a time) never throws in either helper, every
-      surviving point is plottable, and the content key is injective: a
+      surviving point is plottable and inside `[0,100]`, and the content key is
+      injective: a
       two-point ring and a one-point ring whose time swallows the separator
       bytes must not share a key, or React keeps painting the stale series
       (jest `overviewTrend.test.ts`, "history ring fuzz").

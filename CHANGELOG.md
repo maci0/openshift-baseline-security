@@ -150,6 +150,13 @@ depend on those tags.
 
 ### Fixed
 
+- The score trend and per-profile sparklines clamp a `status.history` score
+  into the CRD `[0,100]` bounds before plotting it, the same bound the operator
+  enforces on write and every other `status.score` read already applied. A
+  restored or hand-edited snapshot outside the range was labelled verbatim
+  ("Score moved from 5,000 to 90"), colored from an impossible value, and drawn
+  as a point the chart domain had to clip.
+
 - `restore.sh` no longer restores a backup over a live `ClusterBaseline` that
   has moved on since it was taken. The MANIFEST records the `resourceVersion`
   the backup holds, and the script now reads the live one before writing: a

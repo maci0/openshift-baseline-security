@@ -4,19 +4,27 @@
 // the charting library into the page shell.
 import { encodeKeyPart } from './contentKey';
 import { ScoreSnapshot } from './models';
-import { isFiniteNumber } from './parse';
+import { normalizeScore } from './scoring';
 
 // History snapshots to Victory {x: Date, y: score} points.
-// Drop points with an unparseable time or non-finite score: a single bad
-// snapshot otherwise makes Victory's time-scale domain NaN and silently blanks
-// the whole chart (hand-edited / partial status can carry missing scores).
+// Drop points with an unparseable time or a score that is not a finite number:
+// a single bad snapshot otherwise makes Victory's time-scale domain NaN and
+// silently blanks the whole chart (hand-edited / partial status can carry
+// missing scores). A finite score outside [0,100] is clamped by normalizeScore,
+// the same bound the operator's clampHistory enforces on write and that
+// normalizeScore applies to every status.score read: a restored or hand-edited
+// point must not reach the trend's aria label as "5,000", color the sparkline
+// from an impossible value, or plot a point the y domain has to clip.
 export const toTrendData = (history?: ScoreSnapshot[]): { x: Date; y: number }[] =>
   (history ?? [])
     // status.history is cluster-supplied and not runtime type-checked, so a
     // hand-edited null or non-string entry must be dropped, not throw and blank
     // the Overview page.
-    .map((h) => ({ x: new Date(h?.time), y: h?.score }))
-    .filter((p) => !Number.isNaN(p.x.getTime()) && isFiniteNumber(p.y));
+    .map((h) => ({ x: new Date(h?.time), y: normalizeScore(h?.score) }))
+    .filter(
+      (p): p is { x: Date; y: number } =>
+        !Number.isNaN(p.x.getTime()) && p.y !== null,
+    );
 
 // Content key for history rings: status-only CR updates reallocate the array
 // with the same points; identity deps would rebuild Victory Date/path data on
