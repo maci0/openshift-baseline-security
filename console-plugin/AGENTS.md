@@ -67,6 +67,16 @@ excluded from linting itself via `ignorePatterns`.
 `noUnusedParameters`, and `isolatedModules`. Do not loosen a flag to make an
 error go away.
 
+## Dev server
+
+`yarn start` serves the plugin on :9001 for a console on another origin, so it
+needs CORS, and it serves source maps, so its CORS and Host policy name that
+console instead of admitting every origin (`allowedHosts: 'all'` is open to DNS
+rebinding). `PLUGIN_DEV_ALLOWED_ORIGIN` is the one knob: a bare http(s) origin,
+default `http://localhost:3000`, validated when the dev server options are
+built, and its hostname joins the Host allowlist. A LAN console or an
+SSH-forwarded one sets it. It is dev-only: a production build never reads it.
+
 ## Module layout
 
 Domain logic lives in flat modules under `src/` with a colocated
