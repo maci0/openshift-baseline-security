@@ -5,7 +5,8 @@ plugin. Status: `[x]` covered by an existing test, `[ ]` gap, `[~]` partial
 (asserted in spirit or by a neighboring case, but not pinned exactly).
 
 Existing unit/fuzz tests live in `operator/internal/controller/*_test.go`,
-`operator/cmd/*_test.go`, and `console-plugin/src/*.test.ts`. Live e2e lives in
+`operator/cmd/*_test.go`, `operator/hack/*_test.go` (the `hack/` scripts), and
+`console-plugin/src/*.test.ts`. Live e2e lives in
 `operator/test/e2e/` (Go, build tag `e2e`) and `console-plugin/e2e/` (Playwright).
 
 When adding a case, prefer the cheapest layer that would catch a regression:
@@ -899,14 +900,14 @@ stale Available or eternal Progressing.
       `requestedBy`/`approvedBy` and `last-applied-configuration`
       (`hack/must-gather.sh --self-test`).
 - [x] **Must-gather CLI usage**: `--help`/`-h` print usage on stdout and
-      exit 0; unknown flags and extra args exit 2 (`TestHackMustGatherHelp`,
-      `TestHackMustGatherUnknownOption`, `TestHackMustGatherExtraArgs`).
+      exit 0; unknown flags and extra args exit 2 (`TestMustGatherHelp`,
+      `TestMustGatherUnknownOption`, `TestMustGatherExtraArgs`).
 - [x] **prometheusrule_to_rules.py CLI**: `--help` exits 0 on stdout; wrong
       argc or unknown options exit 2; extract writes a top-level `groups:`
       file (`TestPrometheusRuleToRulesHelp`, `TestPrometheusRuleToRulesExtract`).
 - [x] **hack script --help**: `test-alerts.sh`, `verify-bundle-static.sh`,
       and `verify-product-lockstep.sh` print usage and exit 0 instead of
-      running (`TestHackVerifyAndTestAlertsHelp`).
+      running (`TestVerifyAndTestAlertsHelp`).
 - [ ] **Must-gather smoke**: `operator/hack/must-gather.sh` runs without
       cluster-admin-only assumptions beyond documented RBAC and redacts or
       avoids secrets.

@@ -19,8 +19,8 @@ import {
 import { ScoreSnapshot } from '../models';
 import { formatChartDate, formatCount } from '../dates';
 import { resultsHref } from '../links';
+import { historyContentKey, toTrendData } from '../overviewTrend';
 import { scoreColor } from '../scoring';
-import { historyContentKey, toTrendData } from './overviewTrend';
 
 // Empty-ring fill only. Segment colors live on Overview (the legend is HTML
 // next to this chart, not a Victory colorScale built here).

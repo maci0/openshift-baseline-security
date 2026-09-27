@@ -1,8 +1,9 @@
 // History-ring helpers shared by Overview (data prep) and OverviewCharts
-// (Victory series). Kept out of OverviewCharts so a static import of the
-// helpers cannot pull the charting library into the page shell.
-import { ScoreSnapshot } from '../models';
-import { isFiniteNumber } from '../parse';
+// (Victory series). Domain module, so it lives beside the other pure modules
+// under src/ rather than in components/: a static import of it must not pull
+// the charting library into the page shell.
+import { ScoreSnapshot } from './models';
+import { isFiniteNumber } from './parse';
 
 // History snapshots to Victory {x: Date, y: score} points.
 // Drop points with an unparseable time or non-finite score: a single bad

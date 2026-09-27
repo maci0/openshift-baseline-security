@@ -440,7 +440,7 @@ openshift-baseline-security/
 │   ├── internal/controller/
 │   ├── config/{crd,rbac,manager,default,prometheus,samples}/
 │   ├── bundle/                     # OLM bundle (generated)
-│   ├── hack/                       # must-gather + bundle/alert verify scripts
+│   ├── hack/                       # must-gather + bundle/alert verify scripts (cli_test.go covers their CLI)
 │   ├── test/e2e/                   # live-cluster Go suite (make test-e2e)
 │   ├── Dockerfile
 │   ├── Dockerfile.ci               # registry.ci.openshift.org build variant
@@ -450,7 +450,7 @@ openshift-baseline-security/
 │   └── AGENTS.md                   # operator-specific rules
 ├── console-plugin/                 # console-plugin-template shape
 │   ├── src/components/             # React tabs, BaselineContext, Overview item, UI feedback timing
-│   ├── src/{models,scoring,status,names,cron,dates,waivers,patches,links,results,remediation,report,profiles,download,errors,parse}.*
+│   ├── src/{models,scoring,status,names,cron,dates,waivers,patches,links,results,remediation,report,profiles,download,errors,parse,overviewTrend}.*
 │   │                               # domain modules; tests live alongside as *.test.ts
 │   ├── src/testing/                # shared test-only helpers (fuzz PRNG)
 │   ├── tools/oxlint/               # local anti-slop oxlint plugin

@@ -54,6 +54,7 @@ import { isValidCron } from '../cron';
 import { formatCount, safeLocale } from '../dates';
 import { errorMessage } from '../errors';
 import { resultsHref } from '../links';
+import { historyContentKey, toTrendData } from '../overviewTrend';
 import { resourceVersionTest, schedulePatch } from '../patches';
 import { changedChecksMany } from '../results';
 import {
@@ -72,7 +73,6 @@ import { regionFocusProps } from './DisabledTip';
 import { ChunkError } from './ChunkError';
 import { useChunk } from './chunkLoad';
 import { useAutoDismiss } from './feedback';
-import { historyContentKey, toTrendData } from './overviewTrend';
 import { useWaiverExpiryClock } from './useWaiverExpiryClock';
 
 // Start the charts chunk as soon as this module evaluates (default tab), so
