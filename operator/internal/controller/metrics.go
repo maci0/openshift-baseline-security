@@ -71,6 +71,17 @@ var (
 		Help: "Unix timestamp when the active remediation batch started (status.remediationBatch.startedAt). 0 when no batch is active.",
 	})
 
+	// Outcome of every remediation batch the operator finished, counted once at
+	// the moment the pools came back. grace and orphaned mean the
+	// MachineConfigPools were unpaused before every remediation reported
+	// Applied; status.remediationBatch is cleared either way, so without this
+	// the only record is the log line at that instant. Fixed 4-value label set
+	// (one series each), so there is no cardinality risk.
+	remediationBatches = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "baseline_security_remediation_batches_total",
+		Help: "Remediation batches by outcome: applied (every listed remediation reported Applied), cancelled (none still apply=true), grace (batchResumeGrace expired first, pools unpaused with remediations outstanding), orphaned (crash/cancel recovery unpaused pools that had no batch status).",
+	}, []string{"outcome"})
+
 	// Serialize publishMetrics so concurrent reconciles (or a future raise of
 	// MaxConcurrentReconciles) cannot interleave Reset/Set sequences. Also track
 	// the last published (profile, status) pairs so we can delete stale series
@@ -92,7 +103,7 @@ func init() {
 		complianceScore, complianceChecks, statusObservedTimestamp,
 		remediationBatchActive, remediationBatchStartedTimestamp,
 		conditionStatus, lastScanTimestamp, newlyFailedCount,
-		scanIntervalSecondsGauge,
+		scanIntervalSecondsGauge, remediationBatches,
 	)
 	// Seed the "no score yet" sentinel so a never-reconciled or
 	// error-before-aggregation state reads as -1, not the gauge default of 0

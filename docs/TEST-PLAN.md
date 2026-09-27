@@ -514,6 +514,12 @@ an accepted risk neither inflates nor tanks the score.
 - [x] **Remediation batch started-at gauge**: tracks
       `status.remediationBatch.startedAt`, clears when the batch ends
       (`TestPublishMetricsBatchStartedTimestamp`).
+- [x] **Batch outcome counter**: `baseline_security_remediation_batches_total`
+      counts the outcome once the pools are free and not on batch start
+      (`TestRemediationBatchCountsOutcome`).
+- [x] **PrometheusRule** `RemediationBatchGraceResume` fires on a grace-forced
+      resume and stays silent when only `applied` batches were counted
+      (`make test-alerts`, `alerts_test.yaml`).
 - [x] **Detail condition gauges**: ComplianceOperatorReady, ScanConfigured,
       ScanStorageReady, and ConsolePluginReady publish on
       `baseline_security_condition` next to the rollups, including False

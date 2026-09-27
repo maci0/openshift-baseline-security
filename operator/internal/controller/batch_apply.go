@@ -409,6 +409,9 @@ func (r *ClusterBaselineReconciler) finishRemediationBatch(
 			kv = append(kv, "missingRemediations", missing)
 		}
 		log.FromContext(ctx).Info("remediation batch finished", kv...)
+		// Counted after the resume landed, so a reconcile that fails before this
+		// point does not report an outcome for a batch that is still paused.
+		remediationBatches.WithLabelValues(reason).Inc()
 		cb.Status.RemediationBatch = nil
 		return nil
 	}

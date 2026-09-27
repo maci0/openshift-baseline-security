@@ -45,6 +45,15 @@ depend on those tags.
 
 ### Added
 
+- `baseline_security_remediation_batches_total`, a counter of finished
+  remediation batches by outcome (`applied`, `cancelled`, `grace`, `orphaned`),
+  and a `RemediationBatchGraceResume` alert on it. A batch that ends on the
+  resume grace window or through crash/cancel recovery unpauses the
+  MachineConfigPools before every remediation has reported Applied, and then
+  clears `status.remediationBatch`, so nothing left in the cluster recorded
+  that the fixes may never have landed: the only trace was a log line at the
+  moment it happened. The new Observe panel counts the same event over 24h.
+
 - `make verify-reproducible` (in `make ci` and the GitHub Actions `operator`
   job) builds the manager twice, from two different absolute paths and under a
   different timezone, locale, and umask, and fails unless both binaries hash

@@ -27,7 +27,7 @@
           "title": "Compliance score",
           "type": "singlestat",
           "datasource": "$datasource",
-          "span": 4,
+          "span": 3,
           "format": "none",
           "valueName": "current",
           "thresholds": "60,90",
@@ -42,7 +42,7 @@
           "title": "Degraded",
           "type": "singlestat",
           "datasource": "$datasource",
-          "span": 4,
+          "span": 3,
           "format": "none",
           "valueName": "current",
           "thresholds": "0.5,0.5",
@@ -80,6 +80,21 @@
           "colors": ["#3e8635", "#f0ab00", "#c9190b"],
           "targets": [
             { "expr": "(max(baseline_security_remediation_batch_active and on(instance) topk(1, baseline_security_status_observed_timestamp_seconds)) == 1) * (time() - max((baseline_security_remediation_batch_started_timestamp_seconds > 0) and on(instance) topk(1, baseline_security_status_observed_timestamp_seconds))) or vector(0)", "refId": "A" }
+          ]
+        },
+        {
+          "id": 16,
+          "title": "Batches unpaused early (24h)",
+          "type": "singlestat",
+          "datasource": "$datasource",
+          "span": 2,
+          "format": "none",
+          "valueName": "current",
+          "thresholds": "0.5,0.5",
+          "colorValue": true,
+          "colors": ["#3e8635", "#c9190b", "#c9190b"],
+          "targets": [
+            { "expr": "sum(increase(baseline_security_remediation_batches_total{outcome=~\"grace|orphaned\"}[24h])) or vector(0)", "refId": "A" }
           ]
         }
       ]

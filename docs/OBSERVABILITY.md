@@ -28,6 +28,7 @@ it, discovery finds zero targets and nothing is scraped (`ComplianceStatusStale`
 | `baseline_security_status_observed_timestamp_seconds` | When this replica last published status metrics (HA scrape selection). |
 | `baseline_security_remediation_batch_active` | 1 while a remediation batch is in progress (MCPs may be paused). |
 | `baseline_security_remediation_batch_started_timestamp_seconds` | When the active batch started (batch-age alerting); 0 when none. |
+| `baseline_security_remediation_batches_total` | Finished remediation batches by `outcome`: `applied`, `cancelled`, `grace` (pools unpaused by `batchResumeGrace` with remediations outstanding), `orphaned` (crash/cancel recovery unpaused pools with no batch status). |
 
 The same endpoint also serves the controller-runtime series for the reconciler
 itself, which the dashboard's Reconcile-loop row reads:
@@ -41,7 +42,9 @@ The `Baseline Security / Compliance` ConfigMap dashboard (Observe → Dashboards
 `openshift-config-managed/baseline-security-compliance-dashboard`) has five
 rows to look at, in the order an incident usually needs them:
 
-1. **Score** row: current score, Degraded flag, remediation batch state and age.
+1. **Score** row: current score, Degraded flag, remediation batch state and age,
+   and how many batches in the last 24h were unpaused before their
+   remediations applied.
 2. **Score trend** row: 30-day score history, the regression check after a change.
 3. **Checks by status** row: totals per status, failing checks per profile.
 4. **Operator health** row: rollup and detail conditions, metric freshness, last
@@ -98,6 +101,7 @@ without adding a signal that metrics plus logs do not already carry.
 | `ComplianceStatusStale` | Status metrics not published recently (operator wedged/down). |
 | `ComplianceScanStale` | Last scan older than 1.5x the configured scan interval. |
 | `RemediationBatchStuck` | A remediation batch has not cleared past its grace window (MCPs may stay paused). |
+| `RemediationBatchGraceResume` | A batch ended by the resume grace window or by crash/cancel recovery: the pools came back before every remediation reported Applied. The batch status is cleared, so nothing else in the cluster records it. |
 | `ClusterBaselineDegraded` | The ClusterBaseline `Degraded` condition is True. |
 | `ClusterBaselineNotAvailable` | `Available=False` for 1h while `Progressing=False`: an admin-owned steady state (Compliance Operator not installed under `installComplianceOperator=Manual`, compliance CRDs absent, console plugin image unset) that no other alert covers because those states never set `Degraded`. |
 

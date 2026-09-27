@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -1145,6 +1146,58 @@ func TestRemediationBatchCancelResumes(t *testing.T) {
 	}
 	if paused, _, _ := unstructured.NestedBool(gotPool.Object, "spec", "paused"); paused {
 		t.Fatal("worker pool left paused after cancel")
+	}
+}
+
+// The batch outcome counter is the only record of how a batch ended once
+// status.remediationBatch is cleared: RemediationBatchGraceResume reads it long
+// after the "remediation batch finished" log line has scrolled away. Assert the
+// delta, not the absolute value, because the counter is process-global and other
+// batch tests in this package increment it.
+func TestRemediationBatchCountsOutcome(t *testing.T) {
+	scheme := testScheme(t)
+	rem := nodeRemediation("rem1", "worker")
+	pool := machineConfigPool("worker")
+	cb := newBatchCB()
+	cb.SetAnnotations(map[string]string{batchApplyAnnotation: "rem1"})
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).
+			WithObjects(cb, rem, pool).
+			WithStatusSubresource(&baselinev1alpha1.ClusterBaseline{}).Build(),
+		Scheme: scheme,
+	}
+	ctx := context.Background()
+	// The counter is process-global, so assert deltas across the two passes.
+	cancelledBefore := testutil.ToFloat64(remediationBatches.WithLabelValues("cancelled"))
+
+	if err := r.applyRemediationBatch(ctx, cb); err != nil {
+		t.Fatal(err)
+	}
+	if got := testutil.ToFloat64(remediationBatches.WithLabelValues("cancelled")); got != cancelledBefore {
+		t.Fatalf("outcome counter moved on batch start: cancelled %v -> %v", cancelledBefore, got)
+	}
+
+	// Revert spec.apply so the next pass finishes as cancelled, not applied.
+	gotRem := &unstructured.Unstructured{}
+	gotRem.SetGroupVersionKind(remediationGVK)
+	if err := r.Get(ctx, types.NamespacedName{Namespace: complianceNamespace, Name: "rem1"}, gotRem); err != nil {
+		t.Fatal(err)
+	}
+	if err := unstructured.SetNestedField(gotRem.Object, false, "spec", "apply"); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Update(ctx, gotRem); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := r.applyRemediationBatch(ctx, cb); err != nil {
+		t.Fatal(err)
+	}
+	if got := testutil.ToFloat64(remediationBatches.WithLabelValues("cancelled")) - cancelledBefore; got != 1 {
+		t.Fatalf("cancelled outcome delta = %v, want 1", got)
+	}
+	if got := testutil.ToFloat64(remediationBatches.WithLabelValues("grace")); got != 0 {
+		t.Fatalf("grace outcome count = %v, want 0", got)
 	}
 }
 

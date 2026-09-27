@@ -267,6 +267,9 @@ func (r *ClusterBaselineReconciler) resumeOrphanedBatch(
 	if err := r.clearBatchAnnotations(ctx, cb, []string{}, true); err != nil {
 		return fmt.Errorf("clearing orphaned batch annotations for ClusterBaseline %q: %w", cb.Name, err)
 	}
+	// Same class as a grace resume: the pools are free and the remediation work
+	// was never confirmed Applied. Counted so the outcome outlives this log line.
+	remediationBatches.WithLabelValues("orphaned").Inc()
 	return nil
 }
 

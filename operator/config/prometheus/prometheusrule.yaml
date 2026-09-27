@@ -139,6 +139,30 @@ spec:
               trigger node reboots.
               CLI: oc get clusterbaseline cluster -o jsonpath='{.status.remediationBatch}{"\n"}';
               oc get mcp -o custom-columns=NAME:.metadata.name,PAUSED:.spec.paused
+        - alert: RemediationBatchGraceResume
+          # A batch that ends by grace (or by crash/cancel recovery) unpaused the
+          # MachineConfigPools before every remediation reported Applied. Nothing
+          # in the cluster still reflects that: status.remediationBatch is cleared
+          # and remediationBatchActive returns to 0, so neither this alert's
+          # sibling RemediationBatchStuck nor any condition reports it. The
+          # remediations may still be apply=true and unpushed, or never applied at
+          # all, with no node pending a reboot. Counter-based, so `for:` stays
+          # empty: it fires once per event and cannot flap on a steady value.
+          expr: >-
+            sum(increase(baseline_security_remediation_batches_total{outcome=~"grace|orphaned"}[1h])) > 0
+          labels:
+            severity: warning
+          annotations:
+            summary: Remediation pools were unpaused before the remediations applied
+            description: >-
+              A remediation batch ended without every remediation reporting
+              Applied: the pools were unpaused on the resume grace window, or by
+              crash/cancel recovery. The batch is over, so Compliance will not
+              reconcile it further; check whether the listed remediations are
+              still apply=true and unpushed, and re-apply the batch if the fixes
+              never landed. Nodes may still be rendering the previous MCO config.
+              CLI: oc get complianceremediations -n openshift-compliance;
+              oc logs -n openshift-baseline-security deploy/baseline-security-operator --tail=200
         - alert: ClusterBaselineNotAvailable
           # Available=False while Progressing=False. Degraded deliberately stays
           # False for admin-owned states (Manual install with no Compliance

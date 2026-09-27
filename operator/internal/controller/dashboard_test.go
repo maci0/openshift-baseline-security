@@ -119,6 +119,7 @@ var dashboardMetricNames = []string{
 	"baseline_security_status_observed_timestamp_seconds",
 	"baseline_security_remediation_batch_active",
 	"baseline_security_remediation_batch_started_timestamp_seconds",
+	"baseline_security_remediation_batches_total",
 	"controller_runtime_reconcile_total",
 	"controller_runtime_reconcile_errors_total",
 	"controller_runtime_reconcile_time_seconds",

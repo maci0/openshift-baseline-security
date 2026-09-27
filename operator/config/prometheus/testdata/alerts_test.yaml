@@ -468,3 +468,31 @@ tests:
             exp_annotations:
               summary: 'ClusterBaseline is not Available and not Progressing'
               description: 'The ClusterBaseline has been Available=False for over 1h without Progressing, so no compliance score is being produced. This is an admin-owned steady state (compliance operator not installed with installComplianceOperator=Manual, compliance CRDs absent, or the console plugin image unset), not a transient. Check the detail conditions to see which dependency is missing. CLI: oc get clusterbaseline cluster -o jsonpath=''{range .status.conditions[*]}{.type}={.status} {.reason} {.message}{"\n"}{end}''; operator/hack/must-gather.sh'
+
+  # A grace-forced resume fires: the pools came back with the remediations
+  # outstanding. Counter-derived, so it needs no other series.
+  - interval: 1m
+    input_series:
+      - series: 'baseline_security_remediation_batches_total{outcome="grace",instance="op-1"}'
+        values: '0x30 1x60'
+    alert_rule_test:
+      - eval_time: 70m
+        alertname: RemediationBatchGraceResume
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: 'Remediation pools were unpaused before the remediations applied'
+              description: 'A remediation batch ended without every remediation reporting Applied: the pools were unpaused on the resume grace window, or by crash/cancel recovery. The batch is over, so Compliance will not reconcile it further; check whether the listed remediations are still apply=true and unpushed, and re-apply the batch if the fixes never landed. Nodes may still be rendering the previous MCO config. CLI: oc get complianceremediations -n openshift-compliance; oc logs -n openshift-baseline-security deploy/baseline-security-operator --tail=200'
+
+  # The same counter staying flat on grace (the batch applied normally) is silent.
+  - interval: 1m
+    input_series:
+      - series: 'baseline_security_remediation_batches_total{outcome="applied",instance="op-1"}'
+        values: '0x30 1x60'
+      - series: 'baseline_security_remediation_batches_total{outcome="grace",instance="op-1"}'
+        values: '0x90'
+    alert_rule_test:
+      - eval_time: 70m
+        alertname: RemediationBatchGraceResume
+        exp_alerts: []
