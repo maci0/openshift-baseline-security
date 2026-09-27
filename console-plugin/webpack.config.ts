@@ -9,6 +9,9 @@ const isProd = process.env.NODE_ENV === 'production';
 const config: Configuration & { devServer?: DevServerConfiguration } = {
   mode: isProd ? 'production' : 'development',
   context: path.resolve(__dirname, 'src'),
+  // Empty: ConsoleRemotePlugin below injects one entry per console-extensions.json
+  // $codeRef, which resolves to a default export by name. The two today are
+  // CompliancePage (console.page/route) and ClusterScoreItem (dashboard item).
   entry: {},
   // Production: no persistent webpack cache (avoids host-local cache keys in outputs).
   // Dev keeps an in-memory cache for rebuild speed.

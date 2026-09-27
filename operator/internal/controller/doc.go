@@ -12,6 +12,7 @@
 // Files are split by concern (same package, no import cycles):
 //   - clusterbaseline_controller.go: Reconcile loop, reconcileOwned, SetupWithManager
 //   - clock.go: the reconciler's wall-clock source (nil = real clock)
+//   - managercache.go: ManagerCacheOptions, the manager's namespace-scoped cache bounds
 //   - helpers.go: requeue cadence, createIfMissing, relatedObjectsFromSuites
 //   - unstructured.go: unstructured object/list helpers and metadata field readers
 //   - compliance_operator.go: CO Subscription/OperatorGroup/CSV readiness
