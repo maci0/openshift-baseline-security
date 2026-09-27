@@ -173,7 +173,7 @@ func FuzzSetComplianceOperatorReadyFromCSV(f *testing.F) {
 			_ = unstructured.SetNestedField(csv.Object, 42, "status", "phase")
 		}
 		cb := &baselinev1alpha1.ClusterBaseline{}
-		setComplianceOperatorReadyFromCSV(cb, csv)
+		setComplianceOperatorReadyFromCSV(t.Context(), cb, csv)
 		c := meta.FindStatusCondition(cb.Status.Conditions, "ComplianceOperatorReady")
 		if c == nil {
 			t.Fatal("ComplianceOperatorReady missing")

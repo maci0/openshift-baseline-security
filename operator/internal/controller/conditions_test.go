@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -8,8 +9,10 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/go-logr/logr/funcr"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	baselinev1alpha1 "github.com/maci0/baseline-security-operator/api/v1alpha1"
 )
@@ -473,4 +476,55 @@ func FuzzCondMessage(f *testing.F) {
 			t.Fatalf("long message missing ellipsis: %q", got[max(0, len(got)-10):])
 		}
 	})
+}
+
+func TestSetCondTrueLogRecovered(t *testing.T) {
+	var buf bytes.Buffer
+	logger := funcr.NewJSON(func(obj string) { _, _ = buf.WriteString(obj + "\n") }, funcr.Options{})
+	ctx := log.IntoContext(t.Context(), logger)
+
+	cb := &baselinev1alpha1.ClusterBaseline{}
+	// Never False before: a first True write is not a recovery.
+	setCondTrueLogRecovered(ctx, cb, "ScanStorageReady", "AsExpected", "", "ready", "name", cb.Name)
+	if buf.Len() != 0 {
+		t.Fatalf("first True write must not log a recovery: %s", buf.String())
+	}
+	if c := meta.FindStatusCondition(cb.Status.Conditions, "ScanStorageReady"); c == nil || c.Status != metav1.ConditionTrue {
+		t.Fatalf("condition not set True: %+v", c)
+	}
+
+	// Failure, then recovery: the recovery logs.
+	buf.Reset()
+	setCondFalseLogOnce(ctx, cb, "ScanStorageReady", "ScanStoragePending", "PVC pending", "pending", "name", cb.Name)
+	buf.Reset()
+	setCondTrueLogRecovered(ctx, cb, "ScanStorageReady", "AsExpected", "", "ready", "name", cb.Name)
+	if !strings.Contains(buf.String(), `"msg":"ready"`) {
+		t.Fatalf("recovery must log at Info: %s", buf.String())
+	}
+
+	// Steady True re-assert stays silent (the 1m requeue must not spam).
+	buf.Reset()
+	setCondTrueLogRecovered(ctx, cb, "ScanStorageReady", "AsExpected", "", "ready", "name", cb.Name)
+	if buf.Len() != 0 {
+		t.Fatalf("steady True re-assert must stay silent: %s", buf.String())
+	}
+
+	// A reason change while the status stays False is a new failure and must log:
+	// the transition guard reads a copy, not the entry SetStatusCondition
+	// overwrites in place.
+	buf.Reset()
+	setCondFalseLogOnce(ctx, cb, "ScanStorageReady", "ScanStoragePending", "PVC pending", "pending one", "name", cb.Name)
+	if !strings.Contains(buf.String(), `"msg":"pending one"`) {
+		t.Fatalf("entering False must log: %s", buf.String())
+	}
+	buf.Reset()
+	setCondFalseLogOnce(ctx, cb, "ScanStorageReady", "ScanStoragePending", "PVC pending", "pending one", "name", cb.Name)
+	if buf.Len() != 0 {
+		t.Fatalf("same False reason must stay silent: %s", buf.String())
+	}
+	buf.Reset()
+	setCondFalseLogOnce(ctx, cb, "ScanStorageReady", "ScanStorageMissing", "no class", "pending two", "name", cb.Name)
+	if !strings.Contains(buf.String(), `"msg":"pending two"`) {
+		t.Fatalf("reason change while False must log: %s", buf.String())
+	}
 }

@@ -526,11 +526,39 @@ func setCond(cb *baselinev1alpha1.ClusterBaseline, typ string, status metav1.Con
 // not spam the default log on every requeue. keysAndValues are structured log
 // fields. Shared by the storage/schedule/plugin not-ready paths.
 func setCondFalseLogOnce(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline, typ, reason, msg, logMsg string, keysAndValues ...any) {
-	prev := meta.FindStatusCondition(cb.Status.Conditions, typ)
+	// Snapshot before the write: FindStatusCondition returns a pointer into the
+	// slice and SetStatusCondition mutates that entry in place, so reading prev
+	// afterwards would compare the new status against itself and a changed
+	// reason on an already-False condition would never log.
+	prevStatus, prevReason, hadPrev := prevCondState(cb, typ)
 	setCond(cb, typ, metav1.ConditionFalse, reason, msg)
-	if prev == nil || prev.Status != metav1.ConditionFalse || prev.Reason != reason {
+	if !hadPrev || prevStatus != metav1.ConditionFalse || prevReason != reason {
 		log.FromContext(ctx).Info(logMsg, keysAndValues...)
 	}
+}
+
+// setCondTrueLogRecovered sets a True detail condition and Info-logs only when
+// the condition recovers from a previously False state. setCondFalseLogOnce
+// covers entering a failure; without this the recovery is invisible in default
+// logs, so a Degraded alert that clears leaves no breadcrumb pairing the
+// resolution with the earlier failure line. Steady True re-asserts stay silent.
+func setCondTrueLogRecovered(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline, typ, reason, msg, logMsg string, keysAndValues ...any) {
+	prevStatus, _, hadPrev := prevCondState(cb, typ)
+	setCond(cb, typ, metav1.ConditionTrue, reason, msg)
+	if hadPrev && prevStatus != metav1.ConditionTrue {
+		log.FromContext(ctx).Info(logMsg, keysAndValues...)
+	}
+}
+
+// prevCondState copies a condition's status and reason by value. The pointer
+// FindStatusCondition returns aliases the slice entry that SetStatusCondition
+// overwrites, so any transition guard must read a copy taken before the write.
+func prevCondState(cb *baselinev1alpha1.ClusterBaseline, typ string) (status metav1.ConditionStatus, reason string, found bool) {
+	c := meta.FindStatusCondition(cb.Status.Conditions, typ)
+	if c == nil {
+		return "", "", false
+	}
+	return c.Status, c.Reason, true
 }
 
 // condIsTrue is true when c is present (non-nil) and True. One definition of

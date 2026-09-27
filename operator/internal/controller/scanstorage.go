@@ -8,7 +8,6 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	baselinev1alpha1 "github.com/maci0/baseline-security-operator/api/v1alpha1"
@@ -70,6 +69,7 @@ func (r *ClusterBaselineReconciler) checkScanStorage(ctx context.Context, cb *ba
 			"scan storage PVCs pending", "namespace", complianceNamespace, "pvcs", pending, "name", cb.Name)
 		return nil
 	}
-	setCond(cb, "ScanStorageReady", metav1.ConditionTrue, "AsExpected", "")
+	setCondTrueLogRecovered(ctx, cb, "ScanStorageReady", "AsExpected", "",
+		"scan storage PVCs ready", "name", cb.Name)
 	return nil
 }

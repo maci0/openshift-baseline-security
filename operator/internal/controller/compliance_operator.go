@@ -50,7 +50,7 @@ func (r *ClusterBaselineReconciler) ensureComplianceOperator(ctx context.Context
 		return fmt.Errorf("finding compliance-operator CSV: %w", err)
 	}
 	if csv != nil {
-		setComplianceOperatorReadyFromCSV(cb, csv)
+		setComplianceOperatorReadyFromCSV(ctx, cb, csv)
 		return nil
 	}
 
@@ -321,11 +321,11 @@ func (r *ClusterBaselineReconciler) setComplianceOperatorReady(ctx context.Conte
 		}
 		return fmt.Errorf("getting CSV %s/%s: %w", complianceNamespace, csvName, err)
 	}
-	setComplianceOperatorReadyFromCSV(cb, csv)
+	setComplianceOperatorReadyFromCSV(ctx, cb, csv)
 	return nil
 }
 
-func setComplianceOperatorReadyFromCSV(cb *baselinev1alpha1.ClusterBaseline, csv *unstructured.Unstructured) {
+func setComplianceOperatorReadyFromCSV(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline, csv *unstructured.Unstructured) {
 	phase, _, err := unstructured.NestedString(csv.Object, "status", "phase")
 	if err != nil {
 		// Type-mismatched phase is not "unknown" (that reads as CO reporting an
@@ -342,7 +342,9 @@ func setComplianceOperatorReadyFromCSV(cb *baselinev1alpha1.ClusterBaseline, csv
 	}
 	if phase == "Succeeded" {
 		cb.Status.ComplianceOperatorVersion = strings.TrimPrefix(csv.GetName(), csvNamePrefix)
-		setCond(cb, "ComplianceOperatorReady", metav1.ConditionTrue, "CSVSucceeded", "")
+		setCondTrueLogRecovered(ctx, cb, "ComplianceOperatorReady", "CSVSucceeded", "",
+			"compliance-operator ready", "name", cb.Name,
+			"version", cb.Status.ComplianceOperatorVersion)
 		return
 	}
 	// Keep version empty until Succeeded so the UI does not show a green-looking

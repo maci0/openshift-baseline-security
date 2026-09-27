@@ -42,16 +42,14 @@ depend on those tags.
 
 ## [Unreleased]
 
-### Fixed
+### Added
 
-- Operator and console plugin pods: neither declared a `preStop` hook, so a
-  terminating pod kept its endpoint for the seconds between SIGTERM and
-  endpoint removal, and a scrape or console request could still land on a
-  draining pod. Both containers now sleep 5s in `preStop` before the process
-  sees SIGTERM, inside the existing 30s grace period.
-- Operator `/readyz` reported ready for the whole drain. A SIGTERM now flips
-  the readiness check to failing, so the pod leaves the Service endpoints as
-  soon as the process starts shutting down.
+- Alert `ClusterBaselineNotAvailable`: fires when the ClusterBaseline has been
+  `Available=False` for 1h without `Progressing`. Admin-owned steady states
+  (Compliance Operator not installed under `installComplianceOperator=Manual`,
+  compliance CRDs absent, console plugin image unset) never set `Degraded`, so
+  the operator previously reported healthy while producing no compliance score
+  and no alert fired.
 
 ### Changed
 
@@ -83,12 +81,30 @@ depend on those tags.
 
 ### Fixed
 
+- Operator and console plugin pods: neither declared a `preStop` hook, so a
+  terminating pod kept its endpoint for the seconds between SIGTERM and
+  endpoint removal, and a scrape or console request could still land on a
+  draining pod. Both containers now sleep 5s in `preStop` before the process
+  sees SIGTERM, inside the existing 30s grace period.
+- Operator `/readyz` reported ready for the whole drain. A SIGTERM now flips
+  the readiness check to failing, so the pod leaves the Service endpoints as
+  soon as the process starts shutting down.
 - `operator/hack/must-gather.sh` appended to `related-objects.yaml` instead of
   rewriting it, and the output directory is never cleared. Collecting a second
   must-gather into the same directory duplicated every object document, and when
   the CR was gone the file kept the previous run's objects with nothing marking
   it stale. The file is now truncated at the start of collection, so a rerun
   converges on the current cluster state.
+- Operator logs: a detail condition returning to True (Compliance Operator
+  ready, scan configuration valid, scan storage ready, console plugin deployed)
+  now logs at Info on the recovery. Only the transition into a failure was
+  logged, so a cleared alert had no default-level breadcrumb to pair with the
+  failure line.
+- Operator logs: a detail condition that changed `reason` while staying False
+  (for example scan storage moving from `ScanStoragePending` to a different
+  failure) was never logged. The transition guard compared against the
+  condition entry that `SetStatusCondition` had already overwritten in place,
+  so it always compared the new value with itself.
 
 ## [0.6.1] - 2026-09-02
 

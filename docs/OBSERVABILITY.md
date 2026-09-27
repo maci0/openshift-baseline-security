@@ -41,6 +41,7 @@ it, discovery finds zero targets and nothing is scraped (`ComplianceStatusStale`
 | `ComplianceScanStale` | Last scan older than 1.5x the configured scan interval. |
 | `RemediationBatchStuck` | A remediation batch has not cleared past its grace window (MCPs may stay paused). |
 | `ClusterBaselineDegraded` | The ClusterBaseline `Degraded` condition is True. |
+| `ClusterBaselineNotAvailable` | `Available=False` for 1h while `Progressing=False`: an admin-owned steady state (Compliance Operator not installed under `installComplianceOperator=Manual`, compliance CRDs absent, console plugin image unset) that no other alert covers because those states never set `Degraded`. |
 
 Authoritative definitions: `operator/internal/controller/metrics.go` and
 `operator/config/prometheus/prometheusrule.yaml`.

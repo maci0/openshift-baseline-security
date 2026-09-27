@@ -122,8 +122,9 @@ func (r *ClusterBaselineReconciler) ensureScanConfig(ctx context.Context, cb *ba
 	// never fires when nothing is scheduled, so it must not Degrade (and page)
 	// a baseline the user deliberately turned off.
 	if len(cb.Spec.Profiles) == 0 && len(cb.Spec.TailoredProfiles) == 0 {
-		setCond(cb, "ScanConfigured", metav1.ConditionTrue, "ScanningDisabled",
-			"No profiles selected; scanning is disabled.")
+		setCondTrueLogRecovered(ctx, cb, "ScanConfigured", "ScanningDisabled",
+			"No profiles selected; scanning is disabled.",
+			"scan configuration disabled; no profiles selected", "name", cb.Name)
 		return nil
 	}
 	if schedErr != nil {
@@ -139,7 +140,8 @@ func (r *ClusterBaselineReconciler) ensureScanConfig(ctx context.Context, cb *ba
 		// on input that only an admin edit can fix.
 		return nil //nolint:nilerr // invalid schedule is a Degraded condition, not a retryable error
 	}
-	setCond(cb, "ScanConfigured", metav1.ConditionTrue, "BindingsCreated", "")
+	setCondTrueLogRecovered(ctx, cb, "ScanConfigured", "BindingsCreated", "",
+		"scan configuration valid; bindings in place", "name", cb.Name)
 	return nil
 }
 

@@ -409,7 +409,8 @@ func (r *ClusterBaselineReconciler) ensureConsolePlugin(ctx context.Context, cb 
 		logConsolePluginNotReady(ctx, cb, reason, msg)
 		return nil
 	}
-	setCond(cb, "ConsolePluginReady", metav1.ConditionTrue, "Deployed", "")
+	setCondTrueLogRecovered(ctx, cb, "ConsolePluginReady", "Deployed", "",
+		"console plugin deployed and ready", "name", cb.Name, "namespace", pluginNS)
 	return nil
 }
 

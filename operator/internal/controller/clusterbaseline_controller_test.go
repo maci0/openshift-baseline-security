@@ -3349,7 +3349,7 @@ func TestSetComplianceOperatorReadyFromCSVPhaseShape(t *testing.T) {
 				}
 			}
 			cb := &baselinev1alpha1.ClusterBaseline{}
-			setComplianceOperatorReadyFromCSV(cb, csv)
+			setComplianceOperatorReadyFromCSV(t.Context(), cb, csv)
 			c := meta.FindStatusCondition(cb.Status.Conditions, "ComplianceOperatorReady")
 			if c == nil || c.Reason != tc.wantReason {
 				t.Fatalf("condition = %+v, want reason %q", c, tc.wantReason)

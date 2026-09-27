@@ -507,6 +507,13 @@ an accepted risk neither inflates nor tanks the score.
       `baseline_security_condition` next to the rollups, including False
       (ImageMissing = 0) (`TestPublishMetricsDetailConditions`,
       `TestPublishedConditionTypesMatchOperatorConditions`).
+- [x] **PrometheusRule** `ClusterBaselineNotAvailable` fires on
+      `Available=False` + `Progressing=False` for 1h, stays silent while
+      Progressing or Available, and a stale healthy old leader cannot mask an
+      unavailable new publisher (`make test-alerts`, `alerts_test.yaml`).
+- [x] **Detail condition recovery log**: a detail condition flipping back to
+      True logs once at Info; a steady True re-assert stays silent
+      (`TestSetCondTrueLogRecovered`).
 - [ ] **ServiceMonitor scrape**: with cluster monitoring (namespace
       openshift.io/cluster-monitoring label) + scraper SA token, metrics
       endpoint returns 200 and includes custom gauges (live or kind).
