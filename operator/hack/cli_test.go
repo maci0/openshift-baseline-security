@@ -96,11 +96,13 @@ func TestMustGatherSelfTestRejectsExtraArgs(t *testing.T) {
 	}
 }
 
-func TestVerifyAndTestAlertsHelp(t *testing.T) {
+func TestHackScriptHelp(t *testing.T) {
 	for _, name := range []string{
+		"resolve-release-version.sh",
 		"test-alerts.sh",
 		"verify-bundle-static.sh",
 		"verify-csv-deploy.sh",
+		"verify-image-metadata.sh",
 		"verify-product-lockstep.sh",
 	} {
 		script := scriptPath(t, name)

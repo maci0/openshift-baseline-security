@@ -24,7 +24,7 @@ concurrency:
 jobs:
   publish:
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 60
     env:
       REGISTRY: quay.io/openshift-baseline-security
       # Classic docker driver (build then push, image lands in the local store).
@@ -38,40 +38,29 @@ jobs:
           persist-credentials: false
           fetch-tags: true
 
+      # The release gate runs go vet and go test, so build with the toolchain
+      # go.mod pins rather than whatever the runner image happens to ship.
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: operator/go.mod
+          cache-dependency-path: operator/go.sum
+
       # Version from the tag (strip leading v) or the manual input; must match
       # the Makefile VERSION so a release never ships images tagged differently
       # from the CSV's own image references. Refuse a cut whose git tag is
       # missing, a different commit than HEAD, or whose CHANGELOG still has
       # Unreleased bullets (would publish unreleased work as :VERSION).
+      # The same script gates the sbom job, so the two cannot drift apart.
       - name: resolve and verify version
-        # Input passed via env, never shell-interpolated: ${{ }} expansion into
-        # run: would let a crafted workflow_dispatch version execute commands.
-        env:
-          INPUT_VERSION: ${{ github.event.inputs.version }}
         run: |
           set -euo pipefail
-          if [ -n "$INPUT_VERSION" ]; then
-            ver="$INPUT_VERSION"
-          else
-            ver="${GITHUB_REF_NAME#v}"
-          fi
-          mk=$(sed -n 's/^VERSION ?= //p' operator/Makefile | head -1)
-          if [ "$ver" != "$mk" ]; then
-            echo "tag/input version ($ver) != operator/Makefile VERSION ($mk)" >&2
-            exit 1
-          fi
-          if ! git rev-parse -q --verify "refs/tags/v$ver" >/dev/null; then
-            echo "git tag v$ver missing; tag the cut before publishing" >&2
-            exit 1
-          fi
-          tagged=$(git rev-parse "refs/tags/v$ver^{commit}")
-          head=$(git rev-parse HEAD)
-          if [ "$tagged" != "$head" ]; then
-            echo "refusing to publish $ver from $head; v$ver points at $tagged" >&2
-            exit 1
-          fi
+          operator/hack/resolve-release-version.sh
           make -C operator RELEASE_GATE=1 REQUIRE_GIT_TAGS=1 verify-versions
-          echo "VERSION=$ver" >> "$GITHUB_ENV"
+
+      # Publishing is gated on the tagged commit's own tests, not only on
+      # whatever CI run happened to be green when the tag was cut.
+      - name: test the tagged commit
+        run: make -C operator test
 
       - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
@@ -130,25 +119,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # The script proves the tag exists and points at HEAD; SBOMs must
+          # describe the same commit the publish job pushed.
+          fetch-tags: true
 
       - name: resolve and verify version
-        # Same env indirection as the publish job: no raw input in shell source.
-        env:
-          INPUT_VERSION: ${{ github.event.inputs.version }}
-        run: |
-          set -euo pipefail
-          if [ -n "$INPUT_VERSION" ]; then
-            ver="$INPUT_VERSION"
-          else
-            ver="${GITHUB_REF_NAME#v}"
-          fi
-          mk=$(sed -n 's/^VERSION ?= //p' operator/Makefile | head -1)
-          if [ "$ver" != "$mk" ]; then
-            echo "tag/input version ($ver) != operator/Makefile VERSION ($mk)" >&2
-            exit 1
-          fi
-          echo "VERSION=$ver" >> "$GITHUB_ENV"
-          echo "TAG=v$ver" >> "$GITHUB_ENV"
+        run: operator/hack/resolve-release-version.sh
 
       - name: SBOM operator image
         uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2

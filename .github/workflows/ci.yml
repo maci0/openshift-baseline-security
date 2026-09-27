@@ -281,23 +281,18 @@ jobs:
             --cache-to type=gha,mode=max,scope=${{ matrix.tag }},ignore-error=true \
             -f "${{ matrix.file }}" -t "${{ matrix.tag }}" "${{ matrix.context }}"
       # Runtime images must not default to root (bundle is FROM scratch / unpacked, not executed).
-      - name: verify non-root USER
-        if: matrix.name == 'operator' || matrix.name == 'console-plugin'
+      # Matrix name via env, never interpolated into the script body.
+      - name: verify image metadata
+        env:
+          IMAGE_NAME: ${{ matrix.tag }}
+          IMAGE_KIND: ${{ matrix.name }}
         run: |
-          user=$(docker image inspect -f '{{.Config.User}}' "${{ matrix.tag }}")
-          echo "Config.User=${user}"
-          test -n "${user}"
-          test "${user}" != "0"
-          test "${user}" != "root"
-          test "${user}" != "0:0"
-      - name: verify OCI license and source labels
-        run: |
-          lic=$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.licenses"}}' "${{ matrix.tag }}")
-          echo "org.opencontainers.image.licenses=${lic}"
-          test "$lic" = "Apache-2.0"
-          src=$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.source"}}' "${{ matrix.tag }}")
-          echo "org.opencontainers.image.source=${src}"
-          test "$src" = "https://github.com/maci0/openshift-baseline-security"
+          set -euo pipefail
+          extra=""
+          if [ "$IMAGE_KIND" = "bundle" ]; then
+            extra=--allow-scratch-user
+          fi
+          "$GITHUB_WORKSPACE/operator/hack/verify-image-metadata.sh" "$IMAGE_NAME" $extra
       # Cheap post-build smoke: entrypoint/binary or labeled bundle package exists.
       # Hardened run: no network, read-only rootfs, drop caps (local image only).
       - name: smoke ${{ matrix.name }}
@@ -364,22 +359,11 @@ jobs:
             --cache-from type=gha,scope=baseline-security-operator-catalog \
             --cache-to type=gha,mode=max,scope=baseline-security-operator-catalog,ignore-error=true \
             -f catalog.Dockerfile -t baseline-security-operator-catalog:ci .
-      - name: verify catalog non-root USER
+      - name: verify catalog image metadata
         run: |
-          user=$(docker image inspect -f '{{.Config.User}}' baseline-security-operator-catalog:ci)
-          echo "Config.User=${user}"
-          test -n "${user}"
-          test "${user}" != "0"
-          test "${user}" != "root"
-          test "${user}" != "0:0"
-      - name: verify catalog OCI license and source labels
-        run: |
-          lic=$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.licenses"}}' baseline-security-operator-catalog:ci)
-          echo "org.opencontainers.image.licenses=${lic}"
-          test "$lic" = "Apache-2.0"
-          src=$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.source"}}' baseline-security-operator-catalog:ci)
-          echo "org.opencontainers.image.source=${src}"
-          test "$src" = "https://github.com/maci0/openshift-baseline-security"
+          set -euo pipefail
+          "$GITHUB_WORKSPACE/operator/hack/verify-image-metadata.sh" \
+            baseline-security-operator-catalog:ci
       - name: smoke catalog configs
         run: |
           # Precomputed FBC must be present and readable as the non-root USER.

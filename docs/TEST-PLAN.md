@@ -935,9 +935,11 @@ stale Available or eternal Progressing.
 - [x] **prometheusrule_to_rules.py CLI**: `--help` exits 0 on stdout; wrong
       argc or unknown options exit 2; extract writes a top-level `groups:`
       file (`TestPrometheusRuleToRulesHelp`, `TestPrometheusRuleToRulesExtract`).
-- [x] **hack script --help**: `test-alerts.sh`, `verify-bundle-static.sh`,
-      `verify-csv-deploy.sh`, and `verify-product-lockstep.sh` print usage and
-      exit 0 instead of running (`TestVerifyAndTestAlertsHelp`).
+- [x] **hack script --help**: `resolve-release-version.sh`, `test-alerts.sh`,
+      `verify-bundle-static.sh`, `verify-csv-deploy.sh`,
+      `verify-image-metadata.sh`, and `verify-product-lockstep.sh` print usage
+      and exit 0 instead of running; unknown options exit 2
+      (`TestHackScriptHelp`).
 - [ ] **Must-gather smoke**: `operator/hack/must-gather.sh` runs without
       cluster-admin-only assumptions beyond documented RBAC and redacts or
       avoids secrets.
