@@ -64,7 +64,7 @@ export function OverviewRoute() {
 }
 
 export function ResultsRoute() {
-  const { baseline, checkResults, checkResultsLoaded, checkResultsError } =
+  const { baseline, baselineError, checkResults, checkResultsLoaded, checkResultsError } =
     React.useContext(BaselineContext);
   return (
     <ChunkGate load={loadResultsTab}>
@@ -73,6 +73,7 @@ export function ResultsRoute() {
         return (
           <ResultsTab
             baseline={baseline}
+            baselineError={baselineError}
             results={checkResults}
             resultsLoaded={checkResultsLoaded}
             resultsError={checkResultsError}

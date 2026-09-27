@@ -97,6 +97,7 @@ import {
   waiverExpired,
 } from '../waivers';
 import BaselineNotConfigured from './BaselineNotConfigured';
+import BaselineUnavailable from './BaselineUnavailable';
 import { withDisabledTip } from './DisabledTip';
 import { restoreFocus } from './focus';
 import { useAutoDismiss } from './useAutoDismiss';
@@ -173,7 +174,11 @@ const ResultsTab: React.FC<{
   results?: ComplianceCheckResult[];
   resultsLoaded?: boolean;
   resultsError?: unknown;
-}> = ({ baseline, results, resultsLoaded: loaded = false, resultsError }) => {
+  // Baseline watch failure. CompliancePage forces `loaded` true on an error, so
+  // without this a failed watch reaches BaselineNotConfigured and claims the
+  // CR does not exist.
+  baselineError?: unknown;
+}> = ({ baseline, results, resultsLoaded: loaded = false, resultsError, baselineError }) => {
   const { t, i18n } = useTranslation('plugin__baseline-security-console-plugin');
   const [selected, setSelected] = React.useState<ComplianceCheckResult | null>(null);
   const [waiveReason, setWaiveReason] = React.useState('');
@@ -742,7 +747,7 @@ const ResultsTab: React.FC<{
   if (loaded && !resultsError && !baseline) {
     return (
       <ListPageBody>
-        <BaselineNotConfigured />
+        {baselineError ? <BaselineUnavailable error={baselineError} /> : <BaselineNotConfigured />}
       </ListPageBody>
     );
   }

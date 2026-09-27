@@ -102,6 +102,13 @@ depend on those tags.
   hand-picked values that matched no token), so a status is one color across
   the console, the report, and the dashboard. `TestDashboardUsesStatusPalette`
   pins the widened set.
+- The Results tab reported "Baseline not configured" with a Create button when
+  the `ClusterBaseline` watch failed, for example on a 403 or a missing CRD.
+  The page forces its loaded flag true on a watch error so the tabs stop
+  skeletonning, and Results was the one tab that did not read
+  `baselineError` off the shared context, so it could not tell a failed read
+  from an absent CR. It now renders the same danger state, naming the reason,
+  that Overview, Remediations, and Profiles already render.
 - `hack/verify-backup.sh` computed the backup age with `date -u -d`, which is
   GNU coreutils only. On a host with BSD `date` (macOS, which `hack/backup.sh`
   and `hack/restore.sh` already support for the digest) the conversion failed,
