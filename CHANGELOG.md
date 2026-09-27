@@ -110,6 +110,14 @@ depend on those tags.
 
 ### Changed
 
+- The console plugin's nginx access log no longer uses the `combined` format.
+  It logged the admin's client IP, the referring console URL, and the browser
+  user agent, none of which triage a failed static-asset fetch, and the log
+  line is copied verbatim into `hack/must-gather.sh` output and from there into
+  support archives. The line now carries the method, the path without its query
+  string, the protocol, the status, and the response size. Log volume, the
+  non-2xx/3xx filter, and the destination are unchanged.
+
 - The manager printed its usage text to stdout on a usage error, so a caller
   that captured stdout on the exit-2 path (an unknown flag, an unexpected
   positional argument) read the whole help text as command output while the
