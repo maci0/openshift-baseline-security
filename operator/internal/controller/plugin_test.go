@@ -69,6 +69,30 @@ func TestRelatedImageConsolePluginTrim(t *testing.T) {
 	}
 }
 
+// The reconciler reads the injected image when set and the env only when it is
+// not, so a simulated run does not depend on the environment the binary started
+// in. An injected empty value is an answer (ImageMissing), not a fall back.
+func TestReconcilerRelatedImageOverridesEnv(t *testing.T) {
+	const key = "RELATED_IMAGE_CONSOLE_PLUGIN"
+	t.Setenv(key, "example.test/from-env:1")
+
+	if got := (&ClusterBaselineReconciler{}).relatedImageConsolePlugin(); got != "example.test/from-env:1" {
+		t.Fatalf("uninjected = %q, want the env image", got)
+	}
+
+	image := "  example.test/injected:2  "
+	r := &ClusterBaselineReconciler{RelatedImageConsolePlugin: &image}
+	if got := r.relatedImageConsolePlugin(); got != "example.test/injected:2" {
+		t.Fatalf("injected = %q, want the trimmed injected image", got)
+	}
+
+	empty := ""
+	r = &ClusterBaselineReconciler{RelatedImageConsolePlugin: &empty}
+	if got := r.relatedImageConsolePlugin(); got != "" {
+		t.Fatalf("injected empty = %q, want empty (env must not win)", got)
+	}
+}
+
 // FuzzValidRelatedImage: RELATED_IMAGE_CONSOLE_PLUGIN is untrusted env text.
 // Must never panic; rejects empty, oversize, control chars, and shell/URL noise;
 // accepts only when at least one alnum is present and no forbidden metachar.

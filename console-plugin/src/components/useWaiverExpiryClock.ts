@@ -5,7 +5,7 @@
 // so the content key and reschedule cadence cannot drift between Overview and
 // Results.
 import * as React from 'react';
-import { nowMs } from '../clock';
+import { clearTimer, nowMs, setTimer } from '../clock';
 import { encodeKeyPart } from '../contentKey';
 import { Waiver } from '../models';
 import { futureWaiverDeadlineMs, soonestDeadlineDelayMs } from '../waivers';
@@ -45,8 +45,11 @@ export const useWaiverExpiryClock = (
     if (delay === 0) {
       return;
     }
-    const id = window.setTimeout(() => setTick((c) => c + 1), delay);
-    return () => window.clearTimeout(id);
+    // Scheduled through the clock module, not window.setTimeout: a driver that
+    // advanced a virtual instant has to be able to fire this tick itself, and
+    // a real setTimeout would leave the countdown in wall time.
+    const id = setTimer(delay, () => setTick((c) => c + 1));
+    return () => clearTimer(id);
     // waivers/offsets read when the content key or tick changes; the key
     // encodes both.
     // eslint-disable-next-line react-hooks/exhaustive-deps -- content key + tick

@@ -43,8 +43,11 @@ case "${1:-}" in
   usage
   exit 0
   ;;
--*)
-  echo "${prog}: unknown option: $1" >&2
+-?*)
+  # A path never starts with a dash, so this is a mistyped flag, not a tree the
+  # build produced. Failing as a usage error keeps it from reading as the
+  # "path does not exist" failure it is not.
+  echo "${prog}: unknown option: ${1}" >&2
   usage >&2
   exit 2
   ;;

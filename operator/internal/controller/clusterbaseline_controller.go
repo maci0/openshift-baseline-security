@@ -133,6 +133,12 @@ type ClusterBaselineReconciler struct {
 	// a seed. See clock.go for the one stamp that bypasses it.
 	Clock clock
 
+	// RelatedImageConsolePlugin is the console plugin image to deploy, injected
+	// instead of read from the process env (plugin.go). Nil is production: the
+	// env is the source. A simulated run sets it so a replay does not depend on
+	// the environment the binary happened to start in.
+	RelatedImageConsolePlugin *string
+
 	// lastHistoryStallLog rate-limits default-level Info when history cannot
 	// advance after a completed scan (suite missing / incomplete endTimestamps).
 	// V(1) alone leaves production logs silent until ComplianceScanStale fires.

@@ -15,6 +15,10 @@
 //   - default_cr.go: DefaultClusterBaseline, the zero-config ClusterBaseline/cluster
 //     bootstrap Runnable (leader-only, opt out with BASELINE_SECURITY_SKIP_DEFAULT_CR)
 //   - clock.go: the reconciler's wall-clock source (nil = real clock)
+//   - the reconciler's injected externals, both nil in production: Clock
+//     (wall time) and RelatedImageConsolePlugin (RELATED_IMAGE_CONSOLE_PLUGIN).
+//     Every other edge reads a real cluster, so a simulated run drives this
+//     package through these two.
 //   - managercache.go: ManagerCacheOptions, the manager's namespace-scoped cache bounds
 //   - create_if_missing.go: createIfMissing, shared by the create-owning steps
 //   - unstructured.go: unstructured object/list helpers, metadata field readers,

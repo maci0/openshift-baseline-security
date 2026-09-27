@@ -48,6 +48,18 @@ func relatedImageConsolePlugin() string {
 	return strings.TrimSpace(os.Getenv(EnvRelatedImageConsolePlugin))
 }
 
+// relatedImageConsolePlugin is the reconciler's view of it. Process env is
+// fixed at startup, so a simulated run (or any test) cannot vary the plugin
+// image through it: the reconciler's own field is the seam, and the env stays
+// the production default. A pointer, not a string, so an injected empty value
+// is an answer (ImageMissing) rather than a silent fall back to the env.
+func (r *ClusterBaselineReconciler) relatedImageConsolePlugin() string {
+	if r.RelatedImageConsolePlugin != nil {
+		return strings.TrimSpace(*r.RelatedImageConsolePlugin)
+	}
+	return relatedImageConsolePlugin()
+}
+
 // relatedImageRefMax is the longest image reference accepted. A ref this long
 // is already far past any real registry, port, path, digest, and tag
 // combination, so the bound is a ceiling on operator input, not a protocol
@@ -182,7 +194,7 @@ func (r *ClusterBaselineReconciler) ensureConsolePlugin(ctx context.Context, cb 
 	if cb.Spec.Console.ManagementState == baselinev1alpha1.Removed {
 		return r.removeConsolePlugin(ctx, cb)
 	}
-	image := relatedImageConsolePlugin()
+	image := r.relatedImageConsolePlugin()
 	if image == "" {
 		// Soft-fail: still reconcile scans/status; requeue will retry when env is fixed.
 		// Does not roll up to Degraded (scanning still works), so log on transition

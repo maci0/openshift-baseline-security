@@ -1,4 +1,4 @@
-import { now, nowMs, resetClock, setClock } from './clock';
+import { clearTimer, now, nowMs, resetClock, setClock, setTimer, setTimers } from './clock';
 import { localDateInputValue } from './dates';
 import { activeWaivedNames, waiverExpired } from './waivers';
 import { Waiver } from './models';
@@ -42,6 +42,63 @@ describe('clock seam', () => {
     setClock(() => new Date(FROZEN));
     resetClock();
     expect(now().toISOString()).not.toBe(FROZEN);
+  });
+});
+
+describe('timer seam', () => {
+  it('routes a scheduled wait through an injected scheduler', () => {
+    // The waiver-expiry countdown schedules its tick here. A virtual clock
+    // that cannot fire it would leave every simulated run waiting in real time.
+    const pending = new Map<number, { at: number; fn: () => void }>();
+    const fired: number[] = [];
+    let nextId = 1;
+    setTimers({
+      schedule: (ms, fn) => {
+        const id = nextId++;
+        pending.set(id, { at: nowMs() + ms, fn });
+        return id;
+      },
+      cancel: (id) => {
+        pending.delete(id);
+      },
+    });
+    let ms = Date.parse(FROZEN);
+    setClock(() => new Date(ms));
+
+    setTimer(60_000, () => fired.push(ms));
+    expect(fired).toEqual([]);
+    ms += 60_000;
+    for (const [key, timer] of [...pending]) {
+      if (timer.at <= ms) {
+        pending.delete(key);
+        timer.fn();
+      }
+    }
+    expect(fired).toEqual([Date.parse(FROZEN) + 60_000]);
+
+    const stale = setTimer(60_000, () => fired.push(-1));
+    clearTimer(stale);
+    expect(pending.size).toBe(0);
+  });
+
+  it('stops routing to an injected scheduler after reset', () => {
+    const scheduled: number[] = [];
+    setTimers({
+      schedule: (ms) => {
+        scheduled.push(ms);
+        return 1;
+      },
+      cancel: () => undefined,
+    });
+    resetClock();
+    try {
+      setTimer(0, () => undefined);
+    } catch {
+      // The default is window.setTimeout and the tests run under the node
+      // environment, so reaching the real scheduler throws. Only the absence
+      // of a call on the injected one is the assertion.
+    }
+    expect(scheduled).toEqual([]);
   });
 });
 
