@@ -42,7 +42,26 @@ depend on those tags.
 
 ## [Unreleased]
 
+### Fixed
+
+- Operator and console plugin pods: neither declared a `preStop` hook, so a
+  terminating pod kept its endpoint for the seconds between SIGTERM and
+  endpoint removal, and a scrape or console request could still land on a
+  draining pod. Both containers now sleep 5s in `preStop` before the process
+  sees SIGTERM, inside the existing 30s grace period.
+- Operator `/readyz` reported ready for the whole drain. A SIGTERM now flips
+  the readiness check to failing, so the pod leaves the Service endpoints as
+  soon as the process starts shutting down.
+
 ### Changed
+
+- Kubernetes objects the operator ships (manager Deployment, metrics Service,
+  ServiceMonitor, PrometheusRule, and the plugin Service/Deployment/PDB) now
+  carry the recommended `app.kubernetes.io/name`, `component`, `part-of`, and
+  `managed-by` labels, and the CSV pod template carries
+  `app.kubernetes.io/version`. Selectors still match on `app` alone, because
+  the Deployment selector is immutable and a selector requiring a new label
+  would stop matching pods created before it.
 
 - Threat model: the manager pod was described as running under Restricted PSS.
   The pod spec satisfies Restricted, but no

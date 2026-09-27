@@ -34,6 +34,9 @@ const (
 	finalizerName       = "baselinesecurity.openshift.io/cleanup"
 	pluginName          = "baseline-security-console-plugin"
 	pluginNS            = "openshift-baseline-security"
+	// operatorName is this operator, the entity that owns the objects it
+	// reconciles; it is the app.kubernetes.io/managed-by value.
+	operatorName = "baseline-security-operator"
 	// Cluster-scoped singleton CR name every watch/filter must agree on.
 	clusterBaselineName = "cluster"
 	// OLM CSV names of the compliance-operator package carry this prefix; the

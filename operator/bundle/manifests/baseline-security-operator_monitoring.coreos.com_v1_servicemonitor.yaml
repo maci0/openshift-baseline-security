@@ -4,6 +4,10 @@ metadata:
   name: baseline-security-operator
   labels:
     app: baseline-security-operator
+    app.kubernetes.io/name: baseline-security-operator
+    app.kubernetes.io/component: controller
+    app.kubernetes.io/part-of: baseline-security
+    app.kubernetes.io/managed-by: olm
 spec:
   selector:
     matchLabels:

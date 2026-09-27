@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -86,5 +87,22 @@ func TestDeploymentAvailableFalsePastGrace(t *testing.T) {
 	dep.Status.Conditions[0].Status = corev1.ConditionTrue
 	if deploymentAvailableFalsePastGrace(dep) {
 		t.Fatal("True is not False-past-grace")
+	}
+}
+
+func TestApplyPluginContainerPreStop(t *testing.T) {
+	pod := &corev1.PodSpec{}
+	applyPluginContainer(pod, "quay.io/example/plugin:0.1.0")
+	c := pod.Containers[0]
+	if c.Lifecycle == nil || c.Lifecycle.PreStop == nil || c.Lifecycle.PreStop.Exec == nil {
+		t.Fatal("preStop exec hook required so the endpoint leaves the Service before SIGTERM")
+	}
+	if got := strings.Join(c.Lifecycle.PreStop.Exec.Command, " "); got != "/bin/sh -c sleep 5" {
+		t.Fatalf("preStop command = %q", got)
+	}
+	// The sleep must fit inside the grace period or the pod is SIGKILLed
+	// before nginx ever sees SIGTERM.
+	if *pod.TerminationGracePeriodSeconds <= 5 {
+		t.Fatalf("terminationGracePeriodSeconds = %d, must exceed the preStop sleep", *pod.TerminationGracePeriodSeconds)
 	}
 }

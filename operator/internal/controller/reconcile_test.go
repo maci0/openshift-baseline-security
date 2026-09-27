@@ -926,6 +926,21 @@ func TestEnsureConsolePlugin(t *testing.T) {
 	if pdb.Spec.Selector == nil || pdb.Spec.Selector.MatchLabels["app"] != pluginName {
 		t.Fatalf("plugin PDB selector = %+v", pdb.Spec.Selector)
 	}
+	// Recommended labels on the pod and the objects themselves, so a dashboard
+	// or a NetworkPolicy can select by app.kubernetes.io/*. Selectors stay on
+	// `app` alone: the Deployment selector is immutable, so requiring a label
+	// that pre-existing pods lack would leave the PDB matching nothing.
+	if l := dep.Spec.Template.Labels["app.kubernetes.io/name"]; l != pluginName {
+		t.Fatalf("pod label app.kubernetes.io/name = %q, want %q", l, pluginName)
+	}
+	if l := dep.Labels["app.kubernetes.io/managed-by"]; l != operatorName {
+		t.Fatalf("Deployment label app.kubernetes.io/managed-by = %q, want %q", l, operatorName)
+	}
+	for k := range dep.Spec.Template.Labels {
+		if strings.HasPrefix(k, "app.kubernetes.io/") && (pdb.Spec.Selector.MatchLabels[k] != "" || dep.Spec.Selector.MatchLabels[k] != "") {
+			t.Fatalf("selector must not require %q", k)
+		}
+	}
 	if sc := dep.Spec.Template.Spec.SecurityContext; sc == nil || sc.RunAsNonRoot == nil || !*sc.RunAsNonRoot {
 		t.Fatal("pod SecurityContext.RunAsNonRoot required")
 	}

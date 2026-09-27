@@ -190,7 +190,35 @@ func (r *ClusterBaselineReconciler) ensureConsolePlugin(ctx context.Context, cb 
 
 	// Fresh map per consumer: Service/Deployment/PDB/Affinity must not share one
 	// map header (client-go and API machinery may retain object graphs).
-	pluginLabels := func() map[string]string { return map[string]string{"app": pluginName} }
+	//
+	// Selectors use pluginSelectorLabels only. A selector that also required a
+	// recommended label would stop matching pods created before the label
+	// existed (the Deployment selector is immutable), leaving the PDB
+	// selecting nothing. Recommended labels are for filtering and reporting.
+	pluginSelectorLabels := func() map[string]string { return map[string]string{"app": pluginName} }
+	pluginLabels := func() map[string]string {
+		m := pluginSelectorLabels()
+		m["app.kubernetes.io/name"] = pluginName
+		m["app.kubernetes.io/component"] = "console-plugin"
+		m["app.kubernetes.io/part-of"] = "baseline-security"
+		m["app.kubernetes.io/managed-by"] = operatorName
+		return m
+	}
+	// objectLabels stamps the recommended labels on the object itself so a
+	// dashboard or a NetworkPolicy can select the plugin by app.kubernetes.io/*
+	// rather than by the app label. Merge, never replace: foreign labels set by
+	// the platform must survive every reconcile.
+	objectLabels := func(obj *metav1.ObjectMeta) {
+		if obj.Labels == nil {
+			obj.Labels = map[string]string{}
+		}
+		for k, v := range pluginLabels() {
+			if k == "app" {
+				continue
+			}
+			obj.Labels[k] = v
+		}
+	}
 
 	// On single-node OpenShift there is only one node, so a 2-replica Deployment
 	// plus a minAvailable=1 PDB would refuse eviction of the last pod and deadlock
@@ -225,10 +253,11 @@ func (r *ClusterBaselineReconciler) ensureConsolePlugin(ctx context.Context, cb 
 		svc.Spec.ExternalTrafficPolicy = ""
 		svc.Spec.HealthCheckNodePort = 0
 		svc.Spec.PublishNotReadyAddresses = false
-		svc.Spec.Selector = pluginLabels()
+		svc.Spec.Selector = pluginSelectorLabels()
 		svc.Spec.Ports = []corev1.ServicePort{{
 			Name: "https", Port: 9443, TargetPort: intstr.FromInt32(9443), Protocol: corev1.ProtocolTCP,
 		}}
+		objectLabels(&svc.ObjectMeta)
 		return controllerutil.SetControllerReference(cb, svc, r.Scheme)
 	}); err != nil {
 		return fmt.Errorf("ensuring plugin Service %s/%s: %w", pluginNS, pluginName, err)
@@ -238,7 +267,7 @@ func (r *ClusterBaselineReconciler) ensureConsolePlugin(ctx context.Context, cb 
 	if _, err := controllerutil.CreateOrUpdate(ctx, r.Client, dep, func() error {
 		// Mutate owned fields only; leave selector immutable after create.
 		if dep.Spec.Selector == nil {
-			dep.Spec.Selector = &metav1.LabelSelector{MatchLabels: pluginLabels()}
+			dep.Spec.Selector = &metav1.LabelSelector{MatchLabels: pluginSelectorLabels()}
 		}
 		dep.Spec.Replicas = ptr.To(replicas)
 		// maxUnavailable=1 makes DeploymentAvailable True at 1/2 ready, matching
@@ -262,8 +291,9 @@ func (r *ClusterBaselineReconciler) ensureConsolePlugin(ctx context.Context, cb 
 				Type: corev1.SeccompProfileTypeRuntimeDefault,
 			},
 		}
-		dep.Spec.Template.Spec.Affinity = preferredHostnameAntiAffinity(pluginLabels())
+		dep.Spec.Template.Spec.Affinity = preferredHostnameAntiAffinity(pluginSelectorLabels())
 		applyPluginContainer(&dep.Spec.Template.Spec, image)
+		objectLabels(&dep.ObjectMeta)
 		return controllerutil.SetControllerReference(cb, dep, r.Scheme)
 	}); err != nil {
 		return fmt.Errorf("ensuring plugin Deployment %s/%s: %w", pluginNS, pluginName, err)
@@ -280,9 +310,10 @@ func (r *ClusterBaselineReconciler) ensureConsolePlugin(ctx context.Context, cb 
 		// Preferred anti-affinity alone does not block eviction of both pods on drain.
 		if _, err := controllerutil.CreateOrUpdate(ctx, r.Client, pdb, func() error {
 			pdb.Spec.MinAvailable = ptr.To(intstr.FromInt32(pluginReadyMin))
-			pdb.Spec.Selector = &metav1.LabelSelector{MatchLabels: pluginLabels()}
+			pdb.Spec.Selector = &metav1.LabelSelector{MatchLabels: pluginSelectorLabels()}
 			// Clear maxUnavailable when minAvailable is set (mutually exclusive).
 			pdb.Spec.MaxUnavailable = nil
+			objectLabels(&pdb.ObjectMeta)
 			return controllerutil.SetControllerReference(cb, pdb, r.Scheme)
 		}); err != nil {
 			return fmt.Errorf("ensuring plugin PodDisruptionBudget %s/%s: %w", pluginNS, pluginName, err)

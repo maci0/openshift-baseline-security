@@ -5,6 +5,10 @@ metadata:
   labels:
     app: baseline-security-operator
     control-plane: controller-manager
+    app.kubernetes.io/name: baseline-security-operator
+    app.kubernetes.io/component: controller
+    app.kubernetes.io/part-of: baseline-security
+    app.kubernetes.io/managed-by: olm
   annotations:
     service.beta.openshift.io/serving-cert-secret-name: baseline-security-operator-metrics-cert
 spec:

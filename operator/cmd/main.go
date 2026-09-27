@@ -7,6 +7,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -17,6 +18,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -25,9 +27,11 @@ import (
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
@@ -38,6 +42,13 @@ import (
 // envSkipDefaultCR opts out of creating ClusterBaseline/cluster when none exist.
 // Keep the string in one place so README/CSV comments and code cannot drift.
 const envSkipDefaultCR = "BASELINE_SECURITY_SKIP_DEFAULT_CR"
+
+// errShuttingDown fails the readiness check once SIGTERM has been received.
+var errShuttingDown = errors.New("shutting down")
+
+// shuttingDown is set by a manager runnable when the signal handler cancels the
+// manager context, so readyz reports 503 while the process drains.
+var shuttingDown atomic.Bool
 
 var scheme = runtime.NewScheme()
 
@@ -223,14 +234,14 @@ func main() {
 	}
 
 	utilruntime.Must(mgr.AddHealthzCheck("healthz", healthz.Ping))
-	// Ready only after informers sync. Ping alone marks Ready while caches are
-	// empty, so kubelet can route to a pod that cannot reconcile yet.
-	utilruntime.Must(mgr.AddReadyzCheck("cache-sync", func(req *http.Request) error {
-		if !mgr.GetCache().WaitForCacheSync(req.Context()) {
-			return errCacheNotSynced
-		}
+	utilruntime.Must(mgr.AddReadyzCheck("cache-sync", cacheSyncReadyz(mgr.GetCache())))
+	// Flip the flag as soon as the signal handler cancels the manager context,
+	// before the graceful drain runs, so the first probe after SIGTERM is 503.
+	utilruntime.Must(mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
+		<-ctx.Done()
+		shuttingDown.Store(true)
 		return nil
-	}))
+	})))
 
 	// Zero-config default: create ClusterBaseline/cluster if none exists.
 	// Opt out with BASELINE_SECURITY_SKIP_DEFAULT_CR=true. Leader-only so
@@ -394,4 +405,24 @@ func printUsage(w io.Writer) error {
 	}
 	_, err := fmt.Fprintf(w, "  KUBECONFIG\n        Out-of-cluster kubeconfig. --kubeconfig wins if both are set.\n")
 	return err
+}
+
+// cacheSyncReadyz is the readyz check: the pod serves only once the informers
+// are in sync, and stops serving as soon as SIGTERM arrives. Ping alone would
+// mark the pod ready while the caches are empty, so kubelet can route to a pod
+// that cannot reconcile yet.
+func cacheSyncReadyz(c cache.Cache) func(req *http.Request) error {
+	return func(req *http.Request) error {
+		// SIGTERM received: the process is draining, so fail readiness even
+		// though the caches are still in sync. Endpoint removal normally
+		// happens on SIGTERM anyway; this closes the window where a scrape or
+		// a route still lands on a pod that is shutting down.
+		if shuttingDown.Load() {
+			return errShuttingDown
+		}
+		if !c.WaitForCacheSync(req.Context()) {
+			return errCacheNotSynced
+		}
+		return nil
+	}
 }

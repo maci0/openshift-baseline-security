@@ -352,6 +352,8 @@ verify-versions:
 	fi; \
 	grep -qE "containerImage:.*:$(VERSION_RE)$$" "$$csv" \
 		|| { echo "CSV containerImage annotation is not tagged :$(VERSION); OLM UI would show the wrong operator image"; fail=1; }; \
+	grep -qE "^ +app\.kubernetes\.io/version: $(VERSION_RE)$$" "$$csv" \
+		|| { echo "CSV pod template app.kubernetes.io/version is not $(VERSION); platform tooling would report a stale version"; fail=1; }; \
 	grep -qE '^  "version": "$(VERSION_RE)"' "$$pkg" \
 		|| { echo "console-plugin package.json top-level version is not $(VERSION); shipped plugin would report the wrong version"; fail=1; }; \
 	grep -qE '^    "version": "$(VERSION_RE)"' "$$pkg" \

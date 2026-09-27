@@ -185,6 +185,16 @@ func applyPluginContainer(pod *corev1.PodSpec, image string) {
 			FailureThreshold: 3,
 		},
 		TerminationMessagePath: corev1.TerminationMessagePathDefault,
+		Lifecycle: &corev1.Lifecycle{
+			PreStop: &corev1.LifecycleHandler{
+				// kube removes the endpoint only after SIGTERM, so the console can
+				// open a connection to this pod in the first seconds of termination.
+				// Sleep before the process sees SIGTERM so the endpoint leaves the
+				// Service first; nginx then quits gracefully on SIGTERM. 5s fits
+				// inside terminationGracePeriodSeconds (30) with room for the quit.
+				Exec: &corev1.ExecAction{Command: []string{"/bin/sh", "-c", "sleep 5"}},
+			},
+		},
 		// Prefer container logs when nginx dies before writing the termination file
 		// (matches the manager Deployment; ReadFile alone hides crash context).
 		TerminationMessagePolicy: corev1.TerminationMessageFallbackToLogsOnError,

@@ -323,6 +323,11 @@ spec:
               metadata:
                 labels:
                   app: baseline-security-operator
+                  app.kubernetes.io/name: baseline-security-operator
+                  app.kubernetes.io/component: controller
+                  app.kubernetes.io/part-of: baseline-security
+                  app.kubernetes.io/managed-by: olm
+                  app.kubernetes.io/version: 0.6.1
               spec:
                 serviceAccountName: baseline-security-operator
                 enableServiceLinks: false
@@ -413,6 +418,14 @@ spec:
                         # Headroom for the full-body CCR/Remediation informer
                         # cache on a large cluster; paired with GOMEMLIMIT above.
                         memory: 512Mi
+                    lifecycle:
+                      preStop:
+                        exec:
+                          # Sleep before SIGTERM reaches the process so the
+                          # endpoint leaves the Service first; 5s is well inside
+                          # terminationGracePeriodSeconds (30) minus the 20s
+                          # GracefulShutdownTimeout in cmd/main.go.
+                          command: ["/bin/sh", "-c", "sleep 5"]
                     terminationMessagePolicy: FallbackToLogsOnError
                 volumes:
                   - name: metrics-certs

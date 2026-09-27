@@ -6,6 +6,13 @@ metadata:
   labels:
     app: baseline-security-operator
     control-plane: controller-manager
+    # Recommended labels so a NetworkPolicy or dashboard can select by
+    # app.kubernetes.io/*. The ServiceMonitor selector below stays on
+    # app + control-plane, which every replica of the Service carries.
+    app.kubernetes.io/name: baseline-security-operator
+    app.kubernetes.io/component: controller
+    app.kubernetes.io/part-of: baseline-security
+    app.kubernetes.io/managed-by: olm
   annotations:
     service.beta.openshift.io/serving-cert-secret-name: baseline-security-operator-metrics-cert
 spec:

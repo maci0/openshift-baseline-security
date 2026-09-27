@@ -655,6 +655,15 @@ an accepted risk neither inflates nor tanks the score.
       (`TestIsLoopbackMetricsAddr`).
 - [x] **Plugin HA strategy**: Deployment maxUnavailable=1 so Available stays
       True at 1/2 ready (`TestEnsureConsolePlugin` strategy assert).
+- [x] **preStop on both pods**: the plugin container declares a 5s preStop
+      exec hook inside the 30s grace period
+      (`TestApplyPluginContainerPreStop`); the manager Deployment and the CSV
+      carry the same hook (manifest, asserted by reading the YAML).
+- [x] **Readyz fails on SIGTERM**: readiness reports not-ready as soon as the
+      process starts draining (`TestCacheSyncReadyz`).
+- [x] **Recommended labels without breaking selectors**: pod and object
+      metadata carry `app.kubernetes.io/*`; Service, Deployment and PDB
+      selectors still require `app` alone (`TestEnsureConsolePlugin`).
 - [x] **pluginReadyMin=1**: partial ready is Deployed, not forever Progressing
       (`TestEnsureConsolePlugin`).
 - [x] **Available=False past grace** becomes Unavailable even with some ready

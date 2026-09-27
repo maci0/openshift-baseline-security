@@ -8,6 +8,10 @@ metadata:
   namespace: openshift-baseline-security
   labels:
     app: baseline-security-operator
+    app.kubernetes.io/name: baseline-security-operator
+    app.kubernetes.io/component: controller
+    app.kubernetes.io/part-of: baseline-security
+    app.kubernetes.io/managed-by: olm
 spec:
   groups:
     - name: baseline-security.rules
