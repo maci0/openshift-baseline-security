@@ -149,7 +149,9 @@ produces the same PNG on any runner.
 false` in `.yarnrc.yml` means no install script fetches the browser build.
 `e2e/global-setup.ts` names that command when the binary is missing.
 
-`.env` carries only the four keys in `.env.example`; `e2e/dotenv.ts` rejects an
+`.env` carries only the four keys `E2E_ENV_KEYS` allows: `CONSOLE_URL` and
+`KUBEADMIN_PASSWORD` (set in `.env.example`), `KUBEADMIN_USER` and
+`SCREENSHOT_DIR` (documented there as optional). `e2e/dotenv.ts` rejects an
 unknown, duplicate, malformed, or unterminated-quote line with the file and line
 number, so a typo cannot surface later as a missing value. The `*.test.ts` files
 in `e2e/` are the pieces jest runs (`e2e/dotenv.test.ts`, `e2e/helpers.test.ts`);

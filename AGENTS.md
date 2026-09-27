@@ -94,10 +94,10 @@ standalone channel head, so there is no `PREV_VERSION` anywhere. CSV
 
 ## Layout
 
-- root `Makefile`: contributor entry point. `help`, `check` (preflight), and
-  `test` / `lint` / `ci` wrappers that delegate to the two module Makefiles.
-  It holds no rule of its own, so add a target here only when both modules
-  want it.
+- root `Makefile`: contributor entry point. `help` and `check` (preflight) are
+  its own recipes; `test` / `lint` / `ci` only delegate to the two module
+  Makefiles. Add a delegating target here only when both modules want it; a
+  check that guards one module's toolchain belongs in that module.
 - `operator/`: Go operator (kubebuilder go/v4), OLM bundle, file-based catalog
 - `console-plugin/`: React 18 / PatternFly 6 dynamic plugin
 - `docs/`: SPEC, STANDARDS, PATTERNS, DESIGN-DECISIONS, TEST-PLAN,
@@ -109,8 +109,8 @@ standalone channel head, so there is no `PREV_VERSION` anywhere. CSV
 
 ## House rules
 
-- Branch for the work (`fix/`, `feat/`, `docs/`, `chore/`); never commit
-  straight to `main`.
+- Branch for the work (`fix/`, `feat/`, `docs/`, `test/`, `refactor/`,
+  `chore/`); never commit straight to `main`.
 - No AI tool or model names anywhere git can see: commit messages, branch
   names, PR text, code comments. No `Co-Authored-By` for a tool. Human
   co-authors are credited normally.
