@@ -34,6 +34,7 @@ import {
 } from '../models';
 import { now, nowMs } from '../clock';
 import { formatCount } from '../dates';
+import { formatList } from '../text';
 import { downloadBlob, openBlobInTab } from '../download';
 import { errorMessage } from '../errors';
 import { AccessGate, mayWrite } from '../permissions';
@@ -122,10 +123,15 @@ const CompliancePage: React.FC = () => {
   // Concatenate, do not short-circuit: two watches failing at once used to
   // render only the first message, and the second one's text was never shown
   // anywhere, so an admin could not tell which resource was unreadable.
-  const watchError = [baselineError, scansError, checkResultsError]
+  // The locale's list punctuation rather than a hardcoded space: two
+  // independently worded sentences run together in ja/zh, and an RTL locale
+  // needs the separator on its own side.
+  const watchErrorParts = [baselineError, scansError, checkResultsError]
     .map((e) => errorMessage(e))
-    .filter((m): m is string => !!m)
-    .join(' ') || undefined;
+    .filter((m): m is string => !!m);
+  const watchError = watchErrorParts.length
+    ? formatList(watchErrorParts, i18n.language)
+    : undefined;
 
   // Selector already scopes to owned suites; keep stable aliases for rescan/export.
   const ownedScans = scans ?? EMPTY_SCANS;
@@ -392,7 +398,9 @@ const CompliancePage: React.FC = () => {
             title={t('Failed to load compliance data.')}
             style={{ marginTop: 'var(--pf-t--global--spacer--md)' }}
           >
-            {watchError}
+            {/* Apiserver text: dir=auto so an RTL resource name in the message
+                cannot reorder it against the alert chrome. */}
+            <span dir="auto">{watchError}</span>
           </Alert>
         )}
         {exportNotice && (
@@ -415,7 +423,7 @@ const CompliancePage: React.FC = () => {
             variant={rescanStarted ? 'warning' : 'danger'}
             isInline
             isLiveRegion
-            title={rescanError}
+            title={<span dir="auto">{rescanError}</span>}
             style={{ marginTop: 'var(--pf-t--global--spacer--md)' }}
             actionClose={
               <AlertActionCloseButton

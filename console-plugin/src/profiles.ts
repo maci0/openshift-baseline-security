@@ -145,6 +145,12 @@ export const cleanRuleSelection = (
   };
 };
 
+// Translation keys for the two invariant guards in tailoredProfileManifest.
+// ProfilesTab maps them through t(); anything else from errorMessage is an
+// apiserver message and is rendered as-is.
+export const INVALID_TAILORED_NAME_KEY = 'Invalid tailored profile name.';
+export const INVALID_BASE_PROFILE_KEY = 'Invalid base profile name.';
+
 // Build a TailoredProfile CR body from an editor: a base profile to extend and
 // optional rule names to enable/disable. Empty rule lists are omitted.
 // Empty/whitespace extends defaults to ocp4-cis (same as the Profiles form).
@@ -160,12 +166,14 @@ export const tailoredProfileManifest = (
 ): TailoredProfileManifest => {
   const profileName = name.trim();
   if (!isValidTailoredProfileName(profileName)) {
-    throw new Error('invalid TailoredProfile name');
+    // The message is a translation key, not prose: the caller renders it through
+    // t(), so an invariant that does fire reads in the console's language.
+    throw new Error(INVALID_TAILORED_NAME_KEY);
   }
   // Empty means "use the form default"; non-empty junk must not silently become CIS.
   const extendsName = extendsProfile.trim() || DEFAULT_BASE_PROFILE;
   if (!isValidK8sName(extendsName)) {
-    throw new Error('invalid base profile name');
+    throw new Error(INVALID_BASE_PROFILE_KEY);
   }
   const spec: TailoredProfileSpec = {
     title: profileName,

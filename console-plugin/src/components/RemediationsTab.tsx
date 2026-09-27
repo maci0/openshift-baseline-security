@@ -56,6 +56,7 @@ import { AccessGate, mayWrite } from '../permissions';
 import { encodeKeyList } from '../contentKey';
 import { formatCount } from '../dates';
 import { errorMessage } from '../errors';
+import { listSeparators } from '../text';
 import {
   batchApplyMaxNames,
   batchApplyPatch,
@@ -758,7 +759,10 @@ const RemediationsTab: React.FC<{
                       'The Compliance Operator generates remediations only for failing checks that can be auto-fixed. None are available for the current results.',
                     )}{' '}
                     <a href="/baseline-security/results">{t('Review check results')}</a>
-                    {' · '}
+                    {/* The locale's own list punctuation, not a hardcoded middle
+                        dot: ja and zh join with nothing, and ar puts the separator
+                        on the other side of the pair. */}
+                    {listSeparators(2, i18n.language)[0]}
                     <a href="/baseline-security/profiles">{t('Go to Profiles')}</a>
                   </>
                 )}
@@ -881,10 +885,15 @@ const RemediationsTab: React.FC<{
                       <Tooltip
                         content={
                           depsSummary
-                            ? t(
-                                'Blocked: missing dependency {{deps}}. Apply its remediations first.',
-                                { deps: depsSummary },
-                              )
+                            ? // The dependency names are CR annotation values,
+                              // so the sentence gets dir=auto the same way the
+                              // row's own summary does above.
+                              <span dir="auto">
+                                {t(
+                                  'Blocked: missing dependency {{deps}}. Apply its remediations first.',
+                                  { deps: depsSummary },
+                                )}
+                              </span>
                             : t('Blocked: apply the prerequisite remediations first.')
                         }
                       >
@@ -935,9 +944,12 @@ const RemediationsTab: React.FC<{
       >
         <ModalHeader title={t('Apply remediation?')} labelId="apply-remediation-title" />
         <ModalBody>
+          {/* The remediation name is a CR name, so it is its own element: an
+              embedded {{name}} in a translated sentence leaves an RTL name
+              free to reorder the sentence's own punctuation around it. */}
+          <span dir="auto">{confirming?.metadata.name}</span>{' '}
           {t(
-            '{{name}} will be applied to the cluster. A rescan is required afterwards for results to reflect the change.',
-            { name: confirming?.metadata.name },
+            'will be applied to the cluster. A rescan is required afterwards for results to reflect the change.',
           )}
           {confirming && isNodeRemediation(confirming) && (
             <Alert
@@ -1011,9 +1023,9 @@ const RemediationsTab: React.FC<{
       >
         <ModalHeader title={t('Unapply remediation?')} labelId="unapply-remediation-title" />
         <ModalBody>
+          <span dir="auto">{unapplying?.metadata.name}</span>{' '}
           {t(
-            '{{name}} will stop being applied. A rescan is required afterwards for results to reflect the change.',
-            { name: unapplying?.metadata.name },
+            'will stop being applied. A rescan is required afterwards for results to reflect the change.',
           )}
           {unapplying && isNodeRemediation(unapplying) && (
             <Alert

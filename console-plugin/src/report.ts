@@ -32,7 +32,10 @@ const htmlEscapes = {
 // Module-level regexes: multi-thousand FAIL-row exports must not recompile
 // patterns on every esc() / default translate call.
 const htmlEscapeRe = /[&<>"']/g;
-const reportInterpRe = /\{\{(\w+)\}\}/g;
+// \p{L}\p{N}, not \w: \w is ASCII-only, so a placeholder written with a
+// non-ASCII name would never match and the raw {{...}} would be printed
+// verbatim into the exported report instead of interpolating.
+const reportInterpRe = /\{\{([\p{L}\p{N}_]+)\}\}/gu;
 // Coerce first: CR fields typed as string are not runtime type-checked, so a
 // tampered numeric/object/null value must not throw and abort report export.
 const esc = (s: string): string =>

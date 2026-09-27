@@ -81,6 +81,8 @@ import {
   cleanRuleSelection,
   consoleRule,
   ExistingTailoredProfile,
+  INVALID_BASE_PROFILE_KEY,
+  INVALID_TAILORED_NAME_KEY,
   tailoredEffectiveCounts,
   tailoredProfileManifest,
   tailoredProfileSpecMatches,
@@ -97,6 +99,8 @@ import { compareForDisplay, foldForSearch, foldSearchQuery, matchesFolded } from
 
 // Inline danger alert for the tab's single watch / action error, shared by the
 // page-top slot and every modal so the presentation cannot drift per call site.
+// The message can be an apiserver string, so it is dir=auto the way every other
+// untrusted value in the plugin is.
 const ErrorAlert: React.FC<{ error: string; onClose?: () => void }> = ({ error, onClose }) => {
   const { t } = useTranslation('plugin__baseline-security-console-plugin');
 
@@ -105,7 +109,7 @@ const ErrorAlert: React.FC<{ error: string; onClose?: () => void }> = ({ error, 
       variant="danger"
       isInline
       isLiveRegion
-      title={error}
+      title={<span dir="auto">{error}</span>}
       style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}
       actionClose={
         onClose && (
@@ -644,7 +648,16 @@ const ProfilesTab: React.FC<{
       setTpExtends(DEFAULT_BASE_PROFILE);
       setSuccess(t('Tailored profile created and bound.'));
     } catch (e) {
-      const detail = errorMessage(e);
+      // The two manifest guards throw translation keys, not prose; anything
+      // else is an apiserver message and is rendered as it arrived. The keys
+      // are written out here so the locale-coverage test sees them as literals.
+      const raw = errorMessage(e);
+      const detail =
+        raw === INVALID_TAILORED_NAME_KEY
+          ? t('Invalid tailored profile name.')
+          : raw === INVALID_BASE_PROFILE_KEY
+            ? t('Invalid base profile name.')
+            : raw;
       setError(
         created
           ? t(
@@ -861,7 +874,8 @@ const ProfilesTab: React.FC<{
           title={t('Failed to load the profile catalog.')}
           style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}
         >
-          {catalogWatchError}
+          {/* errorMessage() returns raw apiserver text, so it is dir=auto. */}
+          <span dir="auto">{catalogWatchError}</span>
         </Alert>
       )}
       {/* Hide page-top error while a modal owns the same message. */}
@@ -989,7 +1003,9 @@ const ProfilesTab: React.FC<{
             label={
               <>
                 {t('Disable rules')}{' '}
-                {tpDisable.length > 0 && <Badge isRead>{tpDisable.length}</Badge>}
+                {tpDisable.length > 0 && (
+                  <Badge isRead>{formatCount(tpDisable.length, i18n.language)}</Badge>
+                )}
               </>
             }
             fieldId="tp-disable"
@@ -1045,20 +1061,13 @@ const ProfilesTab: React.FC<{
             <HelperText style={{ marginTop: 'var(--pf-t--global--spacer--md)' }}>
               <HelperTextItem icon={<InfoCircleIcon />}>
                 {extraEnabled > 0
-                  ? t('Scans {{effective}} of {{base}} base rules, plus {{added}} added.', {
-                      effective: remainingBase,
-                      base: baseRules.length,
-                      added: extraEnabled,
+                  ? t('Scans {{formattedEffective}} of {{formattedBase}} base rules, plus {{count}} added.', {
+                      count: extraEnabled,
                       formattedEffective: formatCount(remainingBase, i18n.language),
                       formattedBase: formatCount(baseRules.length, i18n.language),
                       formattedAdded: formatCount(extraEnabled, i18n.language),
                     })
-                  : t('Scans {{effective}} of {{base}} base rules.', {
-                      effective: remainingBase,
-                      base: baseRules.length,
-                      formattedEffective: formatCount(remainingBase, i18n.language),
-                      formattedBase: formatCount(baseRules.length, i18n.language),
-                    })}
+                  : t('Scans {{formattedEffective}} of {{formattedBase}} base rules.')}
               </HelperTextItem>
             </HelperText>
           )}

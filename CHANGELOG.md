@@ -157,6 +157,20 @@ depend on those tags.
   ("Score moved from 5,000 to 90"), colored from an impossible value, and drawn
   as a point the chart domain had to clip.
 
+- Console text renders correctly in non-English locales. Untrusted cluster and
+  API messages (apiserver `Status.message`, compliance-operator condition
+  text, a chunk-load rejection reason) are now bidi-isolated with `dir="auto"`
+  the way check titles and waiver names already were, so an Arabic or Hebrew
+  value no longer reorders the punctuation around it. Counted strings
+  (orphaned waivers, extra rules, chart scan counts) carry a real plural key,
+  so a locale with more than two forms selects the right one instead of
+  always reading the `_other` form. The waiver field-length message quotes the
+  limit constants through the locale-aware number formatter rather than baking
+  Latin digits into a translatable string, the two Remediation confirmation
+  sentences name the remediation as its own element so a translated locale can
+  put it where the grammar needs it, and the empty-state link pair is joined
+  with the locale's own list punctuation instead of a hardcoded middle dot.
+
 - `restore.sh` no longer restores a backup over a live `ClusterBaseline` that
   has moved on since it was taken. The MANIFEST records the `resourceVersion`
   the backup holds, and the script now reads the live one before writing: a

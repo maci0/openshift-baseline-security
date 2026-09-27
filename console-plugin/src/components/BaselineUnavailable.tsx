@@ -29,7 +29,9 @@ const BaselineUnavailable: React.FC<{ error: unknown; style?: React.CSSPropertie
       )}
       {detail && (
         <p>
-          {t('Reason: {{detail}}', { detail })}
+          {/* The reason is an apiserver message, not plugin copy, so it is the
+              one part of the sentence whose direction and script are unknown. */}
+          <span dir="auto">{t('Reason: {{detail}}', { detail })}</span>
         </p>
       )}
     </Alert>

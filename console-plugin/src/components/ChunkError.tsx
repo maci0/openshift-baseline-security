@@ -19,7 +19,10 @@ export const ChunkError: React.FC<{ onRetry: () => void; error?: unknown }> = ({
     <Alert variant="danger" isInline isLiveRegion title={t('Failed to load this view.')}>
       {detail && (
         <p>
-          {t('Reason: {{detail}}', { detail })}
+          {/* The rejection reason comes from the network, the CDN, or a server
+              body, so it is the one part of the sentence whose direction and
+              script are unknown. */}
+          <span dir="auto">{t('Reason: {{detail}}', { detail })}</span>
         </p>
       )}
       <Button variant="link" isInline onClick={onRetry}>

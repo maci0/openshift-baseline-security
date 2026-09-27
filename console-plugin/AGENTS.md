@@ -109,8 +109,18 @@ double casts are rejected outright.
   binds the runtime default locale at module load ignores the console locale
   for the life of the tab, so locale is a parameter, not a constant.
 - Untrusted text off a cluster object (check titles, waiver reasons, CO
-  annotation values, `status.errorMessage`) renders with `dir="auto"`, so an
-  RTL value does not reorder the punctuation around it.
+  annotation values, tailored profile names, `status.errorMessage`) and any
+  `errorMessage()` result (apiserver `Status.message`, a chunk-load rejection
+  reason) renders with `dir="auto"`, so an RTL value does not reorder the
+  punctuation around it. An untrusted name that a sentence has to mention is
+  its own element with the translated sentence beside it, not a `{{name}}`
+  interpolation inside the key.
+- A counted string's key carries the raw `{{count}}` (that is what i18next
+  matches for a plural form) and its value carries the locale-formatted
+  `{{formattedCount}}`; both `_one` and `_other` exist in the English file, and
+  `yarn test src/i18n.test.ts` fails on a half-formed base. Numbers quoted in
+  prose come from the constant through `formatCount`, never written into the
+  key.
 - `'—'` is the rendered placeholder for an absent or unscoreable value, and it
   is distinct from an error state. It is a UI string, not prose: the em-dash
   ban does not reach it.

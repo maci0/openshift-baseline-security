@@ -17,7 +17,7 @@ import {
   HelperTextItem,
 } from '@patternfly/react-core';
 import { ScoreSnapshot } from '../models';
-import { formatChartDate, formatCount } from '../dates';
+import { formatChartDate, formatCount, safeLocale } from '../dates';
 import { resultsHref } from '../links';
 import { historyContentKey, toTrendData } from '../overviewTrend';
 import { scoreColor } from '../scoring';
@@ -193,10 +193,11 @@ export const OverallTrendChart = React.memo<{
         )}
         <Chart
           ariaTitle={t('Score trend')}
-          ariaDesc={t('Score moved from {{from}} to {{to}} over {{scans}} scans.', {
+          ariaDesc={t('Score moved from {{from}} to {{to}} over {{count}} scans.', {
             from: formatCount(historyChartData[0].y, locale),
             to: formatCount(historyChartData[historyChartData.length - 1].y, locale),
-            scans: formatCount(historyChartData.length, locale),
+            count: historyChartData.length,
+            formattedCount: formatCount(historyChartData.length, locale),
           })}
           // Static trend: motion does not add meaning and can delay reading (WCAG 2.3.3).
           animate={false}
@@ -255,10 +256,11 @@ export const MiniTrend = React.memo<{ history?: ScoreSnapshot[] }>(({ history })
     <div style={{ height: 40, marginTop: 'auto', paddingTop: 'var(--pf-t--global--spacer--sm)' }}>
       <Chart
         ariaTitle={t('Score trend')}
-        ariaDesc={t('Score moved from {{from}} to {{to}} over {{scans}} scans.', {
-          from: formatCount(first, i18n.language),
-          to: formatCount(last, i18n.language),
-          scans: formatCount(chartData.length, i18n.language),
+        ariaDesc={t('Score moved from {{from}} to {{to}} over {{count}} scans.', {
+          from: formatCount(first, safeLocale(i18n.language)),
+          to: formatCount(last, safeLocale(i18n.language)),
+          count: chartData.length,
+          formattedCount: formatCount(chartData.length, safeLocale(i18n.language)),
         })}
         animate={false}
         height={40}

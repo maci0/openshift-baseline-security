@@ -68,6 +68,7 @@ import {
   WAIVER_ATTRIBUTION_MAX_LEN,
   WAIVER_REASON_MAX_LEN,
 } from '../patches';
+import { K8S_NAME_MAX_LEN } from '../names';
 import {
   checkBody,
   checkTitle,
@@ -402,7 +403,8 @@ const ResultsTab: React.FC<{
       <Alert
         variant="warning"
         isInline
-        title={t('Waivers referencing a removed check ({{formattedCount}})', {
+        title={t('Waivers referencing a removed check ({{count}})', {
+          count: orphanWaivers.length,
           formattedCount: formatCount(orphanWaivers.length, i18n.language),
         })}
         style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}
@@ -435,7 +437,7 @@ const ResultsTab: React.FC<{
           <Alert
             variant="danger"
             isInline
-            title={waiveError}
+            title={<span dir="auto">{waiveError}</span>}
             style={{ marginTop: 'var(--pf-t--global--spacer--sm)' }}
           />
         )}
@@ -448,8 +450,7 @@ const ResultsTab: React.FC<{
     // conflate them into one message.
     if ((waivers?.length ?? 0) >= WAIVER_MAX_ITEMS) {
       setWaiveError(
-        t('Maximum of {{max}} waivers reached. Remove one before adding another.', {
-          max: WAIVER_MAX_ITEMS,
+        t('Maximum of {{formattedMax}} waivers reached. Remove one before adding another.', {
           formattedMax: formatCount(WAIVER_MAX_ITEMS, i18n.language),
         }),
       );
@@ -479,7 +480,12 @@ const ResultsTab: React.FC<{
     if (!data.length) {
       setWaiveError(
         t(
-          'Waiver fields are invalid or exceed length limits (name 253, reason 1024, attribution 253).',
+          'Waiver fields are invalid or exceed length limits (name {{formattedName}}, reason {{formattedReason}}, attribution {{formattedAttribution}}).',
+          {
+            formattedName: formatCount(K8S_NAME_MAX_LEN, i18n.language),
+            formattedReason: formatCount(WAIVER_REASON_MAX_LEN, i18n.language),
+            formattedAttribution: formatCount(WAIVER_ATTRIBUTION_MAX_LEN, i18n.language),
+          },
         ),
       );
       return;
@@ -597,8 +603,10 @@ const ResultsTab: React.FC<{
             </Button>
           </TableData>
           <TableData id="profile" activeColumnIDs={activeColumnIDs}>
-            {/* Same path as the detail modal and report (checkProfileLabel + t). */}
-            {t(checkProfileLabel(obj.metadata?.labels))}
+            {/* Same path as the detail modal and report (checkProfileLabel + t).
+                A tailored profile name is CR text, so it is dir=auto like the
+                check title in the same row. */}
+            <span dir="auto">{t(checkProfileLabel(obj.metadata?.labels))}</span>
           </TableData>
           <TableData id="status" activeColumnIDs={activeColumnIDs}>
             <Label isCompact color={s.color} icon={s.icon}>
@@ -786,7 +794,7 @@ const ResultsTab: React.FC<{
           variant="danger"
           isInline
           isLiveRegion
-          title={exportError}
+          title={<span dir="auto">{exportError}</span>}
           style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}
           actionClose={
             <AlertActionCloseButton
@@ -895,7 +903,9 @@ const ResultsTab: React.FC<{
                     </FlexItem>
                     <FlexItem>
                       <Label isCompact color="blue">
-                        {profileText}
+                        {/* A tailored profile name is CR text, so it is dir=auto
+                            for the same reason the check title above is. */}
+                        <span dir="auto">{profileText}</span>
                       </Label>
                     </FlexItem>
                   </Flex>
@@ -929,7 +939,9 @@ const ResultsTab: React.FC<{
                           <>
                             {' '}
                             {t('MachineConfigPool:')}{' '}
-                            <a href={machineConfigPoolHref(pool)}>{pool}</a>
+                            <a href={machineConfigPoolHref(pool)} dir="auto">
+                              {pool}
+                            </a>
                           </>
                         )}
                       </Content>
