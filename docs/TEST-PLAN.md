@@ -704,7 +704,8 @@ an accepted risk neither inflates nor tanks the score.
       skips them rather than asserting a parse result.
 - [x] **Manager CLI usage**: leftover positional args are rejected
       (`TestUnexpectedArgsError`); `--help` lists process env vars
-      (`TestPrintUsageIncludesEnv`).
+      (`TestPrintUsageIncludesEnv`) and writes to stdout while a bad
+      invocation writes nothing there (`TestParseArgsWriters`).
 - [ ] **Leader-only default creation**: two operator replicas do not race the
       default CR creation; only the elected leader runs the runnable.
 - [ ] **Leader loss**: demoted process exits (controller-runtime safety);

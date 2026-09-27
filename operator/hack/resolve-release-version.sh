@@ -13,9 +13,12 @@
 # Reads GITHUB_ENV when set and appends there; otherwise prints to stdout.
 set -euo pipefail
 
+# Diagnostics are prefixed with the script name, as in the other hack/ scripts.
+prog="$(basename "$0")"
+
 usage() {
-  cat <<'EOF'
-Usage: resolve-release-version.sh
+  cat <<EOF
+Usage: ${prog}
 
 Resolves the release version from the workflow_dispatch INPUT_VERSION or the
 vX.Y.Z tag in GITHUB_REF_NAME, proves it matches operator/Makefile VERSION and
@@ -27,7 +30,7 @@ EOF
 case "${1:-}" in
   -h | --help)
     if [ "$#" -ne 1 ]; then
-      echo "--help takes no arguments" >&2
+      echo "${prog}: --help takes no arguments" >&2
       exit 2
     fi
     usage
@@ -35,7 +38,7 @@ case "${1:-}" in
     ;;
   "") ;;
   *)
-    echo "unexpected argument: $1" >&2
+    echo "${prog}: unexpected argument: $1" >&2
     usage >&2
     exit 2
     ;;
@@ -46,11 +49,14 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 if [ -n "${INPUT_VERSION:-}" ]; then
   ver="$INPUT_VERSION"
 else
-  ver="${GITHUB_REF_NAME#v}"
+  # ":-" so a local run (no Actions env at all) reaches the diagnostic below
+  # instead of dying on an unbound variable under `set -u`.
+  ver="${GITHUB_REF_NAME:-}"
+  ver="${ver#v}"
 fi
 
 if [ -z "$ver" ]; then
-  echo "no release version: neither INPUT_VERSION nor a vX.Y.Z tag ref" >&2
+  echo "${prog}: no release version: neither INPUT_VERSION nor a vX.Y.Z tag ref" >&2
   exit 1
 fi
 
@@ -58,7 +64,7 @@ fi
 # this one line; publishing a tag that disagrees ships unreleased work.
 mk=$(sed -n 's/^VERSION ?= //p' Makefile | head -1)
 if [ "$ver" != "$mk" ]; then
-  echo "tag/input version ($ver) != operator/Makefile VERSION ($mk)" >&2
+  echo "${prog}: tag/input version ($ver) != operator/Makefile VERSION ($mk)" >&2
   exit 1
 fi
 
@@ -66,13 +72,13 @@ fi
 # HEAD: the images are built from the checkout, so a moved tag would publish
 # content that never passed CI under that name.
 if ! git rev-parse -q --verify "refs/tags/v$ver" >/dev/null; then
-  echo "git tag v$ver missing; tag the cut before publishing" >&2
+  echo "${prog}: git tag v$ver missing; tag the cut before publishing" >&2
   exit 1
 fi
 tagged=$(git rev-parse "refs/tags/v$ver^{commit}")
 head=$(git rev-parse HEAD)
 if [ "$tagged" != "$head" ]; then
-  echo "refusing to publish $ver from $head; v$ver points at $tagged" >&2
+  echo "${prog}: refusing to publish $ver from $head; v$ver points at $tagged" >&2
   exit 1
 fi
 

@@ -291,7 +291,9 @@ non-secret values (image refs as set/valid only), and exits 2 on an invalid
 listen address, a relative `--metrics-cert-dir`, an empty health-probe
 address, or unexpected positional arguments. An unrecognized
 `BASELINE_SECURITY_SKIP_DEFAULT_CR` value exits 1. `--help` prints usage
-on stdout.
+on stdout; an unknown flag or an unexpected argument exits 2 with the
+message and the usage text on stderr, so stdout stays clean for a caller
+that captures it.
 
 ClusterBaseline spec (profiles, schedule, scoring, remediations, waivers)
 is the product config; see `operator/config/samples/` and the CRD.
@@ -307,6 +309,7 @@ is the product config; see `operator/config/samples/` and the CRD.
 | `--zap-encoder` | json (prod) / console (devel) | `json` or `console` |
 | `--zap-log-level` | info (prod) / debug (devel) | `debug`, `info`, `error`, `panic`, or an integer verbosity |
 | `--zap-stacktrace-level` | error (prod) / warn (devel) | `info`, `error`, or `panic` |
+| `--kubeconfig` | client-go default | Explicit kubeconfig path; wins over `KUBECONFIG` |
 | `RELATED_IMAGE_CONSOLE_PLUGIN` | unset | Plugin image the operator deploys; unset leaves `ImageMissing` |
 | `BASELINE_SECURITY_SKIP_DEFAULT_CR` | unset (create CR) | true/1/yes/on skips the default CR; false/0/no/off is the same as unset; any other value exits |
 | `GOMEMLIMIT` | `440MiB` in the Deployment | Go GC soft cap (not read by operator code) |

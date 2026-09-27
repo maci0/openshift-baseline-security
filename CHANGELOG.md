@@ -100,6 +100,12 @@ depend on those tags.
 
 ### Changed
 
+- The manager printed its usage text to stdout on a usage error, so a caller
+  that captured stdout on the exit-2 path (an unknown flag, an unexpected
+  positional argument) read the whole help text as command output while the
+  error itself went to stderr. `--help` still writes to stdout, so
+  `manager --help | less` keeps working; a bad invocation now writes the
+  message and the usage text to stderr, and the message names the binary.
 - Kubernetes objects the operator ships (manager Deployment, metrics Service,
   ServiceMonitor, PrometheusRule, and the plugin Service/Deployment/PDB) now
   carry the recommended `app.kubernetes.io/name`, `component`, `part-of`, and
@@ -163,6 +169,14 @@ depend on those tags.
 - `make help` did not list the release-path targets a version bump needs
   (`make verify-versions`, `make catalog-prepare`), which are only mentioned in
   AGENTS.md and the CSV comments.
+- `hack/resolve-release-version.sh` run outside GitHub Actions died on
+  `GITHUB_REF_NAME: unbound variable` instead of reporting that no release
+  version was found, because the tag ref was read without a default under
+  `set -u`. The two scripts whose diagnostics were not prefixed with their own
+  name (`resolve-release-version.sh`, `verify-image-metadata.sh`) now use the
+  same `script: message` form as the rest of `hack/`, and
+  `verify-image-metadata.sh` sends its per-label output to stderr, since it is
+  a pass/fail gate whose exit code is the result.
 - Console plugin `Rescan now` did not always start a scan. The rescan
   annotation value came from a counter that restarted at 1 on every page load,
   so the first rescan after a reload or a tab switch back to the plugin wrote

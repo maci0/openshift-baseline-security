@@ -85,18 +85,15 @@ func main() {
 	flag.BoolVar(&enableLeaderElection, "leader-elect", true, "Enable leader election.")
 	opts := zap.Options{}
 	opts.BindFlags(flag.CommandLine)
-	// --help must be pipeable (`manager --help | less`). Parse errors still
-	// print "flag provided but not defined" on stderr via flag.Output().
-	flag.Usage = func() {
-		if err := printUsage(os.Stdout); err != nil {
-			fmt.Fprintln(os.Stderr, err)
+	// --help must be pipeable (`manager --help | less`), so the help text goes
+	// to stdout. Everything that reports a bad invocation (unknown flag,
+	// unexpected argument) is an error: it goes to stderr with the usage text,
+	// so a script that captures stdout on the exit-2 path sees no output.
+	if err := parseArgs(os.Args[1:], os.Stdout); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			os.Exit(0)
 		}
-	}
-	flag.Parse()
-	if err := unexpectedArgsError(flag.Args()); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		flag.Usage()
-		os.Exit(2)
+		usageError(err)
 	}
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
@@ -393,9 +390,46 @@ func unexpectedArgsError(args []string) error {
 	return fmt.Errorf("unexpected arguments: %s", strings.Join(args, " "))
 }
 
-// printUsage writes --help to w (stdout when used as flag.Usage so the text
-// is pipeable). Env vars that affect the process are listed so --help matches
-// the README process-configuration table.
+// parseArgs parses args into flag.CommandLine. It returns flag.ErrHelp once
+// the help text has been written to w (an explicit --help is not an error, so
+// it belongs on stdout), and a usage error for anything else, which the caller
+// reports on stderr.
+//
+// ContinueOnError with a silent Usage is what keeps the two apart: under
+// ExitOnError the flag package prints the usage to stdout on a parse error and
+// prints the help text a second time on -h.
+func parseArgs(args []string, w io.Writer) error {
+	flag.Usage = func() {}
+	flag.CommandLine.Init(filepath.Base(os.Args[0]), flag.ContinueOnError)
+	// flag prints "flag provided but not defined" itself; discard it so usageError
+	// can name the program the way the hack/ scripts do.
+	flag.CommandLine.SetOutput(io.Discard)
+	if err := flag.CommandLine.Parse(args); err != nil {
+		if !errors.Is(err, flag.ErrHelp) {
+			return err
+		}
+		if err := printUsage(w); err != nil {
+			return err
+		}
+		return flag.ErrHelp
+	}
+	return unexpectedArgsError(flag.Args())
+}
+
+// usageError reports a bad invocation and exits 2 (usage error, not a runtime
+// failure). Both the message and the usage text go to stderr: stdout carries
+// only the pipeable --help output and log output never touches it.
+func usageError(err error) {
+	fmt.Fprintf(os.Stderr, "%s: %v\n\n", filepath.Base(os.Args[0]), err)
+	if uerr := printUsage(os.Stderr); uerr != nil {
+		fmt.Fprintln(os.Stderr, uerr)
+	}
+	os.Exit(2)
+}
+
+// printUsage writes --help to w (stdout for an explicit --help, stderr
+// alongside a usage error). Env vars that affect the process are listed so
+// --help matches the README process-configuration table.
 func printUsage(w io.Writer) error {
 	name := filepath.Base(os.Args[0])
 	if _, err := fmt.Fprintf(w, "Usage: %s [flags]\n\n", name); err != nil {

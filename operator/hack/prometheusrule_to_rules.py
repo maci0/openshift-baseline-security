@@ -43,12 +43,17 @@ def usage() -> str:
     return f"Usage: {Path(sys.argv[0]).name} <prometheusrule.yaml> <out-rules.yaml>"
 
 
+def fail(message: str) -> None:
+    """Report a diagnostic on stderr under this script's name, as hack/*.sh do."""
+    print(f"{Path(sys.argv[0]).name}: {message}", file=sys.stderr)
+
+
 def main() -> int:
     args = sys.argv[1:]
     if args and args[0] in ("-h", "--help"):
         if len(args) != 1:
             print(usage(), file=sys.stderr)
-            print("error: --help takes no arguments", file=sys.stderr)
+            fail("error: --help takes no arguments")
             return 2
         print(__doc__.strip())
         print()
@@ -56,11 +61,11 @@ def main() -> int:
         return 0
     if args and args[0].startswith("-"):
         print(usage(), file=sys.stderr)
-        print(f"error: unknown option: {args[0]}", file=sys.stderr)
+        fail(f"error: unknown option: {args[0]}")
         return 2
     if len(args) != 2:
         print(usage(), file=sys.stderr)
-        print(f"error: expected 2 arguments, got {len(args)}", file=sys.stderr)
+        fail(f"error: expected 2 arguments, got {len(args)}")
         return 2
     src, dst = Path(args[0]), Path(args[1])
     try:
@@ -69,7 +74,7 @@ def main() -> int:
         body = extract_groups(src.read_text(encoding="utf-8"))
         dst.write_bytes(body.encode("utf-8"))
     except (OSError, ValueError) as e:
-        print(e, file=sys.stderr)
+        fail(str(e))
         return 1
     return 0
 
