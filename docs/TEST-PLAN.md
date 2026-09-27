@@ -666,6 +666,11 @@ an accepted risk neither inflates nor tanks the score.
 
 ## O. Startup, HA & runtime behavior
 
+- [x] **e2e `.env` is validated, not silently filtered**: an unknown key
+      (misspelled `CONSOLE_URL`), a duplicate key, a non-`KEY=value` line, and an
+      unterminated quote each fail the run naming the file and line; a
+      non-empty process env still beats the file
+      (jest `e2e/dotenv.test.ts`).
 - [x] **Metrics cert fallback/reload**: self-signed fallback, service-ca pair
       load, and mtime reload (`TestMetricsCertProviderSelfSignedWhenMissing`,
       `TestMetricsCertProviderLoadsAndReloads`).

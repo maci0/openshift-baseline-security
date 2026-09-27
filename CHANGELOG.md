@@ -149,6 +149,14 @@ depend on those tags.
 
 ### Fixed
 
+- `console-plugin/.env` (live-console Playwright run): a key other than the four
+  the runner reads, a duplicate key, a line that is not `KEY=value`, or an
+  unterminated quote was dropped without a word, so a misspelled `CONSOLE_URL`
+  surfaced much later as "CONSOLE_URL must be set" with nothing pointing at the
+  file. The loader now names the file, the line, and the allowed keys, and
+  reports every bad line at once. `.env.example` also no longer ships a
+  placeholder `CONSOLE_URL` that would run the suite against a host that does
+  not exist.
 - Console plugin, apply-remediation confirmation: the node-remediation warning
   told the admin to batch changes by pausing the target MachineConfigPool under
   Compute and resuming it afterwards, which is exactly what the Remediations tab

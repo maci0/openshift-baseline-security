@@ -1,52 +1,9 @@
-import { existsSync, readFileSync } from 'node:fs';
-import path from 'node:path';
+import path from 'path';
 import { defineConfig } from '@playwright/test';
+import { loadDotEnv } from './dotenv';
 
-// Only e2e knobs from .env; never inject PATH/NODE_OPTIONS/etc. into the runner.
-const DOTENV_KEYS = new Set([
-  'CONSOLE_URL',
-  'KUBEADMIN_USER',
-  'KUBEADMIN_PASSWORD',
-  'SCREENSHOT_DIR',
-]);
-
-// Load console-plugin/.env if present. Non-empty process env wins (CI injects
-// secrets; local .env is for convenience only). Empty/whitespace process env
-// does not block .env, so a blank export cannot hide a filled .env value.
-// Never commit .env. Accepts optional `export KEY=value` (shell-sourced style).
-function loadDotEnv(file: string): void {
-  if (!existsSync(file)) return;
-  for (const line of readFileSync(file, 'utf8').split(/\r?\n/)) {
-    const t = line.trim();
-    if (!t || t.startsWith('#')) continue;
-    const eq = t.indexOf('=');
-    if (eq <= 0) continue;
-    let key = t.slice(0, eq).trim();
-    if (key.startsWith('export ')) {
-      key = key.slice(7).trim();
-    }
-    if (!DOTENV_KEYS.has(key)) continue;
-    const existing = process.env[key];
-    if (existing !== undefined && existing.trim() !== '') continue;
-    let val = t.slice(eq + 1).trim();
-    if (
-      (val.startsWith('"') && val.endsWith('"')) ||
-      (val.startsWith("'") && val.endsWith("'"))
-    ) {
-      // Quoted: keep interior # and spaces (passwords may contain them).
-      val = val.slice(1, -1);
-    } else {
-      // Unquoted: strip shell-style trailing comments (`KEY=value # note`).
-      // Require a space before # so values like `pass#1` stay intact.
-      const hash = val.indexOf(' #');
-      if (hash >= 0) {
-        val = val.slice(0, hash).trimEnd();
-      }
-    }
-    process.env[key] = val;
-  }
-}
-
+// console-plugin/.env if present (never committed). Non-empty process env wins;
+// an unknown or malformed line fails here rather than as a missing value later.
 loadDotEnv(path.resolve(__dirname, '../.env'));
 
 // E2E against a live OpenShift console. Configure via env (see .env.example):
