@@ -56,6 +56,15 @@ depend on those tags.
   taken by `hack/backup.sh` are a single named object and never contain a
   `---` separator, so no valid backup is affected.
 
+- `hack/restore.sh` now stops, changing nothing, when it cannot read the live
+  `ClusterBaseline/cluster`. A failed read left the resourceVersion comparison
+  with an empty value, which read the same as an absent object: the rollback
+  guard was skipped, and an out-of-date backup was applied over a live object
+  that had moved on, discarding every waiver edit and remediation batch
+  annotation made since, with no `--force` and no warning. `--force` does not
+  override it, since the operator cannot have meant to clobber an object whose
+  current resourceVersion was never read.
+
 ### Added
 
 - `hack/verify-backup.sh`, a cluster-free check that a backup directory is

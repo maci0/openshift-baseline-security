@@ -98,10 +98,11 @@ status:
 // fakeOC installs a stub `oc` on PATH for the duration of the test. get
 // returns captured; a get that asks for a jsonpath field returns
 // FAKE_OC_RESOURCE_VERSION (empty by default, which reads as "no live object",
-// the case a restore onto a recovered cluster is in). Every other subcommand
-// is appended to the call log. The stub must tolerate the --request-timeout
-// flag both scripts pass on every call, so it drops leading global flags
-// before dispatching.
+// the case a restore onto a recovered cluster is in). FAKE_OC_GET_FAIL makes
+// that jsonpath get fail, the way an expired token or an apiserver blip does.
+// Every other subcommand is appended to the call log. The stub must tolerate
+// the --request-timeout flag both scripts pass on every call, so it drops
+// leading global flags before dispatching.
 func fakeOC(t *testing.T, dir, captured string) (logfile string) {
 	t.Helper()
 	stub := filepath.Join(dir, "oc")
@@ -116,7 +117,7 @@ func fakeOC(t *testing.T, dir, captured string) (logfile string) {
 		"  whoami) echo kube:admin; exit 0 ;;\n" +
 		"  get)\n" +
 		"    for a in \"$@\"; do\n" +
-		"      case \"$a\" in jsonpath=*) printf '%s' \"${FAKE_OC_RESOURCE_VERSION:-}\"; exit 0 ;; esac\n" +
+		"      case \"$a\" in jsonpath=*) if [ -n \"${FAKE_OC_GET_FAIL:-}\" ]; then echo 'Forbidden: token expired' >&2; exit 1; fi; printf '%s' \"${FAKE_OC_RESOURCE_VERSION:-}\"; exit 0 ;; esac\n" +
 		"    done\n" +
 		"    cat <<'CAPTURED'\n" + captured + "CAPTURED\nexit 0 ;;\n" +
 		"esac\n" +
@@ -524,6 +525,37 @@ func TestRestoreRefusesToRollBackAMovedOnObject(t *testing.T) {
 	calls := ocCalls(t, log)
 	if !strings.Contains(calls, "apply -f") || !strings.Contains(calls, "replace --subresource=status -f") {
 		t.Errorf("--force did not complete the restore; oc calls:\n%s", calls)
+	}
+}
+
+// A read of the live object that fails is not the same as a live object that
+// is gone. Treating the two alike skipped the resourceVersion guard, so a
+// backup was applied over an object that had moved on, with no --force and no
+// warning: the waiver and batch edits made since were gone.
+func TestRestoreRefusesWhenLiveObjectCannotBeRead(t *testing.T) {
+	bin := t.TempDir()
+	log := fakeOC(t, bin, baselineYAML)
+	// Same live resourceVersion as the backup, so only the failed read is
+	// under test: the guard has a real disagreement to catch, not a typo.
+	t.Setenv("FAKE_OC_RESOURCE_VERSION", "41999")
+	t.Setenv("FAKE_OC_GET_FAIL", "1")
+	work := t.TempDir()
+	dir := backupDir(t, work, "bdir", "2026-09-20T03:00:00Z")
+
+	_, stderr, code := runScript(t, "restore.sh", work, dir)
+	if code == 0 {
+		t.Fatal("restore applied a backup it could not compare against the live object")
+	}
+	if !strings.Contains(stderr, "cannot read the live ClusterBaseline") {
+		t.Errorf("stderr %q, want the unreadable live object named", stderr)
+	}
+	// --force does not cover this either: the operator cannot mean to clobber
+	// an object whose current resourceVersion was never read.
+	if _, _, code := runScript(t, "restore.sh", work, "--force", dir); code == 0 {
+		t.Fatal("--force restored over a live object it could not read")
+	}
+	if calls := ocCalls(t, log); strings.Contains(calls, "apply -f") {
+		t.Errorf("the refused restore still wrote to the cluster:\n%s", calls)
 	}
 }
 

@@ -1475,7 +1475,9 @@ the `backup.sh` / `restore.sh` round trip, the status-subresource replace
 refusal of an empty, wrong-kind, truncated, edited, or unmanifested artifact
 before any cluster write, the refusal of a multi-document artifact even when
 its checksum is valid, the refusal to roll a live object back past its own
-resourceVersion without `--force`, the reported artifact age, the
+resourceVersion without `--force`, the refusal when the live object cannot be
+read at all (an unreadable object is not an absent one, and `--force` does not
+override it), the reported artifact age, the
 future-`lastScanTime` recovery hint, the deletion warning that names the
 unrecoverable waivers, `verify-backup.sh` against a good directory and every
 way a scheduled backup fails quietly, and the same round trip on a PATH with

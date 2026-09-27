@@ -114,6 +114,14 @@ soft-delete window behind that. The script refuses, naming both versions, and
 takes `--force` to proceed anyway. On a cluster where the CR is gone, there is
 nothing to compare against and the restore goes ahead.
 
+An absent object and an unreadable one are different states, and only the first
+makes that comparison unnecessary. A read that fails (an expired token
+mid-incident, an apiserver blip) is not an absent object, so the script stops
+with nothing changed rather than reading the empty result as "no live object"
+and restoring over an object that had moved on. `--force` does not cover it:
+the operator cannot have meant to clobber an object whose current
+`resourceVersion` was never read.
+
 The age of the artifact is the RPO the restore buys, so it is in the restore
 summary, and a backup more than a week old says so before anything is written.
 
@@ -184,6 +192,8 @@ on every `make test`, and pins the behavior that matters:
   refusal cannot be dismissed as checksum damage;
 - a restore over a live object that has moved on is refused before any write,
   names both resourceVersions, and proceeds under `--force`;
+- a live object that cannot be read is refused before any write, and
+  `--force` does not override it;
 - the artifact age is reported, and a backup older than a week says so;
 - `verify-backup.sh` passes a good directory and fails each way a scheduled
   backup dies quietly: missing directory, truncated copy, lost MANIFEST,

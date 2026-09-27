@@ -181,7 +181,23 @@ fi
 # not in the artifact and apply would discard them silently. There is no
 # soft-delete window behind that, so it takes --force.
 BACKUP_RESOURCE_VERSION="$(sed -n 's/^resourceVersion=//p' "$MANIFEST" | head -1)"
-LIVE_RESOURCE_VERSION="$(oc get clusterbaseline cluster -o jsonpath='{.metadata.resourceVersion}' 2>/dev/null || true)"
+# An absent object and a failed read are different states, and only the first
+# one makes the guard below unnecessary. A plain `oc get` that fails (token
+# expired mid-incident, apiserver blip) leaves the output empty, which read as
+# "no live object" and skipped the guard: an old backup then clobbered a
+# moved-on object with no --force and no message, losing every waiver edit made
+# since. --ignore-not-found separates the two, by exiting 0 with empty output
+# on NotFound and nonzero on every real failure.
+LIVE_RESOURCE_VERSION=""
+if ! LIVE_RESOURCE_VERSION="$(oc get clusterbaseline cluster --ignore-not-found \
+  -o jsonpath='{.metadata.resourceVersion}')"; then
+  echo "restore.sh: cannot read the live ClusterBaseline/cluster; nothing was changed." >&2
+  echo "restore.sh: A failed read is not an absent object: skipping the resourceVersion" >&2
+  echo "restore.sh: guard here would restore this backup over a live object that has" >&2
+  echo "restore.sh: moved on, discarding the waiver and batch edits made since, with" >&2
+  echo "restore.sh: no --force and no warning. Fix the API access and re-run." >&2
+  exit 1
+fi
 if [[ -n "$BACKUP_RESOURCE_VERSION" && -n "$LIVE_RESOURCE_VERSION" &&
   "$LIVE_RESOURCE_VERSION" != "$BACKUP_RESOURCE_VERSION" ]]; then
   if [[ "$FORCE" == true ]]; then
