@@ -122,6 +122,106 @@ collect_related_objects() {
       done
 }
 
+# Count of best-effort dumps that failed in the current run, so an empty file is
+# not mistaken for a successful collection (e.g. CR missing, RBAC, wrong
+# namespace). Soft-fail targets (plugin absent, no previous logs) stay as
+# `|| true` without counting.
+failures=0
+warn_fail() {
+  echo "warning: failed to collect $1" >&2
+  failures=$((failures + 1))
+}
+
+# Every `oc` call that writes into the output directory, in one place so the
+# re-run property is a property of the whole set and not of whichever collector
+# happens to be read first. Each one redirects straight into $out/<name>, which
+# is what makes a second run into the same directory converge: the shell
+# truncates the target before oc runs, so a target that no longer exists (CR
+# deleted, plugin undeployed, log rotated away) ends up empty rather than still
+# holding the previous run's object, and a target that still exists is
+# overwritten with the same content. A collector that appends must truncate
+# first (collect_related_objects); the truncation is what stops a re-run from
+# duplicating every document.
+#
+# Split out of the script body so --self-test can drive all of them against a
+# stub oc. It used to be inline, which left "every collector must converge"
+# asserted for one collector and assumed for the rest.
+collect_all() {
+  local out="$1"
+
+  # ClusterBaseline status (score, conditions, remediationBatch, relatedObjects).
+  # Strip waiver attribution after a successful get so names do not leave the
+  # cluster; keep the dump even if redaction is a no-op (no waivers present).
+  if oc get clusterbaseline cluster -o yaml > "$out/clusterbaseline.yaml" 2>/dev/null; then
+    redact_clusterbaseline_dump "$out/clusterbaseline.yaml"
+  else
+    warn_fail clusterbaseline.yaml
+  fi
+  oc get clusterbaseline cluster -o jsonpath='{range .status.conditions[*]}{.type}={.status} reason={.reason} msg={.message}{"\n"}{end}' \
+    > "$out/clusterbaseline-conditions.txt" 2>/dev/null \
+    || warn_fail clusterbaseline-conditions.txt
+
+  # Operator namespace: workloads, monitoring CRs, recent events.
+  # Never dump Secret objects: metrics TLS keys and scraper SA tokens would land
+  # on disk (and in support attachments). Names/types only for triage.
+  # Include PDBs (not in `all`): operator + plugin minAvailable during drains.
+  oc -n openshift-baseline-security get all,configmap,servicemonitor,prometheusrule,poddisruptionbudget -o yaml \
+    > "$out/operator-namespace.yaml" 2>/dev/null \
+    || warn_fail operator-namespace.yaml
+  # The console dashboard ConfigMap lives in openshift-config-managed, outside the
+  # operator namespace dumped above. Collect it so "dashboard missing from the
+  # console" can be triaged (never created vs wrong labels vs user-deleted).
+  oc -n openshift-config-managed get configmap baseline-security-compliance-dashboard -o yaml \
+    > "$out/dashboard-configmap.yaml" 2>/dev/null || true
+  oc -n openshift-baseline-security get secrets \
+    -o custom-columns=NAME:.metadata.name,TYPE:.type,AGE:.metadata.creationTimestamp \
+    > "$out/operator-secrets.txt" 2>/dev/null \
+    || warn_fail operator-secrets.txt
+  oc -n openshift-baseline-security get events --sort-by='.lastTimestamp' \
+    > "$out/operator-events.txt" 2>/dev/null \
+    || warn_fail operator-events.txt
+  # All replicas + previous container (crash-loop) when present.
+  oc -n openshift-baseline-security logs deploy/baseline-security-operator --all-containers --tail=-1 \
+    > "$out/operator.log" 2>/dev/null \
+    || warn_fail operator.log
+  # Previous logs are often absent (no restart); do not count as a failure.
+  oc -n openshift-baseline-security logs deploy/baseline-security-operator --all-containers --previous --tail=-1 \
+    > "$out/operator-previous.log" 2>/dev/null || true
+  oc -n openshift-baseline-security describe deploy/baseline-security-operator \
+    > "$out/operator-deploy-describe.txt" 2>/dev/null \
+    || warn_fail operator-deploy-describe.txt
+
+  # Console plugin Deployment (same namespace): nginx access/error streams and
+  # rollout state. Absent when ConsolePluginReady is ImageMissing/Disabled.
+  # Soft-fail: plugin may not be deployed.
+  oc -n openshift-baseline-security logs deploy/baseline-security-console-plugin --all-containers --tail=-1 \
+    > "$out/console-plugin.log" 2>/dev/null || true
+  oc -n openshift-baseline-security logs deploy/baseline-security-console-plugin --all-containers --previous --tail=-1 \
+    > "$out/console-plugin-previous.log" 2>/dev/null || true
+  oc -n openshift-baseline-security describe deploy/baseline-security-console-plugin \
+    > "$out/console-plugin-deploy-describe.txt" 2>/dev/null || true
+
+  # Compliance Operator objects (scans, results, remediations).
+  oc -n openshift-compliance get scansettings,scansettingbindings,tailoredprofiles,compliancesuites,compliancescans,compliancecheckresults,complianceremediations -o yaml \
+    > "$out/compliance.yaml" 2>/dev/null \
+    || warn_fail compliance.yaml
+  oc -n openshift-compliance get events --sort-by='.lastTimestamp' \
+    > "$out/compliance-events.txt" 2>/dev/null \
+    || warn_fail compliance-events.txt
+
+  # MachineConfigPools: pause state is critical for RemediationBatchStuck.
+  oc get mcp -o yaml > "$out/machineconfigpools.yaml" 2>/dev/null \
+    || warn_fail machineconfigpools.yaml
+  oc get mcp -o custom-columns=NAME:.metadata.name,PAUSED:.spec.paused,UPDATED:.status.updatedMachineCount,UPDATING:.status.updatingMachineCount,DEGRADED:.status.degradedMachineCount \
+    > "$out/machineconfigpools-pause.txt" 2>/dev/null \
+    || warn_fail machineconfigpools-pause.txt
+
+  # Soft-fail: Console capability may be disabled.
+  oc get consoleplugin baseline-security-console-plugin -o yaml > "$out/consoleplugin.yaml" 2>/dev/null || true
+
+  collect_related_objects "$out/related-objects.yaml"
+}
+
 # Offline check that attribution does not survive a typical kubectl YAML dump.
 # No oc, no cluster. Invoked as --self-test and from `make test`.
 self_test() {
@@ -386,6 +486,69 @@ EOF
 
     echo "must-gather rerun self-test ok"
   )
+  # The same property for every other collector, not just related-objects.yaml.
+  # They were inline in the script body and therefore untestable: "every
+  # collector must converge" was asserted for one of them and assumed for the
+  # rest. Two runs of the same cluster state into the same directory must land
+  # byte-identical files, and a target that stops existing must end up empty
+  # rather than still holding the previous run's dump, so a re-run after the CR
+  # is deleted cannot ship the deleted object's YAML as if it were current.
+  (
+    work="$(mktemp -d)"
+    trap 'rm -rf -- "$work"' EXIT
+    out="$work/gather"
+    mkdir -p "$out"
+    oc() {
+      case "$*" in
+        # conditions jsonpath yields a line per condition; relatedObjects yields
+        # nothing, so related-objects.yaml stays empty and its own coverage
+        # lives in the rerun self-test above.
+        *'.status.conditions'*) printf 'Available=True reason=Ready msg=ok\n' ;;
+        *jsonpath*) : ;;
+        *) printf 'kind: Collected\nmetadata:\n  name: gathered\n' ;;
+      esac
+    }
+    collect_all "$out"
+    # A collector that stopped writing would make the comparison below
+    # vacuously true, so assert the run produced the files it claims to.
+    for f in clusterbaseline.yaml clusterbaseline-conditions.txt \
+      operator-namespace.yaml operator-secrets.txt operator-events.txt \
+      operator.log operator-deploy-describe.txt consoleplugin.yaml \
+      compliance.yaml compliance-events.txt machineconfigpools.yaml \
+      machineconfigpools-pause.txt; do
+      [ -s "$out/$f" ] || {
+        echo "FAIL: $f was not collected" >&2
+        exit 1
+      }
+    done
+    [ -e "$out/related-objects.yaml" ] || {
+      echo "FAIL: related-objects.yaml was not collected" >&2
+      exit 1
+    }
+    cp -R "$out" "$work/run1"
+    collect_all "$out"
+    diff -r "$work/run1" "$out" >/dev/null || {
+      echo "FAIL: a second collect_all run into the same dir changed the output" >&2
+      diff -r "$work/run1" "$out" >&2 || true
+      exit 1
+    }
+    # Every target gone (RBAC revoked, CR deleted, plugin undeployed): each
+    # file must be empty, not the previous run's content.
+    oc() { return 1; }
+    collect_all "$out" 2>/dev/null || true
+    for f in clusterbaseline.yaml clusterbaseline-conditions.txt \
+      operator-namespace.yaml operator-secrets.txt operator-events.txt \
+      operator.log operator-deploy-describe.txt compliance.yaml \
+      compliance-events.txt machineconfigpools.yaml \
+      machineconfigpools-pause.txt; do
+      [ ! -s "$out/$f" ] || {
+        echo "FAIL: stale $f survived a run that collected nothing" >&2
+        exit 1
+      }
+    done
+
+    echo "must-gather collect_all rerun self-test ok"
+  )
 }
 
 usage() {
@@ -463,86 +626,7 @@ if ! oc whoami >/dev/null 2>&1; then
   exit 1
 fi
 
-# Track which best-effort dumps failed so an empty file is not mistaken for a
-# successful collection (e.g. CR missing, RBAC, wrong namespace). Soft-fail
-# targets (plugin absent, no previous logs) stay as || true without counting.
-failures=0
-warn_fail() {
-  echo "warning: failed to collect $1" >&2
-  failures=$((failures + 1))
-}
-
-# ClusterBaseline status (score, conditions, remediationBatch, relatedObjects).
-# Strip waiver attribution after a successful get so names do not leave the
-# cluster; keep the dump even if redaction is a no-op (no waivers present).
-if oc get clusterbaseline cluster -o yaml > "$OUT/clusterbaseline.yaml" 2>/dev/null; then
-  redact_clusterbaseline_dump "$OUT/clusterbaseline.yaml"
-else
-  warn_fail clusterbaseline.yaml
-fi
-oc get clusterbaseline cluster -o jsonpath='{range .status.conditions[*]}{.type}={.status} reason={.reason} msg={.message}{"\n"}{end}' \
-  > "$OUT/clusterbaseline-conditions.txt" 2>/dev/null \
-  || warn_fail clusterbaseline-conditions.txt
-
-# Operator namespace: workloads, monitoring CRs, recent events.
-# Never dump Secret objects: metrics TLS keys and scraper SA tokens would land
-# on disk (and in support attachments). Names/types only for triage.
-# Include PDBs (not in `all`): operator + plugin minAvailable during drains.
-oc -n openshift-baseline-security get all,configmap,servicemonitor,prometheusrule,poddisruptionbudget -o yaml \
-  > "$OUT/operator-namespace.yaml" 2>/dev/null \
-  || warn_fail operator-namespace.yaml
-# The console dashboard ConfigMap lives in openshift-config-managed, outside the
-# operator namespace dumped above. Collect it so "dashboard missing from the
-# console" can be triaged (never created vs wrong labels vs user-deleted).
-oc -n openshift-config-managed get configmap baseline-security-compliance-dashboard -o yaml \
-  > "$OUT/dashboard-configmap.yaml" 2>/dev/null || true
-oc -n openshift-baseline-security get secrets \
-  -o custom-columns=NAME:.metadata.name,TYPE:.type,AGE:.metadata.creationTimestamp \
-  > "$OUT/operator-secrets.txt" 2>/dev/null \
-  || warn_fail operator-secrets.txt
-oc -n openshift-baseline-security get events --sort-by='.lastTimestamp' \
-  > "$OUT/operator-events.txt" 2>/dev/null \
-  || warn_fail operator-events.txt
-# All replicas + previous container (crash-loop) when present.
-oc -n openshift-baseline-security logs deploy/baseline-security-operator --all-containers --tail=-1 \
-  > "$OUT/operator.log" 2>/dev/null \
-  || warn_fail operator.log
-# Previous logs are often absent (no restart); do not count as a failure.
-oc -n openshift-baseline-security logs deploy/baseline-security-operator --all-containers --previous --tail=-1 \
-  > "$OUT/operator-previous.log" 2>/dev/null || true
-oc -n openshift-baseline-security describe deploy/baseline-security-operator \
-  > "$OUT/operator-deploy-describe.txt" 2>/dev/null \
-  || warn_fail operator-deploy-describe.txt
-
-# Console plugin Deployment (same namespace): nginx access/error streams and
-# rollout state. Absent when ConsolePluginReady is ImageMissing/Disabled.
-# Soft-fail: plugin may not be deployed.
-oc -n openshift-baseline-security logs deploy/baseline-security-console-plugin --all-containers --tail=-1 \
-  > "$OUT/console-plugin.log" 2>/dev/null || true
-oc -n openshift-baseline-security logs deploy/baseline-security-console-plugin --all-containers --previous --tail=-1 \
-  > "$OUT/console-plugin-previous.log" 2>/dev/null || true
-oc -n openshift-baseline-security describe deploy/baseline-security-console-plugin \
-  > "$OUT/console-plugin-deploy-describe.txt" 2>/dev/null || true
-
-# Compliance Operator objects (scans, results, remediations).
-oc -n openshift-compliance get scansettings,scansettingbindings,tailoredprofiles,compliancesuites,compliancescans,compliancecheckresults,complianceremediations -o yaml \
-  > "$OUT/compliance.yaml" 2>/dev/null \
-  || warn_fail compliance.yaml
-oc -n openshift-compliance get events --sort-by='.lastTimestamp' \
-  > "$OUT/compliance-events.txt" 2>/dev/null \
-  || warn_fail compliance-events.txt
-
-# MachineConfigPools: pause state is critical for RemediationBatchStuck.
-oc get mcp -o yaml > "$OUT/machineconfigpools.yaml" 2>/dev/null \
-  || warn_fail machineconfigpools.yaml
-oc get mcp -o custom-columns=NAME:.metadata.name,PAUSED:.spec.paused,UPDATED:.status.updatedMachineCount,UPDATING:.status.updatingMachineCount,DEGRADED:.status.degradedMachineCount \
-  > "$OUT/machineconfigpools-pause.txt" 2>/dev/null \
-  || warn_fail machineconfigpools-pause.txt
-
-# Soft-fail: Console capability may be disabled.
-oc get consoleplugin baseline-security-console-plugin -o yaml > "$OUT/consoleplugin.yaml" 2>/dev/null || true
-
-collect_related_objects "$OUT/related-objects.yaml"
+collect_all "$OUT"
 
 echo "Collected baseline-security must-gather into $OUT"
 if [ "$failures" -gt 0 ]; then

@@ -50,6 +50,19 @@ case "${1:-}" in
   ;;
 esac
 
+# A flag-shaped argument is a usage error, not a path. It used to fall through
+# to the existence check and report "no such path: --typo" with exit 1, which
+# reads as a missing tree on a build that has one, and points at the wrong fix.
+for arg in "$@"; do
+  case "$arg" in
+  - | -*)
+    echo "${prog}: unknown option: $arg" >&2
+    usage >&2
+    exit 2
+    ;;
+  esac
+done
+
 if [ "$#" -eq 0 ]; then
   echo "${prog}: expected at least one path" >&2
   usage >&2
