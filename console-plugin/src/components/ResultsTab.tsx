@@ -506,18 +506,12 @@ const ResultsTab: React.FC<{
     (keyOf: (r: ComplianceCheckResult) => string) =>
       (data: ComplianceCheckResult[], sortDirection: string): ComplianceCheckResult[] => {
         const mul = sortDirection === 'desc' ? -1 : 1;
-        // compareForDisplay (textCollator under it): validates the i18n tag
-        // (never throws on a bad one), caches one collator per locale instead
-        // of paying setup on every one of the O(n log n) comparisons, and
-        // carries numeric:true so rule_2 sorts before rule_10 here exactly as
-        // it does in the Profiles catalog. Same data, one order.
-        const locale = i18n.language;
         return (
           data
             // Decorate once so each comparison reads a precomputed key and the
             // final map restores the original rows without re-running keyOf.
             .map((row, index) => ({ key: keyOf(row), index }))
-            .sort((a, b) => mul * compareForDisplay(a.key, b.key, locale))
+            .sort((a, b) => mul * compareForDisplay(a.key, b.key, i18n.language))
             .map((d) => data[d.index])
         );
       },
@@ -647,13 +641,12 @@ const ResultsTab: React.FC<{
     // Sort by display title (console locale) so chip order matches what users read,
     // not the English-ish profile key / tp- prefix. Same cached, numeric-aware
     // order as the Profiles catalog and the results table.
-    const locale = i18n.language;
     return [...keys]
       .map((k) => ({
         id: k,
         title: t(suiteFilterKeyTitle(k)),
       }))
-      .sort((a, b) => compareForDisplay(a.title, b.title, locale));
+      .sort((a, b) => compareForDisplay(a.title, b.title, i18n.language));
     // profiles/tailored read when keys change; ownedResults only when discovering.
     // eslint-disable-next-line react-hooks/exhaustive-deps -- content keys
   }, [profilesKey, tailoredKey, suiteKeysFromBaseline ? null : ownedResults, i18n, t]);

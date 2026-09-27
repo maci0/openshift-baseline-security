@@ -57,7 +57,7 @@ import { errorMessage } from '../errors';
 import { resultsHref } from '../links';
 import { historyContentKey, toTrendData } from '../overviewTrend';
 import { resourceVersionTest, schedulePatch } from '../patches';
-import { changedChecksMany } from '../results';
+import { ChangedCheck, changedChecksMany } from '../results';
 import { formatList, listSeparators } from '../text';
 import {
   aggregateCounts,
@@ -694,6 +694,32 @@ const Overview: React.FC<{
     );
   };
 
+  // One list renderer for both Recent-changes groups so the marker icon, the
+  // dir="auto" link, and the row shape cannot drift between newly failing and
+  // fixed. The term is passed already translated so each key stays a literal.
+  const changeList = (
+    term: string,
+    items: ChangedCheck[],
+    status: 'danger' | 'success',
+    Marker: React.ElementType,
+  ) => (
+    <DescriptionListGroup>
+      <DescriptionListTerm>{term}</DescriptionListTerm>
+      <DescriptionListDescription>
+        {items.map((c) => (
+          <div key={c.name}>
+            <Icon status={status} isInline>
+              <Marker />
+            </Icon>{' '}
+            <a href={c.href} dir="auto">
+              {c.title}
+            </a>
+          </div>
+        ))}
+      </DescriptionListDescription>
+    </DescriptionListGroup>
+  );
+
   return (
     <PageSection>
       {scanningDisabled(baseline) && (
@@ -935,48 +961,24 @@ const Overview: React.FC<{
                 {...regionFocusProps}
               >
                 <DescriptionList isCompact>
-                  {newlyFailedItems.length > 0 && (
-                    <DescriptionListGroup>
-                      <DescriptionListTerm>
-                        {t('Newly failing ({{formattedCount}})', {
-                          formattedCount: formatCount(newlyFailedItems.length, locale),
-                        })}
-                      </DescriptionListTerm>
-                      <DescriptionListDescription>
-                        {newlyFailedItems.map((c) => (
-                          <div key={c.name}>
-                            <Icon status="danger" isInline>
-                              <ExclamationCircleIcon />
-                            </Icon>{' '}
-                            <a href={c.href} dir="auto">
-                              {c.title}
-                            </a>
-                          </div>
-                        ))}
-                      </DescriptionListDescription>
-                    </DescriptionListGroup>
-                  )}
-                  {fixedItems.length > 0 && (
-                    <DescriptionListGroup>
-                      <DescriptionListTerm>
-                        {t('Fixed ({{formattedCount}})', {
-                          formattedCount: formatCount(fixedItems.length, locale),
-                        })}
-                      </DescriptionListTerm>
-                      <DescriptionListDescription>
-                        {fixedItems.map((c) => (
-                          <div key={c.name}>
-                            <Icon status="success" isInline>
-                              <CheckCircleIcon />
-                            </Icon>{' '}
-                            <a href={c.href} dir="auto">
-                              {c.title}
-                            </a>
-                          </div>
-                        ))}
-                      </DescriptionListDescription>
-                    </DescriptionListGroup>
-                  )}
+                  {newlyFailedItems.length > 0 &&
+                    changeList(
+                      t('Newly failing ({{formattedCount}})', {
+                        formattedCount: formatCount(newlyFailedItems.length, locale),
+                      }),
+                      newlyFailedItems,
+                      'danger',
+                      ExclamationCircleIcon,
+                    )}
+                  {fixedItems.length > 0 &&
+                    changeList(
+                      t('Fixed ({{formattedCount}})', {
+                        formattedCount: formatCount(fixedItems.length, locale),
+                      }),
+                      fixedItems,
+                      'success',
+                      CheckCircleIcon,
+                    )}
                 </DescriptionList>
               </div>
             )}

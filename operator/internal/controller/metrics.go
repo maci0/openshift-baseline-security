@@ -97,14 +97,10 @@ func init() {
 	// Seed the "no score yet" sentinel so a never-reconciled or
 	// error-before-aggregation state reads as -1, not the gauge default of 0
 	// (which the ComplianceScoreLow alert's `>= 0 and < 80` would treat as a
-	// real low score).
+	// real low score). Every other gauge already reads 0 until published; the
+	// condition series need the touch so each labelled child exists from the
+	// start instead of appearing only after the first reconcile.
 	complianceScore.Set(-1)
-	statusObservedTimestamp.Set(0)
-	remediationBatchActive.Set(0)
-	remediationBatchStartedTimestamp.Set(0)
-	lastScanTimestamp.Set(0)
-	newlyFailedCount.Set(0)
-	scanIntervalSecondsGauge.Set(0)
 	for _, typ := range publishedConditionTypes {
 		conditionStatus.WithLabelValues(typ).Set(0)
 	}
