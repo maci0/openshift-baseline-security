@@ -6,6 +6,7 @@ Stdlib only: no PyYAML. The checked-in PrometheusRule uses 2-space indent and
 puts `groups:` as a direct child of `spec:`. We slice that block and dedent by
 two spaces so the output starts with top-level `groups:`.
 """
+
 from __future__ import annotations
 
 import sys

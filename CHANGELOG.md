@@ -135,6 +135,11 @@ depend on those tags.
   and refuses to recreate them. The list declares what the baseline owns, so it
   now tracks the management state and must-gather stops chasing disowned
   objects.
+- CI: the operator's helper scripts were unanalyzed. `make lint` now runs
+  shellcheck over `operator/hack/*.sh` (the bundle, alert, and must-gather
+  checks that ship with the operator) and ruff over `operator/hack/*.py`, so a
+  quoting bug or an unhandled path in a script that gates a release fails the
+  per-PR job instead of surfacing on a runner.
 - Operator and console plugin pods: neither declared a `preStop` hook, so a
   terminating pod kept its endpoint for the seconds between SIGTERM and
   endpoint removal, and a scrape or console request could still land on a

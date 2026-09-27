@@ -7,7 +7,7 @@ over the cluster-scoped singleton `ClusterBaseline/cluster`.
 
 ```sh
 make test          # fmt-check, vet, mod-verify, go test ./..., must-gather --self-test
-make lint          # golangci-lint, pinned version, 0 issues required
+make lint          # golangci-lint, shellcheck hack/*.sh, ruff hack/*.py; 0 issues required
 make ci            # local replica of the GHA operator job (needs docker)
 make fuzz          # short timed fuzz per target; run before a release cut
 make govulncheck

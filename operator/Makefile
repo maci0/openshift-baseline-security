@@ -92,7 +92,7 @@ GO_MINOR := $(basename $(GO_VERSION))
 help:
 	@echo "Operator contributor targets:"
 	@echo "  make test          fmt-check, vet, mod-verify, go test ./..., must-gather --self-test"
-	@echo "  make lint          golangci-lint $(GOLANGCI_LINT_VERSION)"
+	@echo "  make lint          golangci-lint $(GOLANGCI_LINT_VERSION), shellcheck hack/*.sh, ruff $(RUFF_VERSION) hack/"
 	@echo "  make ci            local replica of the CI operator job (needs docker)"
 	@echo "  make fuzz          short seed-corpus fuzz (run before a release)"
 	@echo "  make govulncheck   vulnerability scan (pinned)"
@@ -220,9 +220,28 @@ fuzz:
 	go test ./internal/controller/ -run=^$$ -fuzz=^FuzzClampString$$ -fuzztime=3s
 
 GOLANGCI_LINT_VERSION ?= v2.12.2
+# hack/*.sh run in CI, in the bundle and alert checks, and in must-gather's
+# self-test: shellcheck covers them too. Preinstalled on the ubuntu-24.04
+# runner; elsewhere `brew install shellcheck` or `apt-get install shellcheck`.
+SHELLCHECK ?= shellcheck
+# Pin ruff like every other tool here (single source; never a floating latest).
+RUFF_VERSION ?= 0.16.4
 .PHONY: lint
-lint:
+lint: lint-go lint-shell lint-python
+
+.PHONY: lint-go
+lint-go:
 	go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION) run ./...
+
+.PHONY: lint-shell
+lint-shell:
+	@command -v $(SHELLCHECK) >/dev/null || { echo "$(SHELLCHECK) not on PATH (brew install shellcheck / apt-get install shellcheck)" >&2; exit 1; }
+	$(SHELLCHECK) --external-sources hack/*.sh
+
+.PHONY: lint-python
+lint-python:
+	uvx ruff@$(RUFF_VERSION) check --no-cache hack/
+	uvx ruff@$(RUFF_VERSION) format --no-cache --check hack/
 
 # Pin govulncheck for local and CI (single source; do not `go run ...@latest`).
 GOVULNCHECK_VERSION ?= v1.6.0
