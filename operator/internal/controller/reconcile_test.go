@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -12,6 +13,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -744,6 +746,110 @@ func TestEnsureScanConfigCreatesAndPrunes(t *testing.T) {
 	if got, _, _ := unstructured.NestedString(ss.Object, "schedule"); got != "0 1 * * *" {
 		t.Fatalf("schedule overwritten on invalid cron: %q", got)
 	}
+}
+
+// TestEnsureScanConfigSecondRunWritesNothing: a repeated execution over an
+// unchanged spec must not write the ScanSetting or its ScanSettingBindings.
+// These writes are operator-driven scan triggers, so a second execution that
+// re-PUTs identical content is not a no-op: it is an update event the
+// Compliance Operator acts on, once per poll. Convergence is the property, and
+// object identity plus ResourceVersion are the proof: the fake client bumps
+// ResourceVersion on every Update, so an unchanged one means no write reached
+// the apiserver (a real change bumps it; see TestReconcileSkipsUnchangedStatusWrite
+// for the same reasoning on the status path).
+func TestEnsureScanConfigSecondRunWritesNothing(t *testing.T) {
+	scheme := testScheme(t)
+	scheme.AddKnownTypeWithName(scanSettingGVK, &unstructured.Unstructured{})
+	bindingList := &unstructured.UnstructuredList{}
+	bindingList.SetGroupVersionKind(bindingGVK.GroupVersion().WithKind(bindingGVK.Kind + "List"))
+	scheme.AddKnownTypeWithName(bindingGVK, &unstructured.Unstructured{})
+	scheme.AddKnownTypeWithName(bindingList.GroupVersionKind(), bindingList)
+
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).Build(),
+		Scheme: scheme,
+	}
+	cb := newCB("cis", "e8")
+	cb.Spec.TailoredProfiles = []string{"tp-one"}
+	if err := r.ensureScanConfig(context.Background(), cb); err != nil {
+		t.Fatal(err)
+	}
+
+	// Snapshot every object the first run wrote: name, UID, resourceVersion, and
+	// the whole content.
+	type snap struct {
+		uid, rv string
+		object  map[string]any
+	}
+	read := func(kind schema.GroupVersionKind, name string) snap {
+		obj := &unstructured.Unstructured{}
+		obj.SetGroupVersionKind(kind)
+		if err := r.Get(context.Background(), types.NamespacedName{Namespace: complianceNamespace, Name: name}, obj); err != nil {
+			t.Fatalf("getting %s %s: %v", kind.Kind, name, err)
+		}
+		return snap{uid: string(obj.GetUID()), rv: obj.GetResourceVersion(), object: obj.Object}
+	}
+	first := map[string]snap{
+		"ScanSetting":         read(scanSettingGVK, scanSettingName),
+		"binding-cis":         read(bindingGVK, bindingName("cis")),
+		"binding-e8":          read(bindingGVK, bindingName("e8")),
+		"binding-tailored-tp": read(bindingGVK, tailoredBindingName("tp-one")),
+	}
+
+	if err := r.ensureScanConfig(context.Background(), cb); err != nil {
+		t.Fatal(err)
+	}
+
+	for key, want := range first {
+		kind, name := scanSettingGVK, scanSettingName
+		switch key {
+		case "binding-cis":
+			kind, name = bindingGVK, bindingName("cis")
+		case "binding-e8":
+			kind, name = bindingGVK, bindingName("e8")
+		case "binding-tailored-tp":
+			kind, name = bindingGVK, tailoredBindingName("tp-one")
+		}
+		got := read(kind, name)
+		if got.uid != want.uid {
+			t.Errorf("%s: UID changed on rerun (%s -> %s): a second run recreated the object",
+				key, want.uid, got.uid)
+		}
+		if got.rv != want.rv {
+			t.Errorf("%s: resourceVersion changed on rerun (%s -> %s): the second run re-wrote identical content, which restarts a Compliance scan",
+				key, want.rv, got.rv)
+		}
+		if !equality.Semantic.DeepEqual(got.object, want.object) {
+			t.Errorf("%s: content changed on rerun:\nfirst:  %v\nsecond: %v", key, want.object, got.object)
+		}
+	}
+
+	// No duplicate objects: names are derived, so a rerun must not fan out.
+	bindings := &unstructured.UnstructuredList{}
+	bindings.SetGroupVersionKind(bindingList.GroupVersionKind())
+	if err := r.List(context.Background(), bindings, client.InNamespace(complianceNamespace)); err != nil {
+		t.Fatal(err)
+	}
+	if len(bindings.Items) != 3 {
+		t.Fatalf("rerun produced %d bindings, want 3: %v", len(bindings.Items), bindingNames(bindings.Items))
+	}
+	settings := &unstructured.UnstructuredList{}
+	settings.SetGroupVersionKind(scanSettingGVK.GroupVersion().WithKind(scanSettingGVK.Kind + "List"))
+	if err := r.List(context.Background(), settings, client.InNamespace(complianceNamespace)); err != nil {
+		t.Fatal(err)
+	}
+	if len(settings.Items) != 1 {
+		t.Fatalf("rerun produced %d ScanSettings, want 1", len(settings.Items))
+	}
+}
+
+func bindingNames(items []unstructured.Unstructured) []string {
+	names := make([]string, 0, len(items))
+	for i := range items {
+		names = append(names, items[i].GetName())
+	}
+	slices.Sort(names)
+	return names
 }
 
 // TestEnsureScanConfigScanningDisabled: clearing all profiles (and tailored

@@ -989,6 +989,10 @@ stale Available or eternal Progressing.
 - [x] **Must-gather rerun**: two runs into the same output dir produce
       byte-identical files, and a run that collects no related objects leaves
       no file from the run before (`hack/must-gather.sh --self-test`).
+- [x] **Scan-config rerun**: a second `ensureScanConfig` on an unchanged spec
+      issues no write, so the Compliance Operator sees no binding update to act
+      on; one ScanSetting and one binding per profile remain
+      (`TestEnsureScanConfigSecondRunWritesNothing`).
 - [x] **prometheusrule_to_rules.py CLI**: `--help` exits 0 on stdout; wrong
       argc or unknown options exit 2; extract writes a top-level `groups:`
       file (`TestPrometheusRuleToRulesHelp`, `TestPrometheusRuleToRulesExtract`).
