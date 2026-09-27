@@ -177,8 +177,9 @@ spec:
 EOF
 ```
 
-The catalog references the operator and console-plugin images by digest, so
-OperatorHub pulls everything from `quay.io/openshift-baseline-security/*`.
+The catalog's package references the operator and console-plugin images by the
+release tag, so OperatorHub pulls everything from
+`quay.io/openshift-baseline-security/*`.
 
 ### From source
 

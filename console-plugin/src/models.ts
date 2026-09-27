@@ -75,8 +75,9 @@ export const WAIVER_MAX_ITEMS = 256;
 export const DEFAULT_SCAN_SCHEDULE = '0 1 * * *';
 
 // Base profile every tailored-profile form and manifest falls back to when no
-// extends is chosen (same default as the operator). Single source so create,
-// edit, reset, and validation cannot disagree on the shipped default.
+// extends is chosen. Console-side only: the operator never creates or defaults
+// a TailoredProfile. Single source so create, edit, reset, and validation
+// cannot disagree on the shipped default.
 export const DEFAULT_BASE_PROFILE = 'ocp4-cis';
 
 // Compliance Operator install namespace (product default on OpenShift). Single
@@ -355,9 +356,9 @@ export type ClusterBaseline = {
     tailoredProfiles?: string[];
     schedule?: string;
     installComplianceOperator?: 'Automatic' | 'Manual';
-    // OLM CatalogSource name for the compliance-operator package (default
-    // redhat-operators; override for OKD / disconnected). Matches CRD
-    // spec.complianceCatalogSource.
+    // OLM CatalogSource name for the compliance-operator package. No CRD
+    // default: when unset the operator auto-detects redhat-operators on OCP
+    // and community-operators on OKD. Matches CRD spec.complianceCatalogSource.
     complianceCatalogSource?: string;
     console?: { managementState?: 'Managed' | 'Removed' };
     remediation?: { apply?: 'Automatic' | 'Manual' };

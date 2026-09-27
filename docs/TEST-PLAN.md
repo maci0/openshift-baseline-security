@@ -490,11 +490,12 @@ an accepted risk neither inflates nor tanks the score.
       (`TestComplianceScoreSeededSentinel`, `TestPublishMetrics`).
 - [x] **Per-status series including info/inconsistent/waived** and tailored `tp:`
       prefix (`TestPublishMetrics`).
-- [x] **Alert expressions are HA-safe**: every multi-replica expression selects
-      the newest publisher via
+- [x] **Alert expressions are HA-safe**: every multi-replica expression that
+      reports one operator instance selects the newest publisher via
       `and on(instance) topk(1, baseline_security_status_observed_timestamp_seconds)`
       (ADR-018) in `config/prometheus/prometheusrule.yaml`, pinned by promtool
-      HA case.
+      HA case. `ComplianceStatusStale` is the exception: it aggregates across
+      replicas with `max(...)` and is not HA-scoped.
 - [x] **PrometheusRule** `ComplianceScoreLow` / `ComplianceChecksFailing` fire
       against synthetic metric values (`make test-alerts`, promtool, no cluster):
       score 79 fires, 80 does not, `-1` sentinel never fires, stale HA dup pods

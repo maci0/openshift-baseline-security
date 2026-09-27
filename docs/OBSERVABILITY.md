@@ -5,7 +5,8 @@ native Observe → Dashboards ConfigMap. The install namespace is `openshift-*`
 (platform-reserved) and carries `openshift.io/cluster-monitoring: "true"`, so
 **cluster (platform) Prometheus** scrapes it; user-workload monitoring never
 scrapes `openshift-*` namespaces. The OLM bundle and non-OLM `make deploy` ship
-the same ServiceMonitor / PrometheusRule / dashboard.
+the same ServiceMonitor / PrometheusRule. The dashboard ConfigMap is not a
+manifest: the operator writes it from an embedded asset at reconcile time.
 
 The install also ships a `prometheus-k8s` Role/RoleBinding granting the
 platform Prometheus ServiceAccount (`openshift-monitoring/prometheus-k8s`)
@@ -37,8 +38,8 @@ reconciles, so these are zero on a standby replica.
 ## Dashboards
 
 The `Baseline Security / Compliance` ConfigMap dashboard (Observe → Dashboards,
-`openshift-config-managed/baseline-security-compliance-dashboard`) has four
-things to look at, in the order an incident usually needs them:
+`openshift-config-managed/baseline-security-compliance-dashboard`) has five
+rows to look at, in the order an incident usually needs them:
 
 1. **Score** row: current score, Degraded flag, remediation batch state and age.
 2. **Score trend** row: 30-day score history, the regression check after a change.
@@ -56,11 +57,12 @@ gauge cannot leave a blank panel behind.
 
 ## Logs
 
-Structured JSON (zap, `--zap-encoder`) to stdout, scraped from the pod. Levels:
+Structured JSON (zap, `--zap-encoder`) to stderr, readable from the pod logs.
+Levels:
 
-- **Error**: a reconcile step failed. Each carries the CR `name`, its
-  `generation`, and the `duration` of the whole reconcile so far, so a failure
-  burst is attributable to a spec change.
+- **Error**: a reconcile step failed. Each carries the CR `name` and the
+  `duration` of the whole reconcile so far. The top-level reconcile failure
+  also carries `generation`, so that one is attributable to a spec change.
 - **Info (default level)**: transitions only. A Degraded or not-Available posture
   logs once on entry (with `score`, `fail`, `error`, `inconsistent`,
   `newlyFailed`, `available`, `progressing`, `batchActive`) and the same posture

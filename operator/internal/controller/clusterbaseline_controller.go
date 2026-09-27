@@ -112,7 +112,7 @@ type ClusterBaselineReconciler struct {
 
 	// lastHistoryStallLog rate-limits default-level Info when history cannot
 	// advance after a completed scan (suite missing / incomplete endTimestamps).
-	// V(1) alone leaves production logs silent until ComplianceScanStale (36h).
+	// V(1) alone leaves production logs silent until ComplianceScanStale fires.
 	// Single-threaded reconcile (singleton + leader-elected) so no mutex.
 	lastHistoryStallLog time.Time
 	// lastPostureLogSig is the last Degraded/not-Available posture logged at Info,

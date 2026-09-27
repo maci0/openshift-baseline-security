@@ -241,7 +241,7 @@ func (r *ClusterBaselineReconciler) recordHistory(
 			// Once LastScanTime is set, a missing suite freezes history and can
 			// page ComplianceScanStale with no default-level marker. Rate-limit
 			// Info (see logHistoryStall) so requeue spam stays off while still
-			// leaving a production breadcrumb before the 36h alert.
+			// leaving a production breadcrumb before ComplianceScanStale fires.
 			if cb.Status.LastScanTime != nil {
 				r.logHistoryStall(ctx, "ComplianceSuite not found; history not advanced",
 					"suite", name, "name", cb.Name,
@@ -383,7 +383,8 @@ func (r *ClusterBaselineReconciler) recordHistory(
 
 // historyStallLogInterval is how often default-level Info may repeat for a
 // frozen LastScanTime (suite missing / bad endTimestamps). Shorter than the
-// ComplianceScanStale 36h alert so on-call has breadcrumbs; longer than the
+// ComplianceScanStale window (1.5x the scan interval, 36h at the daily
+// default) so on-call has breadcrumbs; longer than the
 // 1m requeue so logs stay usable.
 const historyStallLogInterval = 30 * time.Minute
 

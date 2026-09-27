@@ -13,13 +13,13 @@ import (
 	baselinev1alpha1 "github.com/maci0/baseline-security-operator/api/v1alpha1"
 )
 
-// Grace before a still-Pending owned scan PVC is treated as stuck (no default
-// StorageClass). Brand-new PVCs are ignored so provisioning lag is not Degraded.
+// Grace before a still-Pending owned scan PVC is treated as stuck. Brand-new
+// PVCs are ignored so provisioning lag is not Degraded.
 const scanStoragePendingGrace = 2 * time.Minute
 
 // checkScanStorage sets the ScanStorageReady detail condition false when owned
-// scan PVCs stay Pending (no default StorageClass); the Degraded rollup
-// propagates it. Listing in a nonexistent namespace returns an empty list, so
+// scan PVCs stay Pending past the grace; the Degraded rollup propagates it.
+// Listing in a nonexistent namespace returns an empty list, so
 // no NotFound handling is needed.
 func (r *ClusterBaselineReconciler) checkScanStorage(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline) error {
 	pvcs := &corev1.PersistentVolumeClaimList{}

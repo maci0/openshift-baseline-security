@@ -452,7 +452,7 @@ openshift-baseline-security/
 │   └── AGENTS.md                   # operator-specific rules
 ├── console-plugin/                 # console-plugin-template shape
 │   ├── src/components/             # React tabs, BaselineContext, Overview item, UI feedback timing
-│   ├── src/{models,scoring,status,names,cron,dates,waivers,patches,links,results,remediation,report,profiles,download,errors,parse,overviewTrend}.*
+│   ├── src/{models,scoring,status,names,cron,dates,waivers,patches,links,results,remediation,report,profiles,download,errors,parse,text,overviewTrend}.*
 │   │                               # domain modules; tests live alongside as *.test.ts
 │   ├── src/testing/                # shared test-only helpers (fuzz PRNG)
 │   ├── tools/oxlint/               # local anti-slop oxlint plugin

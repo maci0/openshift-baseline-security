@@ -96,7 +96,7 @@ echo "${prog}: org.opencontainers.image.source=${src}" >&2
 # that lost it (an unexpanded ARG, a dropped LABEL line) still builds and still
 # passes the checks above: only the built artifact shows it.
 ver=$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.version"}}' "$image")
-echo "org.opencontainers.image.version=${ver}"
+echo "${prog}: org.opencontainers.image.version=${ver}" >&2
 [ -n "$ver" ] || {
   echo "${image} has no org.opencontainers.image.version label" >&2
   exit 1

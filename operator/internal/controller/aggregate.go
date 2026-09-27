@@ -147,7 +147,8 @@ func (r *ClusterBaselineReconciler) aggregateStatus(ctx context.Context, cb *bas
 	currentFails := make([]string, 0, int(checkResultListPageSize)/8+1)
 	if sel != nil {
 		// Live apiserver LIST, not a cache read: unstructured objects bypass the
-		// manager cache (cmd/main.go keeps the client default Unstructured=false),
+		// manager cache (the client is built without setting the Unstructured
+		// cache option, so it stays false),
 		// so the label selector filters server-side. Do NOT flip the client to
 		// cached-unstructured to "fix" this: MCPs/Subscriptions/Consoles are read
 		// via the same client with get-only RBAC, and their informers could never

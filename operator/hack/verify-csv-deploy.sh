@@ -8,12 +8,14 @@
 # to the base (a probe, a resource limit, a volume) ships to `make deploy` and
 # silently not to an OLM install.
 #
-# Three divergences are intentional and normalized away:
+# Four divergences are intentional and normalized away:
 #   * the image tag. The base pins :latest for local `make deploy`; the CSV
 #     pins the release VERSION. Both refs must otherwise be the same repo.
 #   * imagePullPolicy: Always. Base-only: :latest needs Always to pick up a
 #     rebuild, the CSV's versioned tag wants the IfNotPresent default.
 #   * the app.kubernetes.io/version pod label. CSV-only release stamp.
+#   * quoting of the --drop=ALL log level (base writes drop: ["ALL"], the CSV
+#     drop: [ALL]). Semantically the same, so the gsub folds them.
 #
 # Everything else must match line for line.
 #

@@ -3,9 +3,7 @@ import { COMPLIANCE_NAMESPACE, DEFAULT_BASE_PROFILE, isProfileKey, PROFILE_MAX_I
 import { isValidK8sName, isValidTailoredProfileName } from './names';
 import { isString } from './parse';
 
-// Rule object written into TailoredProfile disableRules/enableRules. Shared by
-// tailoredProfileManifest and the ProfilesTab update path so both write the
-// identical shape.
+// Rule object written into TailoredProfile disableRules/enableRules.
 export interface ConsoleRule {
   name: string;
   rationale: string;
