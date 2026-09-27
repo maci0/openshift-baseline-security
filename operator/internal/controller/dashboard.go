@@ -68,12 +68,15 @@ func (r *ClusterBaselineReconciler) ensureComplianceDashboard(ctx context.Contex
 		// every reconcile (15s while Progressing), and a persistent denial would
 		// otherwise emit an unbounded Error stream. V(1) keeps the full cadence.
 		logger := log.FromContext(ctx)
+		// `name` is the ClusterBaseline name everywhere else in the package, so
+		// the ConfigMap is `configMap` here: reusing `name` for a different
+		// object made this line unattributable to the CR it reconciles.
 		logger.V(1).Info("compliance dashboard configmap not reconciled",
-			"namespace", dashboardNS, "name", dashboardName, "error", err)
+			"name", cb.Name, "configMap", dashboardName, "namespace", dashboardNS, "error", err)
 		if r.lastDashboardErrLog.IsZero() || r.elapsed(r.lastDashboardErrLog) >= historyStallLogInterval {
 			r.lastDashboardErrLog = r.now()
 			logger.Error(err, "compliance dashboard configmap not reconciled",
-				"namespace", dashboardNS, "name", dashboardName)
+				"name", cb.Name, "configMap", dashboardName, "namespace", dashboardNS)
 		}
 	}
 }

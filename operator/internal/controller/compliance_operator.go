@@ -311,13 +311,13 @@ func (r *ClusterBaselineReconciler) findComplianceOperatorCSV(ctx context.Contex
 		}
 		return nil, fmt.Errorf("listing CSVs in %s: %w", complianceNamespace, err)
 	}
-	if csv := pickComplianceOperatorCSV(local.Items, complianceNamespace, true); csv != nil {
+	if csv := pickComplianceOperatorCSV(ctx, local.Items, complianceNamespace, true); csv != nil {
 		return csv, nil
 	}
 	// Answer for every walk exit below that found no Succeeded CSV: the best
 	// non-Succeeded one in our own namespace. Computed once; the walk lists
 	// into its own object, so local.Items never changes under it.
-	localFallback := pickComplianceOperatorCSV(local.Items, complianceNamespace, false)
+	localFallback := pickComplianceOperatorCSV(ctx, local.Items, complianceNamespace, false)
 
 	// Cluster-wide fallback. Paged: a CSVCatalog CR carries the full install
 	// spec plus the alm-examples annotation, so one unpaged List of a
@@ -345,7 +345,7 @@ func (r *ClusterBaselineReconciler) findComplianceOperatorCSV(ctx context.Contex
 			}
 			return nil, fmt.Errorf("listing CSVs cluster-wide: %w", err)
 		}
-		bestSucceeded, bestOther = foldComplianceOperatorCSVs(cluster.Items, bestSucceeded, bestOther)
+		bestSucceeded, bestOther = foldComplianceOperatorCSVs(ctx, cluster.Items, bestSucceeded, bestOther)
 		next := cluster.GetContinue()
 		if next == "" {
 			break
@@ -375,6 +375,7 @@ func (r *ClusterBaselineReconciler) findComplianceOperatorCSV(ctx context.Contex
 // not depend on how the pages were split. Only the winners are DeepCopied, and
 // only when one actually replaces the incumbent.
 func foldComplianceOperatorCSVs(
+	ctx context.Context,
 	items []unstructured.Unstructured,
 	bestSucceeded, bestOther *unstructured.Unstructured,
 ) (*unstructured.Unstructured, *unstructured.Unstructured) {
@@ -383,7 +384,7 @@ func foldComplianceOperatorCSVs(
 		if !strings.HasPrefix(csv.GetName(), csvNamePrefix) {
 			continue
 		}
-		phase, _, _ := unstructured.NestedString(csv.Object, "status", "phase")
+		phase := csvPhase(ctx, csv)
 		if phase == "Succeeded" {
 			if bestSucceeded == nil ||
 				compareComplianceCSVVersion(csv.GetName(), bestSucceeded.GetName()) > 0 {
@@ -399,11 +400,27 @@ func foldComplianceOperatorCSVs(
 	return bestSucceeded, bestOther
 }
 
+// csvPhase reads status.phase, logging a wrong-typed value instead of letting
+// it read as an ordinary non-Succeeded phase. The selection is unchanged (an
+// unreadable phase is still not "Succeeded", so the CSV falls to the lower
+// tier), but without the line a healthy compliance operator whose status.phase
+// is corrupt surfaces as ComplianceOperatorReady=False/CSVFailed with no
+// indication the real cause was a type mismatch on one CSV object.
+func csvPhase(ctx context.Context, csv *unstructured.Unstructured) string {
+	phase, _, err := unstructured.NestedString(csv.Object, "status", "phase")
+	if err != nil {
+		log.FromContext(ctx).Info("CSV status.phase unreadable; treating it as not Succeeded",
+			"csv", csv.GetName(), "namespace", csv.GetNamespace(), "error", err.Error())
+		return ""
+	}
+	return phase
+}
+
 // pickComplianceOperatorCSV chooses the newest compliance-operator CSV among items.
 // If ns is non-empty, only that namespace is considered. If succeededOnly, only
 // phase=Succeeded CSVs are candidates; otherwise only non-Succeeded.
 // DeepCopy runs once for the winner so candidate comparisons stay cheap.
-func pickComplianceOperatorCSV(items []unstructured.Unstructured, ns string, succeededOnly bool) *unstructured.Unstructured {
+func pickComplianceOperatorCSV(ctx context.Context, items []unstructured.Unstructured, ns string, succeededOnly bool) *unstructured.Unstructured {
 	bestIdx := -1
 	for i := range items {
 		csv := &items[i]
@@ -413,7 +430,7 @@ func pickComplianceOperatorCSV(items []unstructured.Unstructured, ns string, suc
 		if !strings.HasPrefix(csv.GetName(), csvNamePrefix) {
 			continue
 		}
-		phase, _, _ := unstructured.NestedString(csv.Object, "status", "phase")
+		phase := csvPhase(ctx, csv)
 		isSucceeded := phase == "Succeeded"
 		if succeededOnly != isSucceeded {
 			continue

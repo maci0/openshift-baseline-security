@@ -71,11 +71,21 @@ func (*shutdownFlag) NeedLeaderElection() bool { return false }
 
 func (*shutdownFlag) Start(ctx context.Context) error {
 	<-ctx.Done()
+	// Without this the last line a healthy pod ever emits is "starting manager":
+	// a clean rollout and a crash-looping pod produce the same log, and a drain
+	// cut short by the 20s gracefulShutdownTimeout (against a 30s pod grace)
+	// leaves no record that it happened.
+	setupLog.Info("shutting down; draining manager", "timeout", gracefulShutdownTimeout)
 	shuttingDown.Store(true)
 	return nil
 }
 
 var scheme = runtime.NewScheme()
+
+// setupLog is the process-lifecycle logger. Package-level so the runnables
+// below can reach it, not just main(). ctrl.Log is a delegating sink, so
+// building this before SetLogger still forwards to the configured logger.
+var setupLog = ctrl.Log.WithName("setup")
 
 // version is stamped by the linker from the build ARG (operator/Makefile
 // VERSION, the CSV version, and the OCI version label all read the same value).
@@ -132,7 +142,6 @@ func main() {
 	}
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
-	setupLog := ctrl.Log.WithName("setup")
 
 	// Normalize flag strings so padding from shell/YAML does not change bind
 	// semantics or bypass loopback checks (e.g. " 0 " vs "0").
@@ -311,6 +320,9 @@ func main() {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
 	}
+	// Closes the process bracket started above. A pod that ends here drained and
+	// exited 0; a pod that is missing this line was killed.
+	setupLog.Info("manager stopped", "version", version)
 }
 
 // errEmptyHealthProbeAddr is logged when --health-probe-bind-address is empty.

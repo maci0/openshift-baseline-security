@@ -210,7 +210,7 @@ func (r *ClusterBaselineReconciler) ensureBatchMetadata(
 				// Info: early grace-forced resume is surprising without this
 				// marker (hand-edit / truncated annotation).
 				log.FromContext(ctx).Info("corrupt batch-started-at; failing closed past grace",
-					"name", cb.Name, "raw", raw)
+					"name", cb.Name, "raw", clampString(raw, logValueMaxLen))
 			}
 		}
 		if started.IsZero() {
@@ -285,7 +285,7 @@ func (r *ClusterBaselineReconciler) resumeOrphanedBatch(
 	// Info: crash/cancel recovery unpauses MCPs with no active batch status.
 	// Without this marker, on-call cannot tell orphan resume from a normal finish.
 	log.FromContext(ctx).Info("resuming orphaned remediation batch",
-		"pools", pools, "emptyRequest", emptyRequest, "name", cb.Name)
+		"pools", boundedForLog(pools), "emptyRequest", emptyRequest, "name", cb.Name)
 	owner := batchPauseOwner(cb)
 	for _, pool := range pools {
 		if err := r.setMCPPaused(ctx, pool, false, owner); err != nil {

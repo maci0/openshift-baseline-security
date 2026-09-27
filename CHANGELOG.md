@@ -188,6 +188,40 @@ depend on those tags.
   and the run is a re-run: it is announced and allowed, sending the status
   without the captured `resourceVersion` that its own previous write staled. A
   spec that differs in any way is an admin's edit and the guard is unchanged.
+- A cluster on which no compliance scan had ever completed produced no alert
+  and no dashboard data while every other signal read healthy. The scan
+  staleness rule needs a non-zero last-scan timestamp, so the "never scanned
+  once" case fell through it; the score stayed at the `-1` no-score sentinel,
+  which the low-score rule excludes, and `Available` was True because scanning
+  was configured. The new `ComplianceNeverScanned` alert fires after 6h on a
+  cluster whose schedule parses and whose profiles are selected but whose
+  `status.lastScanTime` has never been set. Scanning deliberately turned off
+  is not paged: it publishes a zero scan interval.
+- Removing the console plugin went unalerted. `Available` ignores the plugin,
+  and `Degraded` only fires on the `Unavailable` reason, so `ImageMissing`,
+  `ImageInvalid` and `ConsoleMissing` set the detail condition alone. A
+  mis-set `RELATED_IMAGE_CONSOLE_PLUGIN` therefore removed all of
+  Administration → Compliance with nothing paging. The new
+  `ConsolePluginNotReady` alert covers those reasons while
+  `spec.console.managementState` is `Managed`; a plugin an admin deliberately
+  removed is not paged, and requiring `Available=True` keeps it from
+  double-reporting `ClusterBaselineNotAvailable`. It reads the new
+  `baseline_security_console_plugin_managed` gauge, which separates "the
+  plugin is missing" from "the plugin was removed on purpose".
+- A `ClusterServiceVersion` whose `status.phase` had the wrong type was read
+  as not `Succeeded` with no log, so a healthy Compliance Operator was
+  reported as `ComplianceOperatorReady=False/CSVFailed` and rolled up to
+  `Degraded`, paging with nothing to attribute it to a type mismatch on one
+  CSV. The read is now logged, naming the CSV and the error.
+- The operator emitted nothing on shutdown, so its last log line was always
+  "starting manager" and a clean drain looked identical to a pod that was
+  killed. It now logs when the drain begins and when the manager has stopped.
+- A hand-edited `baselinesecurity.openshift.io/batch-pools` annotation, or a
+  corrupt `batch-started-at` value, was logged in full and again on every
+  reconcile while the failure persisted, so one corrupt annotation could emit
+  a multi-kilobyte line once a minute. Those fields, and the Pending-PVC list
+  in the scan-storage log, are now bounded for logging. The full lists are
+  still acted on.
 - A failed `CatalogSource` read while auto-detecting the Compliance Operator
   catalog was discarded with no log. Detection then fails safe to "assume the
   catalog is present", so a persistent RBAC denial or apiserver error left the

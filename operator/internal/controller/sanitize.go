@@ -438,6 +438,35 @@ func clampSetList(in []string, nameMax, maxItems int, dropEmpty bool) []string {
 // status.complianceOperatorVersion.
 const complianceOperatorVersionMax = 128
 
+// logListMaxItems and logValueMaxLen bound what a single log field can render.
+// Annotation-derived lists (batch pools, pending PVCs) are hand-editable up to
+// the etcd object limit, and the lines that log them repeat on every reconcile
+// while the failure persists, so an uncapped field turns one corrupt annotation
+// into a multi-kilobyte line emitted once a minute. Truncation is for the log
+// only: callers still act on the full list.
+const (
+	logListMaxItems = 32
+	logValueMaxLen  = 256
+)
+
+// boundedForLog returns a copy of names safe to use as a structured log field:
+// at most logListMaxItems entries, each at most logValueMaxLen runes, with an
+// appended marker recording what was dropped. nil stays nil.
+func boundedForLog(names []string) []string {
+	if len(names) == 0 {
+		return names
+	}
+	shown := make([]string, 0, logListMaxItems+1)
+	for _, n := range names {
+		if len(shown) == logListMaxItems {
+			shown = append(shown, "...")
+			break
+		}
+		shown = append(shown, clampString(n, logValueMaxLen))
+	}
+	return shown
+}
+
 // clampString truncates s to at most max runes (fast path when it already fits
 // by byte length, which implies it fits by rune count). Rune-aware so truncation
 // never splits a multibyte character into invalid UTF-8.

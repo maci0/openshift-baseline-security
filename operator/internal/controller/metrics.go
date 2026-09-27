@@ -82,6 +82,18 @@ var (
 		Help: "Remediation batches by outcome: applied (every listed remediation reported Applied), cancelled (none still apply=true), grace (batchResumeGrace expired first, or a listed remediation could not be observed, so Applied was never confirmed and pools were unpaused with remediations outstanding), orphaned (crash/cancel recovery unpaused pools that had no batch status).",
 	}, []string{"outcome"})
 
+	// 1 when spec.console.managementState is Managed, 0 when Removed. Lets
+	// ConsolePluginNotReady alert on a plugin that is missing when it should be
+	// present without also paging for an admin who deliberately set Removed
+	// (which is also ConsolePluginReady=False, reason Disabled). Without it the
+	// only honest option is no alert at all, and a mis-set
+	// RELATED_IMAGE_CONSOLE_PLUGIN removes the whole console UI with an
+	// all-green alert set.
+	consolePluginManaged = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "baseline_security_console_plugin_managed",
+		Help: "1 when spec.console.managementState is Managed (a console plugin is expected to be deployed), 0 when Removed. Paired with the ConsolePluginReady condition: readiness 0 while managed 1 is the failure to alert on.",
+	})
+
 	// Serialize publishMetrics so concurrent reconciles (or a future raise of
 	// MaxConcurrentReconciles) cannot interleave Reset/Set sequences. Also track
 	// the last published (profile, status) pairs so we can delete stale series
@@ -103,7 +115,7 @@ func init() {
 		complianceScore, complianceChecks, statusObservedTimestamp,
 		remediationBatchActive, remediationBatchStartedTimestamp,
 		conditionStatus, lastScanTimestamp, newlyFailedCount,
-		scanIntervalSecondsGauge, remediationBatches,
+		scanIntervalSecondsGauge, remediationBatches, consolePluginManaged,
 	)
 	// Seed the "no score yet" sentinel so a never-reconciled or
 	// error-before-aggregation state reads as -1, not the gauge default of 0
@@ -188,6 +200,14 @@ func publishMetrics(cb *baselinev1alpha1.ClusterBaseline, now time.Time) {
 			v = 1.0
 		}
 		conditionStatus.WithLabelValues(typ).Set(v)
+	}
+
+	// Empty ManagementState reads as Managed (the CRD default the operator
+	// itself writes), so a cleared CR keeps the "a plugin is expected" reading.
+	if cb.Spec.Console.ManagementState == baselinev1alpha1.Removed {
+		consolePluginManaged.Set(0)
+	} else {
+		consolePluginManaged.Set(1)
 	}
 
 	// Suppress last-scan freshness when scanning is intentionally disabled

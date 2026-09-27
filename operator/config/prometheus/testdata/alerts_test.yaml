@@ -496,3 +496,146 @@ tests:
       - eval_time: 70m
         alertname: RemediationBatchGraceResume
         exp_alerts: []
+
+  # ComplianceNeverScanned: scanning configured (non-zero interval) but
+  # last_scan never set. Fires after the 6h window. This is the cluster state
+  # where every other alert is green: score is -1, there are no check series,
+  # and Available=True.
+  - interval: 1m
+    input_series:
+      - series: 'baseline_security_scan_interval_seconds{instance="op-1"}'
+        values: '86400x500'
+      - series: 'baseline_security_last_scan_timestamp_seconds{instance="op-1"}'
+        values: '0x500'
+      - series: 'baseline_security_status_observed_timestamp_seconds{instance="op-1"}'
+        values: '100x500'
+    alert_rule_test:
+      - eval_time: 361m
+        alertname: ComplianceNeverScanned
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: 'Compliance is configured but no scan has ever completed'
+              description: 'Profiles are selected and spec.schedule parses (scan_interval is non-zero), but status.lastScanTime has never been set, so no compliance score has ever been produced. The Compliance Operator may be installed without a working ScanConfig/StorageConfig, or a scan may be wedged. Check ComplianceScanConfigs and ScanStorageConfigs, and whether a ComplianceSuite ever ran. CLI: oc -n openshift-compliance get compliancesuites,compliancescans,scanconfigs,scanstorageconfigs; oc get clusterbaseline cluster -o yaml'
+
+  # Scanning disabled by the admin (interval 0) must not page: nothing is
+  # expected to scan. The 6h window also has to elapse first.
+  - interval: 1m
+    input_series:
+      - series: 'baseline_security_scan_interval_seconds{instance="op-1"}'
+        values: '0x500'
+      - series: 'baseline_security_last_scan_timestamp_seconds{instance="op-1"}'
+        values: '0x500'
+      - series: 'baseline_security_status_observed_timestamp_seconds{instance="op-1"}'
+        values: '100x500'
+    alert_rule_test:
+      - eval_time: 361m
+        alertname: ComplianceNeverScanned
+        exp_alerts: []
+
+  # Not yet due at 5h: a slow first scan must not page before the window.
+  - interval: 1m
+    input_series:
+      - series: 'baseline_security_scan_interval_seconds{instance="op-1"}'
+        values: '86400x500'
+      - series: 'baseline_security_last_scan_timestamp_seconds{instance="op-1"}'
+        values: '0x500'
+      - series: 'baseline_security_status_observed_timestamp_seconds{instance="op-1"}'
+        values: '100x500'
+    alert_rule_test:
+      - eval_time: 300m
+        alertname: ComplianceNeverScanned
+        exp_alerts: []
+
+  # A cluster that has scanned once is ComplianceScanStale's job, not this
+  # alert's: last_scan > 0 must keep it silent however old the scan is.
+  - interval: 1m
+    input_series:
+      - series: 'baseline_security_scan_interval_seconds{instance="op-1"}'
+        values: '86400x500'
+      - series: 'baseline_security_last_scan_timestamp_seconds{instance="op-1"}'
+        values: '100x500'
+      - series: 'baseline_security_status_observed_timestamp_seconds{instance="op-1"}'
+        values: '100x500'
+    alert_rule_test:
+      - eval_time: 361m
+        alertname: ComplianceNeverScanned
+        exp_alerts: []
+
+  # ConsolePluginNotReady: plugin expected (managed) and not ready, while the
+  # cluster is otherwise Available. Fires after 1h.
+  - interval: 1m
+    input_series:
+      - series: 'baseline_security_condition{type="ConsolePluginReady",instance="op-1"}'
+        values: '0x100'
+      - series: 'baseline_security_console_plugin_managed{instance="op-1"}'
+        values: '1x100'
+      - series: 'baseline_security_condition{type="Available",instance="op-1"}'
+        values: '1x100'
+      - series: 'baseline_security_status_observed_timestamp_seconds{instance="op-1"}'
+        values: '100x100'
+    alert_rule_test:
+      - eval_time: 61m
+        alertname: ConsolePluginNotReady
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: 'Console plugin is not ready while it is expected to be deployed'
+              description: 'spec.console.managementState is Managed but ConsolePluginReady has been False for over 1h, so Administration -> Compliance is missing or broken while scanning still works. Check the ConsolePluginReady reason: ImageMissing/ImageInvalid means RELATED_IMAGE_CONSOLE_PLUGIN is unset or malformed in the operator Deployment, ConsoleMissing means the console operator has not picked up the ConsolePlugin. Compliance scores are unaffected; read them with the CLI until the plugin is back. CLI: oc get clusterbaseline cluster -o jsonpath={range .status.conditions[?(@.type=="ConsolePluginReady")]}{.reason} {.message}{"\n"}{end}; oc -n openshift-compliance get consoleplugins'
+
+  # managementState=Removed is an admin decision, not an incident: the plugin
+  # is absent on purpose and this alert must stay silent.
+  - interval: 1m
+    input_series:
+      - series: 'baseline_security_condition{type="ConsolePluginReady",instance="op-1"}'
+        values: '0x100'
+      - series: 'baseline_security_console_plugin_managed{instance="op-1"}'
+        values: '0x100'
+      - series: 'baseline_security_condition{type="Available",instance="op-1"}'
+        values: '1x100'
+      - series: 'baseline_security_status_observed_timestamp_seconds{instance="op-1"}'
+        values: '100x100'
+    alert_rule_test:
+      - eval_time: 61m
+        alertname: ConsolePluginNotReady
+        exp_alerts: []
+
+  # A ready plugin is silent, and the 1h window is respected.
+  - interval: 1m
+    input_series:
+      - series: 'baseline_security_condition{type="ConsolePluginReady",instance="op-1"}'
+        values: '1x100'
+      - series: 'baseline_security_console_plugin_managed{instance="op-1"}'
+        values: '1x100'
+      - series: 'baseline_security_condition{type="Available",instance="op-1"}'
+        values: '1x100'
+      - series: 'baseline_security_status_observed_timestamp_seconds{instance="op-1"}'
+        values: '100x100'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: ConsolePluginNotReady
+        exp_alerts: []
+      - eval_time: 61m
+        alertname: ConsolePluginNotReady
+        exp_alerts: []
+
+  # Available=False is already ClusterBaselineNotAvailable's case; requiring
+  # Available=True keeps this alert from double-reporting the same incident.
+  - interval: 1m
+    input_series:
+      - series: 'baseline_security_condition{type="ConsolePluginReady",instance="op-1"}'
+        values: '0x100'
+      - series: 'baseline_security_console_plugin_managed{instance="op-1"}'
+        values: '1x100'
+      - series: 'baseline_security_condition{type="Available",instance="op-1"}'
+        values: '0x100'
+      - series: 'baseline_security_condition{type="Progressing",instance="op-1"}'
+        values: '0x100'
+      - series: 'baseline_security_status_observed_timestamp_seconds{instance="op-1"}'
+        values: '100x100'
+    alert_rule_test:
+      - eval_time: 61m
+        alertname: ConsolePluginNotReady
+        exp_alerts: []

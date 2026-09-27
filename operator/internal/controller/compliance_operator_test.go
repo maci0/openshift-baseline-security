@@ -34,7 +34,7 @@ func TestPickComplianceOperatorCSV(t *testing.T) {
 			csv("compliance-operator.v1.10.0", ns, "Succeeded"),
 			csv("compliance-operator.v1.9.0", ns, "Succeeded"),
 		}
-		got := pickComplianceOperatorCSV(items, "", true)
+		got := pickComplianceOperatorCSV(t.Context(), items, "", true)
 		if got == nil || got.GetName() != "compliance-operator.v1.10.0" {
 			t.Fatalf("picked %v, want compliance-operator.v1.10.0", nameOf(got))
 		}
@@ -48,7 +48,7 @@ func TestPickComplianceOperatorCSV(t *testing.T) {
 			csv("compliance-operator.v1.9.0", ns, "Succeeded"),
 		}
 		second := []unstructured.Unstructured{first[2], first[0], first[1]}
-		a, b := pickComplianceOperatorCSV(first, "", true), pickComplianceOperatorCSV(second, "", true)
+		a, b := pickComplianceOperatorCSV(t.Context(), first, "", true), pickComplianceOperatorCSV(t.Context(), second, "", true)
 		if a == nil || b == nil || a.GetName() != b.GetName() {
 			t.Fatalf("winner depends on input order: %v vs %v", nameOf(a), nameOf(b))
 		}
@@ -60,19 +60,19 @@ func TestPickComplianceOperatorCSV(t *testing.T) {
 			csv("compliance-operator.v2.0.0", ns, "Failed"),
 			csv("compliance-operator.v1.0.0", ns, "Succeeded"),
 		}
-		if got := pickComplianceOperatorCSV(items, "", true); got == nil || got.GetName() != "compliance-operator.v1.0.0" {
+		if got := pickComplianceOperatorCSV(t.Context(), items, "", true); got == nil || got.GetName() != "compliance-operator.v1.0.0" {
 			t.Errorf("succeededOnly picked %v, want compliance-operator.v1.0.0", nameOf(got))
 		}
-		if got := pickComplianceOperatorCSV(items, "", false); got == nil || got.GetName() != "compliance-operator.v2.0.0" {
+		if got := pickComplianceOperatorCSV(t.Context(), items, "", false); got == nil || got.GetName() != "compliance-operator.v2.0.0" {
 			t.Errorf("non-succeeded picked %v, want compliance-operator.v2.0.0", nameOf(got))
 		}
 		// A phase the API reports that is neither Succeeded nor anything known
 		// is still a candidate on the non-succeeded side.
 		mixed := []unstructured.Unstructured{csv("compliance-operator.v3.0.0", ns, "Replacing")}
-		if got := pickComplianceOperatorCSV(mixed, "", true); got != nil {
+		if got := pickComplianceOperatorCSV(t.Context(), mixed, "", true); got != nil {
 			t.Errorf("succeededOnly picked %v from an unknown phase, want nil", got.GetName())
 		}
-		if got := pickComplianceOperatorCSV(mixed, "", false); got == nil || got.GetName() != "compliance-operator.v3.0.0" {
+		if got := pickComplianceOperatorCSV(t.Context(), mixed, "", false); got == nil || got.GetName() != "compliance-operator.v3.0.0" {
 			t.Errorf("non-succeeded picked %v from an unknown phase, want compliance-operator.v3.0.0", nameOf(got))
 		}
 	})
@@ -83,13 +83,13 @@ func TestPickComplianceOperatorCSV(t *testing.T) {
 			csv("compliance-operator.v1.9.0", otherNS, "Succeeded"),
 			csv("compliance-operator.v1.0.0", ns, "Succeeded"),
 		}
-		if got := pickComplianceOperatorCSV(items, ns, true); got == nil || got.GetName() != "compliance-operator.v1.0.0" {
+		if got := pickComplianceOperatorCSV(t.Context(), items, ns, true); got == nil || got.GetName() != "compliance-operator.v1.0.0" {
 			t.Errorf("ns filter picked %v, want compliance-operator.v1.0.0", nameOf(got))
 		}
-		if got := pickComplianceOperatorCSV(items, otherNS, true); got == nil || got.GetName() != "compliance-operator.v1.9.0" {
+		if got := pickComplianceOperatorCSV(t.Context(), items, otherNS, true); got == nil || got.GetName() != "compliance-operator.v1.9.0" {
 			t.Errorf("ns filter picked %v, want compliance-operator.v1.9.0", nameOf(got))
 		}
-		if got := pickComplianceOperatorCSV(items, "absent", true); got != nil {
+		if got := pickComplianceOperatorCSV(t.Context(), items, "absent", true); got != nil {
 			t.Errorf("absent namespace picked %v, want nil", got.GetName())
 		}
 	})
@@ -102,17 +102,17 @@ func TestPickComplianceOperatorCSV(t *testing.T) {
 		}
 		// No phase is not Succeeded, so it is only a candidate off the
 		// succeeded path.
-		if got := pickComplianceOperatorCSV(items, "", true); got != nil {
+		if got := pickComplianceOperatorCSV(t.Context(), items, "", true); got != nil {
 			t.Errorf("succeededOnly picked %v, want nil", got.GetName())
 		}
-		if got := pickComplianceOperatorCSV(items, "", false); got == nil || got.GetName() != "compliance-operator.v1.0.0" {
+		if got := pickComplianceOperatorCSV(t.Context(), items, "", false); got == nil || got.GetName() != "compliance-operator.v1.0.0" {
 			t.Errorf("non-succeeded picked %v, want compliance-operator.v1.0.0", nameOf(got))
 		}
 	})
 
 	t.Run("no candidate yields nil", func(t *testing.T) {
 		t.Parallel()
-		if got := pickComplianceOperatorCSV(nil, "", false); got != nil {
+		if got := pickComplianceOperatorCSV(t.Context(), nil, "", false); got != nil {
 			t.Errorf("empty list picked %v, want nil", nameOf(got))
 		}
 	})
@@ -120,7 +120,7 @@ func TestPickComplianceOperatorCSV(t *testing.T) {
 	t.Run("the winner is a copy, not the caller's object", func(t *testing.T) {
 		t.Parallel()
 		items := []unstructured.Unstructured{csv("compliance-operator.v1.0.0", ns, "Succeeded")}
-		got := pickComplianceOperatorCSV(items, "", true)
+		got := pickComplianceOperatorCSV(t.Context(), items, "", true)
 		if got == nil {
 			t.Fatal("picked nil")
 		}
@@ -165,9 +165,9 @@ func TestFoldComplianceOperatorCSVs(t *testing.T) {
 	for split := 0; split <= len(items); split++ {
 		var succ, other *unstructured.Unstructured
 		if split > 0 {
-			succ, other = foldComplianceOperatorCSVs(items[:split], nil, nil)
+			succ, other = foldComplianceOperatorCSVs(t.Context(), items[:split], nil, nil)
 		}
-		succ, other = foldComplianceOperatorCSVs(items[split:], succ, other)
+		succ, other = foldComplianceOperatorCSVs(t.Context(), items[split:], succ, other)
 		for _, tc := range []struct {
 			tier string
 			got  *unstructured.Unstructured
@@ -187,7 +187,7 @@ func TestFoldComplianceOperatorCSVs(t *testing.T) {
 		t.Parallel()
 		seed := csv("compliance-operator.v3.0.0", "ns", "Succeeded")
 		incumbent := seed.DeepCopy()
-		succ, other := foldComplianceOperatorCSVs(nil, incumbent, nil)
+		succ, other := foldComplianceOperatorCSVs(t.Context(), nil, incumbent, nil)
 		if succ != incumbent || other != nil {
 			t.Errorf("empty page changed the incumbents: %v / %v", nameOf(succ), nameOf(other))
 		}
@@ -196,7 +196,7 @@ func TestFoldComplianceOperatorCSVs(t *testing.T) {
 	t.Run("the winner is a copy, not the caller's object", func(t *testing.T) {
 		t.Parallel()
 		page := []unstructured.Unstructured{csv("compliance-operator.v1.0.0", "ns", "Succeeded")}
-		succ, _ := foldComplianceOperatorCSVs(page, nil, nil)
+		succ, _ := foldComplianceOperatorCSVs(t.Context(), page, nil, nil)
 		if succ == nil {
 			t.Fatal("folded to nil")
 		}

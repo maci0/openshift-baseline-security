@@ -271,3 +271,80 @@ spec:
               scan (status.newlyFailed). Open Administration -> Compliance
               Overview for the regressions list, or filter Results by Fail.
               CLI: oc get clusterbaseline cluster -o jsonpath='{.status.newlyFailed}{"\n"}'
+        - alert: ComplianceNeverScanned
+          # The gap ComplianceScanStale cannot see. That alert requires
+          # last_scan_timestamp > 0, so a cluster where the Compliance Operator
+          # is ready, profiles are selected, and the schedule parses, but no
+          # scan ever completes, reads as: score -1 (ComplianceScoreLow is
+          # guarded on >= 0), no check series at all, last_scan 0 (this alert's
+          # absence is the only signal), and Available=True. Every other alert
+          # stays green on a cluster that has never reported a posture.
+          # scan_interval > 0 already implies scanning enabled and a parseable
+          # schedule (schedule.go), so an admin who turned scanning off or typo'd
+          # the cron is not paged; those surface as Degraded/InvalidSchedule.
+          expr: >-
+            (
+              max(baseline_security_scan_interval_seconds
+                and on(instance) topk(1, baseline_security_status_observed_timestamp_seconds)) > 0
+            )
+            and
+            (
+              max(baseline_security_last_scan_timestamp_seconds
+                and on(instance) topk(1, baseline_security_status_observed_timestamp_seconds)) == 0
+            )
+          for: 6h
+          labels:
+            severity: warning
+          annotations:
+            summary: Compliance is configured but no scan has ever completed
+            description: >-
+              Profiles are selected and spec.schedule parses (scan_interval is
+              non-zero), but status.lastScanTime has never been set, so no
+              compliance score has ever been produced. The Compliance Operator
+              may be installed without a working ScanConfig/StorageConfig, or a
+              scan may be wedged. Check ComplianceScanConfigs and
+              ScanStorageConfigs, and whether a ComplianceSuite ever ran.
+              CLI: oc -n openshift-compliance get compliancesuites,compliancescans,scanconfigs,scanstorageconfigs;
+              oc get clusterbaseline cluster -o yaml
+        - alert: ConsolePluginNotReady
+          # The console UI can vanish with every alert green. Available ignores
+          # the plugin (scanning is unaffected), and Degraded only fires on
+          # ConsolePluginReady=False/Unavailable, so ImageMissing, ImageInvalid,
+          # ConsoleMissing and Disabled set only the detail condition. A
+          # mis-set RELATED_IMAGE_CONSOLE_PLUGIN therefore removes the whole
+          # Administration -> Compliance UI with nothing paging.
+          # console_plugin_managed excludes managementState=Removed, which is
+          # also ConsolePluginReady=False and an admin-owned steady state, not an
+          # incident. Requires Available=True so this does not double-report the
+          # already-covered NotAvailable case; 1h outlives a normal roll-out.
+          expr: >-
+            (
+              max(baseline_security_condition{type="ConsolePluginReady"}
+                and on(instance) topk(1, baseline_security_status_observed_timestamp_seconds)) == 0
+            )
+            and
+            (
+              max(baseline_security_console_plugin_managed
+                and on(instance) topk(1, baseline_security_status_observed_timestamp_seconds)) == 1
+            )
+            and
+            (
+              max(baseline_security_condition{type="Available"}
+                and on(instance) topk(1, baseline_security_status_observed_timestamp_seconds)) == 1
+            )
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: Console plugin is not ready while it is expected to be deployed
+            description: >-
+              spec.console.managementState is Managed but ConsolePluginReady has
+              been False for over 1h, so Administration -> Compliance is missing
+              or broken while scanning still works. Check the ConsolePluginReady
+              reason: ImageMissing/ImageInvalid means RELATED_IMAGE_CONSOLE_PLUGIN
+              is unset or malformed in the operator Deployment,
+              ConsoleMissing means the console operator has not picked up the
+              ConsolePlugin. Compliance scores are unaffected; read them with the
+              CLI until the plugin is back.
+              CLI: oc get clusterbaseline cluster -o jsonpath='{range .status.conditions[?(@.type=="ConsolePluginReady")]}{.reason} {.message}{"\n"}{end}';
+              oc -n openshift-compliance get consoleplugins

@@ -36,6 +36,7 @@ operator side; add the namespace to the policy's `from` selector to admit it.
 | `baseline_security_remediation_batch_active` | 1 while a remediation batch is in progress (MCPs may be paused). |
 | `baseline_security_remediation_batch_started_timestamp_seconds` | When the active batch started (batch-age alerting); 0 when none. |
 | `baseline_security_remediation_batches_total` | Finished remediation batches by `outcome`: `applied`, `cancelled`, `grace` (pools unpaused by `batchResumeGrace`, or with a listed remediation that could not be observed, so Applied was never confirmed), `orphaned` (crash/cancel recovery unpaused pools with no batch status). |
+| `baseline_security_console_plugin_managed` | 1 when `spec.console.managementState` is `Managed`, 0 when `Removed`. Pairs with the `ConsolePluginReady` condition so `ConsolePluginNotReady` can tell a plugin that is missing from one that was deliberately removed (both read as `ConsolePluginReady=0`). |
 
 The same endpoint also serves the controller-runtime series for the reconciler
 itself, which the dashboard's Reconcile-loop row reads:
@@ -139,10 +140,12 @@ without adding a signal that metrics plus logs do not already carry.
 | `ComplianceRegressions` | Checks newly failed since the previous scan. |
 | `ComplianceStatusStale` | Status metrics not published recently (operator wedged/down). |
 | `ComplianceScanStale` | Last scan older than 1.5x the configured scan interval. |
+| `ComplianceNeverScanned` | Scanning is configured (non-zero `scan_interval_seconds`) but `last_scan_timestamp_seconds` is still 0 after 6h: no scan has ever completed. The case `ComplianceScanStale` cannot see, since it requires a non-zero last scan. Without it, a cluster that has never produced a posture reads as healthy: score `-1` (excluded by `ComplianceScoreLow`), no check series, and `Available=True`. |
 | `RemediationBatchStuck` | A remediation batch has not cleared past its grace window (MCPs may stay paused). |
 | `RemediationBatchGraceResume` | A batch ended by the resume grace window or by crash/cancel recovery: the pools came back before every remediation reported Applied. The batch status is cleared, so nothing else in the cluster records it. |
 | `ClusterBaselineDegraded` | The ClusterBaseline `Degraded` condition is True. |
 | `ClusterBaselineNotAvailable` | `Available=False` for 1h while `Progressing=False`: an admin-owned steady state (Compliance Operator not installed under `installComplianceOperator=Manual`, compliance CRDs absent, console plugin image unset) that no other alert covers because those states never set `Degraded`. |
+| `ConsolePluginNotReady` | `ConsolePluginReady=False` for 1h while `console_plugin_managed=1` and `Available=True`. The console UI can go missing with every other alert green: `Available` ignores the plugin, and `Degraded` only fires on reason `Unavailable`, so `ImageMissing`, `ImageInvalid` and `ConsoleMissing` set the detail condition alone. `console_plugin_managed=0` (`managementState=Removed`) is an admin decision and stays silent; requiring `Available=True` keeps this from double-reporting `ClusterBaselineNotAvailable`. |
 
 Authoritative definitions: `operator/internal/controller/metrics.go` and
 `operator/config/prometheus/prometheusrule.yaml`.

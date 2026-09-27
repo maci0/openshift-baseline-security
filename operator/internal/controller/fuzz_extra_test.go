@@ -132,7 +132,7 @@ func FuzzPickComplianceOperatorCSV(f *testing.F) {
 			{Object: map[string]any{"metadata": "bad"}},
 			{Object: map[string]any{}},
 		}
-		got := pickComplianceOperatorCSV(items, ns, succeededOnly)
+		got := pickComplianceOperatorCSV(t.Context(), items, ns, succeededOnly)
 		if got == nil {
 			return
 		}
@@ -602,13 +602,13 @@ func FuzzFoldComplianceOperatorCSVs(f *testing.F) {
 			items = append(items, unstructured.Unstructured{Object: obj})
 		}
 
-		wantSucceeded := pickComplianceOperatorCSV(items, "", true)
-		wantOther := pickComplianceOperatorCSV(items, "", false)
+		wantSucceeded := pickComplianceOperatorCSV(t.Context(), items, "", true)
+		wantOther := pickComplianceOperatorCSV(t.Context(), items, "", false)
 		// The fuzzer picks one split; the sweep proves the invariant holds for
 		// every page boundary, which is the whole point of the fold.
 		for _, cut := range append([]int{int(split) % (len(items) + 1)}, allCuts(len(items))...) {
-			gotSucceeded, gotOther := foldComplianceOperatorCSVs(items[:cut], nil, nil)
-			gotSucceeded, gotOther = foldComplianceOperatorCSVs(items[cut:], gotSucceeded, gotOther)
+			gotSucceeded, gotOther := foldComplianceOperatorCSVs(t.Context(), items[:cut], nil, nil)
+			gotSucceeded, gotOther = foldComplianceOperatorCSVs(t.Context(), items[cut:], gotSucceeded, gotOther)
 			assertSameCSVWinner(t, cut, "Succeeded", gotSucceeded, wantSucceeded)
 			assertSameCSVWinner(t, cut, "other", gotOther, wantOther)
 		}

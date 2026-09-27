@@ -380,3 +380,44 @@ func TestClearPublishedMetrics(t *testing.T) {
 		t.Fatalf("observation timestamp after clear = %v, want the clock reading %v (avoid StatusStale; a stale constant must not pass)", got, float64(metricsTestNow.UnixNano())/1e9)
 	}
 }
+
+// ConsolePluginNotReady reads consolePluginManaged, so the two must disagree
+// exactly on managementState=Removed: that is the difference between paging on
+// a missing plugin and paging on one an admin deliberately removed.
+func TestPublishMetricsConsolePluginManaged(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		state baselinev1alpha1.ManagementState
+		want  float64
+	}{
+		{"Managed", baselinev1alpha1.Managed, 1},
+		{"Removed", baselinev1alpha1.Removed, 0},
+		// An unset state is what the operator itself writes as the default, and
+		// what a cleared CR carries. Treating it as Removed would silence the
+		// alert on any cluster that has not set spec.console explicitly.
+		{"empty", "", 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resetMetrics(t)
+			cb := &baselinev1alpha1.ClusterBaseline{}
+			cb.Spec.Console.ManagementState = tc.state
+			publishMetrics(cb, metricsTestNow)
+			if got := testutil.ToFloat64(consolePluginManaged); got != tc.want {
+				t.Fatalf("consolePluginManaged for managementState %q = %v, want %v", tc.state, got, tc.want)
+			}
+		})
+	}
+}
+
+// The CR being deleted must not flip the "a plugin is expected" reading to 0,
+// which would make ConsolePluginNotReady unreachable on that replica.
+func TestClearPublishedMetricsKeepsPluginManaged(t *testing.T) {
+	resetMetrics(t)
+	cb := &baselinev1alpha1.ClusterBaseline{}
+	cb.Spec.Console.ManagementState = baselinev1alpha1.Managed
+	publishMetrics(cb, metricsTestNow)
+	clearPublishedMetrics(metricsTestNow)
+	if got := testutil.ToFloat64(consolePluginManaged); got != 1 {
+		t.Fatalf("consolePluginManaged after clear = %v, want 1", got)
+	}
+}
