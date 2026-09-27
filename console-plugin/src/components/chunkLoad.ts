@@ -46,13 +46,13 @@ export const useChunk = <T>(load: () => Promise<T>, attempt: number): ChunkState
   React.useEffect(() => {
     // watchChunk can only observe a rejection. A load() that throws
     // synchronously must still reach the failed + Retry path instead of
-    // escaping the effect body into the console's error boundary.
+    // escaping the effect. Rejected here, watchChunk delivers it from the
+    // promise callback, so the effect body itself does not set state.
     let pending: Promise<T>;
     try {
       pending = load();
     } catch (error) {
-      setSettled({ attempt, state: { status: 'failed', error } });
-      return undefined;
+      pending = Promise.reject(error);
     }
     return watchChunk(pending, (next) => {
       setSettled({ attempt, state: next });

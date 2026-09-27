@@ -5,8 +5,8 @@ VERSION ?= 0.6.1
 IMG ?= quay.io/openshift-baseline-security/baseline-security-operator:latest
 # Plugin image the operator injects via RELATED_IMAGE_CONSOLE_PLUGIN on deploy.
 PLUGIN_IMG ?= quay.io/openshift-baseline-security/baseline-security-console-plugin:latest
-# Match controller-tools minor to go.mod k8s.io/* (k8s v0.36 -> CT v0.21).
-CONTROLLER_GEN = go run sigs.k8s.io/controller-tools/cmd/controller-gen@v0.21.0
+# Match controller-tools minor to go.mod k8s.io/* (k8s v0.37 -> CT v0.22).
+CONTROLLER_GEN = go run sigs.k8s.io/controller-tools/cmd/controller-gen@v0.22.0
 
 # Pin the Go toolchain from go.mod (single source; matches CI setup-go and the
 # ubi9/go-toolset image). Override with GOTOOLCHAIN=local to use the host only.

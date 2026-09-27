@@ -29,7 +29,10 @@ const ConsoleLink: React.FC<{
           return;
         }
         e.preventDefault();
-        navigate(href);
+        // react-router 7 returns a promise. A superseded navigation rejects it,
+        // and that rejection is the router's own cancellation, not a failure
+        // the click can usefully surface.
+        void navigate(href);
       }}
     >
       {children}

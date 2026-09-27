@@ -104,9 +104,13 @@ jobs:
           go-version-file: operator/go.mod
           cache-dependency-path: operator/go.sum
       # The Makefile refuses GNU Make < 3.82 (its .SHELLFLAGS is ignored by the
-      # 3.81 BSD make that ships as /usr/bin/make), so use Homebrew's gmake.
+      # 3.81 BSD make that ships as /usr/bin/make). Homebrew's GNU make formula
+      # is named make and is keg-only; the binary is still gmake, and it is not
+      # on PATH until the opt prefix is added.
       - name: install gmake
-        run: brew install gmake
+        run: |
+          brew install make
+          echo "$(brew --prefix make)/bin" >> "$GITHUB_PATH"
       # `make test` is the target the docs claim macOS supports: fmt-check, vet,
       # go test ./... (which drives hack/*.sh through a fake oc) and the
       # must-gather self-test. No docker needed, so it runs on a developer

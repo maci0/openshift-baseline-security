@@ -20,8 +20,24 @@ export const encodeKeyPart = (value: unknown): string => {
   if (value === null) {
     return 'z';
   }
-  const s = String(value);
-  return `s${s.length}:${s}`;
+  if (typeof value === 'string' || typeof value === 'boolean' || typeof value === 'bigint') {
+    const s = String(value);
+    return `s${s.length}:${s}`;
+  }
+  // A restored or hand-edited field can be an object. String(object) is
+  // "[object Object]" for every object, so two different values would share a
+  // key and the memo would keep the previous derivation. JSON is unambiguous
+  // for what a CR can hold; a value it cannot carry is tagged by typeof so it
+  // cannot forge a string or number part.
+  try {
+    const s = JSON.stringify(value);
+    if (typeof s === 'string') {
+      return `j${s.length}:${s}`;
+    }
+  } catch {
+    // Cyclic structure. Fall through to the type tag.
+  }
+  return `t${typeof value}`;
 };
 
 // Same encoding for a whole list, so an element cannot forge the encoding of a

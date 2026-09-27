@@ -238,23 +238,32 @@ func TestResolveReleaseVersionInput(t *testing.T) {
 	script := scriptPath(t, "resolve-release-version.sh")
 	ver := makefileVersion(t)
 
-	// Provenance failures vary with the clone (a missing tag, or a tag that is
-	// not at HEAD), so a well-formed input is pinned only on not being rejected
-	// for its shape and on naming the resolved version.
+	// A well-formed input is pinned only on not being rejected for its shape
+	// and on naming the resolved version. The release workflow runs this test
+	// on the tagged commit, where the tag is HEAD and the script exits 0.
+	// Every other clone is a provenance failure (exit 1): the tag is missing
+	// ("git tag vX.Y.Z missing") or it points elsewhere ("refusing to publish
+	// X.Y.Z"). Both messages name the version.
 	for _, tc := range []struct{ name, input string }{
 		{"bare", ver},
 		{"leading-v", "v" + ver},
 		{"padded", "  v" + ver + " \t\n"},
 	} {
-		_, stderr, code := runScriptEnv(t, script, []string{"INPUT_VERSION=" + tc.input})
-		if code != 1 {
-			t.Errorf("%s: exit %d, want 1 (provenance); stderr=%q", tc.name, code, stderr)
-		}
+		stdout, stderr, code := runScriptEnv(t, script, []string{"INPUT_VERSION=" + tc.input})
 		if strings.Contains(stderr, "invalid release version") {
 			t.Errorf("%s: rejected a well-formed version: %q", tc.name, stderr)
 		}
-		if !strings.Contains(stderr, " "+ver) {
-			t.Errorf("%s: stderr does not name the resolved version %s: %q", tc.name, ver, stderr)
+		switch code {
+		case 0:
+			if !strings.Contains(stdout, "VERSION="+ver+"\n") || !strings.Contains(stdout, "TAG=v"+ver+"\n") {
+				t.Errorf("%s: exit 0 but stdout does not name %s: %q", tc.name, ver, stdout)
+			}
+		case 1:
+			if !strings.Contains(stderr, ver) {
+				t.Errorf("%s: stderr does not name the resolved version %s: %q", tc.name, ver, stderr)
+			}
+		default:
+			t.Errorf("%s: exit %d, want 0 or 1; stderr=%q", tc.name, code, stderr)
 		}
 	}
 

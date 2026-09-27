@@ -420,8 +420,8 @@ ComplianceAsCode/compliance-operator master, and npm dist-tags).
 | Tool | Version | Matches |
 |---|---|---|
 | Go | 1.26 | openshift 4.22 builder (`rhel-9-golang-1.26-openshift-4.22`); compliance-operator master is go 1.25.8 |
-| Kubernetes | `k8s.io/*` v0.36.4 | OCP 4.22 kube level is 1.35 (4.21 = 1.34, 4.20 = 1.33); the CSV still gates installs with `minKubeVersion: 1.35.0` while the client libraries run a minor ahead (landed in 0.6.0) |
-| controller-runtime | v0.24.1 | release-0.24 pairs with k8s 1.36 (`PodSpec.workloadRef` is tombstoned upstream in 1.36) |
+| Kubernetes | `k8s.io/*` v0.37.0 | OCP 4.22 kube level is 1.35 (4.21 = 1.34, 4.20 = 1.33); the CSV still gates installs with `minKubeVersion: 1.35.0` while the client libraries run two minors ahead |
+| controller-runtime | v0.25.1 | release-0.25 pairs with k8s 1.37 |
 | dynamic-plugin-sdk | 4.22.0 (`4.22-latest` dist-tag) | console 4.22 (SDK major.minor == console version since 4.18) |
 | React | ^18.3.1 | console 4.22 frontend |
 | PatternFly | ~6.4.x | console 4.22 frontend |
@@ -525,7 +525,7 @@ same Makefile targets (`test`, `lint`, `docker-build`).
 | 0.5.x patches | OLM `replaces` graph dropped (every bundle is a standalone channel head, ADR-030); no static operator PDB (ADR-028); single-node plugin topology; cadence-aware `ComplianceScanStale`; never-firing schedule Degrades (ADR-029); published Quay images and catalog; 5-minute reconcile timeout. | Done; see CHANGELOG.md 0.5.5 to 0.5.15 |
 | 0.6.0 | Toolchain bump (k8s.io v0.36.4, controller-runtime v0.24.1); metadata-only compliance watches and paged CheckResult lists; `baseline-security-admin` no longer aggregated onto `admin`; CSV `capabilities: Basic Install`; waiver names unique at admission (ADR-031); `/licenses/LICENSE` and OCI labels on every image. | Done; see CHANGELOG.md 0.6.0 |
 | 0.6.1 | Image `/licenses` directory mode fix (readable by the non-root runtime user); browserslist advisory bump in the plugin build. | Done; see CHANGELOG.md 0.6.1 |
-| Unreleased | Namespace-scoped manager cache (ADR-032); operator-namespace `NetworkPolicy` (ingress denied except the metrics scrape, ADR-033); alerts `ClusterBaselineNotAvailable` and `RemediationBatchGraceResume`; Observe Reconcile-loop row; `hack/backup.sh`, `hack/restore.sh`, `hack/verify-backup.sh` and `docs/RESTORE.md`; operator `--version`; `yarn size` page-weight gate and shipped third-party notices; CSV export hardened against leading-control-character formula cells; console writes re-check the reviewed permission at the request boundary; pod `preStop` drain and a `preStop`-aware `/readyz`. | In progress; see CHANGELOG.md **[Unreleased]** |
+| Unreleased | Namespace-scoped manager cache (ADR-032); operator-namespace `NetworkPolicy` (ingress denied except the metrics scrape, ADR-033); alerts `ClusterBaselineNotAvailable` and `RemediationBatchGraceResume`; Observe Reconcile-loop row; `hack/backup.sh`, `hack/restore.sh`, `hack/verify-backup.sh` and `docs/RESTORE.md`; operator `--version`; `yarn size` page-weight gate and shipped third-party notices; CSV export hardened against leading-control-character formula cells; console writes re-check the reviewed permission at the request boundary; pod `preStop` drain and a `preStop`-aware `/readyz`; toolchain bump to k8s.io v0.37.0, controller-runtime v0.25.1, and controller-gen v0.22.0. | In progress; see CHANGELOG.md **[Unreleased]** |
 | Productization | Done in 0.5.0: API group renamed to `baselinesecurity.openshift.io`; `registry.ci.openshift.org` build variant (`Dockerfile.ci` + `.ci-operator.yaml`). Remaining: finish ci-operator onboarding in openshift/release, split the plugin into its own repo, Red Hat enhancement proposal referencing this spec. | Partial |
 
 ## 11. Prerequisites
