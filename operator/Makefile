@@ -253,6 +253,8 @@ GOLANGCI_LINT_VERSION ?= v2.12.2
 # runner; elsewhere `brew install shellcheck` or `apt-get install shellcheck`.
 SHELLCHECK ?= shellcheck
 # Pin ruff like every other tool here (single source; never a floating latest).
+# The rule set is ../ruff.toml; lint-python fails if it is gone, rather than
+# letting ruff fall back to its default pyflakes-only set.
 RUFF_VERSION ?= 0.16.4
 # yamllint covers the hand-maintained YAML: the GitHub workflows and the
 # kustomize manifests. Generated output is excluded in ../.yamllint.yaml, not
@@ -276,6 +278,7 @@ lint-shell:
 .PHONY: lint-python
 lint-python:
 	@command -v uvx >/dev/null || { echo "uvx not on PATH (install uv, then: uvx ruff@$(RUFF_VERSION) --version)" >&2; exit 1; }
+	@test -f ../ruff.toml || { echo "../ruff.toml missing; ruff would fall back to its default rule set" >&2; exit 1; }
 	uvx ruff@$(RUFF_VERSION) check --no-cache hack/
 	uvx ruff@$(RUFF_VERSION) format --no-cache --check hack/
 

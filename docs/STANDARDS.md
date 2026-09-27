@@ -40,6 +40,9 @@ gofmt/goimports; issue caps disabled so nothing is truncated),
 shellcheck over `hack/*.sh`, ruff over `hack/`, and yamllint over the
 hand-maintained YAML (`.github/`, `operator/config/`) under the repo-root
 `.yamllint.yaml`; generated output is excluded there rather than reformatted.
+Ruff reads the repo-root `ruff.toml` (bugbear, bandit, pyupgrade, the
+annotation rules, and the rest of the selection, not pyflakes alone; the
+categories left off are named there with the reason).
 
 ## API design conventions
 

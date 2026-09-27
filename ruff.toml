@@ -1,0 +1,56 @@
+# ruff for hack/*.py. `make -C operator lint-python` runs `uvx ruff@$(RUFF_VERSION)`
+# check and format over hack/ from that directory; ruff discovers this file by
+# walking up from hack/, the same way .yamllint.yaml is found for the YAML gate.
+# The repo root holds it, next to .yamllint.yaml, because both are the config for
+# a tree that is mostly not Python.
+#
+# Selected rules are the ones this tree already passes. `make lint-python` used
+# to run ruff's default set (E4, E7, E9, F) alone, which is the pyflakes subset:
+# nothing in the bug-prone, security, or modernization categories ever ran. The
+# list below adds them; the file passes it as written.
+#
+# ruff's own default (88), stated so a bump of ruff cannot silently rewrap
+# hack/ and the formatter cannot disagree with the linter's E501.
+line-length = 88
+
+[lint]
+select = [
+  "E",   # pycodestyle errors
+  "W",   # pycodestyle warnings
+  "F",   # pyflakes
+  "I",   # isort
+  "UP",  # pyupgrade
+  "B",   # flake8-bugbear
+  "C4",  # flake8-comprehensions
+  "PIE", # flake8-pie
+  "SIM", # flake8-simplify
+  "RET", # flake8-return
+  "PERF", # perflint
+  "FLY",  # flynt
+  "PTH",  # flake8-use-pathlib
+  "TID",  # flake8-tidy-imports
+  "ANN",  # flake8-annotations: every function is annotated, so the checker can
+          # verify the callers
+  "ARG",  # flake8-unused-arguments
+  "ERA",  # eradicate: commented-out code
+  "ISC",  # flake8-implicit-str-concat
+  "ICN",  # flake8-import-conventions
+  "G",    # flake8-logging-format
+  "LOG",  # flake8-logging
+  "BLE",  # flake8-blind-except
+  "DTZ",  # flake8-datetimez: naive datetimes are a real bug source
+  "Q",    # flake8-quotes
+  "S",    # bandit
+  "PT",   # flake8-pytest-style
+  "FBT",  # flake8-boolean-trap
+]
+
+# Categories left off, each with the reason it cannot pass or does not apply:
+#   D    docstring conventions; the scripts document themselves in prose
+#        comments above the code, not in a docstring on every function.
+#   T20  `print` is the point: these are CLI scripts that report on stderr and
+#        write a rules file.
+#   EM   and TRY003 forbid literal exception messages; the two raises here are
+#        one-line diagnostics whose text belongs at the raise site.
+#   PLR  magic values: the exit codes and the arg counts read as themselves.
+#   CPY  a copyright header; no other file in the tree carries one.
