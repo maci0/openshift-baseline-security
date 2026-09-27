@@ -399,13 +399,14 @@ CATALOG_IMG ?= quay.io/openshift-baseline-security/baseline-security-operator-ca
 # consumer-facing entries; cut a new version first. When cutting: move
 # [Unreleased] into ## [VERSION], then run RELEASE_GATE=1 REQUIRE_GIT_TAGS=1
 # make verify-versions (fails if Unreleased still has bullets or the tag is missing).
-# AT PUBLISH: after pushing the operator and console-plugin images, resolve each
-# to its @sha256 digest and pin the CSV relatedImages, the embedded Deployment
-# container image, the RELATED_IMAGE_CONSOLE_PLUGIN env, and the containerImage
-# annotation to the digest form. relatedImages is what OLM mirrors for
-# disconnected installs; a mutable :VERSION tag there lets a registry-side swap
-# substitute a different image undetected. The :VERSION tags above are for the
-# pre-publish CSV only.
+# Image references in the CSV are the :VERSION tags, and that is all this gate
+# accepts: every quay.io operator/console-plugin ref (relatedImages, the
+# embedded Deployment container image, RELATED_IMAGE_CONSOLE_PLUGIN, the
+# containerImage annotation) must end in :VERSION. A digest form
+# (`:VERSION@sha256:...`) is rejected here, so do not pin one by hand; the
+# immutability of a published :VERSION is a registry policy (push once, never
+# re-tag or overwrite), and the release workflow proves the git tag matches HEAD
+# before it pushes and runs hack/verify-image-metadata.sh on each image.
 #
 # Also checks, in every one of the five Dockerfiles, that each stage declares
 # ARG SOURCE_DATE_EPOCH: BuildKit clamps a stage's layer timestamps only where

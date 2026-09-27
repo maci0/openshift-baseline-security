@@ -81,7 +81,17 @@ jobs:
       # gate; typecheck is included because jest cannot type a webpack build.
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
+          # Same reasoning as ci.yml: setup-node's yarn cache probe runs the
+          # runner's global Yarn 1.x, which aborts on the packageManager pin.
           node-version-file: console-plugin/.nvmrc
+      # Project-local Yarn cache, keyed on the lockfile, as in ci.yml: the
+      # tagged commit's install graph is the same one CI warmed that week.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: console-plugin/.yarn/cache
+          key: yarn-cache-${{ runner.os }}-${{ hashFiles('console-plugin/yarn.lock') }}
+          restore-keys: |
+            yarn-cache-${{ runner.os }}-
       - name: test the tagged commit (console plugin)
         working-directory: console-plugin
         env:
