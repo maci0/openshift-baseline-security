@@ -9,9 +9,14 @@
 //   RemediationsTab.tsx  - remediation list, apply/batch
 //   ProfilesTab.tsx      - built-in + tailored profile management
 //   ClusterScoreItem.tsx - cluster Overview details score item
+//   LoadingCards.tsx     - skeleton placeholders while a chunk loads
+//   BaselineNotConfigured.tsx - empty state when no ClusterBaseline exists
+//   ChunkError.tsx       - ChunkGate, renders ChunkError + Retry on a failed GET
 //   DisabledTip.tsx      - tooltip wrapper for disabled controls
-//   feedback.ts          - shared success-banner dismiss timing
+//   useAutoDismiss.ts    - shared success-banner dismiss timing
+//   useWaiverExpiryClock.ts - ticking clock driving waiver-expiry countdowns
 //   chunkLoad.ts         - async-chunk load state + Retry
+//   focus.ts             - focus restore after a modal closes
 import * as React from 'react';
 import { ClusterBaseline, ComplianceCheckResult } from '../models';
 import Overview from './Overview';

@@ -74,7 +74,7 @@ import LoadingCards from './LoadingCards';
 import { regionFocusProps } from './DisabledTip';
 import { ChunkError } from './ChunkError';
 import { useChunk } from './chunkLoad';
-import { useAutoDismiss } from './feedback';
+import { useAutoDismiss } from './useAutoDismiss';
 import { useWaiverExpiryClock } from './useWaiverExpiryClock';
 
 // Start the charts chunk as soon as this module evaluates (default tab), so

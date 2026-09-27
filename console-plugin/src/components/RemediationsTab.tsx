@@ -71,7 +71,7 @@ import {
 import BaselineNotConfigured from './BaselineNotConfigured';
 import { regionFocusProps, withDisabledTip } from './DisabledTip';
 import { restoreFocus } from './focus';
-import { useAutoDismiss } from './feedback';
+import { useAutoDismiss } from './useAutoDismiss';
 
 // Stable empty list when the suite-scoped watch is inactive.
 const EMPTY_REMEDIATIONS: ComplianceRemediation[] = [];

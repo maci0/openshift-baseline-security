@@ -96,7 +96,7 @@ import {
 import BaselineNotConfigured from './BaselineNotConfigured';
 import { withDisabledTip } from './DisabledTip';
 import { restoreFocus } from './focus';
-import { useAutoDismiss } from './feedback';
+import { useAutoDismiss } from './useAutoDismiss';
 import { useWaiverExpiryClock } from './useWaiverExpiryClock';
 
 // Color + icon per status so state is not color-only. The index signature

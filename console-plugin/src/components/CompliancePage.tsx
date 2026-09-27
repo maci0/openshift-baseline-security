@@ -37,7 +37,7 @@ import { downloadBlob, openBlobInTab } from '../download';
 import { errorMessage } from '../errors';
 import { rescanPatch, rescanToken } from '../patches';
 import { withDisabledTip } from './DisabledTip';
-import { useAutoDismiss } from './feedback';
+import { useAutoDismiss } from './useAutoDismiss';
 import {
   BaselineContext,
   OverviewRoute,

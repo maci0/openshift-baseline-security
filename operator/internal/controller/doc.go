@@ -22,6 +22,8 @@
 //   - history.go: score history rings, failure-diff, per-profile ring sync, scan endTimestamp parse
 //   - scoring.go: pass/fail and severity-weighted score math, severity lookup
 //   - conditions.go: status condition helpers (condIsTrue/condTrue, setCond) and rollups
+//   - sanitize.go: CRD-schema clamps on every status field before Status().Update,
+//     plus the size budgets and shared dedupe/truncate helpers they use
 //   - inconsistent.go: benign INCONSISTENT collapse for multi-node checks
 //   - matching.go: suite/binding names (built-in + tailored), profile matching, pure set/list helpers
 //   - batch.go: remediation-batch annotations, pool/name helpers, grace timer

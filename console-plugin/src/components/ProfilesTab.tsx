@@ -89,7 +89,7 @@ import BaselineNotConfigured from './BaselineNotConfigured';
 import LoadingCards from './LoadingCards';
 import { withDisabledTip } from './DisabledTip';
 import { restoreFocus } from './focus';
-import { useAutoDismiss } from './feedback';
+import { useAutoDismiss } from './useAutoDismiss';
 import { isString } from '../parse';
 import { compareForDisplay, matchesSearch } from '../text';
 
