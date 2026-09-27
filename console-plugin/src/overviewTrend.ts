@@ -2,6 +2,7 @@
 // (Victory series). Domain module, so it lives beside the other pure modules
 // under src/ rather than in components/: a static import of it must not pull
 // the charting library into the page shell.
+import { encodeKeyPart } from './contentKey';
 import { ScoreSnapshot } from './models';
 import { isFiniteNumber } from './parse';
 
@@ -21,12 +22,14 @@ export const toTrendData = (history?: ScoreSnapshot[]): { x: Date; y: number }[]
 // with the same points; identity deps would rebuild Victory Date/path data on
 // every reconcile even when the trend did not change (max 30 snapshots).
 //
-// Every field is length-prefixed so the encoding is injective. The key is a
-// React memo dependency, so two different histories that produced the same key
-// would leave the trend chart painting one series over another; time and score
-// are cluster-supplied strings that may themselves carry \0 or \x01, which a
-// bare separator would let a hand-edited status forge. JSON.stringify is not an
-// escape either: it maps NaN and null to the same "null".
+// Every field goes through encodeKeyPart, which length-prefixes and type-tags
+// it, so the encoding is injective. The key is a React memo dependency, so two
+// different histories that produced the same key would leave the trend chart
+// painting one series over another; time and score are cluster-supplied values
+// that may themselves carry the separator bytes a bare paste would use, which
+// lets a hand-edited status forge another ring's key and leaves the chart
+// painting the previous trend with no way to refresh it. JSON.stringify is not
+// an escape either: it maps NaN and null to the same "null".
 export const historyContentKey = (history?: ScoreSnapshot[]): string => {
   if (!history?.length) {
     return '';
@@ -34,9 +37,7 @@ export const historyContentKey = (history?: ScoreSnapshot[]): string => {
   let key = `${history.length}\x01`;
   for (let i = 0; i < history.length; i++) {
     const h = history[i];
-    const time = String(h?.time ?? '');
-    const score = String(h?.score ?? '');
-    key += `${time.length}:${time}\x01${score.length}:${score}\x01`;
+    key += encodeKeyPart(h?.time) + encodeKeyPart(h?.score);
   }
   return key;
 };

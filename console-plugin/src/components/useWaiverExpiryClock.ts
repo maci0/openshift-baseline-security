@@ -5,15 +5,19 @@
 // so the content key and reschedule cadence cannot drift between Overview and
 // Results.
 import * as React from 'react';
+import { encodeKeyPart } from '../contentKey';
 import { Waiver } from '../models';
 import { futureWaiverDeadlineMs, soonestDeadlineDelayMs } from '../waivers';
 
 // Content key for spec.waivers: identity deps would rebuild waiver sets (and
 // reschedule the expiry timer) on every reconcile even when nothing changed.
-const waiversContentKey = (waivers: Waiver[] | undefined): string =>
+// Encoded, not interpolated: a waiver name or expiresAt carrying the old
+// separator forged another waiver set's key, and the effect then never
+// rescheduled, leaving an expiring waiver's label stuck at its old value.
+export const waiversContentKey = (waivers: Waiver[] | undefined): string =>
   (waivers ?? [])
-    .map((w) => `${w.name ?? ''}\0${w.expiresAt ?? ''}`)
-    .join('\x01');
+    .map((w) => encodeKeyPart(w.name) + encodeKeyPart(w.expiresAt))
+    .join('');
 
 // Schedule a tick at the soonest future waiver deadline plus any per-deadline
 // offsetsMs (e.g. -14d so a tab clocks when a waiver enters the expiring-soon

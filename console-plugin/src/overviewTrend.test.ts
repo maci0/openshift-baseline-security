@@ -26,6 +26,11 @@ describe('toTrendData', () => {
   });
 });
 
+// The separator the previous key builder interpolated, spelled out so the
+// forgery below is readable and the source stays free of control characters.
+const NUL = String.fromCharCode(0);
+const SOH = String.fromCharCode(1);
+
 describe('historyContentKey', () => {
   it('is empty for missing or empty history', () => {
     expect(historyContentKey(undefined)).toBe('');
@@ -40,6 +45,19 @@ describe('historyContentKey', () => {
     const b = a.map((h) => ({ time: h.time, score: h.score }));
     expect(historyContentKey(a)).toBe(historyContentKey(b));
     expect(historyContentKey(a)).not.toBe(historyContentKey(a.slice(0, 1)));
+  });
+
+  it('does not let a snapshot time forge another ring key', () => {
+    // The old NUL/SOH interpolation gave both rings the same key, so MiniTrend
+    // kept painting the first one after the status changed to the second.
+    const two = [
+      { time: '2026-01-01T00:00:00Z', score: 80 },
+      { time: '2026-01-02T00:00:00Z', score: 82 },
+    ];
+    const merged = [
+      { time: `2026-01-01T00:00:00Z${NUL}80${SOH}2026-01-02T00:00:00Z`, score: 82 },
+    ];
+    expect(historyContentKey(two)).not.toBe(historyContentKey(merged));
   });
 });
 

@@ -458,6 +458,9 @@ an accepted risk neither inflates nor tanks the score.
 - [x] **Waiver for a non-owned / stale result name**: harmless, never affects the
       score (only owned suites are tallied)
       (`TestAggregateStatusWaiverIgnoresForeignSuite`).
+- [x] **Waiver content key is not forgeable**: a name carrying the key separator
+      cannot make two different waiver sets share a key, so the expiry clock
+      always reschedules (jest `waiversContentKey`).
 - [x] **Duplicate waiver name**: console replace-on-same-name plus list-test
       before append (jest `addWaiverPatch`); CRD CEL
       `self.all(x, self.exists_one(y, y.name == x.name))` rejects a second
@@ -835,6 +838,8 @@ stale Available or eternal Progressing.
       `TestScanIntervalSecondsInvalidNotCached`, `TestScanIntervalSecondsConcurrent`).
 - [x] History ring cap 30, no aliasing after truncate
       (`TestAppendHistoryRing`, `FuzzAppendHistoryRing`).
+- [x] Score-history content key is not forgeable, so the trend chart recomputes
+      when a snapshot changes (jest `historyContentKey`, `encodeKeyPart`).
 - [x] **DST / timezone**: cron is evaluated in UTC (CO ScanSettings fire on the
       container clock). `TestNextScanTime` pins FixedZone UTC-5 plus
       America/New_York spring-forward (2026-03-08) and fall-back (2026-11-01)
