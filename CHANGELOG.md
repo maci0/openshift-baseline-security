@@ -163,6 +163,13 @@ depend on those tags.
 
 ### Changed
 
+- The CRD and manager ClusterRole are generated with controller-gen v0.21.0
+  instead of v0.20.1. The Makefile asks for the controller-tools release whose
+  `k8s.io/*` matches the operator's, and the k8s bump to v0.36.4 left it a
+  minor behind: v0.20.1 builds against k8s v0.35. The generated schema is
+  byte-identical apart from the `controller-gen.kubebuilder.io/version`
+  annotation, so no field changes.
+
 - `yarn size` reports the first-paint download (entry bundles plus the manifest
   and locale the console fetches ahead of them) and no longer counts
   `THIRD-PARTY-NOTICES.txt` in the dist total. No page links that file, so it
