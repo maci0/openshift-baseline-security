@@ -4,6 +4,7 @@ import {
   stripControlAndFormat,
   stripExportControls,
   stripFormatChars,
+  stripInvisibleText,
 } from './parse';
 
 describe('isString / isFiniteNumber', () => {
@@ -38,6 +39,29 @@ describe('stripControlAndFormat', () => {
     expect(stripControlAndFormat('a\tb')).toBe('ab');
     expect(stripControlAndFormat('a\0b')).toBe('ab');
     expect(stripControlAndFormat('')).toBe('');
+  });
+});
+
+describe('stripInvisibleText', () => {
+  it('drops the hidden characters from prose', () => {
+    expect(stripInvisibleText('accepted risk')).toBe('accepted risk');
+    expect(stripInvisibleText('safe\u202Eexe.csv')).toBe('safeexe.csv');
+    expect(stripInvisibleText('\u200B=cmd')).toBe('=cmd');
+    expect(stripInvisibleText('x\uFEFFy')).toBe('xy');
+    expect(stripInvisibleText('a\u2060b')).toBe('ab');
+    expect(stripInvisibleText('a\tb\0c')).toBe('abc');
+  });
+
+  it('keeps ZWJ and ZWNJ, which are script content', () => {
+    // Family emoji: dropping the ZWJ turns one glyph into three.
+    expect(stripInvisibleText('\uD83D\uDC68\u200D\uD83D\uDC69\u200D\uD83D\uDC67')).toBe(
+      '\uD83D\uDC68\u200D\uD83D\uDC69\u200D\uD83D\uDC67',
+    );
+    // Persian compound (koshida-free ZWNJ spelling) and a Devanagari conjunct.
+    expect(stripInvisibleText('m\u200Cmi')).toBe('m\u200Cmi');
+    expect(stripInvisibleText('k\u200Dsh')).toBe('k\u200Dsh');
+    // The identity strip still refuses them: an identity has no use for a joiner.
+    expect(stripControlAndFormat('\u200Dadmin')).toBe('admin');
   });
 });
 

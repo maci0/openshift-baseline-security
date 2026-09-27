@@ -2,7 +2,7 @@
 import { isValidCron } from './cron';
 import { TAILORED_PROFILE_MAX_ITEMS, WAIVER_MAX_ITEMS, Waiver } from './models';
 import { isValidK8sName, isValidTailoredProfileName } from './names';
-import { isString, stripControlAndFormat } from './parse';
+import { isString, stripControlAndFormat, stripInvisibleText } from './parse';
 import { codePointLength } from './text';
 
 // One RFC 6902 operation emitted by the patch builders in this module. value
@@ -179,8 +179,12 @@ export const addWaiverPatch = (waivers: Waiver[] | undefined | null, entry: Waiv
   // Trim optional text fields once: whitespace-only is empty; MaxLength is on
   // the stored value so padding cannot smuggle past the bound after a later trim.
   // Strip controls and BIDI/zero-width marks so audit names cannot spoof another
-  // identity in the UI, CSV, or printable report.
-  const reason = stripControlAndFormat(entry.reason?.trim() ?? '');
+  // identity in the UI, CSV, or printable report. The reason is prose, not an
+  // identity, so it keeps its ZWJ/ZWNJ: those are script content (emoji
+  // sequences, Arabic/Persian compounds) and dropping them would store text the
+  // user never typed. The two attribution fields keep the full strip, where a
+  // leading joiner in front of "admin" is exactly the spoof to refuse.
+  const reason = stripInvisibleText(entry.reason?.trim() ?? '');
   const requestedBy = stripControlAndFormat(entry.requestedBy?.trim() ?? '');
   const approvedBy = stripControlAndFormat(entry.approvedBy?.trim() ?? '');
   // Match ClusterBaseline CRD bounds so over-long / malformed fields fail closed

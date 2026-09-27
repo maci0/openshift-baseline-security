@@ -18,7 +18,7 @@ import {
   safeLocale,
   textDirection,
 } from './dates';
-import { isFiniteNumber, stripFormatChars } from './parse';
+import { isFiniteNumber, stripInvisibleText } from './parse';
 import { waiverExpired } from './waivers';
 
 // HTML-escape untrusted text (waiver reasons, rule titles) for the report.
@@ -37,9 +37,11 @@ const reportInterpRe = /\{\{(\w+)\}\}/g;
 // tampered numeric/object/null value must not throw and abort report export.
 const esc = (s: string): string =>
   // SAFETY: htmlEscapeRe matches only the five characters keyed in htmlEscapes,
-  // so the lookup below cannot miss. Format characters (BIDI, zero-width) are
-  // stripped first so untrusted CR text cannot reverse or hide neighboring cells.
-  stripFormatChars(String(s ?? '')).replace(htmlEscapeRe, (c) => htmlEscapes[c as keyof typeof htmlEscapes]);
+  // so the lookup below cannot miss. Invisible characters (BIDI, zero-width) are
+  // stripped first so untrusted CR text cannot reverse or hide neighboring cells,
+  // with the prose strip so a rule title or waiver reason keeps its ZWJ/ZWNJ
+  // (emoji sequences, Arabic/Persian compounds) instead of printing mangled.
+  stripInvisibleText(String(s ?? '')).replace(htmlEscapeRe, (c) => htmlEscapes[c as keyof typeof htmlEscapes]);
 
 // Isolate untrusted CR text (check titles, waiver reasons, names) so a
 // bidirectional override cannot reverse surrounding punctuation or column

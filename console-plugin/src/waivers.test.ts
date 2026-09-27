@@ -474,6 +474,21 @@ describe('waivers', () => {
       },
     ]);
   });
+  it('addWaiverPatch keeps ZWJ/ZWNJ in the reason but not in an identity field', () => {
+    // A family emoji and a ZWNJ compound are script content in free text, so the
+    // reason is stored as typed; the same characters in an audit identity would
+    // only ever hide the first letter of the name it spoofs.
+    const reason = 'ship \uD83D\uDC68\u200D\uD83D\uDC69\u200D\uD83D\uDC67 mi\u200Cn';
+    expect(
+      addWaiverPatch(undefined, {
+        name: 'chk5',
+        reason,
+        requestedBy: '\u200Dalice',
+      }),
+    ).toEqual([
+      { op: 'add', path: '/spec/waivers', value: [{ name: 'chk5', reason, requestedBy: 'alice' }] },
+    ]);
+  });
   it('addWaiverPatch replaces an existing entry instead of duplicating', () => {
     expect(addWaiverPatch([{ name: 'chk', reason: 'old' }], { name: 'chk', reason: 'new' })).toEqual(
       [

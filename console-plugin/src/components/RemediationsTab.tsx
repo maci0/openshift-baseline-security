@@ -69,7 +69,7 @@ import {
   remediationObjectText,
   REMEDIATION_OBJECT_UNSERIALIZABLE,
 } from '../remediation';
-import { isString, stripFormatChars } from '../parse';
+import { isString, stripInvisibleText } from '../parse';
 import BaselineNotConfigured from './BaselineNotConfigured';
 import { regionFocusProps, withDisabledTip } from './DisabledTip';
 import { restoreFocus } from './focus';
@@ -781,7 +781,7 @@ const RemediationsTab: React.FC<{
               const isBlocked = state === 'MissingDependencies';
               const depsSummary = isBlocked ? missingDependencySummary(rem, i18n.language) : '';
               const rawError = rem.status?.errorMessage;
-              const errorDetail = isString(rawError) ? stripFormatChars(rawError).trim() : undefined;
+              const errorDetail = isString(rawError) ? stripInvisibleText(rawError).trim() : undefined;
               const remName = rem.metadata?.name ?? '';
               return (
                 <Tr key={remName}>

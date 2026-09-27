@@ -29,10 +29,28 @@ const exportControlRe = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]/gu;
 export const stripFormatChars = (s: string): string => s.replace(formatCharRe, '');
 
 // Drop controls and format characters from identity-bearing strings
-// (waiver requestedBy/approvedBy/reason). Trim first at the call site so a
+// (waiver requestedBy/approvedBy). Trim first at the call site so a
 // tab-only value stays empty rather than becoming a leftover control.
 export const stripControlAndFormat = (s: string): string =>
   s.replace(controlAndFormatRe, '');
+
+// Free prose (waiver reason, remediation error text, report cells). Same
+// invisible-character defense, minus the two format characters that carry
+// script content: U+200D ZWJ and U+200C ZWNJ join letters in Arabic, Persian,
+// and Indic scripts and glue emoji sequences into one glyph. Stripping them
+// rewrites what the user wrote (a Persian compound misspells, a family emoji
+// becomes three separate emoji), and prose has no identity to spoof, so the
+// joiners stay. Everything else in \p{Cf} (BIDI controls, zero-width space,
+// BOM, word joiner) still renders as nothing and only ever exists to hide the
+// next character. Identity fields keep the full strip: a ZWJ in front of
+// "admin" is a spoofing vector there and no legal identity needs one.
+const controlRe = /\p{Cc}/gu;
+// \p{Cf} minus U+200C / U+200D, written as the negation of "not-Cf or either
+// joiner" so the class needs no set-operation syntax.
+const joinerSafeFormatRe = /[^\P{Cf}\u200C\u200D]/gu;
+
+export const stripInvisibleText = (s: string): string =>
+  s.replace(controlRe, '').replace(joinerSafeFormatRe, '');
 
 // Drop the controls a spreadsheet would trim off a cell before evaluating it,
 // keeping the RFC 4180 delimiters. Run on export rows only.

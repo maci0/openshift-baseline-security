@@ -57,7 +57,7 @@ import {
 import { Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table';
 import { downloadBlob } from '../download';
 import { errorMessage } from '../errors';
-import { stripControlAndFormat } from '../parse';
+import { stripControlAndFormat, stripInvisibleText } from '../parse';
 import { AccessGate, mayWrite } from '../permissions';
 import { checkResultHref, machineConfigPoolHref } from '../links';
 import {
@@ -994,7 +994,7 @@ const ResultsTab: React.FC<{
                 (() => {
                   const w = findWaiver(selectedLive.metadata.name, waivers);
                   const expired = !!w && waiverExpired(w);
-                  const reasonText = stripControlAndFormat(w?.reason ?? '');
+                  const reasonText = stripInvisibleText(w?.reason ?? '');
                   const requestedByText = stripControlAndFormat(w?.requestedBy ?? '');
                   const approvedByText = stripControlAndFormat(w?.approvedBy ?? '');
                   return (

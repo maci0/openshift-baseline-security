@@ -81,6 +81,17 @@ depend on those tags.
 
 ### Fixed
 
+- A waiver reason, a remediation error message, and the text in the printable
+  report lost their zero-width joiners and non-joiners on the way in and out.
+  The invisible-character filter dropped every Unicode format character, so a
+  family emoji was stored as three separate emoji and a Persian or Arabic
+  compound lost the joiner that carries its meaning. Free text now keeps those
+  two joiners while still dropping the characters that only exist to hide the
+  next one (BIDI controls, zero-width space, BOM, word joiner). The waiver
+  `requestedBy` / `approvedBy` fields keep the full filter, where a joiner in
+  front of a name is a spoof and no identity needs one. CSV export is
+  unchanged: a hidden character in front of a formula sigil is still neutralized
+  there.
 - `baseline_security_scan_interval_seconds` could report a value that depended
   on which process published it first. The walk behind the gauge started at the
   publisher's clock, so an annual schedule crossing a leap year reported 365d

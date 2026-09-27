@@ -1,7 +1,7 @@
 // Remediation kind detection, object rendering, dependency summaries, apply order.
 import { ComplianceRemediation, nodePoolFromScanName, SCAN_NAME_LABEL } from './models';
 import { isValidK8sName } from './names';
-import { isString, stripFormatChars } from './parse';
+import { isString, stripFormatChars, stripInvisibleText } from './parse';
 import { formatList, textCollator } from './text';
 
 // Fields of a compliance-operator depends-on-obj JSON entry; values are
@@ -145,7 +145,10 @@ export const missingDependencySummary = (
     return formatList(parts, locale);
   }
   const err = rem.status?.errorMessage;
-  return isString(err) ? stripFormatChars(err).trim() || null : null;
+  // Free text from the Compliance Operator, so the prose strip: a ZWJ or ZWNJ in
+  // it is script content (emoji sequence, Arabic/Persian compound), not an
+  // attempt to hide a character.
+  return isString(err) ? stripInvisibleText(err).trim() || null : null;
 };
 
 // Sort key for guided remediation: applyable remediations first so prerequisite
