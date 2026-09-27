@@ -174,12 +174,10 @@ func resetScanIntervalCache(t *testing.T) {
 	t.Helper()
 	scanIntervalMu.Lock()
 	clear(scanIntervalCache)
-	clear(scanIntervalInflight)
 	scanIntervalMu.Unlock()
 	t.Cleanup(func() {
 		scanIntervalMu.Lock()
 		clear(scanIntervalCache)
-		clear(scanIntervalInflight)
 		scanIntervalMu.Unlock()
 	})
 }

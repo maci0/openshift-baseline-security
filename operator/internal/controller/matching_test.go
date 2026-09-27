@@ -44,6 +44,53 @@ func TestNotIn(t *testing.T) {
 	}
 }
 
+// TestSortedDiffMatchesNotIn pins sortedDiff to the same set semantics notIn
+// defines: unique sorted members of a absent from b, duplicates in either input
+// counting once. The merge-join and the map version must never disagree.
+func TestSortedDiffMatchesNotIn(t *testing.T) {
+	// Deterministic LCG: a fixed seed keeps a failure reproducible.
+	rng := uint64(0x2545F4914F6CDD1D)
+	next := func(n int) int {
+		rng = rng*6364136223846793005 + 1442695040888963407
+		return int((rng >> 33) % uint64(n))
+	}
+	for trial := range 500 {
+		pick := func() []string {
+			var out []string
+			for range next(8) {
+				out = append(out, fmt.Sprintf("c%02d", next(12)))
+			}
+			slices.Sort(out)
+			return out
+		}
+		a, b := pick(), pick()
+		set := map[string]bool{}
+		for _, x := range b {
+			set[x] = true
+		}
+		got, want := sortedDiff(a, b), notIn(a, set)
+		if !slices.Equal(got, want) {
+			t.Fatalf("trial %d: sortedDiff(%v, %v) = %v, want %v", trial, a, b, got, want)
+		}
+		if !slices.IsSorted(got) {
+			t.Fatalf("trial %d: sortedDiff(%v, %v) = %v, not sorted", trial, a, b, got)
+		}
+	}
+	if got := sortedDiff(nil, []string{"a"}); got != nil {
+		t.Fatalf("nil a = %v, want nil", got)
+	}
+}
+
+// TestSortedDiffRunCollapsing pins the whole-run handling: a value present in b
+// is excluded even when a and b hold differing numbers of its copies, and an
+// absent value is emitted once no matter how often a repeats it.
+func TestSortedDiffRunCollapsing(t *testing.T) {
+	got := sortedDiff([]string{"a", "a", "b", "b", "b", "c", "d", "d"}, []string{"b", "b", "d"})
+	if !slices.Equal(got, []string{"a", "c"}) {
+		t.Fatalf("collapsing runs = %v, want [a c]", got)
+	}
+}
+
 func TestOwnedSuites(t *testing.T) {
 	if len(ownedSuites(&baselinev1alpha1.ClusterBaseline{})) != 0 {
 		t.Fatal("empty profiles should yield empty suites")

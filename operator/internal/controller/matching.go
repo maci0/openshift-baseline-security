@@ -138,64 +138,33 @@ func notIn(a []string, b map[string]bool) []string {
 // Both inputs must be ascending; the result is sorted. Set semantics match
 // map-based notIn (duplicate names in either list count once). Prefer this
 // over notIn on multi-thousand FAIL lists (one linear pass, no maps).
+//
+// Merge-join on whole runs: a's value is visited once, and b's cursor only ever
+// moves forward, so the walk stays O(n+m) with no per-name bookkeeping.
 func sortedDiff(a, b []string) []string {
 	if len(a) == 0 {
 		return nil
 	}
-	if len(b) == 0 {
-		// Unique copy of a (production lists are unique; fuzz may not be).
-		out := make([]string, 0, len(a))
-		var prev string
-		for i, x := range a {
-			if i == 0 || x != prev {
-				out = append(out, x)
-				prev = x
-			}
-		}
-		return out
-	}
 	// Typical newlyFailed/fixed are a small fraction of the fail set.
 	out := make([]string, 0, len(a)/8+1)
-	i, j := 0, 0
-	for i < len(a) {
-		if j >= len(b) {
-			// Remainder of a, unique.
-			var prev string
-			havePrev := len(out) > 0
-			if havePrev {
-				prev = out[len(out)-1]
-			}
-			for ; i < len(a); i++ {
-				if !havePrev || a[i] != prev {
-					out = append(out, a[i])
-					prev = a[i]
-					havePrev = true
-				}
-			}
-			break
+	j := 0
+	for i := 0; i < len(a); {
+		v := a[i]
+		for i < len(a) && a[i] == v {
+			i++
 		}
-		switch {
-		case a[i] == b[j]:
-			// Skip the whole equal run in both (set membership).
-			v := a[i]
-			for i < len(a) && a[i] == v {
-				i++
-			}
+		for j < len(b) && b[j] < v {
+			j++
+		}
+		// v is in b: skip its whole run there too, so the next distinct value in a
+		// compares against the first b entry that can still match it.
+		if j < len(b) && b[j] == v {
 			for j < len(b) && b[j] == v {
 				j++
 			}
-		case a[i] < b[j]:
-			v := a[i]
-			out = append(out, v)
-			for i < len(a) && a[i] == v {
-				i++
-			}
-		default:
-			v := b[j]
-			for j < len(b) && b[j] == v {
-				j++
-			}
+			continue
 		}
+		out = append(out, v)
 	}
 	return out
 }

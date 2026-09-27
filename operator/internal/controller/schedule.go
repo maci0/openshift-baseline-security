@@ -86,12 +86,10 @@ const (
 // metrics publish but fine once per distinct schedule per process lifetime.
 // Max gap is a property of the cron, not of `now`, so the key is the normalized
 // expression. A truncated walk is not stored: an underestimate would false-page
-// ComplianceScanStale at 1.5x. Inflight channels collapse concurrent misses of
-// the same key so a per-minute cron cannot be walked N times at once.
+// ComplianceScanStale at 1.5x.
 var (
-	scanIntervalMu       sync.Mutex
-	scanIntervalCache    = map[string]float64{}
-	scanIntervalInflight = map[string]chan struct{}{}
+	scanIntervalMu    sync.Mutex
+	scanIntervalCache = map[string]float64{}
 )
 
 // scanIntervalSeconds returns the LARGEST gap between consecutive fires over
@@ -111,38 +109,27 @@ func scanIntervalSeconds(schedule string, now time.Time) float64 {
 	if err != nil {
 		return 0
 	}
-	for {
-		scanIntervalMu.Lock()
-		if v, ok := scanIntervalCache[norm]; ok {
-			scanIntervalMu.Unlock()
-			return v
-		}
-		if wait, busy := scanIntervalInflight[norm]; busy {
-			scanIntervalMu.Unlock()
-			<-wait
-			continue
-		}
-		done := make(chan struct{})
-		scanIntervalInflight[norm] = done
-		scanIntervalMu.Unlock()
-
-		maxGap, complete := computeScanInterval(sched, now)
-
-		scanIntervalMu.Lock()
-		delete(scanIntervalInflight, norm)
-		if complete {
-			if _, exists := scanIntervalCache[norm]; !exists && len(scanIntervalCache) >= scanIntervalCacheMax {
-				for k := range scanIntervalCache {
-					delete(scanIntervalCache, k)
-					break
-				}
-			}
-			scanIntervalCache[norm] = maxGap
-		}
-		close(done)
-		scanIntervalMu.Unlock()
+	// The walk runs under the cache lock, so concurrent misses of one key
+	// collapse onto a single walk: the next caller finds the entry already
+	// stored. This is not metricsMu, so a slow walk still never stalls scrapes
+	// or gauge updates (publishMetrics walks before taking that lock).
+	scanIntervalMu.Lock()
+	defer scanIntervalMu.Unlock()
+	if v, ok := scanIntervalCache[norm]; ok {
+		return v
+	}
+	maxGap, complete := computeScanInterval(sched, now)
+	if !complete {
 		return maxGap
 	}
+	if len(scanIntervalCache) >= scanIntervalCacheMax {
+		for k := range scanIntervalCache {
+			delete(scanIntervalCache, k)
+			break
+		}
+	}
+	scanIntervalCache[norm] = maxGap
+	return maxGap
 }
 
 // computeScanInterval walks consecutive fires from now. complete is false when
