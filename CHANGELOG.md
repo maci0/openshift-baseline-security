@@ -43,6 +43,8 @@ depend on those tags.
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-09-28
+
 ## [0.7.0] - 2026-09-28
 
 ### Added
@@ -2256,7 +2258,8 @@ OLM upgrade edge: `v0.2.1` replaces `v0.2.0`.
 
 Initial packaged release.
 
-[Unreleased]: https://github.com/maci0/openshift-baseline-security/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/maci0/openshift-baseline-security/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/maci0/openshift-baseline-security/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/maci0/openshift-baseline-security/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/maci0/openshift-baseline-security/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/maci0/openshift-baseline-security/compare/v0.5.15...v0.6.0
