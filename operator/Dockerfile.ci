@@ -7,7 +7,7 @@
 # One version literal per Dockerfile: the linker stamps it into the binary
 # (`manager --version`) and the runtime stage re-declares it for the OCI label.
 # Same shape as the release Dockerfile; make verify-versions fails if duplicated.
-ARG VERSION=0.6.1
+ARG VERSION=0.7.0
 FROM registry.ci.openshift.org/ocp/builder:rhel-9-golang-1.26-openshift-4.22 AS build
 ARG SOURCE_DATE_EPOCH=0
 # Pulls the global VERSION above into this stage for the linker stamp.
