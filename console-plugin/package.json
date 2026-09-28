@@ -33,7 +33,7 @@
     "@playwright/test": "^1.62.1",
     "@rikalabs/oxlint-standards": "0.8.1",
     "@types/jest": "^30.0.0",
-    "@types/node": "^22.0.0",
+    "@types/node": "^26.6.2",
     "@types/react": "^18.3.28",
     "copy-webpack-plugin": "^14.0.0",
     "eslint": "^10.9.1",
