@@ -1,24 +1,4 @@
-import { messageForRenderError, reportRenderError } from './renderError';
-
-describe('messageForRenderError', () => {
-  it('names the component and the thrown reason', () => {
-    expect(messageForRenderError('Results', new Error('not a function'))).toBe(
-      'Results: not a function',
-    );
-  });
-
-  it('still names the component when the throw carries no message', () => {
-    expect(messageForRenderError('Profiles', undefined)).toBe(
-      'Profiles: render failed with no message',
-    );
-  });
-
-  it('uses a thrown string as the reason', () => {
-    expect(messageForRenderError('Overview', 'bad status shape')).toBe(
-      'Overview: bad status shape',
-    );
-  });
-});
+import { reportRenderError } from './renderError';
 
 describe('reportRenderError', () => {
   // The browser console is the only sink a dynamic plugin has: a render throw
@@ -46,6 +26,12 @@ describe('reportRenderError', () => {
     expect(errorSpy).toHaveBeenCalledWith(
       'Remediations: render failed with no message',
       undefined,
+    );
+  });
+
+  it('uses a thrown string as the reason', () => {
+    expect(reportRenderError('Overview', 'bad status shape')).toBe(
+      'Overview: bad status shape',
     );
   });
 });

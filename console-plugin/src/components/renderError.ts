@@ -13,7 +13,7 @@ import type { UntrustedValue } from '../parse';
 // messageForRenderError names the component that threw and the reason it gave.
 // A throw with no usable message is still reported: the component name and the
 // captured error are the record.
-export const messageForRenderError = (component: string, error: UntrustedValue): string =>
+const messageForRenderError = (component: string, error: UntrustedValue): string =>
   `${component}: ${errorMessage(error) ?? 'render failed with no message'}`;
 
 export const reportRenderError = (component: string, error: UntrustedValue): string => {
