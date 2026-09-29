@@ -7,8 +7,8 @@
 // once those CRDs exist; Reconcile still requeues as a fallback (1m steady, 15s
 // while Progressing or a remediation batch is Applying; also shortens toward the
 // soonest active waiver expiresAt, floored at 1s). Score aggregation live-lists
-// CheckResults in pages of 500; the other compliance Lists are paged the same
-// way (suites 200, remediations and bindings 200).
+// CheckResults and remediations in pages of 500; the other compliance Lists
+// are paged the same way (suites and bindings 200).
 //
 // Files are split by concern (same package, no import cycles):
 //   - clusterbaseline_controller.go: Reconcile loop, reconcileOwned, SetupWithManager,
