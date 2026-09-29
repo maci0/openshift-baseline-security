@@ -110,7 +110,14 @@ func (d *DefaultClusterBaseline) Start(ctx context.Context) error {
 			return nil
 		}
 		if isPermanentDefaultCRError(err) {
-			d.Log.Error(err, "permanent error creating default ClusterBaseline; not retrying")
+			// Say what the cluster is left with: the reconciler publishes a
+			// NotFound posture, which ClusterBaselineNotAvailable reads as the
+			// admin-owned steady state (Manual install, CRDs absent), so this
+			// line is the only place the real cause is recorded.
+			d.Log.Error(err, "permanent error creating default ClusterBaseline; not retrying. "+
+				"Until an admin creates ClusterBaseline/cluster or the operator pod restarts, "+
+				"no compliance scan is configured and every posture alert reads healthy",
+				"name", "cluster")
 			return nil
 		}
 		attempt++

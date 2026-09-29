@@ -119,6 +119,41 @@ spec:
               (platform) monitoring scrapes the metrics ServiceMonitor.
               CLI: oc -n openshift-baseline-security get pods,servicemonitor;
               oc -n openshift-baseline-security logs deploy/baseline-security-operator --tail=200
+        - alert: OperatorReconcileFailing
+          # Cause-based, and the one failure the posture alerts cannot see: a
+          # reconcile that fails before (or on) its own status write. Degraded is
+          # a best-effort write on that path, so a lost status RBAC grant leaves
+          # no condition, and publishMetrics still runs, so ComplianceStatusStale
+          # stays green and the score keeps its last value: every posture alert
+          # reads healthy while nothing is being reconciled. The error series is
+          # the only record (dashboard Reconcile-loop row plus the log line).
+          # Ratio, not rate: at the requeue backoff ceiling a fully failing loop
+          # runs about once per 16m, indistinguishable from idle by rate alone,
+          # while its error share stays 1. The >= 3 errors/hour floor keeps a
+          # single transient failure (1 of ~60) silent.
+          expr: >-
+            (
+              sum(increase(controller_runtime_reconcile_errors_total[1h]))
+              /
+              clamp_min(sum(increase(controller_runtime_reconcile_total[1h])), 1)
+            ) > 0.5
+            and
+            sum(increase(controller_runtime_reconcile_errors_total[1h])) >= 3
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: ClusterBaseline reconciles are failing
+            description: >-
+              Most ClusterBaseline reconciles are failing (at least 3 errors in
+              the last hour), so status and the custom gauges can keep their last
+              values while nothing is being reconciled. A failure on the status
+              write itself leaves no Degraded condition to read, so the operator
+              logs are the only record. Look for 'reconcile failed' and
+              'status update after reconcile error failed', and check the
+              operator's RBAC on clusterbaselines/status and the apiserver.
+              CLI: oc -n openshift-baseline-security logs deploy/baseline-security-operator --tail=200;
+              oc auth can-i update clusterbaselines/status --as=system:serviceaccount:openshift-baseline-security:baseline-security-operator
         - alert: RemediationBatchStuck
           # batchResumeGrace is 10m; past ~20m the batch should have cleared.
           # A stuck batch means MachineConfigPools may remain paused.

@@ -569,6 +569,10 @@ an accepted risk neither inflates nor tanks the score.
 - [x] **Detail condition recovery log**: a detail condition flipping back to
       True logs once at Info; a steady True re-assert stays silent
       (`TestSetCondTrueLogRecovered`).
+- [x] **PrometheusRule** `OperatorReconcileFailing` fires when every reconcile
+      errors, stays silent on a single transient failure (below the 3-errors
+      floor) and when the error series is absent (`make test-alerts`,
+      `alerts_test.yaml`).
 - [ ] **ServiceMonitor scrape**: with cluster monitoring (namespace
       openshift.io/cluster-monitoring label) + scraper SA token, metrics
       endpoint returns 200 and includes custom gauges (live or kind).

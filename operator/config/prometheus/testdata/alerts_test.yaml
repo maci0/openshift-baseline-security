@@ -220,6 +220,54 @@ tests:
         alertname: ComplianceStatusStale
         exp_alerts: []
 
+  # Every reconcile errors: OperatorReconcileFailing fires after 15m. The one
+  # case no posture alert covers, because the Degraded write itself is what is
+  # failing and the gauges keep republishing.
+  - interval: 1m
+    input_series:
+      - series: 'controller_runtime_reconcile_errors_total{controller="clusterbaseline",instance="op-1"}'
+        values: '0+60x80'
+      - series: 'controller_runtime_reconcile_total{controller="clusterbaseline",instance="op-1",result="error"}'
+        values: '0+60x80'
+      - series: 'controller_runtime_reconcile_total{controller="clusterbaseline",instance="op-1",result="success"}'
+        values: '0x80'
+    alert_rule_test:
+      - eval_time: 31m
+        alertname: OperatorReconcileFailing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: 'ClusterBaseline reconciles are failing'
+              description: 'Most ClusterBaseline reconciles are failing (at least 3 errors in the last hour), so status and the custom gauges can keep their last values while nothing is being reconciled. A failure on the status write itself leaves no Degraded condition to read, so the operator logs are the only record. Look for ''reconcile failed'' and ''status update after reconcile error failed'', and check the operator''s RBAC on clusterbaselines/status and the apiserver. CLI: oc -n openshift-baseline-security logs deploy/baseline-security-operator --tail=200; oc auth can-i update clusterbaselines/status --as=system:serviceaccount:openshift-baseline-security:baseline-security-operator'
+
+  # A single transient failure among a healthy minute of reconciles: below the
+  # 3-errors floor, so the alert stays silent.
+  - interval: 1m
+    input_series:
+      - series: 'controller_runtime_reconcile_errors_total{controller="clusterbaseline",instance="op-1"}'
+        values: '0 1x80'
+      - series: 'controller_runtime_reconcile_total{controller="clusterbaseline",instance="op-1",result="error"}'
+        values: '0 1x80'
+      - series: 'controller_runtime_reconcile_total{controller="clusterbaseline",instance="op-1",result="success"}'
+        values: '0 1x80'
+    alert_rule_test:
+      - eval_time: 31m
+        alertname: OperatorReconcileFailing
+        exp_alerts: []
+
+  # No reconcile-error series at all (the operator has never run the controller,
+  # e.g. only the default-CR runnable): sum() over an empty vector yields no
+  # alert, and ComplianceStatusStale owns the never-started case.
+  - interval: 1m
+    input_series:
+      - series: 'controller_runtime_reconcile_total{controller="clusterbaseline",instance="op-1",result="success"}'
+        values: '0+60x80'
+    alert_rule_test:
+      - eval_time: 31m
+        alertname: OperatorReconcileFailing
+        exp_alerts: []
+
   # Remediation batch active for 20m+ fires RemediationBatchStuck.
   - interval: 1m
     input_series:

@@ -39,9 +39,10 @@ operator side; add the namespace to the policy's `from` selector to admit it.
 | `baseline_security_console_plugin_managed` | 1 when `spec.console.managementState` is `Managed`, 0 when `Removed`. Pairs with the `ConsolePluginReady` condition so `ConsolePluginNotReady` can tell a plugin that is missing from one that was deliberately removed (both read as `ConsolePluginReady=0`). |
 
 The same endpoint also serves the controller-runtime series for the reconciler
-itself, which the dashboard's Reconcile-loop row reads:
-`controller_runtime_reconcile_total` (by `result`), `controller_runtime_reconcile_errors_total`,
-and the `controller_runtime_reconcile_time_seconds` histogram. Only the leader
+itself, which the dashboard's Reconcile-loop row and `OperatorReconcileFailing`
+read: `controller_runtime_reconcile_total` (by `result`),
+`controller_runtime_reconcile_errors_total`, and the
+`controller_runtime_reconcile_time_seconds` histogram. Only the leader
 reconciles, so these are zero on a standby replica.
 
 ## Dashboards
@@ -139,6 +140,7 @@ without adding a signal that metrics plus logs do not already carry.
 | `ComplianceChecksInconsistent` | Checks INCONSISTENT across nodes. |
 | `ComplianceRegressions` | Checks newly failed since the previous scan. |
 | `ComplianceStatusStale` | Status metrics not published recently (operator wedged/down). |
+| `OperatorReconcileFailing` | Most `ClusterBaseline` reconciles error (error share above 0.5 with at least 3 errors in the hour). The failure the posture alerts cannot see: the Degraded condition is written on the error path, so when that write itself fails (lost `clusterbaselines/status` RBAC, apiserver) no condition is recorded, and the gauges keep republishing, so `ComplianceStatusStale` and the score stay green. A share, not a rate, because a loop failing at the requeue backoff ceiling reconciles about once per 16m, which reads as idle by rate. |
 | `ComplianceScanStale` | Last scan older than 1.5x the configured scan interval. |
 | `ComplianceNeverScanned` | Scanning is configured (non-zero `scan_interval_seconds`) but `last_scan_timestamp_seconds` is still 0 after 6h: no scan has ever completed. The case `ComplianceScanStale` cannot see, since it requires a non-zero last scan. Without it, a cluster that has never produced a posture reads as healthy: score `-1` (excluded by `ComplianceScoreLow`), no check series, and `Available=True`. |
 | `RemediationBatchStuck` | A remediation batch has not cleared past its grace window (MCPs may stay paused). |

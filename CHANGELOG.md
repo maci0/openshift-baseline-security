@@ -43,6 +43,17 @@ depend on those tags.
 
 ## [Unreleased]
 
+### Added
+
+- A `OperatorReconcileFailing` alert. A reconcile that fails on its own status
+  write (lost `clusterbaselines/status` permission, apiserver error) records no
+  Degraded condition, and the operator keeps republishing the last known score,
+  so every posture alert stayed green while nothing was being reconciled. The
+  alert fires on the controller-runtime error share (more than half of the
+  reconciles in the last hour, at least 3 errors), which stays readable at the
+  requeue backoff ceiling where the raw rate looks like an idle loop. A single
+  transient failure is below the floor and does not page.
+
 ### Changed
 
 - Accessibility of the console page and the exported HTML report. A value shown
