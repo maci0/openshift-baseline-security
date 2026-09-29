@@ -271,7 +271,11 @@ fuzz:
 	go test ./internal/controller/ -run=^$$ -fuzz=^FuzzComplianceCSVVersionTotalOrder$$ -fuzztime=5s
 	go test ./internal/controller/ -run=^$$ -fuzz=^FuzzValidateBatchTarget$$ -fuzztime=5s
 
-GOLANGCI_LINT_VERSION ?= v2.12.2
+# v2.12.2 ships a staticcheck whose fact analysis panics on a Go toolchain
+# newer than the one it was built against ("can't run linter
+# goanalysis_metalinter", exit 3), which kills `make lint` for anyone whose
+# local Go is ahead of go.mod. v2.14.0 runs this tree clean (0 issues).
+GOLANGCI_LINT_VERSION ?= v2.14.0
 # golangci-lint's default cache is the user cache dir, shared by every checkout
 # of this repo on the machine, and its entries record absolute paths. A second
 # clone (a worktree, a moved directory) then replays issues that belong to the

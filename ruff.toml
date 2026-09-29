@@ -53,7 +53,32 @@ select = [
   "EXE",  # shebang and executable-bit agreement
   "PYI",  # the subset of typing rules that apply to runtime .py files
   "FA",   # flake8-future-annotations: a PEP 604 union that needs `from __future__`
+  "ASYNC", # flake8-async: an async call that is not awaited, and a blocking
+           # stdlib call inside a coroutine
+  "COM",   # flake8-commas: a trailing comma that disagrees with the file's own
+           # style, which is what `ruff format` then rewrites under you
+  "INP",   # flake8-no-pep420: a package directory without __init__.py
+  "INT",   # flake8-gettext: a bare `_(...)` marker ruff's own i18n rules emit
+  "N",     # pep8-naming: a class that is not CapWords, a constant that is not
+           # UPPER, a name that shadows an import
+  "PD",    # flake8-pandas-vet: deprecated pandas API
+  "PLC",   # pylint conventions; PLW is above, PLE below, PLR stays off, see below
+  "PLE",   # pylint errors: a useless paren, an except clause that names nothing
+  "RSE",   # flake8-raise: a `raise` outside `except` that the grammar already
+           # reads as a re-raise, and parens the raised expression does not need
+  "SLOT",  # flake8-slots: a subclass that redeclares __slots__ and omits the
+           # bases' is an AttributeError waiting to happen
+  "T10",   # flake8-debugger: a pdb.set_trace() or breakpoint() left in a
+           # committed script, which hangs the run instead of failing it
+  "YTT",   # flake8-2020: a `sys.version` or `sys.version_info` compare that
+           # was already false on every supported interpreter
 ]
+
+# ruff's own warning: COM812 (missing trailing comma) disagrees with
+# `ruff format`, which owns where a trailing comma goes. The rest of COM stays
+# on: COM818 (prohibited trailing comma) and COM819 (trailing comma on a bare
+# tuple's last element) are the two the formatter cannot fix for you.
+ignore = ["COM812"]
 
 # Categories left off, each with the reason it cannot pass or does not apply:
 #   D    docstring conventions; the scripts document themselves in prose
