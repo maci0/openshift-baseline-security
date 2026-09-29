@@ -340,7 +340,7 @@ func (r *ClusterBaselineReconciler) findComplianceOperatorCSV(ctx context.Contex
 		if err := r.List(ctx, cluster, opts...); err != nil {
 			if meta.IsNoMatchError(err) {
 				// CRD still present for namespaced list; only non-Succeeded local remains.
-				return localFallback, nil
+				return walkedBest(ctx, bestSucceeded, bestOther, localFallback, false), nil
 			}
 			return nil, fmt.Errorf("listing CSVs cluster-wide: %w", err)
 		}
@@ -353,7 +353,7 @@ func (r *ClusterBaselineReconciler) findComplianceOperatorCSV(ctx context.Contex
 		// or the next List would replay this page for as long as the reconcile
 		// deadline holds, and the page cap stops a walk the apiserver never ends.
 		if next == cont || page+1 >= csvListMaxPages {
-			return localFallback, nil
+			return walkedBest(ctx, bestSucceeded, bestOther, localFallback, true), nil
 		}
 		cont = next
 	}
@@ -364,6 +364,30 @@ func (r *ClusterBaselineReconciler) findComplianceOperatorCSV(ctx context.Contex
 		return localFallback, nil
 	}
 	return bestOther, nil
+}
+
+// walkedBest ranks the CSVs a cluster-wide walk produced the same way the
+// walk's normal-completion exit does, so an early exit answers the same
+// question as a full one. A Succeeded CSV folded in before the walk stopped is
+// the answer regardless of why it stopped; dropping it for the local-only
+// fallback would report a missing operator on a cluster that has one. A walk
+// that stopped without finding either is logged, since the result is then
+// indistinguishable from an operator that is genuinely not installed.
+func walkedBest(
+	ctx context.Context,
+	succeeded, other, localFallback *unstructured.Unstructured,
+	truncated bool,
+) *unstructured.Unstructured {
+	if succeeded != nil {
+		return succeeded
+	}
+	if localFallback != nil {
+		return localFallback
+	}
+	if truncated {
+		log.FromContext(ctx).Info("cluster-wide CSV walk stopped before the last page; no CSV found on what it read")
+	}
+	return other
 }
 
 // foldComplianceOperatorCSVs returns the newest compliance-operator CSV of each

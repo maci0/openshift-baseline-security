@@ -264,7 +264,13 @@ const RemediationsTab: React.FC<{
   const owned = remediations ?? EMPTY_REMEDIATIONS;
 
   const run = async <T,>(fn: () => Promise<T>, failMsg: string): Promise<boolean> => {
-    if (busyRef.current) return false;
+    // A second click while a write is in flight is refused, not dropped: the
+    // callers treat false as "nothing happened" and stay silent, so without a
+    // message the click is dead. Same wording as ResultsTab's waiver guard.
+    if (busyRef.current) {
+      setError(t('Another remediation change is already in progress.'));
+      return false;
+    }
     busyRef.current = true;
     setBusy(true);
     setError(null);

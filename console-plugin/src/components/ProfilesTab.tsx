@@ -469,7 +469,12 @@ const ProfilesTab: React.FC<{
     // Same chokepoint every write goes through: the save path is a k8sUpdate on
     // the TailoredProfile, so a denied review must not fetch and pre-fill it.
     // updateGate carries the baseline-patch half the Edit control carries too.
-    if (!mayWrite(updateGate)) return;
+    // Every sibling write path (createTailored, unbindTailored) reports a denied
+    // gate; a silent return made Edit a dead click.
+    if (!mayWrite(updateGate)) {
+      setError(t('You do not have permission to edit the baseline.'));
+      return;
+    }
     // Bumped only on the path that actually fetches, so a click refused by the
     // guards above cannot cancel an in-flight load and leave nothing open.
     editSeq.current += 1;

@@ -1661,6 +1661,45 @@ func TestFindComplianceOperatorCSVListErrorPaths(t *testing.T) {
 			t.Fatalf("cluster-wide lists = %d, want 2 (one page, then the stalled-token guard)", csvs)
 		}
 	})
+
+	// The stalled-token and page-cap exits stop with what the walk already
+	// folded. Discarding it in favour of the local-only fallback made a
+	// Succeeded CSV on the page just read invisible, so a cluster that has the
+	// operator installed elsewhere was reported as not installed.
+	t.Run("stopped walk keeps the Succeeded CSV it already read", func(t *testing.T) {
+		scheme := testScheme(t)
+		clusterSucceeded := u(csvGVK)
+		clusterSucceeded.SetName("compliance-operator.v1.10.0")
+		clusterSucceeded.SetNamespace("other-operators")
+		_ = unstructured.SetNestedField(clusterSucceeded.Object, "Succeeded", "status", "phase")
+		r := &ClusterBaselineReconciler{
+			Client: fake.NewClientBuilder().WithScheme(scheme).
+				WithInterceptorFuncs(interceptor.Funcs{
+					List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+						gvk := list.GetObjectKind().GroupVersionKind()
+						if gvk.Kind != csvGVK.Kind+"List" || inComplianceNS(opts) {
+							return c.List(ctx, list, opts...)
+						}
+						items, ok := list.(*unstructured.UnstructuredList)
+						if !ok {
+							t.Fatalf("cluster-wide list is %T, want *unstructured.UnstructuredList", list)
+						}
+						items.Items = []unstructured.Unstructured{*clusterSucceeded}
+						list.SetContinue("stalled-token")
+						return nil
+					},
+				}).Build(),
+			Scheme: scheme,
+		}
+		got, err := r.findComplianceOperatorCSV(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got == nil || got.GetNamespace() != "other-operators" {
+			t.Fatalf("CSV = %v/%v, want the Succeeded CSV the stopped walk had read",
+				got.GetNamespace(), got.GetName())
+		}
+	})
 }
 
 // Version ordering itself is table-tested in compliance_version_test.go, next
