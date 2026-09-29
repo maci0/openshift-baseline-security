@@ -647,7 +647,7 @@ describe('normalizeScore', () => {
       const got = normalizeScore(v);
       // Stated as one claim rather than a matcher behind an `if`: a non-number
       // must not survive, and a surviving number must be inside the CRD range.
-      expect(got === null || (isNum(got) && got >= 0 && got <= 100)).toBe(true);
+      expect(got === null || (isFiniteNumber(got) && got >= 0 && got <= 100)).toBe(true);
     }
   });
 });
@@ -721,7 +721,7 @@ describe('clusterScore', () => {
         cb(j === 1 ? 'cluster' : randomString((j + 1) % 12), i % 3 === 0 ? undefined : (i + j) % 101),
       );
       const got = clusterScore(i % 7 === 0 ? undefined : list);
-      expect(got === null || isNum(got)).toBeTruthy();
+      expect(got === null || isFiniteNumber(got)).toBeTruthy();
     }
   });
 });

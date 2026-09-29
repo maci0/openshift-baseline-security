@@ -574,7 +574,8 @@ describe('repeated execution', () => {
       expect(anns['baselinesecurity.openshift.io/batch-apply']).toBe('rem-a');
       // The annotation is a one-shot the operator consumes and clears: a replay
       // landing after it ran would pause the pools and re-apply the batch.
-      const moved: Doc = { ...once, metadata: { ...once.metadata, resourceVersion: '101' } };
+      const meta = once.metadata as Record<string, unknown>;
+      const moved: Doc = { ...once, metadata: { ...meta, resourceVersion: '101' } };
       expect(() => applyOps(moved, request)).toThrow('test failed');
     }
   });

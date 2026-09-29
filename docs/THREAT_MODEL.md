@@ -379,9 +379,9 @@ edited.
 `SECURITY.md` was checked against reality on 2026-09-29 and every claim holds:
 
 - Supported versions: latest published 0.x only. README **Current release**
-  (`README.md:10`) and `operator/Makefile` `VERSION` are both `0.8.0`, the CSV
+  (`README.md:10`) and `operator/Makefile` `VERSION` are both `0.9.0`, the CSV
   `name`/`spec.version`/`containerImage` agree, and `CHANGELOG.md` carries a
-  `0.8.0` section. The table does not overstate a backport stream that does not
+  `0.9.0` section. The table does not overstate a backport stream that does not
   exist.
 - Supported host: OpenShift 4.22, matching CHANGELOG **Support window** and
   `README.md:287-289`. The enforcement is `minKubeVersion: 1.35.0`
