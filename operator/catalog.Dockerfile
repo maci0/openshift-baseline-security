@@ -1,7 +1,7 @@
 FROM quay.io/operator-framework/opm@sha256:b32d3891616662620da08d7f0ec42c2e69fa2de43427dc975d35b12f7a969a0f
 # BuildKit special-case ARG: clamps image/layer timestamps when passed by the client.
 ARG SOURCE_DATE_EPOCH=0
-ARG VERSION=0.8.0
+ARG VERSION=0.9.0
 # Export so the opm cache RUN (and any tooling that reads the env) sees a fixed epoch.
 ENV SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH}
 ENTRYPOINT ["/bin/opm"]
