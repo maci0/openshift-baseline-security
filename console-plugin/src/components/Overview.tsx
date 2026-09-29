@@ -43,14 +43,13 @@ import {
   clusterBaselinePatchAccess,
   ClusterBaselineModel,
   ComplianceCheckResult,
-  DEFAULT_SCAN_SCHEDULE,
   profileTitle,
   ResultCounts,
   scanningDisabled,
   ScoreSnapshot,
   suiteFilterKey,
 } from '../models';
-import { isValidCron } from '../cron';
+import { effectiveSchedule, isValidCron } from '../cron';
 import {
   CHANGES_MAX_HEIGHT,
   DASHBOARD_CARD_MIN_WIDTH,
@@ -161,7 +160,10 @@ const DONUT_TEAL = 'var(--pf-t--global--color--nonstatus--teal--default)';
 // Inline editor for spec.schedule in the Details card, gated on patch permission.
 const ScheduleEditor: React.FC<{ baseline: ClusterBaseline }> = ({ baseline }) => {
   const { t } = useTranslation('plugin__baseline-security-console-plugin');
-  const current = (baseline.spec.schedule ?? '').trim() || DEFAULT_SCAN_SCHEDULE;
+  // effectiveSchedule, not String#trim: the value read back is the one the
+  // operator's normalizeAndParseSchedule sees, so a schedule the operator calls
+  // InvalidSchedule cannot render here as a healthy cron.
+  const current = effectiveSchedule(baseline.spec.schedule);
   const [editing, setEditing] = React.useState(false);
   const [value, setValue] = React.useState(current);
   const [busy, setBusy] = React.useState(false);

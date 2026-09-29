@@ -1,4 +1,5 @@
 // Cron expression validation for ClusterBaseline.spec.schedule (5-field form).
+import { DEFAULT_SCAN_SCHEDULE } from './models';
 import { codePointLength, GO_SPACE, trimGoSpace } from './text';
 
 const cronMonths = {
@@ -93,3 +94,13 @@ export const isValidCron = (s: string): boolean => {
     validCronField(fields[4], 0, 6, cronDays)
   );
 };
+
+// The schedule the CR actually carries, read the way the operator reads it:
+// trimGoSpace, then the default when nothing is left. The read side of the same
+// field schedulePatch writes, so the two cannot disagree on the characters the
+// JS and Go trim sets treat differently. A stored schedule padded with a leading
+// U+FEFF is InvalidSchedule to the operator (strings.TrimSpace keeps U+FEFF, so
+// the first field never parses); String#trim would strip it and render the
+// Details card as a healthy cron while the CR sits Degraded.
+export const effectiveSchedule = (schedule: string | undefined): string =>
+  trimGoSpace(schedule ?? '') || DEFAULT_SCAN_SCHEDULE;

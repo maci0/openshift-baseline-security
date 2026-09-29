@@ -1,4 +1,5 @@
-import { isValidCron } from './cron';
+import { effectiveSchedule, isValidCron } from './cron';
+import { DEFAULT_SCAN_SCHEDULE } from './models';
 import { trimGoSpace } from './text';
 
 // Local predicate: the sweep pins that isValidCron returns a strict boolean,
@@ -175,5 +176,34 @@ describe('isValidCron throw-safety (fuzz sweep)', () => {
       const fields = trimGoSpace(s).split(operatorSpaceRe);
       expect(fields).toHaveLength(5);
     }
+  });
+});
+
+describe('effectiveSchedule', () => {
+  it('defaults an absent or all-whitespace schedule', () => {
+    expect(effectiveSchedule(undefined)).toBe(DEFAULT_SCAN_SCHEDULE);
+    expect(effectiveSchedule('')).toBe(DEFAULT_SCAN_SCHEDULE);
+    // Padded with a character the operator's strings.Fields splits on, so the
+    // stored value parses to nothing and the default is what runs.
+    expect(effectiveSchedule('\t \u00a0')).toBe(DEFAULT_SCAN_SCHEDULE);
+  });
+
+  it('returns the stored schedule trimmed with the operator separator set', () => {
+    expect(effectiveSchedule('0 1 * * *')).toBe('0 1 * * *');
+    expect(effectiveSchedule('\t0 1 * * *\n')).toBe('0 1 * * *');
+    // U+0085 (NEL) is operator whitespace and is dropped.
+    expect(effectiveSchedule('\u00850 1 * * *\u0085')).toBe('0 1 * * *');
+  });
+
+  it('keeps U+FEFF, which the operator does not trim', () => {
+    // String#trim strips U+FEFF and would render this as a healthy cron, while
+    // the operator's strings.TrimSpace keeps it, the first field fails to
+    // parse, and the CR goes Degraded with InvalidSchedule. Reading the field
+    // with the same set the writer (schedulePatch) uses is what keeps the
+    // console from showing a schedule the operator will refuse.
+    const stored = '\uFEFF0 1 * * *';
+    expect(effectiveSchedule(stored)).toBe(stored);
+    expect('\uFEFF0 1 * * *'.trim()).not.toBe(stored);
+    expect(isValidCron(effectiveSchedule(stored))).toBe(false);
   });
 });
