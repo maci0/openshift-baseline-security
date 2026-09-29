@@ -3847,6 +3847,46 @@ func TestSetComplianceOperatorReady(t *testing.T) {
 	}
 }
 
+// A Subscription status.installedCSV that is not a resource name must never
+// reach the apiserver: a Get on it answers 400, not 404, so the not-found
+// branch cannot absorb it, and the raw value would be printed into a condition
+// the console renders.
+func TestSetComplianceOperatorReadyRejectsInvalidInstalledCSVName(t *testing.T) {
+	t.Parallel()
+	scheme := testScheme(t)
+	for _, bad := range []string{
+		"../secrets",             // path-shaped: not a name
+		"compliance\noperator",   // newline: control characters into a condition
+		"compliance\x1boperator", // ANSI escape: same, rendered by the console
+		strings.Repeat("a", 300), // longer than a DNS-1123 subdomain
+	} {
+		sub := &unstructured.Unstructured{}
+		sub.SetGroupVersionKind(subscriptionGVK)
+		sub.SetName("compliance-operator")
+		sub.SetNamespace(complianceNamespace)
+		_ = unstructured.SetNestedField(sub.Object, bad, "status", "installedCSV")
+
+		r := &ClusterBaselineReconciler{
+			Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(sub).Build(),
+			Scheme: scheme,
+		}
+		cb := &baselinev1alpha1.ClusterBaseline{}
+		if err := r.setComplianceOperatorReady(context.Background(), cb, sub); err != nil {
+			t.Fatalf("installedCSV %q: unexpected error: %v", bad, err)
+		}
+		c := meta.FindStatusCondition(cb.Status.Conditions, "ComplianceOperatorReady")
+		if c == nil || c.Status != metav1.ConditionFalse || c.Reason != "Installing" {
+			t.Fatalf("installedCSV %q: condition = %+v, want False/Installing", bad, c)
+		}
+		if strings.Contains(c.Message, bad) {
+			t.Fatalf("installedCSV %q leaked verbatim into the condition: %q", bad, c.Message)
+		}
+		if cb.Status.ComplianceOperatorVersion != "" {
+			t.Fatalf("installedCSV %q: version = %q, want empty", bad, cb.Status.ComplianceOperatorVersion)
+		}
+	}
+}
+
 func TestSetComplianceOperatorReadyFromCSVPhaseShape(t *testing.T) {
 	t.Parallel()
 	cases := []struct {

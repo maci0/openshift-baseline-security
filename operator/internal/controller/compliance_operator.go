@@ -508,6 +508,17 @@ func (r *ClusterBaselineReconciler) setComplianceOperatorReady(ctx context.Conte
 		setCond(cb, r.now(), "ComplianceOperatorReady", metav1.ConditionFalse, "Installing", "installedCSV empty")
 		return nil
 	}
+	// status.installedCSV is a foreign Subscription field. A non-DNS-1123 value
+	// (a name-shaped path, a control character) must not reach the apiserver:
+	// a Get on it returns 400 rather than 404, so it would neither resolve nor
+	// be distinguishable from "not found" to the IsNotFound branch below, and
+	// the raw value would land unescaped in the condition message the console
+	// renders. Same rule as every other untrusted name the reconciler Gets.
+	if validK8sName(csvName) == "" {
+		cb.Status.ComplianceOperatorVersion = ""
+		setCond(cb, r.now(), "ComplianceOperatorReady", metav1.ConditionFalse, "Installing", "installedCSV not a resource name")
+		return nil
+	}
 
 	csv := u(csvGVK)
 	if err := r.Get(ctx, types.NamespacedName{Namespace: complianceNamespace, Name: csvName}, csv); err != nil {

@@ -329,6 +329,10 @@ per-node annotation) when nodes disagree.
 - [ ] **Subscription status points at a deleted CSV**: condition stays
       Installing, version is cleared, no stale Ready condition remains
       (`TestSetComplianceOperatorReady` covers empty/missing pieces).
+- [x] **Subscription `status.installedCSV` is not a resource name**: dropped
+      before the apiserver, version cleared, condition message does not echo
+      the value (`TestSetComplianceOperatorReadyRejectsInvalidInstalledCSVName`,
+      fuzzed by `FuzzSetComplianceOperatorReady`).
 - [ ] **CatalogSource rename / disconnected**: `spec.complianceCatalogSource`
       override creates Subscription against the named source.
 - [ ] **Remove CO under Manual mode**: Available flips False; score eventually

@@ -5,9 +5,11 @@ import (
 	"testing"
 	"time"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	baselinev1alpha1 "github.com/maci0/baseline-security-operator/api/v1alpha1"
 )
@@ -208,6 +210,64 @@ func FuzzSetComplianceOperatorReadyFromCSV(f *testing.F) {
 			}
 			if cb.Status.ComplianceOperatorVersion != "" {
 				t.Fatalf("non-Succeeded must clear version, got %q", cb.Status.ComplianceOperatorVersion)
+			}
+		}
+	})
+}
+
+// FuzzSetComplianceOperatorReady: untrusted Subscription status.installedCSV ->
+// apiserver request + status conditions. A name that is not a DNS-1123
+// subdomain must be dropped before the Get (a request on it answers 400, not
+// 404) and must never reach a condition message unescaped.
+func FuzzSetComplianceOperatorReady(f *testing.F) {
+	f.Add("compliance-operator.v1.9.1")
+	f.Add("")
+	f.Add("../secrets")
+	f.Add("compliance\noperator")
+	f.Add("compliance\x1b[31moperator")
+	f.Add(strings.Repeat("a", 300))
+	f.Fuzz(func(t *testing.T, csvName string) {
+		if len(csvName) > 512 {
+			csvName = csvName[:512]
+		}
+		sub := &unstructured.Unstructured{Object: map[string]any{
+			"metadata": map[string]any{"name": "compliance-operator", "namespace": complianceNamespace},
+			"status":   map[string]any{"installedCSV": csvName},
+		}}
+		r := &ClusterBaselineReconciler{Client: fake.NewClientBuilder().Build(), Scheme: testScheme(t)}
+		cb := &baselinev1alpha1.ClusterBaseline{}
+		if err := r.setComplianceOperatorReady(t.Context(), cb, sub); err != nil {
+			// Only a Read timeout may reach here; a 400-shaped name would mean the
+			// validation was dropped.
+			if !apierrors.IsTimeout(err) {
+				t.Fatalf("installedCSV %q: unexpected error: %v", csvName, err)
+			}
+		}
+		c := meta.FindStatusCondition(cb.Status.Conditions, "ComplianceOperatorReady")
+		if c == nil {
+			t.Fatalf("installedCSV %q: ComplianceOperatorReady missing", csvName)
+		}
+		if len(c.Message) > 1024 || c.Reason == "" {
+			t.Fatalf("installedCSV %q: unsafe condition: reason=%q msgLen=%d", csvName, c.Reason, len(c.Message))
+		}
+		valid := validK8sName(csvName) != ""
+		switch {
+		case csvName == "":
+			if c.Message != "installedCSV empty" {
+				t.Fatalf("empty installedCSV: message = %q", c.Message)
+			}
+		case !valid:
+			// Dropped before the apiserver, so the message must not echo it back.
+			if c.Message != "installedCSV not a resource name" {
+				t.Fatalf("installedCSV %q leaked into message %q", csvName, c.Message)
+			}
+			if cb.Status.ComplianceOperatorVersion != "" {
+				t.Fatalf("installedCSV %q: version = %q, want empty", csvName, cb.Status.ComplianceOperatorVersion)
+			}
+		default:
+			// A conforming name that resolves to no CSV is still Installing.
+			if c.Status != metav1.ConditionFalse || c.Reason != "Installing" {
+				t.Fatalf("installedCSV %q: status=%s reason=%s", csvName, c.Status, c.Reason)
 			}
 		}
 	})

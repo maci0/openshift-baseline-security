@@ -43,6 +43,19 @@ depend on those tags.
 
 ## [Unreleased]
 
+### Security
+
+- A `Subscription` whose `status.installedCSV` is not a resource name no longer
+  reaches the apiserver. The value is written by OLM, and it was used verbatim
+  as the object name of the `Get` for the ClusterServiceVersion: a non
+  DNS-1123 value is answered with 400 rather than 404, so the not-found branch
+  could not absorb it, and the raw string was also interpolated into the
+  `ComplianceOperatorReady` condition message the console renders, where
+  control characters and ANSI escapes survived. Such a value is now dropped
+  before the request, the version is cleared, and the condition reads
+  `installedCSV not a resource name`. `TestSetComplianceOperatorReadyRejectsInvalidInstalledCSVName`
+  and the `FuzzSetComplianceOperatorReady` target pin it.
+
 ### Added
 
 - A `OperatorReconcileFailing` alert. A reconcile that fails on its own status
