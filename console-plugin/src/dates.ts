@@ -92,11 +92,14 @@ export const expiresAtMs = (iso: string): number => {
 // (no locale) is returned without touching the map.
 const localeTags = new Map<string, string | undefined>();
 
-// Above this many distinct tags the input is not a console locale list (a
-// caller feeding unbounded text), so stop growing: drop everything and let the
-// few live locales repopulate. Keeps the cache bounded without a TTL on a map
-// whose entries never go stale.
-const localeTagCacheMax = 64;
+// LOCALE_CACHE_MAX is the entry cap on every locale-keyed cache in this module
+// and in text.ts. The key is a BCP 47 tag read from the URL and from
+// navigator.languages, so its space is not the console's language list:
+// "en-US-u-ca-buddhist", "en-US-u-nu-arab" and any other well-formed tag each
+// add one entry, and unbounded that grows for the life of the console tab. The
+// cap keeps the reuse for a session that toggles between real languages and
+// costs one construction per call past it.
+const LOCALE_CACHE_MAX = 64;
 
 export const safeLocale = (locale?: string): string | undefined => {
   if (!locale) return undefined;
@@ -108,25 +111,18 @@ export const safeLocale = (locale?: string): string | undefined => {
   } catch {
     canonical = undefined;
   }
-  if (localeTags.size >= localeTagCacheMax) {
+  if (localeTags.size >= LOCALE_CACHE_MAX) {
+    // Past the cap the input is not a console locale list (a caller feeding
+    // unbounded text), so drop everything and let the few live locales
+    // repopulate. The entries never go stale, so no TTL is needed.
     localeTags.clear();
   }
   localeTags.set(locale, canonical);
   return canonical;
 };
 
-// Upper bound on entries per Intl cache below. The caches exist to reuse
-// formatters across renders, and the key is a canonical BCP 47 tag, whose space
-// is not the console's language list: i18next reads the tag from the URL and
-// from navigator.languages, and any well-formed tag canonicalizes to a distinct
-// key, so "en-US-u-ca-buddhist", "en-US-u-nu-arab" and friends each add one
-// entry. Unbounded, that grows for the life of the console tab. A cap keeps the
-// reuse for a session that toggles between real languages and costs only a
-// construction per call once a hostile tag stream is past it.
-const INTL_CACHE_MAX = 64;
-
 // Fetch from (or insert into) one of the module-level Intl caches. Past the cap
-// the oldest key is dropped, so the map is bounded by INTL_CACHE_MAX entries
+// the oldest key is dropped, so the map is bounded by LOCALE_CACHE_MAX entries
 // rather than by how many distinct locale tags the tab has seen. Eviction is
 // insertion order, not least-recently-used: a hit does not reorder the map, which
 // keeps the hot path to one get and no reordering bookkeeping.
@@ -136,7 +132,7 @@ export const intlCached = <T>(cache: Map<string, T>, key: string, make: () => T)
     return hit;
   }
   const built = make();
-  if (cache.size >= INTL_CACHE_MAX) {
+  if (cache.size >= LOCALE_CACHE_MAX) {
     // Map iterates in insertion order, so the first key is the oldest.
     for (const oldest of cache.keys()) {
       cache.delete(oldest);

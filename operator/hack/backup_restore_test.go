@@ -1319,11 +1319,14 @@ func TestBackupAgeLimitIsNotTruncatedToWholeDays(t *testing.T) {
 	work := t.TempDir()
 	bin := t.TempDir()
 	fakeOC(t, bin, baselineYAML)
-	// 7 days minus a second is inside the limit; 7 days and a second is past
-	// it. The stamp is second-granular, so a plain 7-day stamp is the boundary.
-	atLimit := backupDir(t, work, "at", now.Add(-7*24*time.Hour).Format(time.RFC3339))
+	// Inside the limit by a minute, past it by an hour. A stamp exactly 7 days
+	// old is the limit boundary itself, and the script reads the wall clock at
+	// run time, so a stamp taken at -7d and verified a second later is already
+	// past it: the in-limit case has to sit clear of the boundary or the test
+	// fails on a slow machine and passes on a fast one.
+	atLimit := backupDir(t, work, "at", now.Add(-7*24*time.Hour+time.Minute).Format(time.RFC3339))
 	if _, stderr, code := runScript(t, "verify-backup.sh", work, atLimit); code != 0 {
-		t.Errorf("verify-backup.sh on a backup exactly 7 days old: exit %d, want 0; stderr=%s", code, stderr)
+		t.Errorf("verify-backup.sh on a backup inside the 7-day limit: exit %d, want 0; stderr=%s", code, stderr)
 	}
 	overLimit := backupDir(t, work, "over", now.Add(-7*24*time.Hour-time.Hour).Format(time.RFC3339))
 	_, stderr, code := runScript(t, "verify-backup.sh", work, overLimit)

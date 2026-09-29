@@ -350,8 +350,8 @@ export const buildReportHtml = (
       (w) =>
         `<tr><td>${autoDir(w.name)}</td><td>${autoDir(w.reason ?? '')}</td>` +
         `<td>${autoDir(w.requestedBy ?? '')}</td><td>${autoDir(w.approvedBy ?? '')}</td>` +
-        `<td>${w.expiresAt ? esc(formatLocalDate(w.expiresAt, locale)) : ''}</td>` +
-        `<td>${w.reviewBy ? esc(formatLocalDate(w.reviewBy, locale)) : ''}</td></tr>`,
+        `<td>${w.expiresAt ? autoDir(formatLocalDate(w.expiresAt, locale)) : ''}</td>` +
+        `<td>${w.reviewBy ? autoDir(formatLocalDate(w.reviewBy, locale)) : ''}</td></tr>`,
     )
     .join('');
   const emptyProfiles = `<tr><td colspan="9" class="muted">${esc(t('No profiles'))}</td></tr>`;
