@@ -55,7 +55,8 @@ the rest.
 
 | What you changed | Fast loop | Full local replica of CI |
 |---|---|---|
-| `operator/` | `make test` or one package: `go test ./internal/controller/ -count=1 -run TestName` | `make ci` (needs docker for alerts + bundle validate) |
+| `operator/` | `make test-one PKG=./internal/controller/` for a package, `make test-one PKG=./internal/controller/ RUN=TestName` for one test | `make ci` (needs docker for alerts + bundle validate) |
+| `operator/` CSV, RBAC, monitoring, or `VERSION` | `make verify` (no docker) | `make ci` |
 | `console-plugin/` | `yarn test` or one file: `yarn test src/scoring.test.ts`; watch: `yarn test:watch` | `yarn ci` |
 
 `make test` / `yarn test` do not need a cluster. Live e2e is
@@ -76,6 +77,12 @@ that step needs root, so it is not part of the per-clone loop.
 2. Operator edits: `cd operator && make test test-race lint`. Also `make generate manifests`
    if you touched API markers or the manager ClusterRole (`config/rbac/role.yaml`),
    and commit the output. CI fails on `git diff --exit-code` after that command.
+   `make verify` runs every static consistency check CI runs between the drift
+   check and `make bundle`: CRD shape, the kustomize render, the hand-copied
+   bundle manifests, CSV RBAC, `verify-versions`, and the Go/TS contract. It
+   needs no docker, so it is the half of `make bundle` a contributor without a
+   daemon can still run. Touching the CSV, `config/rbac/role.yaml`,
+   `config/prometheus/`, or `VERSION` means running it.
 3. Plugin edits: `cd console-plugin && yarn lint && yarn lint:oxlint && yarn typecheck && yarn test`.
    `yarn ci` also runs the production webpack build (CI does).
 4. Consumer-visible behavior: a `[Unreleased]` entry in `CHANGELOG.md` (symptom,
@@ -87,9 +94,10 @@ that step needs root, so it is not part of the per-clone loop.
 
 `make ci` at the repo root runs both: `operator/Makefile ci` (unit tests,
 lint, govulncheck, alert tests, generated-file drift, binary reproducibility,
-bundle validate) and `console-plugin` `yarn ci`. Together they match the
-GitHub Actions `operator` and `console-plugin` jobs; the plugin side excludes
-`yarn npm audit`, which is CI-only. Image and catalog builds stay in CI.
+`make verify`, bundle validate) and `console-plugin` `yarn ci`. Together they
+match the GitHub Actions `operator` and `console-plugin` jobs; the plugin side
+excludes `yarn npm audit`, which is CI-only. Image and catalog builds stay in
+CI.
 
 `cd operator && make verify-reproducible` on its own rebuilds the manager from
 a second absolute path with a different timezone, locale, and umask and fails

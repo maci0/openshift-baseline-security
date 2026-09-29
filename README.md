@@ -339,7 +339,7 @@ reports a missing tool before a build starts, and `make -C operator help` /
 # operator: unit test + lint. Makefile sets GOTOOLCHAIN from go.mod (1.26.x);
 # host Go 1.21+ downloads that toolchain. `make ci` is the GHA operator job
 # (needs docker for alert tests and bundle validate).
-cd operator && make test lint
+cd operator && make test lint verify
 
 # console plugin (Node 22 per .nvmrc / package.json engines; Yarn 4 via corepack)
 cd console-plugin
@@ -359,8 +359,13 @@ applies the CRD first).
 
 ## Testing
 
-- Unit + fuzz (Go): `cd operator && make test`. One test:
-  `cd operator && go test ./internal/controller/ -count=1 -run TestName`.
+- Unit + fuzz (Go): `cd operator && make test`. One package or one test:
+  `cd operator && make test-one PKG=./internal/controller/ [RUN=TestName]`,
+  which runs with the same exported toolchain, module and locale environment
+  `make test` uses.
+- Static consistency (CSV, RBAC, monitoring bundle, version lockstep, CRD
+  shape, kustomize render): `cd operator && make verify`. No docker; it is the
+  docker-free half of `make bundle`.
 - Unit (TypeScript): `cd console-plugin && yarn test`. One file:
   `cd console-plugin && yarn test src/scoring.test.ts`. Watch: `yarn test:watch`.
 - Full GHA replica: `make ci` at the repo root (needs docker), which is

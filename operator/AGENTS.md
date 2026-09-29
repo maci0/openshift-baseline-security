@@ -12,9 +12,12 @@ make mod-tidy-check # go.mod/go.sum match the imports; run `go mod tidy` when it
 make lint          # golangci-lint, shellcheck hack/*.sh, ruff check + format --check on hack/ (../ruff.toml), yamllint ../.yamllint.yaml
 make ci            # local replica of the GHA operator job (needs docker)
 make verify-reproducible  # build ./cmd twice (path, TZ, locale, umask) and diff the SHA-256
+make verify        # every static check below (CRD, kustomize, bundle, CSV, version
+                   # lockstep, Go/TS lockstep); no docker, the docker-free half of bundle
 make fuzz          # short timed fuzz per target; run before a release cut
 make govulncheck
-make bundle        # every verify-* target, then operator-sdk bundle validate
+make bundle        # make verify, then operator-sdk bundle validate (needs docker)
+make test-one      # one package (PKG=) or one test (PKG= RUN=), same env as make test
 make help          # contributor-facing targets
 ```
 
@@ -132,4 +135,6 @@ client. `test/e2e/` needs a live cluster and `KUBECONFIG` (`make test-e2e`),
 and is never part of the per-PR gate. Assert on returned errors from fake-client
 calls rather than discarding them.
 
-One package or test: `go test ./internal/controller/ -count=1 -run TestName`.
+One package or test: `make test-one PKG=./internal/controller/ [RUN=TestName]`.
+A bare `go test` in your shell is not the same run: it inherits your GOFLAGS,
+GOTOOLCHAIN, TZ and LC_ALL rather than the ones the gate exports.

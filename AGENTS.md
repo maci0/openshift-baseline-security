@@ -20,7 +20,7 @@ Both halves must be green before a change lands. Neither runs the other's.
 ```sh
 make setup                                    # yarn install (plugin), then preflight
 make check                                    # preflight, both modules
-cd operator       && make test test-race lint  # + make fuzz before a release
+cd operator       && make test test-race lint verify  # + make fuzz before a release
 cd console-plugin && yarn lint && yarn lint:oxlint && yarn typecheck && yarn test
 ```
 

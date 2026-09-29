@@ -103,17 +103,21 @@ help:
 	@echo "  make govulncheck   vulnerability scan (pinned)"
 	@echo "  make build         generate, manifests, fmt-check, vet, bin/manager"
 	@echo "  make verify-reproducible  build ./cmd twice (path, TZ, locale, umask) and diff the SHA-256"
+	@echo "  make verify           every static consistency check: CRD, kustomize render, bundle"
+	@echo "                        manifests, CSV RBAC/deploy, version lockstep, Go/TS lockstep"
+	@echo "                        (no docker; the docker-free half of 'make bundle')"
 	@echo "  make verify-manifests  build every kustomize entry point; check the render against its sources"
 	@echo "  make run           build and run against the current kubeconfig"
 	@echo "  make bundle        verify-* then operator-sdk bundle validate (needs docker)"
 	@echo "  make test-e2e      live-cluster e2e (needs KUBECONFIG)"
 	@echo "  make test-alerts   promtool alert unit tests (needs docker)"
 	@echo "  make fmt           rewrite with gofmt"
+	@echo "  make test-one      one package (PKG=) or one test (PKG= RUN=), same env as make test"
 	@echo "  make generate manifests  controller-gen; commit the output"
 	@echo "Release (version lockstep, run after any VERSION bump):"
 	@echo "  make verify-versions   CSV / package.json / CHANGELOG / README agree on VERSION"
 	@echo "  make catalog-prepare   render + validate the file-based catalog (needs docker)"
-	@echo "Single test: go test ./internal/controller/ -count=1 -run TestName"
+	@echo "Single test: make test-one PKG=./internal/controller/ RUN=TestName"
 
 .PHONY: clean
 clean:
@@ -171,6 +175,22 @@ vet:
 test: fmt-check vet mod-verify
 	go test ./...
 	./hack/must-gather.sh --self-test
+
+# The edit-test loop: one package, or one test, with the same environment
+# `make test` runs under. A bare `go test ./internal/controller/ -run TestName`
+# in the contributor's shell is not the same command: it inherits whatever
+# GOFLAGS, GOTOOLCHAIN, TZ and LC_ALL the shell has, so `GOFLAGS=-mod=mod` in a
+# profile rewrites go.mod on the way past and a non-UTC TZ gives go test a
+# different build-cache key than the one CI warms, making the one "fast" path
+# a cache miss every time. This target exists so the documented loop goes
+# through the same exports as the gate.
+#
+# PKG is required; RUN is optional. Without RUN the result cache applies, so
+# repeat runs are instant; with RUN the test must actually re-run, so -count=1.
+.PHONY: test-one
+test-one:
+	@test -n "$(PKG)" || { echo "usage: make test-one PKG=./internal/controller/ [RUN=TestName]" >&2; exit 1; }
+	go test $(if $(RUN),-count=1 -run '$(RUN)',) $(PKG)
 
 # Race detector over the same unit suite. A reconcile-time data race produces no
 # failing assertion in a plain `go test`, so it can merge unnoticed and only
@@ -338,6 +358,7 @@ ci:
 		echo "$$drift" >&2; \
 		exit 1; \
 	fi
+	$(MAKE) --no-print-directory verify
 	$(MAKE) --no-print-directory bundle
 
 # Keep in lockstep with operator/Dockerfile RUN go build flags (reproducible, stripped, PIE).
@@ -622,11 +643,24 @@ verify-versions:
 verify-product-lockstep:
 	./hack/verify-product-lockstep.sh
 
+# Every static consistency check: CRD shape, kustomize render, the hand-copied
+# bundle manifests, CSV RBAC and deployability, the version lockstep, and the
+# ADR-024 Go/TS contract. All of them are pure text/grep over the checkout, so
+# this target needs no docker: it is the part of `bundle` a contributor can run
+# without a daemon, and it is what the CI operator job runs as separate steps
+# before `make bundle`. `bundle` delegates here rather than restating the list,
+# so a check added in one place cannot be missing from the other.
+.PHONY: verify
+verify:
+	$(MAKE) --no-print-directory verify-crd verify-manifests verify-csv-rbac \
+		verify-csv-deploy verify-monitoring-bundle verify-bundle-static \
+		verify-versions verify-product-lockstep
+
 # manifests first; static checks run in the recipe so `make -j bundle` cannot
 # validate CRD/RBAC while controller-gen is still rewriting them.
 .PHONY: bundle
 bundle: manifests
-	$(MAKE) --no-print-directory verify-crd verify-manifests verify-csv-rbac verify-csv-deploy verify-monitoring-bundle verify-bundle-static verify-versions verify-product-lockstep
+	$(MAKE) --no-print-directory verify
 	cp config/crd/bases/baselinesecurity.openshift.io_clusterbaselines.yaml bundle/manifests/
 	# Clamp the bundle tree's mtimes before anything copies it into an image:
 	# BuildKit's SOURCE_DATE_EPOCH clamps layer creation times, not the mtimes a
