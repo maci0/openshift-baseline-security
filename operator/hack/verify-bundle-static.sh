@@ -24,6 +24,9 @@ Usage: ${prog}
 
 Fail if a hand-copied bundle manifest drifted from its config/ source.
 Run from operator/ (make verify-bundle-static) or with REPO_ROOT set.
+
+Options:
+  -h, --help   print this usage and exit 0
 EOF
 }
 

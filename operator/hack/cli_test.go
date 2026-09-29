@@ -131,6 +131,16 @@ func TestHackScriptUsageContract(t *testing.T) {
 			if strings.Contains(usageLine, "/") {
 				t.Errorf("--help Usage line %q names a path, want the bare script name", usageLine)
 			}
+			// Every script accepts -h, so the usage text has to list it: an
+			// accepted-but-undocumented spelling is a flag a reader cannot
+			// discover, and it reads as a bug on the scripts that do document it.
+			if !strings.Contains(stdout, "-h, --help") {
+				t.Errorf("--help does not document -h:\n%s", stdout)
+			}
+			shortStdout, shortStderr, shortCode := runCmd(t, script, "-h")
+			if shortCode != 0 || shortStderr != "" || shortStdout != stdout {
+				t.Errorf("-h: exit %d, stderr %q, stdout %q; want exit 0, empty stderr, and the --help text", shortCode, shortStderr, shortStdout)
+			}
 
 			for _, args := range [][]string{{"--help", "extra"}, {"--not-a-flag"}} {
 				stdout, stderr, code := runCmd(t, script, args...)

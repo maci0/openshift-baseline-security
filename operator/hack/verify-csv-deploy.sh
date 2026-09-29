@@ -40,6 +40,9 @@ Usage: ${prog}
 Fail if the CSV install.spec.deployments[].spec drifted from
 config/manager/manager.yaml. Run from operator/ (make verify-csv-deploy) or
 with REPO_ROOT set.
+
+Options:
+  -h, --help   print this usage and exit 0
 EOF
 }
 

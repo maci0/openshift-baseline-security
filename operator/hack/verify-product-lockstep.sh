@@ -11,6 +11,9 @@ Usage: ${prog}
 
 Fail if operator Go and console TypeScript product contracts drift.
 Run from operator/ (make verify-product-lockstep) or with REPO_ROOT set.
+
+Options:
+  -h, --help   print this usage and exit 0
 EOF
 }
 

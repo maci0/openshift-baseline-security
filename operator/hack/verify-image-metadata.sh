@@ -25,6 +25,9 @@ and carries the expected org.opencontainers.image source, license, and
 version labels.
 --allow-scratch-user is for FROM scratch bundles: OLM unpacks them, no process
 runs, so no USER is required, but a declared root USER is still rejected.
+
+Options:
+  -h, --help   print this usage and exit 0
 EOF
 }
 

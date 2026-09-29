@@ -28,6 +28,9 @@ Usage: ${prog} <go build flags> <go ldflags>
 Builds ./cmd twice, from two different absolute paths and under a different
 TZ/LC_ALL, then fails unless both binaries have the same SHA-256.
 No arguments of its own beyond the build flags passed through from the Makefile.
+
+Options:
+  -h, --help   print this usage and exit 0
 EOF
 }
 

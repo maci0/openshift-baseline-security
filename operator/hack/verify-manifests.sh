@@ -35,6 +35,9 @@ Usage: ${prog}
 
 Build the kustomize tree and check the render against its sources.
 Run from operator/ (make verify-manifests) or with REPO_ROOT set.
+
+Options:
+  -h, --help   print this usage and exit 0
 EOF
 }
 

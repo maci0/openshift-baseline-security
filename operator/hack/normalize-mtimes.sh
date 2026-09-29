@@ -35,6 +35,9 @@ Usage: ${prog} <path> [path...]
 
 Set the mtime of every file under each path to SOURCE_DATE_EPOCH (default 0),
 so image layers built from them are byte-identical across build times.
+
+Options:
+  -h, --help   print this usage and exit 0
 EOF
 }
 

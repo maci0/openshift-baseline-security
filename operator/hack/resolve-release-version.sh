@@ -29,6 +29,9 @@ Either source accepts surrounding whitespace and an optional leading v, and
 must be MAJOR.MINOR.PATCH; anything else exits 2 naming the source and value.
 Exit 1 is a resolution or provenance failure (no version, a version that
 disagrees with the Makefile, a tag that is missing or not at HEAD).
+
+Options:
+  -h, --help   print this usage and exit 0
 EOF
 }
 

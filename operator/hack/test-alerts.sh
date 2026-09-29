@@ -13,6 +13,9 @@ Usage: ${prog}
 
 Unit-test PrometheusRule alerts with promtool in a container.
 Requires python3 and docker on PATH. No arguments.
+
+Options:
+  -h, --help   print this usage and exit 0
 EOF
 }
 
