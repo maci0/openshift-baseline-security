@@ -143,6 +143,12 @@ fi
 # The binary and decimal SI suffixes take an optional trailing B, which is how
 # both spell GOMEMLIMIT (440MiB) and the manifests' limit (512Mi). The metric
 # suffixes (m, u, n) are not accepted: they have no meaning for a heap cap.
+#
+# %.0f, not %d: %d converts through the awk implementation's C int, and the
+# awks this gate runs under disagree above 2^31-1. mawk (busybox awk) prints
+# "-2147483648" for 4Gi, so a GOMEMLIMIT of 4Gi against an 8Gi limit compared as
+# negative and the check passed on a value it never read. %.0f formats the
+# double, exact for every whole-byte quantity up to 2^53.
 quantity_bytes() {
 	awk -v q="$1" '
 		BEGIN {
@@ -160,7 +166,7 @@ quantity_bytes() {
 				unit == "Mi" ? 1048576 :
 				unit == "Gi" ? 1073741824 :
 				unit == "Ti" ? 1099511627776 : 0)
-			printf "%d\n", num * mul
+			printf "%.0f\n", num * mul
 		}'
 }
 
