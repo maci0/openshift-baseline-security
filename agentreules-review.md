@@ -19,8 +19,6 @@ skills to `skills-review`; PRDs, RFCs, and the content of new ADRs to
 the set beside this one. With no `doc-review` running, a stale sentence in
 `README.md` or `docs/` is this review's finding. A record that already exists
 but has drifted from the code it describes is (7) below, not `specs-review`.
-This review covers only whether the existing contract documents still describe
-the repo as it is.
 
 First decide if this review applies. Look for `AGENTS.md` (or an equivalent
 agent rules file) plus a `docs/` directory of contract documents; the review
@@ -74,8 +72,6 @@ Review the following:
 - Findable pattern: `make -C operator verify-product-lockstep` is the runnable
   oracle (a dead grep or a missing file fails it); a green run still leaves the
   unchecked-pair half to reading the script against ADR-024.
-- `make -C operator test-alerts` (needs docker) is the oracle for (6)'s alert
-  half.
 
 5. TEST-PLAN rows whose named test does not exist
 - Every `[x]` row in `docs/TEST-PLAN.md` names a test. The test must still
@@ -91,6 +87,9 @@ Review the following:
   source, and each alert expression must be covered by a case in
   `operator/config/prometheus/testdata/alerts_test.yaml`. Adding a metric
   without the doc row, or an alert without a testdata case, is the finding.
+- Findable pattern: `make -C operator test-alerts` (needs docker) is the
+  oracle for the alert half; a metric named only in the doc is a finding until
+  the Go source or the testdata case is found.
 
 7. ADR hygiene
 - Each record in `docs/DESIGN-DECISIONS.md` carries a `*Recorded: <date>*`
@@ -108,14 +107,14 @@ Review the following:
   governs. Name the doc line and the code location, or drop the claim.
 
 8. House rules stated in more than one file
-- The root `AGENTS.md` and the component files both carry gating, suppression,
-  and commit rules. A rule that appears in several files with different wording
-  is a finding: keep it in the one file whose subtree owns it, or make the
-  wording identical.
-- Findable pattern: take a distinctive phrase from a rule (a make target, a
-  phrase like `review-loop: keep`, a lint tool name) and `rg` it across
-  `AGENTS.md`, `CONTRIBUTING.md`, and both component `AGENTS.md` files. More
-  than one hit with different wording is the finding.
+- The root `AGENTS.md` and both component files carry the gate commands; only
+  the root carries the suppression and branching rules. A rule that appears in
+  several files with different wording is a finding: keep it in the one file
+  whose subtree owns it, or make the wording identical.
+- Findable pattern: take a distinctive phrase from a rule (a make target such
+  as `make -C operator bundle`, a lint tool name, a suppression prefix) and
+  `rg` it across `AGENTS.md`, `CONTRIBUTING.md`, and both component
+  `AGENTS.md` files. More than one hit with different wording is the finding.
 
 9. Rules an agent cannot obey
 - A prohibition with no findable pattern ("keep the code idiomatic",
