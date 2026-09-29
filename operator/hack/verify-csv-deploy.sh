@@ -19,6 +19,14 @@
 #
 # Everything else must match line for line.
 #
+# The last check is the one pair of values a line-for-line diff cannot relate:
+# GOMEMLIMIT and the container memory limit. They are independent knobs that
+# only work together (GOMEMLIMIT above the cgroup cap makes the GC stop
+# collecting early and the pod is OOMKilled with a heap that never grew), and
+# nothing else in the tree ties them, so a memory-limit change alone would ship
+# a pod that the limit outruns. The diff keeps the two files in sync; this keeps
+# the value inside the limit.
+#
 # Run from operator/ (make verify-csv-deploy) or with REPO_ROOT set.
 set -euo pipefail
 
@@ -123,5 +131,91 @@ if ! diff -u "$tmp/base" "$tmp/csv"; then
 	echo "Apply the same change to both. The image tag, imagePullPolicy, and the" >&2
 	echo "app.kubernetes.io/version label are normalized away; anything else" >&2
 	echo "printed above is real drift." >&2
+	exit 1
+fi
+
+# quantity_bytes prints a quantity as a whole number of bytes, or nothing when
+# the spelling is one it does not know. Refusing the unknown is the point: a
+# silent "treat it as 0" would let this check pass on a value it never read.
+# The binary and decimal SI suffixes take an optional trailing B, which is how
+# both spell GOMEMLIMIT (440MiB) and the manifests' limit (512Mi). The metric
+# suffixes (m, u, n) are not accepted: they have no meaning for a heap cap.
+quantity_bytes() {
+	awk -v q="$1" '
+		BEGIN {
+			if (q !~ /^[0-9]+(\.[0-9]+)?(k|M|G|T|Ki|Mi|Gi|Ti)?[Bb]?$/) exit 1
+			num = q
+			sub(/[A-Za-z]+$/, "", num)
+			unit = substr(q, length(num) + 1)
+			sub(/[Bb]$/, "", unit)
+			mul = (unit == "" ? 1 :
+				unit == "k" ? 1000 :
+				unit == "M" ? 1000000 :
+				unit == "G" ? 1000000000 :
+				unit == "T" ? 1000000000000 :
+				unit == "Ki" ? 1024 :
+				unit == "Mi" ? 1048576 :
+				unit == "Gi" ? 1073741824 :
+				unit == "Ti" ? 1099511627776 : 0)
+			printf "%d\n", num * mul
+		}'
+}
+
+# base_gomemlimit is the GOMEMLIMIT env value from the base Deployment.
+base_gomemlimit() {
+	awk '
+		/^[[:space:]]*-?[[:space:]]*name:[[:space:]]*GOMEMLIMIT[[:space:]]*$/ { want = 1; next }
+		want && match($0, /value:[[:space:]]*/) {
+			v = substr($0, RSTART + RLENGTH)
+			sub(/[[:space:]]+$/, "", v)
+			print v
+			exit
+		}
+	' "$BASE"
+}
+
+# base_memory_limit is the first memory entry under a resources.limits block,
+# so it is the cgroup cap and not the (lower) request.
+base_memory_limit() {
+	awk '
+		/^[[:space:]]*limits:[[:space:]]*$/ { ind = match($0, /[^ ]/) - 1; in_limits = 1; next }
+		in_limits && match($0, /[^ ]/) && (RSTART - 1) <= ind { in_limits = 0 }
+		in_limits && /^[[:space:]]*memory:[[:space:]]*/ {
+			v = $0
+			sub(/^[[:space:]]*memory:[[:space:]]*/, "", v)
+			sub(/[[:space:]]+$/, "", v)
+			print v
+			exit
+		}
+	' "$BASE"
+}
+
+gomemlimit="$(base_gomemlimit)"
+memlimit="$(base_memory_limit)"
+if [ -z "$gomemlimit" ]; then
+	echo "${prog}: config/manager/manager.yaml sets no GOMEMLIMIT on the manager container." >&2
+	echo "Without it the Go heap is free to grow past limits.memory and the pod is" >&2
+	echo "OOMKilled on a large cluster instead of the GC collecting harder." >&2
+	exit 1
+fi
+if [ -z "$memlimit" ]; then
+	echo "${prog}: could not read limits.memory for the manager container in config/manager/manager.yaml." >&2
+	exit 1
+fi
+# `|| true`: under set -e an unparsable quantity would otherwise end the script
+# here, before it can say which value it could not read.
+gomemlimit_bytes="$(quantity_bytes "$gomemlimit" || true)"
+memlimit_bytes="$(quantity_bytes "$memlimit" || true)"
+if [ -z "$gomemlimit_bytes" ] || [ -z "$memlimit_bytes" ]; then
+	echo "${prog}: GOMEMLIMIT=${gomemlimit} / limits.memory=${memlimit} is not a quantity this check can compare." >&2
+	echo "Fix the spelling in config/manager/manager.yaml (and the CSV) so the two" >&2
+	echo "stay comparable here." >&2
+	exit 1
+fi
+if [ "$gomemlimit_bytes" -gt "$memlimit_bytes" ]; then
+	echo "${prog}: GOMEMLIMIT=${gomemlimit} is above the container memory limit ${memlimit}." >&2
+	echo "The GC would stop collecting before the cgroup cap, so the pod is" >&2
+	echo "OOMKilled rather than collecting. Keep GOMEMLIMIT under the limit" >&2
+	echo "(the current pair is ~85%)." >&2
 	exit 1
 fi

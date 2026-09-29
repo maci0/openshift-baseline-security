@@ -55,7 +55,10 @@ than guessing.
   kustomization lists ships to nobody), and the tree-local references must
   resolve: a RoleBinding `roleRef` to a declared Role/ClusterRole, a Service
   selector to a pod template, a ServiceMonitor selector to a Service, and the
-  Secret/ConfigMap a ServiceMonitor names. Renders with `kustomize`, else
+  Secret/ConfigMap a ServiceMonitor names. It also holds the metrics port and
+  the probe port to one number each across the flag argument, the
+  `containerPort`, the Service port and `targetPort`, the NetworkPolicy
+  ingress port, and every probe. Renders with `kustomize`, else
   `kubectl kustomize`, else `oc kustomize`; override with `KUSTOMIZE=`.
   Adding a manifest means listing it in its kustomization, or this fails.
 - `verify-versions`: release version, toolchain pins, image-build flags, the
@@ -76,7 +79,10 @@ than guessing.
   Deployment in `config/manager/manager.yaml`. The image tag,
   `imagePullPolicy`, and the `app.kubernetes.io/version` pod label are the only
   allowed divergences; anything else means a base change shipped to
-  `make deploy` and not to an OLM install.
+  `make deploy` and not to an OLM install. It also checks the one pair of values
+  a line-for-line diff cannot relate: `GOMEMLIMIT` must be set and stay under
+  `resources.limits.memory`, or the GC stops collecting before the cgroup cap
+  and the pod is OOMKilled.
 - `verify-bundle-static`: hand-copied bundle manifests against their `config/`
   sources (not the CSV, CRD, or monitoring CRs).
 - `verify-monitoring-bundle`: ServiceMonitor and PrometheusRule.

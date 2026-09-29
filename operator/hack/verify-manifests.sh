@@ -18,6 +18,10 @@
 #      ServiceMonitor selector to a Service, and the Secret/ConfigMap a
 #      ServiceMonitor names to declared objects. Those are the references that
 #      fail at scrape time with no apply-time error.
+#   4. the metrics port and the probe port each name one number across every
+#      place that spells them (the flag argument, the containerPort, the
+#      Service port and targetPort, the NetworkPolicy ingress port, and every
+#      probe). A mismatch still applies and still leaves the manager Ready.
 #
 # Run from operator/ (make verify-manifests) or with REPO_ROOT set.
 set -euo pipefail
@@ -102,7 +106,7 @@ function push(indent, k) {
 }
 
 function fail(msg) {
-	print "${prog}: " msg > "/dev/stderr"
+	print prog ": " msg > "/dev/stderr"
 	bad = 1
 }
 
@@ -204,6 +208,24 @@ function flush(	p, i) {
 		ref_secret[v] = 1
 	} else if (pfx "." kv ~ /\.ca\.configMap\.name$/) {
 		ref_configmap[v] = 1
+	} else if (pfx ~ /\.ports$/ && kv == "port" && kind == "Service") {
+		svc_port[v] = 1
+	} else if (pfx ~ /\.ports$/ && kv == "targetPort" && kind == "Service") {
+		svc_target[v] = 1
+	} else if (kv == "containerPort") {
+		container_port[v] = 1
+	} else if (pfx ~ /\.httpGet$/ && kv == "port") {
+		probe_port[v] = 1
+	} else if (pfx ~ /\.ingress\..*\.ports$/ && kv == "port" && kind == "NetworkPolicy") {
+		np_port[v] = 1
+	} else if (pfx ~ /\.args$/ && kv == "--metrics-bind-address=") {
+		# An args item is a bare scalar, so this parser splits it at the first
+		# colon: kv is "--<flag>=" and v is the port. A value that is not a port
+		# (":0" to disable, or a host) leaves metrics_arg empty and the check
+		# below reports it rather than passing on it.
+		metrics_arg = (v ~ /^[0-9]+$/) ? v : ""
+	} else if (pfx ~ /\.args$/ && kv == "--health-probe-bind-address=") {
+		probe_arg = (v ~ /^[0-9]+$/) ? v : ""
 	}
 }
 
@@ -239,6 +261,46 @@ END {
 	for (p in sm_configmap) {
 		if (!(p in configmap)) fail("the ServiceMonitor serving CA ConfigMap " p " is not declared in the tree")
 	}
+
+	# The metrics port and the probe port are each one setting spelled in
+	# several places: the flag argument, the containerPort, the Service port
+	# and targetPort, the NetworkPolicy ingress port, and every probe. A change
+	# to one of them still renders, still applies, and still leaves the manager
+	# Ready, so nothing fails until the metric is silently unscrapeable or the
+	# probes hit a closed port. There is one metrics Service, one NetworkPolicy
+	# and one manager Deployment in this tree, so the sets are unambiguous.
+	nm = 0
+	for (k in svc_port)     { metrics_val[++nm] = k; metrics_src[nm] = "the metrics Service port" }
+	for (k in svc_target)   { metrics_val[++nm] = k; metrics_src[nm] = "the metrics Service targetPort" }
+	for (k in container_port) { metrics_val[++nm] = k; metrics_src[nm] = "a containerPort" }
+	for (k in np_port)      { metrics_val[++nm] = k; metrics_src[nm] = "a NetworkPolicy ingress port" }
+	if (metrics_arg == "") {
+		fail("no --metrics-bind-address=:<port> argument in any container args")
+	} else {
+		metrics_val[++nm] = metrics_arg
+		metrics_src[nm] = "the --metrics-bind-address argument"
+	}
+	for (i = 2; i <= nm; i++) {
+		if (metrics_val[i] != metrics_val[1]) {
+			fail(metrics_src[i] " is " metrics_val[i] " but " metrics_src[1] " is " metrics_val[1] \
+				", so the metrics endpoint moves where nothing reaches it")
+		}
+	}
+
+	np = 0
+	for (k in probe_port) { probe_val[++np] = k; probe_src[np] = "a probe httpGet port" }
+	if (probe_arg == "") {
+		fail("no --health-probe-bind-address=:<port> argument in any container args")
+	} else {
+		probe_val[++np] = probe_arg
+		probe_src[np] = "the --health-probe-bind-address argument"
+	}
+	for (i = 2; i <= np; i++) {
+		if (probe_val[i] != probe_val[1]) {
+			fail(probe_src[i] " is " probe_val[i] " but " probe_src[1] " is " probe_val[1] \
+				", so the kubelet probes a port the manager does not listen on")
+		}
+	}
 	if (bad) exit 1
 }
 AWK
@@ -252,7 +314,7 @@ for e in $ENTRY_POINTS; do
 	fi
 done
 
-awk -v resolve=1 -f "$work/facts.awk" "$work/default.yaml" >"$work/render-objs.txt"
+awk -v prog="$prog" -v resolve=1 -f "$work/facts.awk" "$work/default.yaml" >"$work/render-objs.txt"
 
 # Every hand-maintained manifest must reach the config/default render. A file no
 # kustomization lists renders nowhere and ships to nobody; the guardrails that
@@ -267,7 +329,7 @@ for src in "$CONFIG"/crd/bases/*.yaml "$CONFIG"/manager/*.yaml \
 			echo "${prog}: ${src#"$OP"/} declares $objkey, which no kustomization includes" >&2
 			exit 1
 		}
-	done < <(awk -f "$work/facts.awk" "$src")
+	done < <(awk -v prog="$prog" -f "$work/facts.awk" "$src")
 done
 
 echo "${prog}: $(grep -c '^OBJ ' "$work/render-objs.txt") objects rendered from config/default; every source included, every tree reference resolved"
