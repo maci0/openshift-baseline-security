@@ -56,6 +56,15 @@ depend on those tags.
 
 ### Changed
 
+- The macOS CI lane now runs the docker-free `make verify` targets, not just
+  `make test` and `make lint-shell`, so the ~1400 lines of awk and sed in
+  `hack/verify-*.sh` and in `verify-versions` are exercised under BSD userland
+  instead of being asserted to work. `verify-manifests` stays on the ubuntu lane
+  because it needs a kustomize renderer.
+- `make verify-reproducible` now fails when the host has no tzdata or no
+  `en_US.UTF-8` locale. The exports that vary the second build were silently
+  ineffective there, so both builds ran under the same zone and encoding and the
+  check reported a property it had not tested.
 - Accessibility of the console page and the exported HTML report. A value shown
   as an em dash (no last scan, scanning disabled, an unscored profile) named its
   state with `aria-label` on a bare `<span>`, which assistive technology does not

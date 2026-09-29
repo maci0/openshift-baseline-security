@@ -144,6 +144,18 @@ jobs:
       # fallback branches (shasum, BSD date) are the ones a developer hits.
       - name: shellcheck
         run: gmake lint-shell
+      # `make verify` is the other documented macOS-capable gate: operator/AGENTS.md
+      # calls it the docker-free half of `make bundle`, and it is ~1400 lines of
+      # awk/sed/grep over the checkout, which is exactly the code that reads
+      # differently under BSD userland. verify-manifests is the one member that
+      # needs a kustomize renderer, so it is left to the ubuntu lane: a brew
+      # kustomize and the runner's kubectl kustomize can emit different output,
+      # and a failure there would say nothing about portability.
+      - name: verify (docker-free static checks)
+        run: >-
+          gmake verify-crd verify-csv-rbac verify-csv-deploy
+          verify-monitoring-bundle verify-bundle-static
+          verify-versions verify-product-lockstep
 
   console-plugin:
     runs-on: ubuntu-24.04

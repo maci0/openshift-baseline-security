@@ -32,9 +32,14 @@ docker), and `console-plugin` `yarn ci`, the replica of the GHA
 `catalog` jobs have no local replica beyond `make -C operator bundle` and
 `make -C operator catalog-prepare` (both need docker); a Dockerfile, bundle, or
 CSV change should have run those first. The required `portability` job runs
-`gmake test` and `gmake lint-shell` on `macos-14`, so a change to `hack/*.sh`
-or to anything the suite drives has to stay portable to a host with no GNU
-coreutils; there is no local replica of it beyond the commands themselves.
+`gmake test`, `gmake lint-shell`, and the docker-free `verify` targets
+(`verify-crd`, `verify-csv-rbac`, `verify-csv-deploy`,
+`verify-monitoring-bundle`, `verify-bundle-static`, `verify-versions`,
+`verify-product-lockstep`) on `macos-14`; `verify-manifests` stays on the
+ubuntu lane because it needs a kustomize renderer. So a change to `hack/*.sh`,
+to `verify-versions`, or to anything the suite drives has to stay portable to a
+host with no GNU coreutils; there is no local replica of it beyond the commands
+themselves.
 Extended fuzzing and live-cluster e2e are
 scheduled or on-demand, never per-PR. `make help` at the root and in each
 module directory lists the rest. Human clone-to-PR path: `CONTRIBUTING.md`.

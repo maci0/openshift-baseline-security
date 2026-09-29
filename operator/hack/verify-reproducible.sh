@@ -105,6 +105,31 @@ done
 (
   cd "$work/second"
   export TZ=Asia/Tokyo LC_ALL=en_US.UTF-8
+  # An absent tzdata or an ungenerated locale makes the exports above
+  # silently ineffective: the second build then runs in the same zone and
+  # encoding as the first, and the check reports a property it never tested.
+  # A container built FROM alpine has no locale and no zone database at all,
+  # so this is a reachable host, not a hypothetical. Both probes are POSIX
+  # (date and locale); a host with no `locale` at all keeps the export and is
+  # not failed here.
+  if [ "$(date +%z)" = "+0000" ]; then
+    echo "${prog}: this host has no tzdata, so TZ=Asia/Tokyo had no effect" >&2
+    echo "and the locale leg of this check cannot run. Install tzdata, or point" >&2
+    echo "TZ at a zone file this host can read." >&2
+    exit 1
+  fi
+  if command -v locale >/dev/null 2>&1; then
+    # An ungenerated locale makes `locale charmap` itself fail under the
+    # exported LC_ALL, so an empty result is the signal, not a mismatch.
+    charmap="$(locale charmap 2>/dev/null || true)"
+    c_charmap="$(LC_ALL=C locale charmap 2>/dev/null || true)"
+    if [ -z "$charmap" ] || { [ -n "$c_charmap" ] && [ "$charmap" = "$c_charmap" ]; }; then
+      echo "${prog}: this host has no en_US.UTF-8 locale, so LC_ALL had no effect." >&2
+      echo "Install the locale (musl and glibc images ship without one), or change" >&2
+      echo "the locale this script exports to one the host actually has." >&2
+      exit 1
+    fi
+  fi
   umask 077
   build "$work/second-out"
 )
