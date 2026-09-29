@@ -41,7 +41,7 @@ RUN --network=none yarn build && find dist -exec touch -d "@${SOURCE_DATE_EPOCH}
 # Image-equivalent layout (document root /opt/app-root/src) with TLS only on 9443.
 # nginx.conf is checked into the repo (no brittle sed against the base image).
 # ubi9/nginx-120
-FROM registry.access.redhat.com/ubi9/nginx-120@sha256:397b74f658a31eb203b3ecfe1ee892e810af61714b83afdbfe07bfe0fba3a844
+FROM registry.access.redhat.com/ubi9/nginx-120@sha256:d1058ad0b51b68f18638ea2a63381148cbc80ef8767fa9281911008767b0d156
 ARG SOURCE_DATE_EPOCH=0
 ARG VERSION=0.9.0
 # Runtime UID owns static assets and nginx.conf (read-only rootfs still applies
