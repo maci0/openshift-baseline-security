@@ -466,9 +466,10 @@ const ProfilesTab: React.FC<{
   // the base profile and disabled rules from its spec.
   const openEdit = async (name: string, trigger: HTMLElement | null) => {
     if (pendingRef.current) return;
-    // Same gate the Edit control carries: the save path is a k8sUpdate on the
-    // TailoredProfile, so a denied review must not fetch and pre-fill it.
-    if (!canUpdate) return;
+    // Same chokepoint every write goes through: the save path is a k8sUpdate on
+    // the TailoredProfile, so a denied review must not fetch and pre-fill it.
+    // updateGate carries the baseline-patch half the Edit control carries too.
+    if (!mayWrite(updateGate)) return;
     // Bumped only on the path that actually fetches, so a click refused by the
     // guards above cannot cancel an in-flight load and leave nothing open.
     editSeq.current += 1;

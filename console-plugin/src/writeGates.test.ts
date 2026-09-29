@@ -7,26 +7,39 @@ import * as path from 'path';
 // use is still offered, and the denial surfaces only after the round trip.
 //
 // `mayWrite` (./permissions) is the single chokepoint for that, and nothing
-// enforced that a new mutation goes through it: the only prior coverage is
-// mayWrite's own truth table. This pins the coverage instead, so the next write
-// added to a component without a gate fails here rather than in review.
+// enforced that a new API call goes through it: the only prior coverage is
+// mayWrite's own truth table. This pins the coverage instead, so the next read
+// or write added without a gate fails here rather than in review.
 //
-// The check is structural, not semantic: a mutation is considered guarded when
+// The check is structural, not semantic: a call is considered guarded when
 // a mayWrite call appears between the enclosing top-level declaration and the
-// call site. That is the shape every current write has, and it fails closed for
+// call site. That is the shape every current call has, and it fails closed for
 // a new ungated function in a file that has no gate at all.
 
-const COMPONENTS_DIR = path.join(__dirname, 'components');
+// Every module under src, not just src/components: a mutation helper parked in
+// a non-component module (a shared `patchBaseline`, a custom hook) is still a
+// console write, and scoping the walk to components left that default-allowed.
+const SRC_DIR = __dirname;
+const SKIP_DIRS = new Set(['testing']);
+const sourceFiles = (dir: string = SRC_DIR): string[] =>
+  fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      return SKIP_DIRS.has(entry.name) ? [] : sourceFiles(full);
+    }
+    if (!/\.tsx?$/.test(entry.name) || /\.test\.tsx?$/.test(entry.name)) {
+      return [];
+    }
+    return [full];
+  });
 
-const MUTATIONS = /\b(k8sPatch|k8sUpdate|k8sCreate|k8sDelete)\s*\(/;
+// k8sGet is in the set with the writes: a fetch of a user-named object (a
+// TailoredProfile pre-fill) spends the same access review as the update that
+// follows it, and an ungated read of a name from the request is the object-level
+// miss the update gate was added to prevent.
+const MUTATIONS = /\b(k8sGet|k8sPatch|k8sUpdate|k8sCreate|k8sDelete)\s*\(/;
 const GUARD = /\bmayWrite\s*\(/;
 const TOP_LEVEL_DECL = /^(export\s+)?(const|function|async function|let)\s/;
-
-const sourceFiles = (): string[] =>
-  fs
-    .readdirSync(COMPONENTS_DIR)
-    .filter((name) => name.endsWith('.tsx') || name.endsWith('.ts'))
-    .map((name) => path.join(COMPONENTS_DIR, name));
 
 const mutationLines = (text: string): number[] =>
   text
@@ -49,12 +62,23 @@ const guarded = (lines: string[], at: number): boolean => {
 describe('write gating', () => {
   const files = sourceFiles();
 
-  it('finds the components that write to the API', () => {
+  it('finds the modules that call the API', () => {
     const writing = files.filter((file) => mutationLines(fs.readFileSync(file, 'utf8')).length > 0);
     expect(writing.length).toBeGreaterThan(0);
   });
 
-  it.each(files)('%s gates every mutation through mayWrite', (file) => {
+  // Pins the walk itself: narrowing it back to src/components would leave a
+  // mutation helper in any other module ungated and unnoticed.
+  it('covers src root modules and components alike', () => {
+    expect(files).toEqual(
+      expect.arrayContaining([
+        path.join(SRC_DIR, 'permissions.ts'),
+        path.join(SRC_DIR, 'components', 'CompliancePage.tsx'),
+      ]),
+    );
+  });
+
+  it.each(files)('%s gates every API read and write through mayWrite', (file) => {
     const lines = fs.readFileSync(file, 'utf8').split('\n');
     for (const at of mutationLines(lines.join('\n'))) {
       expect({ line: at + 1, guarded: guarded(lines, at) }).toEqual({ line: at + 1, guarded: true });
