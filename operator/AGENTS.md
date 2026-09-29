@@ -69,7 +69,8 @@ than guessing.
   The CHANGELOG half covers the `## [Unreleased]` / `## [VERSION]` ordering and
   rejects a `### ` heading that appears twice inside one release: Keep a Changelog
   has one section per kind, and a repeat hides entries from a reader who stops
-  at the first one.
+  at the first one. It also rejects a `## [VERSION]` section with no entry under
+  it, which is a cut that shipped no change or notes that were never written.
 - `verify-product-lockstep`: score weights, caps, the `ProfileKey` set, and
   annotation keys shared between Go and the console plugin (ADR-024). Adding a
   profile means touching the CRD enum, the Go constants, and the plugin's

@@ -494,6 +494,10 @@ verify-versions:
 	if [ -n "$$dup_sections" ]; then \
 		echo "CHANGELOG.md repeats a section heading inside one release: $$dup_sections; Keep a Changelog has one section per kind and a repeat hides entries from consumers reading the first one"; fail=1; \
 	fi; \
+	empty_notes=$$(awk -v v="## [$(VERSION)]" 'index($$0, v) == 1 { insec=1; next } /^## / { insec=0 } insec && /^- / { found=1 } END { if (!found) print v }' "$$cl"); \
+	if [ -n "$$empty_notes" ]; then \
+		echo "CHANGELOG.md $$empty_notes has no entries; a version with nothing under it is either a cut with no change or notes that were never written, and both ship images a consumer cannot tell apart from the last one"; fail=1; \
+	fi; \
 	grep -qE '"@console/pluginAPI": ">=4\.22\.0-0 <4\.23\.0-0"' "$$pkg" \
 		|| { echo "console-plugin package.json @console/pluginAPI must be >=4.22.0-0 <4.23.0-0 (matches =v4.22 host pin); looser ranges would load on untested consoles"; fail=1; }; \
 	grep -qE "^\[$(VERSION_RE)\]: .*compare/.*v$(VERSION_RE)$$" "$$cl" \

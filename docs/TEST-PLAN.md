@@ -427,6 +427,14 @@ per-node annotation) when nodes disagree.
       fix).
 - [ ] **Unapply path** does not show the reboot warning modal.
 - [ ] **Foreign remediations** (other suite labels) never appear in the table.
+- [x] **A replayed batch apply is rejected on both annotation shapes**: the
+      annotation is a one-shot request the operator consumes and clears, so a
+      submit built from a stale read would otherwise pause the pools and
+      re-apply a batch that already ran. The patch carries a `resourceVersion`
+      test whether it writes into an existing annotations map or creates the
+      map, and a sibling annotation written in between is not dropped
+      (jest `a replayed batch-apply request is rejected`, `a replayed
+      batch-apply does not drop a sibling annotation`).
 - [ ] **Apply when CO auto-apply is already Automatic**: UI toggle and CO
       ScanSetting stay consistent after reconcile.
 
@@ -477,6 +485,15 @@ an accepted risk neither inflates nor tanks the score.
       before append (jest `addWaiverPatch`); CRD CEL
       `self.all(x, self.exists_one(y, y.name == x.name))` rejects a second
       row at admission (`listType=map` is a merge key, not uniqueness).
+- [x] **A replayed waiver submit is rejected, not merged**: every shape
+      `addWaiverPatch` and `removeWaiverPatch` emit carries a `test` on
+      `metadata.resourceVersion`, so a create built from a read taken before the
+      first write landed cannot replace the whole list (RFC 6902 `add` on an
+      existing member replaces it), a stale append and a stale remove on a
+      shifted index are both refused, and a re-read turns the append into an
+      in-place update (jest `a replayed waiver create is rejected`, `a
+      replayed waiver append is rejected`, `a replayed waiver remove is
+      rejected`).
 - [ ] **RBAC read-only user** cannot see the enabled Waive button.
 - [ ] **Cross-profile rule**: a rule scanned by both cis and pci-dss has distinct
       result names; waiving one does not waive the other (document the by-name
@@ -974,6 +991,14 @@ stale Available or eternal Progressing.
       does not amplify into API hammering beyond Progressing 15s cadence.
 - [ ] **Empty schedule string**: treated as default `0 1 * * *` for ScanSetting
       and NextScanTime; Overview shows the effective schedule, not "—".
+- [x] **The read side trims the operator's whitespace set, not `String#trim`**:
+      `effectiveSchedule` keeps U+FEFF and the other runes Go's
+      `strings.TrimSpace` keeps, so a value the operator reports as
+      `InvalidSchedule` cannot render in the Details card as a healthy cron
+      while the CR sits Degraded, and an absent or all-whitespace value still
+      falls back to the default (jest `returns the stored schedule trimmed with
+      the operator separator set`, `keeps U+FEFF`, `defaults an absent or
+      all-whitespace schedule`).
 
 ## T. Chaos, topology & "day 2" environments
 
@@ -1276,8 +1301,14 @@ Injectable faults for envtest or a "faulty client" wrapper:
 - [ ] **Create Subscription returns AlreadyExists**: createIfMissing ignores;
       install continues.
 - [ ] **List returns a continue token that does not advance**: every paged List
-      loop (check results, suites, remediations) stops with what it read instead
-      of replaying one page until the reconcile deadline (`TestNextPageToken`).
+      loop (check results, suites, remediations, ScanSettingBindings) stops with
+      what it read instead of replaying one page until the reconcile deadline
+      (`TestNextPageToken`).
+- [x] **No compliance List is unbounded**: the suites, remediations, and
+      ScanSettingBindings reads walk every page, so a namespace holding bindings
+      this operator does not own cannot be pinned in one response. The binding
+      pre-read that skips a no-op write and the prune that follows it read the
+      same full set (`TestEnsureScanConfigPagesBindings`).
 - [ ] **Delete binding returns NotFound**: prune path continues.
 - [ ] **Get Console returns NoKindMatch**: deregister and ensure paths soft-fail.
 - [ ] **Get CatalogSource returns a transient error**: detection answers
@@ -1370,6 +1401,13 @@ Beyond existing fuzz targets, properties that should always hold:
 - [x] **Bidirectional text in check titles**: Results modal and table titles
       use `dir=auto`; HTML report wraps untrusted cells in `dir=auto` (jest
       `isolates untrusted check titles`). CSV column tokens stay English.
+- [x] **Untrusted text in a translated string is isolated, not just
+      direction-detected**: where a value rides inside a translated sentence
+      that no element can carry a `dir` (an `aria-label`, a `title`, an Alert
+      title, a string held in state), `bidiIsolate` wraps it in FSI/PDI so an
+      RTL apiserver message cannot drag the surrounding punctuation with it,
+      and the value itself is passed through byte for byte (jest `wraps the
+      value in FSI and PDI`, `keeps the value byte for byte`).
 - [x] **HTML report chrome is PatternFly-aligned**: system-ui stack, status
       hexes, no generic `#ccc`/`#666` table dump (jest `uses PatternFly status
       colors`).

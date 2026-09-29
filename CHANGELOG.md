@@ -67,7 +67,57 @@ depend on those tags.
   reboot), and the plugin's `UntrustedValue` boundary type with bidi isolation
   of untrusted text before translation. No shipped behavior changed.
 
+### Fixed
+
+- `spec.schedule` was read back with `String#trim` on the Details card, which
+  strips characters Go's `strings.TrimSpace` keeps. A schedule stored with a
+  leading U+FEFF (or any other non-Go whitespace) is `InvalidSchedule` to the
+  operator, so the CR sits Degraded with a condition, while the plugin rendered
+  the same value as a healthy cron next to a green editor. The read side now
+  trims the operator's whitespace set and falls back to the default exactly the
+  way the operator's own parser does, so what the card shows is what the CR
+  carries. Existing schedules are unaffected; nothing is rewritten on the
+  cluster.
+
+- A second submit of a waiver or of a batch apply, built from a read taken
+  before the first write landed, could overwrite what the first submit stored or
+  re-run a batch the operator had already consumed. **Before:** the waiver
+  create shape issued `add /spec/waivers` with no test, and RFC 6902 `add` on an
+  existing member replaces it, so a resubmit that still read the list as absent
+  dropped every waiver already there; the batch-apply annotation is a one-shot
+  request the operator consumes and clears, so a stale resubmit paused the
+  MachineConfigPools and re-applied the same remediations a second time, which
+  is a second set of node reboots. **After:** every shape these builders emit
+  carries a `test` on `metadata.resourceVersion`, so a stale submit is refused
+  with a 409 that the console surfaces instead of overwriting or re-applying. A
+  submit made from a current read behaves as before.
+
+- Untrusted text interpolated into a translated sentence rendered without
+  bidirectional isolation: an RTL apiserver error message placed inside an
+  LTR string put the punctuation that followed it on the wrong side, and the
+  surrounding translated text moved with it. The places that carry such a value
+  in an `aria-label`, a `title`, an Alert title, or a string held in state now
+  wrap it in a directional isolate. This affects how a hostile or foreign-language
+  value is displayed, not what is stored or patched.
+
+- The operator live-listed the Compliance Operator CRDs (suites, remediations,
+  ScanSettingBindings) with unbounded `List` calls, so a namespace holding many
+  objects of a kind this operator does not own came back as a single response
+  large enough to pin memory in the operator for the life of the watch. Every
+  one of those Lists now goes through the same paged walk the CheckResult
+  aggregation already used (200 per call, continuing on the page token). The
+  objects processed, and the CR fields written, are unchanged; a namespace
+  larger than one response no longer has to fit in one.
+
 ## [0.8.0] - 2026-09-28
+
+### Changed
+
+- Nothing a consumer can observe. The cut moved the version string (the CSV,
+  both package manifests, the five Dockerfiles, `README.md`) and opened this
+  section; every other file in `v0.7.0...v0.8.0` is byte-identical to 0.7.0, so
+  the 0.8.0 images behave as 0.7.0 and there is nothing to upgrade for. A user
+  who pinned `0.7.0` does not need to move.
 
 ## [0.7.0] - 2026-09-28
 

@@ -62,7 +62,9 @@ Cutting a release:
 3. `make -C operator bundle` (regenerates the CRD copy, runs every verify
    target, and validates the bundle in operator-sdk).
 4. `make -C operator RELEASE_GATE=1 verify-versions`, which fails if
-   `[Unreleased]` still has entries.
+   `[Unreleased]` still has entries, and which also fails if the section
+   promoted to `## [X.Y.Z]` ended up with no entry under it. A bump that ships
+   no change is not a release: leave the version where it is.
 5. Tag `vX.Y.Z`. `REQUIRE_GIT_TAGS=1` adds the tag's existence to the check.
    The release workflow runs both gates and the tagged commit's own
    `make -C operator test` plus the console plugin's `yarn typecheck` and
