@@ -9,6 +9,7 @@ import * as React from 'react';
 import { useTranslation } from 'react-i18next';
 import { Alert, PageSection } from '@patternfly/react-core';
 import { errorMessage } from '../errors';
+import { bidiIsolate } from '../text';
 
 const BaselineUnavailable: React.FC<{ error: unknown; style?: React.CSSProperties }> = ({
   error,
@@ -30,8 +31,11 @@ const BaselineUnavailable: React.FC<{ error: unknown; style?: React.CSSPropertie
       {detail && (
         <p>
           {/* The reason is an apiserver message, not plugin copy, so it is the
-              one part of the sentence whose direction and script are unknown. */}
-          <span dir="auto">{t('Reason: {{detail}}', { detail })}</span>
+              one part of the sentence whose direction and script are unknown.
+              The isolate carries that direction; dir="auto" on the wrapper
+              would settle on the English "Reason" and leave the message an
+              unisolated run in an LTR sentence. */}
+          <span dir="auto">{t('Reason: {{detail}}', { detail: bidiIsolate(detail) })}</span>
         </p>
       )}
     </Alert>

@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Alert, Button, PageSection } from '@patternfly/react-core';
 import { errorMessage } from '../errors';
 import type { UntrustedValue } from '../parse';
+import { bidiIsolate } from '../text';
 import { reportRenderError } from './renderError';
 
 type TabErrorBoundaryProps = {
@@ -62,7 +63,11 @@ const TabError: React.FC<{ name: string; error: UntrustedValue; onRetry: () => v
   onRetry,
 }) => {
   const { t } = useTranslation('plugin__baseline-security-console-plugin');
-  const detail = errorMessage(error) ?? t('No reason was reported.');
+  const reason = errorMessage(error);
+  // Isolate the reported reason, not the translated fallback: the isolates are
+  // invisible but they are copied along with the text, and a plugin sentence
+  // has a direction the page already knows.
+  const detail = reason ? bidiIsolate(reason) : t('No reason was reported.');
   return (
     <PageSection>
       <Alert

@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Alert, Button, PageSection, Skeleton } from '@patternfly/react-core';
 import { errorMessage } from '../errors';
 import { TREND_SKELETON_HEIGHT } from '../layout';
+import { bidiIsolate } from '../text';
 import { ChunkState, useChunk } from './chunkLoad';
 
 // Visible failure for a dropped or 404'd async chunk. Retry re-invokes the
@@ -22,8 +23,8 @@ export const ChunkError: React.FC<{ onRetry: () => void; error?: unknown }> = ({
         <p>
           {/* The rejection reason comes from the network, the CDN, or a server
               body, so it is the one part of the sentence whose direction and
-              script are unknown. */}
-          <span dir="auto">{t('Reason: {{detail}}', { detail })}</span>
+              script are unknown. The isolate carries that direction. */}
+          <span dir="auto">{t('Reason: {{detail}}', { detail: bidiIsolate(detail) })}</span>
         </p>
       )}
       <Button variant="link" isInline onClick={onRetry}>

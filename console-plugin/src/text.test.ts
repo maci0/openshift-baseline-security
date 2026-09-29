@@ -1,4 +1,4 @@
-import { codePointLength, compareForDisplay, foldForSearch, foldSearchQuery, formatList, listSeparators, matchesFolded, textCollator, trimGoSpace } from './text';
+import { bidiIsolate, codePointLength, compareForDisplay, foldForSearch, foldSearchQuery, formatList, listSeparators, matchesFolded, textCollator, trimGoSpace } from './text';
 
 describe('foldForSearch', () => {
   it('folds case and strips diacritics', () => {
@@ -260,6 +260,31 @@ describe('codePointLength', () => {
   it('agrees with .length on ASCII', () => {
     expect(codePointLength('no_empty_passwords')).toBe('no_empty_passwords'.length);
     expect(codePointLength('')).toBe(0);
+  });
+});
+
+describe('bidiIsolate', () => {
+  // U+2068 FSI opens the isolate and U+2069 PDI closes it. Both are Cf
+  // (format) characters, so a renderer lays them out as nothing; the pair is
+  // what keeps the value's own direction from leaking into the sentence it is
+  // interpolated into.
+  it('wraps the value in FSI and PDI', () => {
+    expect(bidiIsolate('reason')).toBe('\u2068reason\u2069');
+  });
+
+  // The value has to survive intact: a check title or an apiserver message is
+  // what the user is reading, and trimming or normalizing it here would print
+  // something the apiserver never sent.
+  it('keeps the value byte for byte, including its own direction', () => {
+    const arabic = 'لا يمكن قراءة المورد';
+    expect(bidiIsolate(arabic).slice(1, -1)).toBe(arabic);
+  });
+
+  // An empty value still closes its isolate, so concatenating a conditional
+  // reason never leaves U+2068 open and turns the rest of the message into
+  // part of the isolate.
+  it('balances an empty value', () => {
+    expect(bidiIsolate('')).toBe('\u2068\u2069');
   });
 });
 

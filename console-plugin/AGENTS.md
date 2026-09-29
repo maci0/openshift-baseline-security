@@ -140,7 +140,12 @@ double casts are rejected outright.
   reason) renders with `dir="auto"`, so an RTL value does not reorder the
   punctuation around it. An untrusted name that a sentence has to mention is
   its own element with the translated sentence beside it, not a `{{name}}`
-  interpolation inside the key.
+  interpolation inside the key. Where no element can carry the `dir` (an
+  `aria-label`, a `title` attribute, an `Alert` title prop, a string kept in
+  state), the untrusted value goes through `bidiIsolate` from `src/text.ts`
+  instead: `dir="auto"` settles the direction of the whole string from its
+  first strong character, which is the translated prefix, so an RTL message
+  would be an unisolated run in an LTR sentence.
 - A counted string's key carries the raw `{{count}}` (that is what i18next
   matches for a plural form) and its value carries the locale-formatted
   `{{formattedCount}}`; both `_one` and `_other` exist in the English file, and

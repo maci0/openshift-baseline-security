@@ -93,7 +93,7 @@ import {
   formatLocalDate,
   localDateInputValue,
 } from '../dates';
-import { compareForDisplay } from '../text';
+import { bidiIsolate, compareForDisplay } from '../text';
 import { FILTER_FIELD_MIN_WIDTH, WAIVER_FIELD_MIN_WIDTH } from '../layout';
 import {
   activeWaivedNames,
@@ -635,7 +635,11 @@ const ResultsTab: React.FC<{
               variant="link"
               isInline
               title={title}
-              aria-label={t('View details for {{title}}', { title })}
+              // Isolate the title inside the label: an attribute has no dir of
+              // its own, so an RTL check title (untrusted CO text) is an
+              // unisolated run in an LTR sentence and the words around it
+              // reorder for anyone reading the label as plain text.
+              aria-label={t('View details for {{title}}', { title: bidiIsolate(title) })}
               onClick={(e) => {
                 returnFocusRef.current = e.currentTarget;
                 setWaiveSuccess(null);

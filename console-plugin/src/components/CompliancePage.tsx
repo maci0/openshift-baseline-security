@@ -34,7 +34,7 @@ import {
 } from '../models';
 import { now, nowMs } from '../clock';
 import { formatCount } from '../dates';
-import { formatList } from '../text';
+import { bidiIsolate, formatList } from '../text';
 import { downloadBlob, openBlobInTab } from '../download';
 import { errorMessage } from '../errors';
 import { AccessGate, mayWrite } from '../permissions';
@@ -201,7 +201,7 @@ const CompliancePage: React.FC = () => {
           detail
             ? t('Failed to rescan {{formattedCount}} of {{formattedTotal}} scans: {{detail}}', {
                 ...counts,
-                detail,
+                detail: bidiIsolate(detail),
               })
             : t('Failed to rescan {{formattedCount}} of {{formattedTotal}} scans. Check permissions and try again.', counts),
         );
@@ -237,7 +237,7 @@ const CompliancePage: React.FC = () => {
         setExportNotice({
           variant: 'danger',
           message: detail
-            ? t('Failed to load the report exporter: {{detail}}', { detail })
+            ? t('Failed to load the report exporter: {{detail}}', { detail: bidiIsolate(detail) })
             : t('Failed to load the report exporter.'),
         });
         return;

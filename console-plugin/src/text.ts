@@ -203,3 +203,18 @@ export const trimGoSpace = (value: string): string => value.replace(goSpaceTrimR
 // accepted. Array.from walks code points, so a surrogate pair counts once and a
 // lone surrogate still counts once rather than throwing.
 export const codePointLength = (value: string): number => Array.from(value).length;
+
+// FIRST STRONG ISOLATE / POP DIRECTIONAL ISOLATE around a fragment whose
+// direction is unknown, for the places a translated sentence has to carry it
+// and no element can carry the dir: an aria-label, a title attribute, an
+// Alert title prop, a string kept in state. dir="auto" on a wrapper element
+// settles the direction of the whole string from its first strong character,
+// which is the translated prefix, so an RTL apiserver message becomes an
+// unisolated run inside an LTR sentence and the punctuation that follows it
+// lands on the wrong side. An isolate contains the run and resolves its own
+// direction, and U+2069 closes it so the following text is unaffected.
+//
+// Only wrap untrusted or unknown-direction values. Wrapping translated copy
+// is a no-op for rendering and puts two invisible characters in anything the
+// user copies out of the message.
+export const bidiIsolate = (value: string): string => `\u2068${value}\u2069`;
