@@ -54,5 +54,12 @@ LABEL org.opencontainers.image.description="Cluster-scoped OpenShift compliance 
 LABEL org.opencontainers.image.source="https://github.com/maci0/openshift-baseline-security"
 LABEL org.opencontainers.image.licenses="Apache-2.0"
 LABEL org.opencontainers.image.version="${VERSION}"
+# Documentation only (Kubernetes ignores it for reachability): the two ports the
+# manager binds, so `docker inspect` on the published image does not read them as
+# hidden constants. 8443 is --metrics-bind-address, scraped by Prometheus through
+# the Service; 8081 is --health-probe-bind-address, called by the kubelet probes.
+# Both are the defaults the Deployment passes explicitly (verify-csv-deploy holds
+# the flag arguments and the probes to one number each).
+EXPOSE 8443 8081
 USER 65532:65532
 ENTRYPOINT ["/usr/bin/manager"]

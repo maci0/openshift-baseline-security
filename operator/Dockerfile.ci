@@ -46,5 +46,7 @@ LABEL org.opencontainers.image.description="Cluster-scoped OpenShift compliance 
 LABEL org.opencontainers.image.source="https://github.com/maci0/openshift-baseline-security"
 LABEL org.opencontainers.image.licenses="Apache-2.0"
 LABEL org.opencontainers.image.version="${VERSION}"
+# Documentation only, same two ports and same reason as operator/Dockerfile.
+EXPOSE 8443 8081
 USER 65532:65532
 ENTRYPOINT ["/usr/bin/manager"]

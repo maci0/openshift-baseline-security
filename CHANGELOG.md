@@ -67,6 +67,12 @@ depend on those tags.
   reboot), and the plugin's `UntrustedValue` boundary type with bidi isolation
   of untrusted text before translation. No shipped behavior changed.
 
+- The published operator image now declares the two ports the manager binds
+  (8443 metrics, 8081 health probes) in its `EXPOSE` metadata. `docker inspect`
+  on the image showed no ports at all, so both listeners read as hidden
+  constants of the binary. Documentation only: Kubernetes ignores `EXPOSE` for
+  reachability, and no behavior changed.
+
 ### Fixed
 
 - `spec.schedule` was read back with `String#trim` on the Details card, which
