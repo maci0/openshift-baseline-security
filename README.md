@@ -210,10 +210,11 @@ with `BASELINE_SECURITY_SKIP_DEFAULT_CR=true` on the CSV deployment
 (unrecognized values fail process start; see
 [Operator process configuration](#operator-process-configuration)).
 
-The bundle ships the metrics ServiceMonitor / PrometheusRule / dashboard
-(scraped by platform monitoring), the `prometheus-k8s` discovery Role, and a
-default-deny ingress `NetworkPolicy` on the operator pods (metrics port open to
-`openshift-monitoring` and the service-ca namespaces only); see
+The bundle ships the metrics ServiceMonitor / PrometheusRule (scraped by platform
+monitoring) and the `prometheus-k8s` discovery Role. The Grafana dashboard is not
+a manifest: the operator writes it from an embedded asset at reconcile time. A
+default-deny ingress `NetworkPolicy` on the operator pods keeps the metrics port
+open to `openshift-monitoring` and the service-ca namespaces only; see
 [docs/OBSERVABILITY.md](docs/OBSERVABILITY.md). Deleting the `ClusterBaseline`
 or uninstalling this operator does **not** remove the shared Compliance
 Operator; owned resources are cleaned up via owner references and the

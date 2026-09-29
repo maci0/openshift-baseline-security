@@ -9,13 +9,15 @@
 //   RemediationsTab.tsx  - remediation list, apply/batch
 //   ProfilesTab.tsx      - built-in + tailored profile management
 //   ClusterScoreItem.tsx - cluster Overview details score item
-//   LoadingCards.tsx     - skeleton placeholders while a chunk loads
+//   LoadingCards.tsx     - skeleton placeholders while the baseline watch has
+//                          not delivered yet (chunk loads have their own gate)
 //   BaselineNotConfigured.tsx - empty state when no ClusterBaseline exists
 //   BaselineUnavailable.tsx - danger state when the baseline watch failed
 //   ChunkError.tsx       - ChunkGate, renders ChunkError + Retry on a failed GET
 //   TabErrorBoundary.tsx - per-tab boundary: reports a render throw, keeps the nav
 //   renderError.ts       - the browser-console report a render throw produces
 //   DisabledTip.tsx      - tooltip wrapper for disabled controls
+//   ConsoleLink.tsx      - in-SPA link to another console route
 //   useAutoDismiss.ts    - shared success-banner dismiss timing
 //   useWaiverExpiryClock.ts - ticking clock driving waiver-expiry countdowns
 //   chunkLoad.ts         - async-chunk load state + Retry

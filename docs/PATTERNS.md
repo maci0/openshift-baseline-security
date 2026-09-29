@@ -83,8 +83,8 @@ current (`make generate manifests && git diff --exit-code`).
 
 Conventions applied:
 - k8s.io/* modules track the target OCP kube level (4.22 = 1.35; client
-  libraries on v0.36.x, one minor ahead, with `minKubeVersion: 1.35.0`),
-  controller-runtime matching (v0.24.x), Go per build root (1.26).
+  libraries on v0.37.x, two minors ahead, with `minKubeVersion: 1.35.0`),
+  controller-runtime matching (v0.25.x), Go per build root (1.26).
 - Unstructured clients for foreign CRs touched only lightly (compliance,
   OLM, console operator config) rather than importing their Go modules.
   Typed APIs only for owned CRDs and core objects.

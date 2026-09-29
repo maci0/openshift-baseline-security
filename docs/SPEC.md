@@ -1,6 +1,6 @@
 # OpenShift Baseline Security
 
-Design specification for the product on `main` (0.6.x line plus work still under
+Design specification for the product on `main` (0.8.x line plus work still under
 CHANGELOG **[Unreleased]**). Targets OpenShift Container Platform 4.22. What is
 in a published CSV/image tag is defined only by [CHANGELOG.md](../CHANGELOG.md)
 and the **Current release** line in the root README; do not assume every
@@ -526,6 +526,7 @@ same Makefile targets (`test`, `lint`, `docker-build`).
 | 0.6.0 | Toolchain bump (k8s.io v0.36.4, controller-runtime v0.24.1); metadata-only compliance watches and paged CheckResult lists; `baseline-security-admin` no longer aggregated onto `admin`; CSV `capabilities: Basic Install`; waiver names unique at admission (ADR-031); `/licenses/LICENSE` and OCI labels on every image. | Done; see CHANGELOG.md 0.6.0 |
 | 0.6.1 | Image `/licenses` directory mode fix (readable by the non-root runtime user); browserslist advisory bump in the plugin build. | Done; see CHANGELOG.md 0.6.1 |
 | 0.7.0 | Namespace-scoped manager cache (ADR-032); operator-namespace `NetworkPolicy` (ingress denied except the metrics scrape, ADR-033); alerts `ClusterBaselineNotAvailable` and `RemediationBatchGraceResume`; Observe Reconcile-loop row; `hack/backup.sh`, `hack/restore.sh`, `hack/verify-backup.sh` and `docs/RESTORE.md`; operator `--version`; `yarn size` page-weight gate and shipped third-party notices; CSV export hardened against leading-control-character formula cells; console writes re-check the reviewed permission at the request boundary; pod `preStop` drain and a `preStop`-aware `/readyz`; toolchain bump to k8s.io v0.37.0, controller-runtime v0.25.1, and controller-gen v0.22.0. | Done; see CHANGELOG.md 0.7.0 |
+| 0.8.0 | Version cut only, no CHANGELOG entries of its own; the published behavior is 0.7.0's. | Done; see CHANGELOG.md 0.8.0 |
 | Productization | Done in 0.5.0: API group renamed to `baselinesecurity.openshift.io`; `registry.ci.openshift.org` build variant (`Dockerfile.ci` + `.ci-operator.yaml`). Remaining: finish ci-operator onboarding in openshift/release, split the plugin into its own repo, Red Hat enhancement proposal referencing this spec. | Partial |
 
 ## 11. Prerequisites

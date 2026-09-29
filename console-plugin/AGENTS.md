@@ -18,7 +18,7 @@ Node 22 exactly, pinned by `.nvmrc` to the same patch as the digest-pinned
 has to stay that way. The console supplies both at runtime and the plugin's
 copy has to be the one it binds to: `react-i18next` is a no-fallback singleton
 shared module, so a version the console 4.22 line does not provide
-(`react-i18next` ~16.5.8, `i18next` ~25.6.2) builds clean and then breaks in
+(`react-i18next` ~16.5.8, `i18next` ~26.4.2) builds clean and then breaks in
 the browser. No unit test can catch that mismatch.
 
 ## Gate

@@ -62,6 +62,14 @@ export const normalizeScore = (v: UntrustedValue): number | null => {
   return Math.min(SCORE_MAX, Math.max(SCORE_MIN, v));
 };
 
+// A ring point as it arrives off a watch. status.profiles[].history is typed
+// ScoreSnapshot, but that is the shape the operator writes: a restored or
+// hand-edited ring can carry a point with a missing or non-string time and a
+// missing or non-finite score, and the reader below is written to survive both.
+// Read-only, because callers hold the status ring as a ReadonlyArray and the
+// reader has no reason to copy it.
+export type HistoryPoint = { time?: string; score?: number };
+
 /**
  * Newest usable point of a score-history ring, or undefined when the ring holds
  * none. The operator appends oldest-first and caps the ring at 30, but that is a
@@ -77,14 +85,6 @@ export const normalizeScore = (v: UntrustedValue): number | null => {
  * wrote; it only stops a hand-edited fractional point from disagreeing with the
  * integer status.score rendered beside it.
  */
-// A ring point as it arrives off a watch. status.profiles[].history is typed
-// ScoreSnapshot, but that is the shape the operator writes: a restored or
-// hand-edited ring can carry a point with a missing or non-string time and a
-// missing or non-finite score, and the reader below is written to survive both.
-// Read-only, because callers hold the status ring as a ReadonlyArray and the
-// reader has no reason to copy it.
-export type HistoryPoint = { time?: string; score?: number };
-
 export const latestSnapshotScore = (history?: readonly HistoryPoint[]): number | undefined => {
   let latestMs = Number.NEGATIVE_INFINITY;
   let latest: number | undefined;
