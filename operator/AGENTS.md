@@ -54,11 +54,11 @@ than guessing.
   under `config/` must reach the `config/default` render (a file no
   kustomization lists ships to nobody), and the tree-local references must
   resolve: a RoleBinding `roleRef` to a declared Role/ClusterRole, a Service
-  selector to a pod template, a ServiceMonitor selector to a Service, and the
-  Secret/ConfigMap a ServiceMonitor names. It also holds the metrics port and
-  the probe port to one number each across the flag argument, the
-  `containerPort`, the Service port and `targetPort`, the NetworkPolicy
-  ingress port, and every probe. Renders with `kustomize`, else
+  selector to a pod template, a ServiceMonitor selector and scraped port name
+  to a Service, and the Secret/ConfigMap a ServiceMonitor names. It also holds
+  the metrics port and the probe port to one number each across the flag
+  argument, the `containerPort`, the Service port and `targetPort`, the
+  NetworkPolicy ingress port, and every probe. Renders with `kustomize`, else
   `kubectl kustomize`, else `oc kustomize`; override with `KUSTOMIZE=`.
   Adding a manifest means listing it in its kustomization, or this fails.
 - `verify-versions`: release version, toolchain pins, image-build flags, the

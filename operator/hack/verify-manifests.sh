@@ -15,9 +15,9 @@
 #      file no kustomization lists is caught;
 #   3. the tree-local cross-resource references resolve: RoleBinding roleRef to
 #      a declared Role/ClusterRole, Service selector to a pod template,
-#      ServiceMonitor selector to a Service, and the Secret/ConfigMap a
-#      ServiceMonitor names to declared objects. Those are the references that
-#      fail at scrape time with no apply-time error.
+#      ServiceMonitor selector and scraped port name to a Service, and the
+#      Secret/ConfigMap a ServiceMonitor names to declared objects. Those are
+#      the references that fail at scrape time with no apply-time error.
 #   4. the metrics port and the probe port each name one number across every
 #      place that spells them (the flag argument, the containerPort, the
 #      Service port and targetPort, the NetworkPolicy ingress port, and every
@@ -208,10 +208,14 @@ function flush(	p, i) {
 		ref_secret[v] = 1
 	} else if (pfx "." kv ~ /\.ca\.configMap\.name$/) {
 		ref_configmap[v] = 1
+	} else if (pfx ~ /\.ports$/ && kv == "name" && kind == "Service") {
+		svc_portname[v] = 1
 	} else if (pfx ~ /\.ports$/ && kv == "port" && kind == "Service") {
 		svc_port[v] = 1
 	} else if (pfx ~ /\.ports$/ && kv == "targetPort" && kind == "Service") {
 		svc_target[v] = 1
+	} else if (pfx ~ /\.endpoints$/ && kv == "port" && kind == "ServiceMonitor") {
+		sm_portname[v] = 1
 	} else if (kv == "containerPort") {
 		container_port[v] = 1
 	} else if (pfx ~ /\.httpGet$/ && kv == "port") {
@@ -260,6 +264,15 @@ END {
 	}
 	for (p in sm_configmap) {
 		if (!(p in configmap)) fail("the ServiceMonitor serving CA ConfigMap " p " is not declared in the tree")
+	}
+	# A ServiceMonitor endpoint scrapes the Service port whose *name* it names,
+	# not the one whose number matches. A Service port renamed without the
+	# ServiceMonitor following leaves the selector matching (the labels are
+	# untouched) and every other check green, while the endpoint resolves to no
+	# port and the scrape silently finds zero targets.
+	for (p in sm_portname) {
+		if (!(p in svc_portname))
+			fail("a ServiceMonitor endpoint scrapes the Service port named " p ", which no Service declares")
 	}
 
 	# The metrics port and the probe port are each one setting spelled in
