@@ -1808,3 +1808,28 @@ func FuzzSanitizeStatusForUpdate(f *testing.F) {
 		}
 	})
 }
+
+// matchesAnyProfile runs over every PVC in the compliance namespace times every
+// selected profile, on every reconcile, and its answer is not observable from the
+// allocation count alone, so the property that it must not allocate per candidate
+// base is pinned here: CutPrefix on the base itself and a byte test for the '-'
+// boundary, rather than CutPrefix on a freshly concatenated base+"-".
+func BenchmarkMatchesAnyProfile(b *testing.B) {
+	profiles := map[string]bool{
+		"ocp4-cis": true, "ocp4-pci-dss": true, "ocp4-nist-moderate-high": true,
+		"ocp4-stig": true, "ocp4-nerc-tcp-crypto": true, "ocp4-ospp-ancora": true,
+		"ocp4-cis-node": true, "ocp4-cis-worker": true,
+	}
+	names := []string{
+		"ocp4-cis", "ocp4-cis-master", "ocp4-cis-worker", "ocp4-cis-node-worker",
+		"ocp4-pci-dss-master", "ocp4-nist-moderate-high-worker", "ocp4-stig-master",
+		"ocp4-nerc-tcp-crypto-worker", "unrelated-workload-claim", "ocp4-cis-node",
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		for _, n := range names {
+			matchesAnyProfile(n, profiles)
+		}
+	}
+}

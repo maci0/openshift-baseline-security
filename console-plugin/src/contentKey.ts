@@ -64,5 +64,19 @@ const kindOf = (value: UntrustedValue): string => {
 // different list. `['a\0b']` and `['a', 'b']` share a plain join('\0') key, which
 // makes the memo serve one derivation for the other. Parts are self-delimiting,
 // so they concatenate with no separator of their own.
-export const encodeKeyList = (values: readonly UntrustedValue[] | undefined): string =>
-  (values ?? []).map((v) => encodeKeyPart(v)).join('');
+//
+// One accumulation pass, not map(encodeKeyPart).join(''): status.newlyFailed and
+// status.fixed are capped at 4096 names each, and encodeKeyList gates the memo
+// deps on every Overview, Results, and Remediations render. The map shape builds
+// a second array of N encoded strings and hands them all to join; accumulating
+// keeps one output string.
+export const encodeKeyList = (values: readonly UntrustedValue[] | undefined): string => {
+  if (!values) {
+    return '';
+  }
+  let key = '';
+  for (const v of values) {
+    key += encodeKeyPart(v);
+  }
+  return key;
+};

@@ -44,7 +44,16 @@ func matchesAnyProfile(name string, profiles map[string]bool) bool {
 		if name == p {
 			return true
 		}
-		if rest, ok := strings.CutPrefix(name, p+"-"); ok && scanRoleSuffix(rest) {
+		// CutPrefix on p, then require the boundary byte, instead of CutPrefix on
+		// p+"-": the concatenation allocated a fresh string for every candidate
+		// base on every call, and checkScanStorage runs this over every PVC in the
+		// namespace times every selected profile on every reconcile. Slicing past
+		// the '-' the base already ends at costs nothing.
+		rest, ok := strings.CutPrefix(name, p)
+		if !ok || len(rest) == 0 || rest[0] != '-' {
+			continue
+		}
+		if scanRoleSuffix(rest[1:]) {
 			return true
 		}
 	}
