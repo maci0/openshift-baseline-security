@@ -154,120 +154,109 @@ func (r *ClusterBaselineReconciler) aggregateStatus(ctx context.Context, cb *bas
 		// via the same client with get-only RBAC, and their informers could never
 		// start (no list/watch). Page so one response cannot pin every CCR.
 		list := uList(checkResultGVK)
-		cont := ""
-		for {
-			opts := []client.ListOption{
-				client.InNamespace(complianceNamespace),
-				client.MatchingLabelsSelector{Selector: sel},
-				client.Limit(checkResultListPageSize),
-			}
-			if cont != "" {
-				opts = append(opts, client.Continue(cont))
-			}
-			if err := r.List(ctx, list, opts...); err != nil {
-				if meta.IsNoMatchError(err) {
-					// CRDs gone: do not leave a stale score/profile rollup on the CR.
-					// Info once when we actually clear data (not every requeue while
-					// CRDs stay missing): expected during CO uninstall, but a sudden
-					// score drop must still be explainable from operator logs.
-					hadRollup := cb.Status.Score != nil || len(cb.Status.Profiles) > 0 ||
-						len(cb.Status.TailoredProfiles) > 0 || cb.Status.LastScanTime != nil ||
-						len(cb.Status.History) > 0
-					if hadRollup {
-						log.FromContext(ctx).Info("compliance CRDs absent; cleared score/history rollup",
-							"name", cb.Name)
+		base := []client.ListOption{
+			client.InNamespace(complianceNamespace),
+			client.MatchingLabelsSelector{Selector: sel},
+		}
+		err := r.listPaged(ctx, list, checkResultListPageSize, base,
+			func(items []unstructured.Unstructured) (bool, error) {
+				for i := range items {
+					item := &items[i]
+					// Single label key reads: GetLabels() copies the whole map per call and
+					// would allocate once (or twice when weighted) per CCR each reconcile.
+					suite := unstructuredLabel(item.Object, suiteLabel)
+					// Route to the owning bucket first so weighting/regression only see owned checks.
+					var rc *baselinev1alpha1.ResultCounts
+					var profileKey baselinev1alpha1.ProfileKey
+					var tailoredName string
+					var isTailored bool
+					if name, ok := tailoredNameFromSuite(suite); ok {
+						if ts := byTailored[name]; ts != nil {
+							rc = &ts.ResultCounts
+							tailoredName = name
+							isTailored = true
+						}
+					} else if key, ok := profileKeyFromSuite(suite); ok {
+						if ps := byProfile[key]; ps != nil {
+							rc = &ps.ResultCounts
+							profileKey = key
+						}
 					}
-					cb.Status.Score = nil
-					cb.Status.Profiles = nil
-					cb.Status.TailoredProfiles = nil
-					cb.Status.LastScanTime = nil
-					cb.Status.NextScanTime = nil
-					cb.Status.History = nil
-					cb.Status.PreviousFailures = nil
-					cb.Status.DiffBaseFailures = nil
-					cb.Status.DiffBaseScanTime = nil
-					cb.Status.NewlyFailed = nil
-					cb.Status.Fixed = nil
-					// Keep relatedObjects in sync with desired ownership even when CO is absent.
-					cb.Status.RelatedObjects = relatedObjectsFromSuites(cb, suites)
-					return nil
-				}
-				return fmt.Errorf("listing ComplianceCheckResults in %s: %w", complianceNamespace, err)
-			}
-			for i := range list.Items {
-				item := &list.Items[i]
-				// Single label key reads: GetLabels() copies the whole map per call and
-				// would allocate once (or twice when weighted) per CCR each reconcile.
-				suite := unstructuredLabel(item.Object, suiteLabel)
-				// Route to the owning bucket first so weighting/regression only see owned checks.
-				var rc *baselinev1alpha1.ResultCounts
-				var profileKey baselinev1alpha1.ProfileKey
-				var tailoredName string
-				var isTailored bool
-				if name, ok := tailoredNameFromSuite(suite); ok {
-					if ts := byTailored[name]; ts != nil {
-						rc = &ts.ResultCounts
-						tailoredName = name
-						isTailored = true
+					if rc == nil {
+						continue
 					}
-				} else if key, ok := profileKeyFromSuite(suite); ok {
-					if ps := byProfile[key]; ps != nil {
-						rc = &ps.ResultCounts
-						profileKey = key
+					// Direct map read: NestedString path-walks every CCR (often thousands)
+					// each reconcile. Wrong-type or missing status must not vanish from
+					// counts (tally default maps empty/unknown to ERROR).
+					status, _ := item.Object["status"].(string)
+					// WAIVED is OUR synthetic status, assigned below for waived FAILs only.
+					// A raw CCR claiming it (tampered object or a future CO status) must not
+					// buy an accepted-risk slot with no spec.waivers entry: fail closed to
+					// ERROR, matching the console's effectiveStatus fold for unknown tokens.
+					if status == "WAIVED" {
+						status = "ERROR"
+					}
+					// A check the Compliance Operator marks INCONSISTENT only because it does
+					// not apply on some nodes (PASS where it applies, NOT-APPLICABLE elsewhere)
+					// is benign; collapse it so it does not read as "review each". A real
+					// PASS-vs-FAIL split stays INCONSISTENT.
+					if status == "INCONSISTENT" {
+						status = effectiveInconsistentStatus(item)
+					}
+					// Waivers apply to failing checks only: a waived FAIL is pulled out of
+					// the pass/fail denominator into the Waived bucket. If a waived check later passes it
+					// counts as PASS again (self-healing), so a stale waiver never silently
+					// depresses the score; the admin can still remove it from the UI.
+					//
+					// Scan-diff (newlyFailed/fixed) still tracks the raw FAIL outcome: accepting
+					// risk must not appear as Fixed or drop a regression. Score and ResultCounts
+					// use the Waived bucket; previousFailures/diffBase use the FAIL name set.
+					name := unstructuredName(item.Object)
+					rawFail := status == "FAIL"
+					if rawFail && name != "" && waived[name] {
+						status = "WAIVED"
+					}
+					tally(rc, status)
+					// Empty names never match waivers and must not enter scan-diff lists
+					// (newlyFailed/fixed deep-links and alerts would be meaningless).
+					if rawFail && name != "" {
+						currentFails = append(currentFails, name)
+					}
+					if weighted {
+						addWeight(status, item, profileKey, tailoredName, isTailored)
 					}
 				}
-				if rc == nil {
-					continue
+				return false, nil
+			})
+		if err != nil {
+			if meta.IsNoMatchError(err) {
+				// CRDs gone: do not leave a stale score/profile rollup on the CR.
+				// Info once when we actually clear data (not every requeue while
+				// CRDs stay missing): expected during CO uninstall, but a sudden
+				// score drop must still be explainable from operator logs.
+				hadRollup := cb.Status.Score != nil || len(cb.Status.Profiles) > 0 ||
+					len(cb.Status.TailoredProfiles) > 0 || cb.Status.LastScanTime != nil ||
+					len(cb.Status.History) > 0
+				if hadRollup {
+					log.FromContext(ctx).Info("compliance CRDs absent; cleared score/history rollup",
+						"name", cb.Name)
 				}
-				// Direct map read: NestedString path-walks every CCR (often thousands)
-				// each reconcile. Wrong-type or missing status must not vanish from
-				// counts (tally default maps empty/unknown to ERROR).
-				status, _ := item.Object["status"].(string)
-				// WAIVED is OUR synthetic status, assigned below for waived FAILs only.
-				// A raw CCR claiming it (tampered object or a future CO status) must not
-				// buy an accepted-risk slot with no spec.waivers entry: fail closed to
-				// ERROR, matching the console's effectiveStatus fold for unknown tokens.
-				if status == "WAIVED" {
-					status = "ERROR"
-				}
-				// A check the Compliance Operator marks INCONSISTENT only because it does
-				// not apply on some nodes (PASS where it applies, NOT-APPLICABLE elsewhere)
-				// is benign; collapse it so it does not read as "review each". A real
-				// PASS-vs-FAIL split stays INCONSISTENT.
-				if status == "INCONSISTENT" {
-					status = effectiveInconsistentStatus(item)
-				}
-				// Waivers apply to failing checks only: a waived FAIL is pulled out of
-				// the pass/fail denominator into the Waived bucket. If a waived check later passes it
-				// counts as PASS again (self-healing), so a stale waiver never silently
-				// depresses the score; the admin can still remove it from the UI.
-				//
-				// Scan-diff (newlyFailed/fixed) still tracks the raw FAIL outcome: accepting
-				// risk must not appear as Fixed or drop a regression. Score and ResultCounts
-				// use the Waived bucket; previousFailures/diffBase use the FAIL name set.
-				name := unstructuredName(item.Object)
-				rawFail := status == "FAIL"
-				if rawFail && name != "" && waived[name] {
-					status = "WAIVED"
-				}
-				tally(rc, status)
-				// Empty names never match waivers and must not enter scan-diff lists
-				// (newlyFailed/fixed deep-links and alerts would be meaningless).
-				if rawFail && name != "" {
-					currentFails = append(currentFails, name)
-				}
-				if weighted {
-					addWeight(status, item, profileKey, tailoredName, isTailored)
-				}
+				cb.Status.Score = nil
+				cb.Status.Profiles = nil
+				cb.Status.TailoredProfiles = nil
+				cb.Status.LastScanTime = nil
+				cb.Status.NextScanTime = nil
+				cb.Status.History = nil
+				cb.Status.PreviousFailures = nil
+				cb.Status.DiffBaseFailures = nil
+				cb.Status.DiffBaseScanTime = nil
+				cb.Status.NewlyFailed = nil
+				cb.Status.Fixed = nil
+				// Keep relatedObjects in sync with desired ownership even when CO is absent.
+				cb.Status.RelatedObjects = relatedObjectsFromSuites(cb, suites)
+				return nil
 			}
-			// A token that does not advance would replay this page until the
-			// reconcile deadline; stop with what is counted so a partial rollup
-			// is written and the next reconcile re-lists from the start.
-			next, more := nextPageToken(list.GetContinue(), cont)
-			if !more {
-				break
-			}
-			cont = next
+			return fmt.Errorf("listing ComplianceCheckResults in %s: %w", complianceNamespace, err)
 		}
 	}
 	slices.Sort(currentFails)

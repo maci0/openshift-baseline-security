@@ -260,42 +260,32 @@ func (r *ClusterBaselineReconciler) listRemediationsForBatch(
 		return found, nil
 	}
 	list := uList(remediationGVK)
-	cont := ""
-	for {
-		opts := []client.ListOption{
-			client.InNamespace(complianceNamespace),
-			client.Limit(remediationListPageSize),
-		}
-		if cont != "" {
-			opts = append(opts, client.Continue(cont))
-		}
-		if err := r.List(ctx, list, opts...); err != nil {
-			if meta.IsNoMatchError(err) {
-				return nil, errComplianceCRDsAbsent
+	base := []client.ListOption{client.InNamespace(complianceNamespace)}
+	err := r.listPaged(ctx, list, remediationListPageSize, base,
+		func(items []unstructured.Unstructured) (bool, error) {
+			// Index range: no copy of each remediation's map header per item. The
+			// map outlives this page, so the remediation is deep-copied out of the
+			// list buffer listPaged reuses.
+			for i := range items {
+				if needed[items[i].GetName()] {
+					cp := &unstructured.Unstructured{}
+					items[i].DeepCopyInto(cp)
+					found[items[i].GetName()] = cp
+				}
 			}
-			return nil, fmt.Errorf("listing ComplianceRemediations in %s: %w", complianceNamespace, err)
+			// Every name is present: stop paging rather than walk the rest of
+			// the namespace's remediations.
+			return len(found) == len(needed), nil
+		})
+	if err != nil {
+		if meta.IsNoMatchError(err) {
+			return nil, errComplianceCRDsAbsent
 		}
-		// Index range: no copy of each remediation's map header per item.
-		for i := range list.Items {
-			item := &list.Items[i]
-			if needed[item.GetName()] {
-				found[item.GetName()] = item
-			}
-		}
-		// Every name is present: stop paging rather than walk the rest of the
-		// namespace's remediations.
-		if len(found) == len(needed) {
-			return found, nil
-		}
-		// A token that does not advance means the next List would replay this
-		// page until the reconcile deadline. Stop with what is found; the
-		// missing names take the same terminal path as a NotFound.
-		next, more := nextPageToken(list.GetContinue(), cont)
-		if !more {
-			return found, nil
-		}
-		cont = next
+		return nil, fmt.Errorf("listing ComplianceRemediations in %s: %w", complianceNamespace, err)
 	}
+	// A non-advancing continue token stops the walk early; the missing names
+	// take the same terminal path as a NotFound.
+	return found, nil
 }
 
 // finishRemediationBatch is phase two: resume when every listed remediation is

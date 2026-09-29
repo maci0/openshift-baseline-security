@@ -106,39 +106,34 @@ func (r *ClusterBaselineReconciler) listOwnedSuites(
 ) (map[string]*unstructured.Unstructured, error) {
 	owned := make(map[string]*unstructured.Unstructured, len(expected))
 	list := uList(suiteGVK)
-	cont := ""
-	for {
-		opts := []client.ListOption{
-			client.InNamespace(complianceNamespace),
-			client.Limit(suiteListPageSize),
-		}
-		if cont != "" {
-			opts = append(opts, client.Continue(cont))
-		}
-		if err := r.List(ctx, list, opts...); err != nil {
-			if meta.IsNoMatchError(err) {
-				return nil, nil
+	base := []client.ListOption{client.InNamespace(complianceNamespace)}
+	err := r.listPaged(ctx, list, suiteListPageSize, base,
+		func(items []unstructured.Unstructured) (bool, error) {
+			// Index range: avoid copying each Unstructured (map header + metadata)
+			// per suite, and skip foreign suites before they reach the index. The
+			// map outlives this page, so the suite is deep-copied out of the list
+			// buffer listPaged reuses.
+			for i := range items {
+				if expected[items[i].GetName()] {
+					cp := &unstructured.Unstructured{}
+					items[i].DeepCopyInto(cp)
+					owned[items[i].GetName()] = cp
+				}
 			}
-			return nil, fmt.Errorf("listing ComplianceSuites in %s for history: %w", complianceNamespace, err)
+			// Every expected suite is indexed: stop rather than walk the rest of
+			// the namespace's suites.
+			return len(owned) == len(expected), nil
+		})
+	if err != nil {
+		if meta.IsNoMatchError(err) {
+			return nil, nil
 		}
-		// Index range: avoid copying each Unstructured (map header + metadata)
-		// per suite, and skip foreign suites before they reach the index.
-		for i := range list.Items {
-			item := &list.Items[i]
-			if expected[item.GetName()] {
-				owned[item.GetName()] = item
-			}
-		}
-		// A token that does not advance would replay this page until the
-		// reconcile deadline; stop with the suites collected so far, which
-		// recordHistory treats as "no completed suite" rather than wedging the
-		// singleton worker.
-		next, more := nextPageToken(list.GetContinue(), cont)
-		if !more {
-			return owned, nil
-		}
-		cont = next
+		return nil, fmt.Errorf("listing ComplianceSuites in %s for history: %w", complianceNamespace, err)
 	}
+	// A non-advancing continue token (or a short collection) leaves the map
+	// missing suites, which recordHistory treats as "no completed suite" rather
+	// than wedging the singleton worker.
+	return owned, nil
 }
 
 // completedSuiteTimes returns the member-scan completion range only when the

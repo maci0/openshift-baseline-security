@@ -165,7 +165,10 @@ Responsibilities:
    (`cis` → `ocp4-cis` + `ocp4-cis-node`, `stig` → `ocp4-stig` +
    `ocp4-stig-node` + `rhcos4-stig`, etc.). An empty `spec.profiles` with
    no `spec.tailoredProfiles` prunes all owned bindings and clears the score
-   (scanning disabled; CR and history retained).
+   (scanning disabled; CR and history retained). One paged List (200 per
+   call) of the namespace's bindings serves both the pre-read that skips a
+   no-op write and the prune, so a namespace holding bindings this operator
+   does not own cannot be pinned in one response.
 3. **Console plugin deployment** (G3): nginx Deployment (2 replicas with
    preferred pod anti-affinity on multi-node topologies; collapses to 1
    replica with no PDB on SingleReplica clusters so the single node can

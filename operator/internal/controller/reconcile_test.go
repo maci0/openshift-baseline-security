@@ -784,6 +784,97 @@ func TestEnsureScanConfigCreatesAndPrunes(t *testing.T) {
 	}
 }
 
+// TestEnsureScanConfigPagesBindings: the binding List is paged like every other
+// unstructured read (a live apiserver call, so an unbounded response would pin
+// the whole compliance namespace), and a binding the operator owns that only
+// appears on a later page is still pruned. Fake client ignores Limit/Continue,
+// so an interceptor serves two pages and asserts the page size on each.
+func TestEnsureScanConfigPagesBindings(t *testing.T) {
+	scheme := testScheme(t)
+	bindingList := &unstructured.UnstructuredList{}
+	bindingList.SetGroupVersionKind(bindingGVK.GroupVersion().WithKind(bindingGVK.Kind + "List"))
+	scheme.AddKnownTypeWithName(bindingGVK, &unstructured.Unstructured{})
+	scheme.AddKnownTypeWithName(bindingList.GroupVersionKind(), bindingList)
+	scheme.AddKnownTypeWithName(scanSettingGVK, &unstructured.Unstructured{})
+
+	cb := newCB("cis")
+	owned := &unstructured.Unstructured{}
+	owned.SetGroupVersionKind(bindingGVK)
+	owned.SetName("baseline-old")
+	owned.SetNamespace(complianceNamespace)
+	owned.SetOwnerReferences([]metav1.OwnerReference{{
+		APIVersion: baselinev1alpha1.GroupVersion.String(),
+		Kind:       "ClusterBaseline",
+		Name:       cb.Name,
+		UID:        cb.UID,
+		Controller: ptr.To(true),
+	}})
+	foreign := &unstructured.Unstructured{}
+	foreign.SetGroupVersionKind(bindingGVK)
+	foreign.SetName("someone-elses")
+	foreign.SetNamespace(complianceNamespace)
+
+	const page2Token = "page2"
+	lists := 0
+	var deleted []string
+	r := &ClusterBaselineReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(cb).
+			WithStatusSubresource(&baselinev1alpha1.ClusterBaseline{}).
+			WithInterceptorFuncs(interceptor.Funcs{
+				List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+					if gvk := list.GetObjectKind().GroupVersionKind(); gvk.Group != bindingGVK.Group || gvk.Kind != bindingGVK.Kind+"List" {
+						return c.List(ctx, list, opts...)
+					}
+					lo := &client.ListOptions{}
+					lo.ApplyOptions(opts)
+					if lo.Limit != bindingListPageSize {
+						return fmt.Errorf("binding List Limit = %d, want %d", lo.Limit, bindingListPageSize)
+					}
+					ul, ok := list.(*unstructured.UnstructuredList)
+					if !ok {
+						return fmt.Errorf("binding List type = %T, want *unstructured.UnstructuredList", list)
+					}
+					var src []*unstructured.Unstructured
+					switch lo.Continue {
+					case "":
+						src = []*unstructured.Unstructured{foreign}
+						ul.SetContinue(page2Token)
+					case page2Token:
+						src = []*unstructured.Unstructured{owned}
+						ul.SetContinue("")
+					default:
+						return fmt.Errorf("unexpected continue %q", lo.Continue)
+					}
+					lists++
+					ul.Items = make([]unstructured.Unstructured, len(src))
+					for i, it := range src {
+						ul.Items[i] = *it.DeepCopy()
+					}
+					return nil
+				},
+				Delete: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {
+					deleted = append(deleted, obj.GetName())
+					return c.Delete(ctx, obj, opts...)
+				},
+			}).Build(),
+		Scheme: scheme,
+	}
+	if err := r.ensureScanConfig(context.Background(), cb); err != nil {
+		t.Fatalf("ensureScanConfig: %v", err)
+	}
+	if lists != 2 {
+		t.Fatalf("binding List calls = %d, want 2 pages", lists)
+	}
+	if len(deleted) != 1 || deleted[0] != "baseline-old" {
+		t.Fatalf("deleted = %v, want [baseline-old] (a stale owned binding on the second page)", deleted)
+	}
+	binding := &unstructured.Unstructured{}
+	binding.SetGroupVersionKind(bindingGVK)
+	if err := r.Get(context.Background(), types.NamespacedName{Namespace: complianceNamespace, Name: "baseline-cis"}, binding); err != nil {
+		t.Fatal("selected binding missing:", err)
+	}
+}
+
 // TestEnsureScanConfigSecondRunWritesNothing: a repeated execution over an
 // unchanged spec must not write the ScanSetting or its ScanSettingBindings.
 // These writes are operator-driven scan triggers, so a second execution that

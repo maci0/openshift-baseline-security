@@ -23,6 +23,12 @@ const (
 	scanResultStorageRotation = int64(3)
 )
 
+// bindingListPageSize bounds one apiserver List of ScanSettingBindings. The
+// operator's own bindings track spec (tens), but the compliance namespace also
+// holds bindings other tools and the Compliance Operator UI created; an
+// unbounded read would pin all of them in one response on every reconcile.
+const bindingListPageSize int64 = 200
+
 func (r *ClusterBaselineReconciler) ensureScanConfig(ctx context.Context, cb *baselinev1alpha1.ClusterBaseline) error {
 	// Validate schedule first, but still reconcile ScanSetting fields other than
 	// schedule and all bindings so a bad cron does not freeze profile/tp or
@@ -87,18 +93,38 @@ func (r *ClusterBaselineReconciler) ensureScanConfig(ctx context.Context, cb *ba
 	// CreateOrUpdate so the create/update conflict handling is unchanged; the
 	// pre-read only skips the Get when the binding already matches the desired
 	// state (the same comparison CreateOrUpdate does before its Update).
+	//
+	// Paged, like every other unstructured read here: the compliance namespace
+	// also holds bindings this operator does not own, and one unbounded response
+	// would pin all of them. Only the selected names (bounded by spec) and the
+	// stale owned names (a slice of strings) are retained, so the walk does not
+	// hold the namespace in memory either.
+	selected := ownedSuites(cb)
+	existing := make(map[string]*unstructured.Unstructured, len(selected))
+	var stale []string
 	bindings := uList(bindingGVK)
-	if err := r.List(ctx, bindings, client.InNamespace(complianceNamespace)); err != nil {
-		if meta.IsNoMatchError(err) {
+	listErr := r.listPaged(ctx, bindings, bindingListPageSize,
+		[]client.ListOption{client.InNamespace(complianceNamespace)},
+		func(items []unstructured.Unstructured) (bool, error) {
+			for i := range items {
+				b := &items[i]
+				switch {
+				case selected[b.GetName()]:
+					cp := &unstructured.Unstructured{}
+					b.DeepCopyInto(cp)
+					existing[b.GetName()] = cp
+				case metav1.IsControlledBy(b, cb):
+					stale = append(stale, b.GetName())
+				}
+			}
+			return false, nil
+		})
+	if listErr != nil {
+		if meta.IsNoMatchError(listErr) {
 			setScanCRDsMissing(ctx, cb, r.now())
 			return nil
 		}
-		return fmt.Errorf("listing ScanSettingBindings in %s: %w", complianceNamespace, err)
-	}
-	existing := make(map[string]*unstructured.Unstructured, len(bindings.Items))
-	for i := range bindings.Items {
-		b := &bindings.Items[i]
-		existing[b.GetName()] = b
+		return fmt.Errorf("listing ScanSettingBindings in %s: %w", complianceNamespace, listErr)
 	}
 
 	for _, key := range cb.Spec.Profiles {
@@ -119,14 +145,13 @@ func (r *ClusterBaselineReconciler) ensureScanConfig(ctx context.Context, cb *ba
 		}
 	}
 
-	selected := ownedSuites(cb)
-	for i := range bindings.Items {
-		b := &bindings.Items[i]
-		if selected[b.GetName()] || !metav1.IsControlledBy(b, cb) {
-			continue
-		}
+	for _, name := range stale {
+		b := &unstructured.Unstructured{}
+		b.SetGroupVersionKind(bindingGVK)
+		b.SetName(name)
+		b.SetNamespace(complianceNamespace)
 		if err := r.Delete(ctx, b); err != nil && !apierrors.IsNotFound(err) {
-			return fmt.Errorf("deleting ScanSettingBinding %s/%s: %w", complianceNamespace, b.GetName(), err)
+			return fmt.Errorf("deleting ScanSettingBinding %s/%s: %w", complianceNamespace, name, err)
 		}
 	}
 	// No profiles and no tailored profiles: scanning is intentionally disabled.

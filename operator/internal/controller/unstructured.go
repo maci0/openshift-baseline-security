@@ -1,8 +1,11 @@
 package controller
 
 import (
+	"context"
+
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 func u(gvk schema.GroupVersionKind) *unstructured.Unstructured {
@@ -58,6 +61,48 @@ func unstructuredName(obj map[string]any) string {
 		return ""
 	}
 	return stringMapValue(meta, "name")
+}
+
+// listPaged walks a paged List of unstructured objects, handing each page to
+// visit until the collection is exhausted, visit returns an error, or visit
+// asks to stop (which is how a caller short-circuits once it has everything it
+// came for). list is reused across pages, so a visit that retains an item must
+// copy it.
+//
+// The caller owns the GVK, the page size, and the base options; this owns the
+// Continue token and the non-advancing-token guard. Paging is not optional on
+// these reads: the client is built without the Unstructured cache option, so
+// every such List is a live apiserver read and an unbounded one pins the whole
+// namespace in one response. The returned error is the raw List error, so a
+// caller can still branch on meta.IsNoMatchError and add its own context.
+func (r *ClusterBaselineReconciler) listPaged(
+	ctx context.Context,
+	list *unstructured.UnstructuredList,
+	pageSize int64,
+	base []client.ListOption,
+	visit func(items []unstructured.Unstructured) (stop bool, err error),
+) error {
+	cont := ""
+	for {
+		opts := make([]client.ListOption, 0, len(base)+2)
+		opts = append(opts, base...)
+		opts = append(opts, client.Limit(pageSize))
+		if cont != "" {
+			opts = append(opts, client.Continue(cont))
+		}
+		if err := r.List(ctx, list, opts...); err != nil {
+			return err
+		}
+		stop, err := visit(list.Items)
+		if err != nil || stop {
+			return err
+		}
+		next, more := nextPageToken(list.GetContinue(), cont)
+		if !more {
+			return nil
+		}
+		cont = next
+	}
 }
 
 // nextPageToken advances a paged List loop and reports whether another page
