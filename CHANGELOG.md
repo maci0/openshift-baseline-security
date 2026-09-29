@@ -109,6 +109,12 @@ depend on those tags.
   objects processed, and the CR fields written, are unchanged; a namespace
   larger than one response no longer has to fit in one.
 
+- The Remediations tab could keep a stale state filter, leaving rows hidden
+  behind a chip that no longer described the list, when an unknown
+  `applicationState` value carried a comma. A state the operator does not know
+  passes through as its raw text, so two different sets of states could read as
+  the same set and the tab kept filtering by the earlier one.
+
 ## [0.8.0] - 2026-09-28
 
 ### Changed

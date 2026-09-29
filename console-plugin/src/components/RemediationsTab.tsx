@@ -353,11 +353,15 @@ const RemediationsTab: React.FC<{
       .sort((a, b) => compareForDisplay(a, b, i18n.language));
     return [...known, ...extra];
   }, [stateCounts, i18n.language]);
+  // Membership key for the filter memo. encodeKeyList, not join(','): an unknown
+  // applicationState is a cluster-supplied free-form token, so {'a', 'b,c'} and
+  // {'a,b', 'c'} share a comma-joined key and the memo would serve a filter set
+  // computed for a different state set.
+  const stateKeysId = encodeKeyList(stateKeys);
   // A state can leave the set (auto-apply, another admin) while its chip is
   // selected. Dropping it here keeps the filter from hiding rows behind a chip
   // that no longer renders, which would strand the list on an unexplained
   // subset.
-  const stateKeysId = stateKeys.join(',');
   const activeStates = React.useMemo(
     () => stateFilters.filter((k) => stateCounts.has(k)),
     // stateKeysId carries membership; stateCounts is read when it changes.
