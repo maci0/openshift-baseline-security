@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { shot } from './helpers';
+import { shot } from './shot';
 
 // Extra screenshots of modals / states not covered by the assertion suite.
 

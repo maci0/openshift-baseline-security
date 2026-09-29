@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { gotoTab } from './helpers';
+import { gotoTab } from './navigation';
 
 // Coverage for Overview/Remediations affordances that the other specs render
 // but never exercise: inline schedule editing, the score-trend card, the

@@ -193,7 +193,7 @@ false` in `.yarnrc.yml` means no install script fetches the browser build.
 `SCREENSHOT_DIR` (documented there as optional). `e2e/dotenv.ts` rejects an
 unknown, duplicate, malformed, or unterminated-quote line with the file and line
 number, so a typo cannot surface later as a missing value. The `*.test.ts` files
-in `e2e/` are the pieces jest runs (`e2e/dotenv.test.ts`, `e2e/helpers.test.ts`);
+in `e2e/` are the pieces jest runs (`e2e/dotenv.test.ts`, `e2e/shot.test.ts`);
 the `*.spec.ts` files there belong to Playwright and stay out of the jest gate.
 
 `shot()` hides the console masthead account control before the capture and

@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { gotoTab } from './helpers';
+import { gotoTab } from './navigation';
 
 // Assertions that only hold on the live multi-node, multi-benchmark cluster
 // (CIS + PCI-DSS enabled, a cis-custom TailoredProfile bound, worker nodes

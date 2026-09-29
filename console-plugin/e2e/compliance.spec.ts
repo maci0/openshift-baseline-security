@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
-import { gotoTab as goto, shot } from './helpers';
+import { gotoTab as goto } from './navigation';
+import { shot } from './shot';
 
 test.describe('Baseline Security console plugin', () => {
   test('Overview shows the compliance score and profile breakdown', async ({ page }) => {

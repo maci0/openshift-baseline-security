@@ -53,7 +53,7 @@ if (kubeUser) {
   delete process.env.KUBEADMIN_USER;
 }
 
-// Empty/whitespace SCREENSHOT_DIR means default (helpers.ts); drop so empty
+// Empty/whitespace SCREENSHOT_DIR means default (shot.ts); drop so empty
 // string is never treated as a relative write path.
 const screenshotDir = (process.env.SCREENSHOT_DIR ?? '').trim();
 if (screenshotDir) {

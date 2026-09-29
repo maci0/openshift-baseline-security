@@ -1,5 +1,6 @@
 import { test, expect, Page } from '@playwright/test';
-import { gotoTab, shot } from './helpers';
+import { gotoTab } from './navigation';
+import { shot } from './shot';
 
 // Dark-theme screenshots + a smoke assertion that the plugin renders on the
 // console's dark theme. The console applies PatternFly's dark theme by toggling

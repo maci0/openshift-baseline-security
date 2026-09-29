@@ -1,4 +1,4 @@
-import { pickAccountControl, Rect } from './helpers';
+import { pickAccountControl, Rect } from './shot';
 
 // Viewport rect with the right edge derived, so a case reads as coordinates.
 const rect = (x: number, width: number, height = 30): Rect => ({
