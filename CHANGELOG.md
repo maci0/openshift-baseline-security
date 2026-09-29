@@ -45,6 +45,13 @@ depend on those tags.
 
 ### Changed
 
+- Accessibility of the console page and the exported HTML report. A value shown
+  as an em dash (no last scan, scanning disabled, an unscored profile) named its
+  state with `aria-label` on a bare `<span>`, which assistive technology does not
+  expose, so a screen reader read "dash"; the name is now real text and the dash
+  is hidden from the accessibility tree. The exported report names each of its
+  tables with a caption, marks its column headers `scope="col"`, and declares a
+  viewport so it reflows on a narrow window.
 - An apiserver conflict (409) during a reconcile is now re-attempted on a fixed
   10 ms cadence with the same 5-attempt budget, and the wait ends if the
   reconcile is cancelled. The previous retry jittered its waits off a global

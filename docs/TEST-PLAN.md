@@ -492,6 +492,15 @@ an accepted risk neither inflates nor tanks the score.
 - [x] **HTML report score band**: 59 danger, 88 warning, 90 success, unscored
       muted (jest `paints a failing score danger`; `uses PatternFly status
       colors`).
+- [x] **HTML report table semantics**: every table carries an off-screen
+      `caption` naming it and `scope="col"` on all 19 headers, so a screen
+      reader can navigate by table and read a column's header with its cells
+      (jest `names every table and scopes its column headers for a screen
+      reader`).
+- [x] **HTML report reflow**: the exported document declares a viewport, so a
+      phone or a zoomed window reflows it instead of scaling the whole page
+      down (jest `declares a viewport so the exported page reflows instead of
+      zooming out`).
 - [ ] **ClusterScoreItem render branches**: loading/error → "—"; scored →
       colored link; not-scanned → "Not scanned" (component unit test).
 - [ ] **Extra ClusterBaselines in the list**: still prefers `cluster` name.

@@ -77,6 +77,7 @@ import BaselineNotConfigured from './BaselineNotConfigured';
 import BaselineUnavailable from './BaselineUnavailable';
 import ConsoleLink from './ConsoleLink';
 import { regionFocusProps, withDisabledTip } from './DisabledTip';
+import { AbsentValue } from './ScreenReaderOnly';
 import { restoreFocus } from './focus';
 import { useAutoDismiss } from './useAutoDismiss';
 
@@ -1064,7 +1065,12 @@ const RemediationsTab: React.FC<{
                     {remName}
                   </Td>
                   <Td dataLabel={t('Kind')}>
-                    {rem.spec?.current?.object?.kind ?? '—'}
+                    {rem.spec?.current?.object?.kind ? (
+                      rem.spec.current.object.kind
+                    ) : (
+                      // A manifest with no kind is an absent value, not a dash to read.
+                      <AbsentValue label={t('n/a')} />
+                    )}
                     {nodeNames.has(remName) && (
                       <Label
                         isCompact

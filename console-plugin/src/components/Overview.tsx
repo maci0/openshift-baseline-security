@@ -91,6 +91,7 @@ import { ChunkError } from './ChunkError';
 import { useChunk } from './chunkLoad';
 import { useAutoDismiss } from './useAutoDismiss';
 import { useWaiverExpiryClock } from './useWaiverExpiryClock';
+import { AbsentValue, ScreenReaderOnly } from './ScreenReaderOnly';
 
 // Start the charts chunk as soon as this module evaluates (default tab), so
 // Victory download overlaps first paint of the score cards instead of waiting
@@ -134,7 +135,12 @@ const ClusterTimestamp: React.FC<{ value: string; locale?: string }> = ({
   return instant ? (
     <Timestamp date={instant} locale={locale} />
   ) : (
-    <span aria-label={t('Unknown')}>{value}</span>
+    // The raw string stays visible so a hand-edited status is readable, and
+    // the qualifier naming it unparseable is text for assistive technology only.
+    <>
+      <ScreenReaderOnly>{t('Unknown')}</ScreenReaderOnly>
+      <span>{value}</span>
+    </>
   );
 };
 
@@ -1021,7 +1027,7 @@ const Overview: React.FC<{
                     />
                   ) : (
                     // Bare em dash is silent or read as "dash"; name the empty state.
-                    <span aria-label={t('Not scanned')}>—</span>
+                    <AbsentValue label={t('Not scanned')} />
                   )}
                 </DescriptionListDescription>
               </DescriptionListGroup>
@@ -1029,11 +1035,11 @@ const Overview: React.FC<{
                 <DescriptionListTerm>{t('Next scan')}</DescriptionListTerm>
                 <DescriptionListDescription>
                   {scanningDisabled(baseline) ? (
-                    <span aria-label={t('Scanning is disabled')}>—</span>
+                    <AbsentValue label={t('Scanning is disabled')} />
                   ) : baseline.status?.nextScanTime ? (
                     <ClusterTimestamp value={baseline.status.nextScanTime} locale={locale} />
                   ) : (
-                    <span aria-label={t('n/a')}>—</span>
+                    <AbsentValue label={t('n/a')} />
                   )}
                 </DescriptionListDescription>
               </DescriptionListGroup>

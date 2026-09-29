@@ -196,6 +196,10 @@ const REPORT_CSS =
   ';font-size:' +
   REPORT_TOKENS.subheading +
   '}' +
+  // Name each table for a screen reader navigating table by table. The visible
+  // section heading above it is not the programmatic name, so the caption
+  // repeats it off-screen rather than leaving the table anonymous (WCAG 1.3.1).
+  'caption.visually-hidden{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);clip-path:inset(50%);white-space:nowrap;border:0}' +
   'table{border-collapse:collapse;margin:0.5rem 0 0;width:100%}' +
   'th,td{border-block-end:1px solid ' +
   REPORT_TOKENS.border +
@@ -355,9 +359,15 @@ export const buildReportHtml = (
     ? formatLocalDateTime(st.lastScanTime, locale)
     : t('n/a');
   const waiverCount = activeWaivers.length;
+  // One heading string: the <h2> and the table's off-screen <caption> must
+  // agree, and a screen reader reaching the table reads the caption.
+  const waiversHeading = t('Active waivers ({{count}})', {
+    count: waiverCount,
+    formattedCount: fmt(waiverCount),
+  });
   // CSP: no scripts (report is static HTML). style-src unsafe-inline covers the
   // embedded chrome CSS only; all untrusted text is HTML-escaped above.
-  return `<!doctype html><html lang="${esc(htmlLang)}" dir="${htmlDir}"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"><meta name="referrer" content="no-referrer"><title>${esc(t('Compliance report'))}</title>
+  return `<!doctype html><html lang="${esc(htmlLang)}" dir="${htmlDir}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"><meta name="referrer" content="no-referrer"><title>${esc(t('Compliance report'))}</title>
 <style>${REPORT_CSS}</style></head><body class="${frameClass}">
 <h1>${esc(t('Compliance report'))}</h1>
 <p class="muted">${esc(t('Generated {{when}} • last scan {{lastScan}}', {
@@ -366,18 +376,13 @@ export const buildReportHtml = (
   }))}</p>
 <p class="${scoreClass}">${esc(t('Score: {{score}}', { score }))}</p>
 <h2>${esc(t('Profiles'))}</h2>
-<table><thead><tr><th>${esc(t('Profile'))}</th><th>${esc(t('Pass'))}</th><th>${esc(t('Fail'))}</th><th>${esc(t('Manual'))}</th><th>${esc(t('Info'))}</th><th>${esc(t('Inconsistent'))}</th><th>${esc(t('Error'))}</th><th>${esc(t('Waived'))}</th><th>${esc(t('Not applicable'))}</th></tr></thead>
+<table><caption class="visually-hidden">${esc(t('Profiles'))}</caption><thead><tr><th scope="col">${esc(t('Profile'))}</th><th scope="col">${esc(t('Pass'))}</th><th scope="col">${esc(t('Fail'))}</th><th scope="col">${esc(t('Manual'))}</th><th scope="col">${esc(t('Info'))}</th><th scope="col">${esc(t('Inconsistent'))}</th><th scope="col">${esc(t('Error'))}</th><th scope="col">${esc(t('Waived'))}</th><th scope="col">${esc(t('Not applicable'))}</th></tr></thead>
 <tbody>${profileRows || emptyProfiles}</tbody></table>
 <h2>${esc(t('Failing checks'))}</h2>
-<table><thead><tr><th>${esc(t('Check'))}</th><th>${esc(t('Title'))}</th><th>${esc(t('Profile'))}</th><th>${esc(t('Severity'))}</th></tr></thead>
+<table><caption class="visually-hidden">${esc(t('Failing checks'))}</caption><thead><tr><th scope="col">${esc(t('Check'))}</th><th scope="col">${esc(t('Title'))}</th><th scope="col">${esc(t('Profile'))}</th><th scope="col">${esc(t('Severity'))}</th></tr></thead>
 <tbody>${failingRows || emptyFailing}</tbody></table>
-<h2>${esc(
-    t('Active waivers ({{count}})', {
-      count: waiverCount,
-      formattedCount: fmt(waiverCount),
-    }),
-  )}</h2>
-<table><thead><tr><th>${esc(t('Check'))}</th><th>${esc(t('Reason'))}</th><th>${esc(t('Requested by'))}</th><th>${esc(t('Approved by'))}</th><th>${esc(t('Expires'))}</th><th>${esc(t('Review by'))}</th></tr></thead>
+<h2>${esc(waiversHeading)}</h2>
+<table><caption class="visually-hidden">${esc(waiversHeading)}</caption><thead><tr><th scope="col">${esc(t('Check'))}</th><th scope="col">${esc(t('Reason'))}</th><th scope="col">${esc(t('Requested by'))}</th><th scope="col">${esc(t('Approved by'))}</th><th scope="col">${esc(t('Expires'))}</th><th scope="col">${esc(t('Review by'))}</th></tr></thead>
 <tbody>${waiverRows || emptyWaivers}</tbody></table>
 </body></html>`;
 };

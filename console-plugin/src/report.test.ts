@@ -328,6 +328,40 @@ describe('buildReportHtml data correctness', () => {
     expect(html).toContain('100 / 100');
     expect(html).toContain('class="score score-success"');
   });
+
+  it('names every table and scopes its column headers for a screen reader', () => {
+    const html = buildReportHtml(
+      withStatus({
+        score: 83,
+        profiles: [
+          { key: 'cis', pass: 10, fail: 0, manual: 0, info: 0, inconsistent: 0, error: 0, waived: 0, notApplicable: 0 },
+        ],
+      }),
+      [],
+      NOW,
+    );
+    // A heading above a table is not its programmatic name: the caption is.
+    for (const name of ['Profiles', 'Failing checks', 'Active waivers (0)']) {
+      expect(html).toContain(`<caption class="visually-hidden">${name}</caption>`);
+    }
+    // 9 profile columns, 4 failing-check columns, 6 waiver columns.
+    expect(html.match(/<th scope="col">/g)).toHaveLength(19);
+    expect(html).not.toMatch(/<th>/);
+  });
+
+  it('declares a viewport so the exported page reflows instead of zooming out', () => {
+    const html = buildReportHtml(
+      withStatus({
+        score: 83,
+        profiles: [
+          { key: 'cis', pass: 10, fail: 0, manual: 0, info: 0, inconsistent: 0, error: 0, waived: 0, notApplicable: 0 },
+        ],
+      }),
+      [],
+      NOW,
+    );
+    expect(html).toContain('<meta name="viewport" content="width=device-width,initial-scale=1">');
+  });
 });
 describe('buildReportHtml', () => {
   const cb = {
