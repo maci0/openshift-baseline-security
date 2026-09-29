@@ -75,6 +75,7 @@ import { isString, stripInvisibleText } from '../parse';
 import { LOADING_ROW_HEIGHT } from '../layout';
 import BaselineNotConfigured from './BaselineNotConfigured';
 import BaselineUnavailable from './BaselineUnavailable';
+import ScanningDisabledHint from './ScanningDisabled';
 import ConsoleLink from './ConsoleLink';
 import { regionFocusProps, withDisabledTip } from './DisabledTip';
 import { AbsentValue } from './ScreenReaderOnly';
@@ -970,10 +971,7 @@ const RemediationsTab: React.FC<{
             >
               <EmptyStateBody>
                 {noScanning ? (
-                  <>
-                    {t('No profiles are selected. Enable a profile to resume scanning.')}{' '}
-                    <ConsoleLink href="/baseline-security/profiles">{t('Go to Profiles')}</ConsoleLink>
-                  </>
+                  <ScanningDisabledHint />
                 ) : (
                   <>
                     {t(

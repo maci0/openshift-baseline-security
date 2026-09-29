@@ -17,20 +17,10 @@ Options:
 EOF
 }
 
-if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
-  if [ "$#" -ne 1 ]; then
-    echo "${prog}: --help takes no arguments" >&2
-    usage >&2
-    exit 2
-  fi
-  usage
-  exit 0
-fi
-if [ "$#" -ne 0 ]; then
-  echo "${prog}: unexpected arguments: $*" >&2
-  usage >&2
-  exit 2
-fi
+# shellcheck source-path=SCRIPTDIR
+# shellcheck source=lib-cli.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib-cli.sh"
+reject_arguments "$@"
 
 ROOT="${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 API="${ROOT}/operator/api/v1alpha1/clusterbaseline_types.go"

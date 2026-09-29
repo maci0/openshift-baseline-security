@@ -101,6 +101,7 @@ import {
 } from '../waivers';
 import BaselineNotConfigured from './BaselineNotConfigured';
 import BaselineUnavailable from './BaselineUnavailable';
+import ScanningDisabledHint from './ScanningDisabled';
 import ConsoleLink from './ConsoleLink';
 import { withDisabledTip } from './DisabledTip';
 import { restoreFocus } from './focus';
@@ -844,10 +845,7 @@ const ResultsTab: React.FC<{
         >
           <EmptyStateBody>
             {noScanning ? (
-              <>
-                {t('No profiles are selected. Enable a profile to resume scanning.')}{' '}
-                <ConsoleLink href="/baseline-security/profiles">{t('Go to Profiles')}</ConsoleLink>
-              </>
+              <ScanningDisabledHint />
             ) : (
               t(
                 'Results appear after a scan completes. The first scan starts automatically; use Rescan now above to run one sooner.',

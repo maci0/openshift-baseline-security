@@ -5,7 +5,7 @@ import { formatCount } from '../dates';
 import { ClusterBaseline, ClusterBaselineGVK } from '../models';
 import { clusterScore, scoreColor } from '../scoring';
 import ConsoleLink from './ConsoleLink';
-import { ScreenReaderOnly } from './ScreenReaderOnly';
+import { AbsentValue } from './ScreenReaderOnly';
 
 // Module-level so every render passes the same watch options object. A literal
 // built in the component body is a new reference on each render, and the SDK
@@ -41,8 +41,7 @@ const ClusterScoreItem: React.FC = () => {
   if (!loaded) {
     return (
       <span aria-busy="true">
-        <ScreenReaderOnly>{t('Loading compliance data')}</ScreenReaderOnly>
-        <span aria-hidden>—</span>
+        <AbsentValue label={t('Loading compliance data')} />
       </span>
     );
   }

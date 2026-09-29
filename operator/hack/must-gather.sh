@@ -33,14 +33,9 @@ _redact_yaml_dump() {
   # would leave that text in the dump, so a dropped key also swallows its
   # continuation. last-applied-configuration is a single JSON blob per key, so
   # its continuation is kept and the JSON substitutions redact it instead.
-  # Rewrite via a temp file: GNU sed -i is not accepted by BSD sed (macOS),
-  # which treats the next argument as a required backup suffix.
   #
-  # The rewrite runs in a subshell that owns the temp file, whose EXIT trap
-  # removes it on every exit, including on a signal: the pre-redaction copy in
-  # TMPDIR still carries the requestedBy / approvedBy identities this function
-  # exists to strip. The signal traps turn a signal into an ordinary exit so the
-  # EXIT trap still runs.
+  # The signal traps turn a signal into an ordinary exit so the EXIT trap
+  # still runs.
   (
     local tmp
     tmp="$(mktemp)"

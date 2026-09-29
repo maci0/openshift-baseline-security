@@ -86,6 +86,7 @@ import BaselineNotConfigured from './BaselineNotConfigured';
 import { BaselineUnavailableSection } from './BaselineUnavailable';
 import LoadingCards from './LoadingCards';
 import ConsoleLink from './ConsoleLink';
+import ScanningDisabledHint from './ScanningDisabled';
 import { regionFocusProps, withDisabledTip } from './DisabledTip';
 import { ChunkError } from './ChunkError';
 import { useChunk } from './chunkLoad';
@@ -841,8 +842,7 @@ const Overview: React.FC<{
           title={t('Scanning is disabled')}
           style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}
         >
-          {t('No profiles are selected. Enable a profile to resume scanning.')}{' '}
-          <ConsoleLink href="/baseline-security/profiles">{t('Go to Profiles')}</ConsoleLink>
+          <ScanningDisabledHint />
         </Alert>
       )}
       {degraded && (

@@ -2,9 +2,8 @@ import { ClusterBaseline, ComplianceCheckResult, ResultCounts } from './models';
 import { HISTORY_SCORING_MODE_ANN, aggregateCounts, checkSeverity, clusterScore, effectiveScoringMode, flatProfileScore, historyScoringModeMismatch, latestSnapshotScore, normalizeScore, profileScore, scoreColor, scoreLabelColor, scoreStatus, severityWeight } from './scoring';
 import { isFiniteNumber } from './parse';
 
-// Runtime pins for fuzz sweeps: totals must be real numbers and mode checks
-// real booleans whatever garbage the persisted CR carries.
-const isNum = (v: unknown): v is number => typeof v === 'number';
+// Runtime pin for fuzz sweeps: mode checks must be real booleans whatever
+// garbage the persisted CR carries.
 const isBool = (v: unknown): v is boolean => typeof v === 'boolean';
 import { fuzzRand, randomString } from './testing/fuzz';
 
