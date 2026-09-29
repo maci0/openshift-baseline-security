@@ -50,6 +50,16 @@ depend on those tags.
   reconcile is cancelled. The previous retry jittered its waits off a global
   random source, so two runs of the same input could stop at different points.
 
+- `docs/THREAT_MODEL.md` brought back in line with the code after 0.6.1. The
+  commit stamp, the operator fuzz-target count (60, not 58), and the whole
+  `cmd/main.go`, `plugin.go`, `plugin_pod.go`, `compliance_operator.go`,
+  `manager.yaml`, `nginx.conf`, and console-plugin citation set had drifted.
+  Three surfaces the model did not name are now covered: the `--version` flag,
+  the `resourceVersion`-guarded console patch builders (a stale batch or waiver
+  resubmit now returns 409 instead of a second MCP pause and a second node
+  reboot), and the plugin's `UntrustedValue` boundary type with bidi isolation
+  of untrusted text before translation. No shipped behavior changed.
+
 ## [0.8.0] - 2026-09-28
 
 ## [0.7.0] - 2026-09-28
