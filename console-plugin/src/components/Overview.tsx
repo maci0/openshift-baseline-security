@@ -740,6 +740,11 @@ const Overview: React.FC<{
   // countable score (history stays short) but a second scan already compared.
   const hasPriorScan =
     !!baseline.status?.diffBaseScanTime || (baseline.status?.history?.length ?? 0) > 1;
+  // Score cards come from status rollups, which the operator writes only after
+  // a completed scan, so a bound-but-unscanned baseline has neither list.
+  const hasProfileScores =
+    (baseline.status?.profiles ?? []).length > 0 ||
+    (baseline.status?.tailoredProfiles ?? []).length > 0;
 
   // Compact score chip shown as a per-profile card action (built-in + tailored).
   const scoreLabel = (pScore: number | null) =>
@@ -1185,25 +1190,46 @@ const Overview: React.FC<{
       </Gallery>
       {/* Per-profile score cards in their own row so they stay uniform height
           instead of stretching to match the tall donut/details/trend cards. */}
-      <Gallery
-        hasGutter
-        minWidths={{ default: SCORE_CARD_MIN_WIDTH }}
-        style={{ marginTop: 'var(--pf-t--global--spacer--md)' }}
-      >
-        {(baseline.status?.profiles ?? []).map((p) =>
-          scoreCard(p.key, t(profileTitle(p.key)), p, p.history),
-        )}
-        {(baseline.status?.tailoredProfiles ?? []).map((tp) =>
-          scoreCard(
-            `tp-${tp.name}`,
-            <>
-              {tp.name} <Label isCompact color="blue">{t('Tailored')}</Label>
-            </>,
-            tp,
-            tp.history,
-          ),
-        )}
-      </Gallery>
+      {hasProfileScores ? (
+        <Gallery
+          hasGutter
+          minWidths={{ default: SCORE_CARD_MIN_WIDTH }}
+          style={{ marginTop: 'var(--pf-t--global--spacer--md)' }}
+        >
+          {(baseline.status?.profiles ?? []).map((p) =>
+            scoreCard(p.key, t(profileTitle(p.key)), p, p.history),
+          )}
+          {(baseline.status?.tailoredProfiles ?? []).map((tp) =>
+            scoreCard(
+              `tp-${tp.name}`,
+              <>
+                {tp.name} <Label isCompact color="blue">{t('Tailored')}</Label>
+              </>,
+              tp,
+              tp.history,
+            ),
+          )}
+        </Gallery>
+      ) : (
+        // status.profiles stays empty until the first scan is tallied, so a
+        // baseline with profiles enabled and no completed scan left an empty
+        // gap where this row belongs, with nothing saying what was missing.
+        // Scanning-disabled baselines keep the alert above instead, which
+        // already names the fix.
+        !scanningDisabled(baseline) && (
+          <EmptyState
+            titleText={t('No profile scores yet')}
+            headingLevel="h2"
+            style={{ marginTop: 'var(--pf-t--global--spacer--lg)' }}
+          >
+            <EmptyStateBody>
+              {t(
+                'A score and breakdown per profile appear after a scan completes. Use Rescan now above to run one sooner.',
+              )}
+            </EmptyStateBody>
+          </EmptyState>
+        )
+      )}
     </PageSection>
   );
 };

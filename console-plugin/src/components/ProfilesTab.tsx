@@ -1147,6 +1147,17 @@ const ProfilesTab: React.FC<{
           </Button>
         </ModalFooter>
       </Modal>
+      {/* Heading like the tailored section below: two sibling card galleries
+          with only one of them titled left the first grid unlabelled, so a
+          reader landing mid-page could not tell what the cards were. */}
+      <Title headingLevel="h2" size="lg">
+        {t('Compliance profiles')}
+      </Title>
+      <Content component="p" style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}>
+        {t(
+          'These profiles are available to scan. Enable one to include its checks in scans; the Compliance Operator runs the checks.',
+        )}
+      </Content>
       <Gallery hasGutter minWidths={{ default: PROFILE_CARD_MIN_WIDTH }}>
         {PROFILE_KEYS.map((key) => {
           const info = PROFILE_INFO[key];

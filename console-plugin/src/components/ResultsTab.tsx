@@ -1056,10 +1056,14 @@ const ResultsTab: React.FC<{
                           </>
                         )}
                       </Content>
+                      {/* Same scroll wrapper the Remediations table uses: a node
+                          name is untrusted CR text, and inside a fixed-width
+                          modal it pushed the table past the dialog edge on a
+                          narrow viewport instead of wrapping or scrolling. */}
+                      <div style={{ overflowX: 'auto', marginBottom: 'var(--pf-t--global--spacer--md)' }}>
                       <Table
                         variant="compact"
                         aria-label={t('Per-node results')}
-                        style={{ marginBottom: 'var(--pf-t--global--spacer--md)' }}
                       >
                         <Thead>
                           <Tr>
@@ -1103,6 +1107,7 @@ const ResultsTab: React.FC<{
                           )}
                         </Tbody>
                       </Table>
+                      </div>
                     </>
                   );
                 })()}
