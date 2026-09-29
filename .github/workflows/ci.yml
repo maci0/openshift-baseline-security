@@ -68,7 +68,17 @@ jobs:
       - name: verify generated files are current
         run: |
           make generate manifests
-          git diff --exit-code
+          # --porcelain, not `git diff`: a NEW generated file (a zz_generated
+          # deepcopy for a type added this PR, an extra CRD in the bases dir)
+          # is untracked, and `git diff` sees nothing to exit non-zero over. The
+          # file then reaches the release image because every Dockerfile COPYs
+          # the tree, while CI reported the tree clean.
+          status="$(git status --porcelain)"
+          if [ -n "$status" ]; then
+            echo "generated files are out of date; run 'make generate manifests' and commit the result:" >&2
+            echo "$status" >&2
+            exit 1
+          fi
       # `make verify-manifests` renders config/ with whatever kustomize the host
       # has; kubectl (preinstalled on the runner) supplies the embedded one, so
       # nothing is installed for it.

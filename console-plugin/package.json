@@ -8,7 +8,7 @@
   },
   "scripts": {
     "clean": "rm -rf dist",
-    "check-node": "node -e \"const m=+process.versions.node.split('.')[0]; if(m!==22){console.error('Node 22 required (got '+process.versions.node+'; see .nvmrc / package.json engines)'); process.exit(1)}\"",
+    "check-node": "node -e \"const e=require('./package.json').engines.node; const m=+process.versions.node.split('.')[0]; const want=+(e.match(/>=\\s*(\\d+)/)||[])[1]; if(m!==want){console.error('Node '+want+' required (got '+process.versions.node+'; see .nvmrc / package.json engines: '+e+')'); process.exit(1)}\"",
     "build": "yarn check-node && yarn typecheck && yarn clean && NODE_ENV=production TZ=UTC LC_ALL=C SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-0} yarn ts-node node_modules/.bin/webpack && yarn licenses && yarn size && test -s dist/plugin-manifest.json && test -s dist/locales/en/plugin__baseline-security-console-plugin.json && test -s dist/THIRD-PARTY-NOTICES.txt && ls dist/plugin-entry*.min.js >/dev/null",
     "licenses": "yarn ts-node tools/attribution/generate.ts",
     "size": "yarn ts-node tools/size/check.ts",

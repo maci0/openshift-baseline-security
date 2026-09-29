@@ -86,7 +86,11 @@ endef
 VERSION_RE := $(subst .,\.,$(VERSION))
 GO_VERSION_RE := $(subst .,\.,$(GO_VERSION))
 # Go minor (1.26 from 1.26.6) for the CI builder image tag (golang-1.26-...).
-GO_MINOR := $(basename $(GO_VERSION))
+# Take the first two dotted components explicitly. `basename` only gave the
+# right answer because go.mod spells a full patch version, and it stops at the
+# last dot: a legal `go 1.27` directive would yield `1`, and every builder-tag
+# check below would then grep for `golang-1-` and fail on a correct tree.
+GO_MINOR := $(word 1,$(subst ., ,$(GO_VERSION))).$(word 2,$(subst ., ,$(GO_VERSION)))
 
 .PHONY: help
 help:
@@ -322,8 +326,18 @@ ci:
 	$(MAKE) --no-print-directory govulncheck
 	$(MAKE) --no-print-directory test-alerts
 	$(MAKE) --no-print-directory generate manifests
-	@git diff --exit-code -- api config/crd config/rbac bundle/manifests/baselinesecurity.openshift.io_clusterbaselines.yaml \
-		|| { echo "generated files drifted; run: make generate manifests" >&2; exit 1; }
+	# git status, not git diff: a NEW generated file (a zz_generated deepcopy for
+	# a type added this change, an extra CRD in the bases dir) is untracked, and
+	# `git diff` exits 0 over a path it has no entry for. The file then reaches
+	# the release image, because every Dockerfile COPYs the whole tree, while the
+	# gate reported the tree clean. Scoped to the generated paths so an unrelated
+	# dirty file in the worktree does not fail the replica.
+	@drift=$$(git status --porcelain -- api config/crd config/rbac bundle/manifests); \
+	if [ -n "$$drift" ]; then \
+		echo "generated files drifted; run: make generate manifests and commit the result:" >&2; \
+		echo "$$drift" >&2; \
+		exit 1; \
+	fi
 	$(MAKE) --no-print-directory bundle
 
 # Keep in lockstep with operator/Dockerfile RUN go build flags (reproducible, stripped, PIE).
