@@ -69,6 +69,12 @@ export const expiresAtMs = (iso: string): number => {
   if (d) return d.getTime();
   // Date-only shape but not a real calendar day (e.g. 2026-02-31): fail closed.
   if (localDateOnlyRe.test(iso)) return NaN;
+  // Same fail-closed rule for a date-time whose leading day does not exist.
+  // `new Date` is lenient about the calendar and V8's legacy parser still takes
+  // a space separator, so "2026-02-31 00:00:00Z" would roll forward to
+  // 2026-03-03 and keep a waiver live three days past the day it claims, while
+  // formatLocalDate renders the same value as Feb 31.
+  if (!isoDayExists(iso)) return NaN;
   return new Date(iso).getTime();
 };
 

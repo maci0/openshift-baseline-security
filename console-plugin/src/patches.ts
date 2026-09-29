@@ -219,6 +219,13 @@ export const addWaiverPatch = (
   const reason = stripInvisibleText(entry.reason?.trim() ?? '');
   const requestedBy = stripControlAndFormat(entry.requestedBy?.trim() ?? '');
   const approvedBy = stripControlAndFormat(entry.approvedBy?.trim() ?? '');
+  // isParseableTime trims before it matches, so an RFC3339 value carrying
+  // padding would validate here and then be stored padded. metav1.Time
+  // unmarshals with time.Parse(time.RFC3339), which rejects the padding, so
+  // the apiserver would 422 a waiver the console reported as saved. Trim once
+  // and use the trimmed value for both the check and the store.
+  const expiresAt = entry.expiresAt?.trim() ?? '';
+  const reviewBy = entry.reviewBy?.trim() ?? '';
   // Match ClusterBaseline CRD bounds so over-long / malformed fields fail closed
   // here (empty ops) instead of only at apiserver admission.
   if (
@@ -226,8 +233,8 @@ export const addWaiverPatch = (
     codePointLength(reason) > WAIVER_REASON_MAX_LEN ||
     codePointLength(requestedBy) > WAIVER_ATTRIBUTION_MAX_LEN ||
     codePointLength(approvedBy) > WAIVER_ATTRIBUTION_MAX_LEN ||
-    (entry.expiresAt != null && entry.expiresAt !== '' && !isParseableTime(entry.expiresAt)) ||
-    (entry.reviewBy != null && entry.reviewBy !== '' && !isParseableTime(entry.reviewBy))
+    (expiresAt !== '' && !isParseableTime(expiresAt)) ||
+    (reviewBy !== '' && !isParseableTime(reviewBy))
   ) {
     return [];
   }
@@ -236,8 +243,8 @@ export const addWaiverPatch = (
   if (reason) clean.reason = reason;
   if (requestedBy) clean.requestedBy = requestedBy;
   if (approvedBy) clean.approvedBy = approvedBy;
-  if (entry.expiresAt) clean.expiresAt = entry.expiresAt;
-  if (entry.reviewBy) clean.reviewBy = entry.reviewBy;
+  if (expiresAt) clean.expiresAt = expiresAt;
+  if (reviewBy) clean.reviewBy = reviewBy;
   const guard = resourceVersionTest(resourceVersion);
   if (waivers != null) {
     const idx = waivers.findIndex((w) => w.name === name);

@@ -4,6 +4,7 @@
 // the charting library into the page shell.
 import { encodeKeyPart } from './contentKey';
 import { ScoreSnapshot } from './models';
+import { isString } from './parse';
 import { normalizeScore } from './scoring';
 
 // History snapshots to Victory {x: Date, y: score} points.
@@ -19,7 +20,11 @@ export const toTrendData = (history?: ScoreSnapshot[]): { x: Date; y: number }[]
   (history ?? [])
     // status.history is cluster-supplied and not runtime type-checked, so a
     // hand-edited null or non-string entry must be dropped, not throw and blank
-    // the Overview page.
+    // the Overview page. The type guard is not redundant with the getTime()
+    // check below: `new Date(null)` is the epoch and `new Date(0)` is the
+    // epoch too, so a coerced non-string would survive as a real point and
+    // stretch the x domain to 1970.
+    .filter((h) => isString(h?.time))
     .map((h) => ({ x: new Date(h?.time), y: normalizeScore(h?.score) }))
     .filter(
       (p): p is { x: Date; y: number } =>

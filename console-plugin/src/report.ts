@@ -310,14 +310,17 @@ export const buildReportHtml = (
         `<td>${fmt(countCell(c.waived))}</td><td>${fmt(countCell(c.notApplicable))}</td></tr>`,
     )
     .join('');
-  const activeWaivers = (baseline.spec.waivers ?? []).filter(
+  // Optional-chain spec like status above: a baseline rendered from a partial
+  // read (spec not yet delivered, or a hand-written report fixture) must still
+  // export rather than throw and lose the whole report.
+  const activeWaivers = (baseline.spec?.waivers ?? []).filter(
     (w) => w.name && !waiverExpired(w, now),
   );
   // Same active set as score/CSV (activeWaivedNames); rebuild from the filtered
   // list so empty names cannot suppress a FAIL row via a corrupt waiver entry.
   const activeWaived = new Set(activeWaivers.map((w) => w.name));
-  const profileSet = new Set(baseline.spec.profiles ?? []);
-  const tailoredSet = new Set(baseline.spec.tailoredProfiles ?? []);
+  const profileSet = new Set(baseline.spec?.profiles ?? []);
+  const tailoredSet = new Set(baseline.spec?.tailoredProfiles ?? []);
   // Single pass over results: no intermediate filtered array (export can hold
   // multi-thousand CCRs; only FAIL rows become HTML).
   const failingParts: string[] = [];

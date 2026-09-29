@@ -86,6 +86,37 @@ depend on those tags.
 
 ### Fixed
 
+- A waiver `expiresAt` or `reviewBy` typed with surrounding whitespace passed the
+  console's RFC3339 check, which trims before it matches, and was then written
+  into the patch untrimmed. `metav1.Time` unmarshals with
+  `time.Parse(time.RFC3339)`, which rejects the padding, so the apiserver
+  answered 422 for a waiver the console had already reported as saved. Both
+  fields are now trimmed once and the trimmed value is what gets checked and
+  stored, matching how `reason` and the attribution fields were already
+  handled. Values with no padding are unaffected.
+
+- A waiver expiry whose leading calendar day does not exist stayed active past
+  the day it claims. `new Date` is lenient about the calendar and its legacy
+  parser still accepts a space separator, so `2026-02-31 00:00:00Z` rolled
+  forward to 2026-03-03, leaving the waiver live for three extra days while the
+  same value displayed as "Feb 31". `expiresAtMs` now applies the calendar
+  check the module already used for the display path, so the value is treated
+  as expired. Date-only values were already refused.
+
+- A history snapshot with a non-string `time` (a hand-edited `null`, `0`, or
+  `true`) survived into the Overview trend chart. `new Date` coerces those to
+  real instants at or near the epoch, so the point was plotted and stretched
+  the chart's time domain to 1970, compressing the real series into one column,
+  while the score badge beside it read the same ring through `Date.parse` and
+  disagreed. Non-string times are now dropped, which is what the module already
+  documented.
+
+- The `Degraded` condition for a stalled Compliance Operator install read
+  `after 15m0s:` because it formatted the raw `time.Duration`, while the scan
+  storage and console plugin messages render the same kind of grace through
+  `graceMinutes`. It now reads `after 15m:`, consistent with its siblings. The
+  message is a user-facing status string; no condition type or reason changed.
+
 - `spec.schedule` was read back with `String#trim` on the Details card, which
   strips characters Go's `strings.TrimSpace` keeps. A schedule stored with a
   leading U+FEFF (or any other non-Go whitespace) is `InvalidSchedule` to the

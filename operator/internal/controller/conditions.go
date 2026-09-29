@@ -227,7 +227,7 @@ func setRollupConditions(cb *baselinev1alpha1.ClusterBaseline, now time.Time) {
 			detail = co.Reason
 		}
 		setCond(cb, now, "Degraded", metav1.ConditionTrue, "InstallStalled",
-			fmt.Sprintf("Compliance Operator not ready after %s: %s", coInstallGrace, detail))
+			fmt.Sprintf("Compliance Operator not ready after %dm: %s", graceMinutes(coInstallGrace), detail))
 	case condFalseWith(scan, "InvalidSchedule"):
 		setCond(cb, now, "Degraded", metav1.ConditionTrue, "InvalidSchedule", scan.Message)
 	case condFalseWith(storage):
