@@ -66,7 +66,6 @@ import { checkResultHref, machineConfigPoolHref } from '../links';
 import {
   addWaiverPatch,
   removeWaiverPatch,
-  resourceVersionTest,
   WAIVER_ATTRIBUTION_MAX_LEN,
   WAIVER_REASON_MAX_LEN,
 } from '../patches';
@@ -294,7 +293,11 @@ const ResultsTab: React.FC<{
       await k8sPatch({
         model: ClusterBaselineModel,
         resource: baseline,
-        data: [...resourceVersionTest(baseline.metadata.resourceVersion), ...data],
+        // Every waiver builder carries its own resourceVersion test, so this
+        // sends the ops exactly as built. Prepending a second guard here used
+        // to be what kept a repeated submit from clobbering the list; the
+        // builders own that now, and patchWaivers has no way to widen it.
+        data,
       });
       // Success path bypasses the busy guard on closeModal.
       resetWaiverForm();
@@ -397,7 +400,7 @@ const ResultsTab: React.FC<{
   }, [loaded, resultsError, waiversKey, results]);
 
   const removeWaiverByIndex = (index: number, name: string, successMsg?: string) => {
-    const data = removeWaiverPatch(index, name);
+    const data = removeWaiverPatch(index, name, baseline?.metadata.resourceVersion);
     if (!data.length) {
       setWaiveError(t('Failed to remove waiver.'));
       return;
@@ -487,14 +490,18 @@ const ResultsTab: React.FC<{
       setWaiveError(t('Expiry or review date is invalid. Use a valid calendar date.'));
       return;
     }
-    const data = addWaiverPatch(waivers, {
-      name: selectedLive.metadata.name,
-      reason: waiveReason.trim(),
-      requestedBy: waiveRequestedBy.trim(),
-      approvedBy: waiveApprovedBy.trim(),
-      expiresAt,
-      reviewBy,
-    });
+    const data = addWaiverPatch(
+      waivers,
+      {
+        name: selectedLive.metadata.name,
+        reason: waiveReason.trim(),
+        requestedBy: waiveRequestedBy.trim(),
+        approvedBy: waiveApprovedBy.trim(),
+        expiresAt,
+        reviewBy,
+      },
+      baseline?.metadata.resourceVersion,
+    );
     // Empty patch is client-side MaxLength/name validation: surface it so
     // over-long fields are not a silent no-op.
     if (!data.length) {

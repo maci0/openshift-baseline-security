@@ -407,6 +407,7 @@ const RemediationsTab: React.FC<{
     const batchPatch = batchApplyPatch(
       !!baseline.metadata.annotations,
       batchable.map((r) => r.metadata?.name ?? ""),
+      baseline.metadata.resourceVersion,
     );
     if (!batchPatch.length) {
       setError(t('No valid remediations to batch-apply.'));
@@ -417,7 +418,10 @@ const RemediationsTab: React.FC<{
         k8sPatch({
           model: ClusterBaselineModel,
           resource: baseline,
-          data: [...resourceVersionTest(baseline.metadata.resourceVersion), ...batchPatch],
+          // batchApplyPatch carries the resourceVersion test itself, so the
+          // request is rejected rather than re-pausing the pools if anything
+          // wrote the baseline since this list was read.
+          data: batchPatch,
         }),
       t('Failed to start batch apply.'),
     ).then((ok) => {

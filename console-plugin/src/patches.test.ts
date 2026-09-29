@@ -1,9 +1,102 @@
 import { isValidCron } from './cron';
 import { isValidK8sName } from './names';
 import { isString } from './parse';
-import { batchApplyPatch, batchApplyRequested, remediationApplyPatch, rescanPatch, rescanToken, resourceVersionTest, schedulePatch, tailoredProfileBindingPatch } from './patches';
+import { addWaiverPatch, batchApplyPatch, batchApplyRequested, remediationApplyPatch, removeWaiverPatch, rescanPatch, rescanToken, resourceVersionTest, schedulePatch, tailoredProfileBindingPatch, type PatchOp } from './patches';
 import { randomString } from './testing/fuzz';
 import { trimGoSpace } from './text';
+
+// Minimal RFC 6902 applier covering the op set the builders in patches.ts emit
+// (add / replace / remove / test, object members, whole arrays, and the "-"
+// array append). It exists so a test can assert what a SECOND execution does
+// to a document instead of asserting only the op list: the whole-point failure
+// mode is a patch that looks right and silently replaces a list.
+type Doc = { [key: string]: unknown };
+
+const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
+
+const readPointer = (doc: Doc, path: string): unknown => {
+  let cur: unknown = doc;
+  for (const raw of path.split('/').slice(1)) {
+    const key = raw.replace(/~1/g, '/').replace(/~0/g, '~');
+    if (cur == null || typeof cur !== 'object') {
+      throw new Error(`path ${path} does not resolve`);
+    }
+    cur = (cur as Record<string, unknown>)[key];
+  }
+  return cur;
+};
+
+const writePointer = (doc: Doc, path: string, value: unknown): void => {
+  const keys = path.split('/').slice(1).map((k) => k.replace(/~1/g, '/').replace(/~0/g, '~'));
+  const last = keys.pop();
+  if (last == null) throw new Error('empty pointer');
+  let cur: unknown = doc;
+  for (const key of keys) {
+    if (cur == null || typeof cur !== 'object') {
+      throw new Error(`path ${path} does not resolve`);
+    }
+    cur = (cur as Record<string, unknown>)[key];
+  }
+  if (cur == null || typeof cur !== 'object') {
+    throw new Error(`path ${path} does not resolve`);
+  }
+  (cur as Record<string, unknown>)[last] = value;
+};
+
+const removePointer = (doc: Doc, path: string): void => {
+  const keys = path.split('/').slice(1).map((k) => k.replace(/~1/g, '/').replace(/~0/g, '~'));
+  const last = keys.pop();
+  if (last == null) throw new Error('empty pointer');
+  let cur: unknown = doc;
+  for (const key of keys) {
+    if (cur == null || typeof cur !== 'object') {
+      throw new Error(`path ${path} does not resolve`);
+    }
+    cur = (cur as Record<string, unknown>)[key];
+  }
+  if (Array.isArray(cur) && last !== '-') {
+    cur.splice(Number(last), 1);
+  } else if (cur != null && typeof cur === 'object') {
+    delete (cur as Record<string, unknown>)[last];
+  }
+};
+
+// applyOps returns the patched document, or throws the way the apiserver rejects
+// a failed test op. Applied to a fresh clone, so the caller keeps the original
+// and can replay the same ops against it.
+const applyOps = (doc: Doc, ops: PatchOp[]): Doc => {
+  const next = clone(doc);
+  for (const op of ops) {
+    switch (op.op) {
+      case 'test':
+        if (JSON.stringify(readPointer(next, op.path)) !== JSON.stringify(op.value)) {
+          throw new Error(`test failed at ${op.path}`);
+        }
+        break;
+      case 'add':
+        if (op.path.endsWith('/-')) {
+          const arr = readPointer(next, op.path.slice(0, -2));
+          if (!Array.isArray(arr)) throw new Error(`${op.path} parent is not an array`);
+          arr.push(op.value);
+        } else {
+          writePointer(next, op.path, op.value);
+        }
+        break;
+      case 'replace':
+        writePointer(next, op.path, op.value);
+        break;
+      case 'remove':
+        removePointer(next, op.path);
+        break;
+    }
+  }
+  return next;
+};
+
+const newDoc = (resourceVersion: string): Doc => ({
+  metadata: { resourceVersion, annotations: undefined },
+  spec: {},
+});
 
 describe('remediationApplyPatch', () => {
   it('adds the leaf when spec.remediation exists so absent defaulted fields are tolerated', () => {
@@ -278,6 +371,14 @@ describe('batchApplyPatch', () => {
       { op: 'add', path: '/metadata/annotations', value: { 'baselinesecurity.openshift.io/batch-apply': 'a' } },
     ]);
   });
+  it('resourceVersion-guards both shapes, so a replay cannot re-run the batch', () => {
+    const guard = { op: 'test', path: '/metadata/resourceVersion', value: '7' };
+    expect(batchApplyPatch(true, ['a'], '7')[0]).toEqual(guard);
+    expect(batchApplyPatch(false, ['a'], '7')[0]).toEqual(guard);
+    // No known resourceVersion (no guard rather than a false conflict).
+    expect(batchApplyPatch(true, ['a'])).toHaveLength(1);
+    expect(batchApplyPatch(false, ['a'])).toHaveLength(1);
+  });
   it('is a no-op for empty, blank, or invalid names', () => {
     expect(batchApplyPatch(true, [])).toEqual([]);
     expect(batchApplyPatch(true, ['', '  ', ','])).toEqual([]);
@@ -380,5 +481,114 @@ describe('batchApplyRequested', () => {
       }
       expect(bad).toBeUndefined();
     }
+  });
+});
+
+// What a second execution does to the object, not just to the op list. Every
+// builder here emits a resourceVersion test, so a replay against a document
+// that has already moved on is rejected instead of overwriting the first
+// write's result.
+describe('repeated execution', () => {
+  const RV = '100';
+
+  it('a replayed waiver create is rejected and does not drop the first waiver', () => {
+    // First submit reads an absent list, so it creates it. A second submit
+    // built from the same (now stale) snapshot reaches the same branch.
+    const first = newDoc(RV);
+    const afterFirst = applyOps(first, addWaiverPatch(undefined, { name: 'chk-a' }, RV));
+    expect((afterFirst.spec as { waivers: { name: string }[] }).waivers).toEqual([
+      { name: 'chk-a' },
+    ]);
+    // The apiserver bumped resourceVersion on the first write.
+    const afterWrite: Doc = { ...afterFirst, metadata: { resourceVersion: '101' } };
+    const replay = addWaiverPatch(undefined, { name: 'chk-b' }, RV);
+    expect(() => applyOps(afterWrite, replay)).toThrow('test failed');
+    // The list the first submit created is intact: a plain `add` on /spec/waivers
+    // would have replaced it with the single-entry replay.
+    expect((afterWrite.spec as { waivers: { name: string }[] }).waivers).toEqual([
+      { name: 'chk-a' },
+    ]);
+  });
+
+  it('a replayed waiver append is rejected, and a re-read re-runs as an update', () => {
+    const base: Doc = {
+      metadata: { resourceVersion: RV },
+      spec: { waivers: [{ name: 'chk-a' }] },
+    };
+    const append = addWaiverPatch([{ name: 'chk-a' }], { name: 'chk-b' }, RV);
+    const once = applyOps(base, append);
+    expect((once.spec as { waivers: { name: string }[] }).waivers).toEqual([
+      { name: 'chk-a' },
+      { name: 'chk-b' },
+    ]);
+    // Replaying the same patch: the list test no longer matches, so no second row.
+    expect(() => applyOps(once, append)).toThrow('test failed');
+    expect((once.spec as { waivers: { name: string }[] }).waivers).toHaveLength(2);
+    // Re-running with a fresh read is an update of the same entry, not an append.
+    const reread = addWaiverPatch(
+      (once.spec as { waivers: { name: string }[] }).waivers,
+      { name: 'chk-a', reason: 'risk' },
+      '102',
+    );
+    const twice = applyOps(
+      { ...once, metadata: { resourceVersion: '102' } },
+      reread,
+    );
+    expect((twice.spec as { waivers: { name: string }[] }).waivers).toEqual([
+      { name: 'chk-a', reason: 'risk' },
+      { name: 'chk-b' },
+    ]);
+  });
+
+  it('a replayed waiver remove is rejected rather than removing a shifted index', () => {
+    const base: Doc = {
+      metadata: { resourceVersion: RV },
+      spec: { waivers: [{ name: 'chk-a' }, { name: 'chk-b' }] },
+    };
+    const remove = removeWaiverPatch(0, 'chk-a', RV);
+    const once = applyOps(base, remove);
+    expect((once.spec as { waivers: { name: string }[] }).waivers).toEqual([
+      { name: 'chk-b' },
+    ]);
+    // Index 0 now holds chk-b, so even the name test refuses a stale replay.
+    expect(() => applyOps(once, remove)).toThrow('test failed');
+    expect((once.spec as { waivers: { name: string }[] }).waivers).toEqual([
+      { name: 'chk-b' },
+    ]);
+  });
+
+  it('a replayed batch-apply request is rejected on both annotation shapes', () => {
+    for (const hasAnnotations of [true, false]) {
+      const base: Doc = hasAnnotations
+        ? {
+            metadata: {
+              resourceVersion: RV,
+              annotations: { 'kubectl.kubernetes.io/last-applied-configuration': '{}' },
+            },
+            spec: {},
+          }
+        : newDoc(RV);
+      const request = batchApplyPatch(hasAnnotations, ['rem-a'], RV);
+      const once = applyOps(base, request);
+      const anns = (once.metadata as { annotations: Record<string, string> }).annotations;
+      expect(anns['baselinesecurity.openshift.io/batch-apply']).toBe('rem-a');
+      // The annotation is a one-shot the operator consumes and clears: a replay
+      // landing after it ran would pause the pools and re-apply the batch.
+      const moved: Doc = { ...once, metadata: { ...once.metadata, resourceVersion: '101' } };
+      expect(() => applyOps(moved, request)).toThrow('test failed');
+    }
+  });
+
+  it('a replayed batch-apply does not drop a sibling annotation written since', () => {
+    const base: Doc = {
+      metadata: { resourceVersion: '101', annotations: { other: 'keep' } },
+      spec: {},
+    };
+    // The stale view had no annotations map at all, so this build takes the
+    // whole-map branch, which replaces the map the sibling now lives in.
+    const request = batchApplyPatch(false, ['rem-a'], RV);
+    const anns = (base.metadata as { annotations: Record<string, string> }).annotations;
+    expect(() => applyOps(base, request)).toThrow('test failed');
+    expect(anns['other']).toBe('keep');
   });
 });

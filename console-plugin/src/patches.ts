@@ -86,7 +86,18 @@ export const schedulePatch = (cron: string): PatchOp[] => {
 // remediations, and resume so nodes reboot once. Adds the annotations map when
 // absent (a nested add would 404). Empty / invalid names yield no ops (matches
 // operator skip of comma-only annotations). Cap matches batchMaxRemediations.
-export const batchApplyPatch = (hasAnnotations: boolean, names: string[]): PatchOp[] => {
+//
+// Every shape is resourceVersion-guarded, not just the whole-map one. The
+// annotation is a one-shot request the operator consumes and clears, so a
+// resubmit built from a stale read can land after a newer batch already ran:
+// the operator would pause the pools and re-apply remediations a second time.
+// The guard turns that into a 409 the caller surfaces, which is the only
+// thing that keeps "apply twice" from meaning "two reboots".
+export const batchApplyPatch = (
+  hasAnnotations: boolean,
+  names: string[],
+  resourceVersion?: string,
+): PatchOp[] => {
   const seen = new Set<string>();
   const list: string[] = [];
   for (const raw of names) {
@@ -102,11 +113,14 @@ export const batchApplyPatch = (hasAnnotations: boolean, names: string[]): Patch
   const value = list.join(',');
   // JSON Pointer escapes "/" as "~1" in the nested annotation path.
   const annPath = `/metadata/annotations/${BATCH_APPLY_ANNOTATION.replace(/\//g, '~1')}`;
+  const guard = resourceVersionTest(resourceVersion);
   return hasAnnotations
     ? [
+        ...guard,
         { op: 'add', path: annPath, value },
       ]
     : [
+        ...guard,
         {
           op: 'add',
           path: '/metadata/annotations',
@@ -180,7 +194,19 @@ export const WAIVER_ATTRIBUTION_MAX_LEN = 253;
 // (updates reason, avoids duplicate list-map keys from a double-click race).
 // Empty or invalid names (not DNS-1123) yield no ops so CRD admission is not
 // the first failure mode.
-export const addWaiverPatch = (waivers: Waiver[] | undefined | null, entry: Waiver): PatchOp[] => {
+//
+// Every shape carries the resourceVersion test, because the create shape
+// writes /spec/waivers itself: RFC 6902 add on a member REPLACES it, so a
+// second submit that still reads the list as absent (the watch has not
+// delivered the first write, or a retried request reuses its snapshot) would
+// overwrite the whole list and drop the waiver the first submit stored. The
+// test is emitted here rather than left to a call site so the builder is safe
+// on its own.
+export const addWaiverPatch = (
+  waivers: Waiver[] | undefined | null,
+  entry: Waiver,
+  resourceVersion?: string,
+): PatchOp[] => {
   const name = entry.name;
   // Trim optional text fields once: whitespace-only is empty; MaxLength is on
   // the stored value so padding cannot smuggle past the bound after a later trim.
@@ -212,10 +238,12 @@ export const addWaiverPatch = (waivers: Waiver[] | undefined | null, entry: Waiv
   if (approvedBy) clean.approvedBy = approvedBy;
   if (entry.expiresAt) clean.expiresAt = entry.expiresAt;
   if (entry.reviewBy) clean.reviewBy = entry.reviewBy;
+  const guard = resourceVersionTest(resourceVersion);
   if (waivers != null) {
     const idx = waivers.findIndex((w) => w.name === name);
     if (idx >= 0) {
       return [
+        ...guard,
         { op: 'test', path: `/spec/waivers/${idx}/name`, value: name },
         { op: 'replace', path: `/spec/waivers/${idx}`, value: clean },
       ];
@@ -228,21 +256,27 @@ export const addWaiverPatch = (waivers: Waiver[] | undefined | null, entry: Waiv
     // saw the pre-add list cannot both append. The test 409s; the caller re-reads
     // and the replace path above then updates in place.
     return [
+      ...guard,
       { op: 'test', path: '/spec/waivers', value: waivers },
       { op: 'add', path: '/spec/waivers/-', value: clean },
     ];
   }
-  return [{ op: 'add', path: '/spec/waivers', value: [clean] }];
+  return [...guard, { op: 'add', path: '/spec/waivers', value: [clean] }];
 };
 
 // JSON patch removing the waiver at index i (test-guards the name so a
 // concurrent reorder cannot delete the wrong entry). Invalid index / empty name
 // yield no ops so a bad call site cannot emit a patch that always 404s.
-export const removeWaiverPatch = (index: number, name: string): PatchOp[] => {
+export const removeWaiverPatch = (
+  index: number,
+  name: string,
+  resourceVersion?: string,
+): PatchOp[] => {
   if (!Number.isInteger(index) || index < 0 || !name) {
     return [];
   }
   return [
+    ...resourceVersionTest(resourceVersion),
     { op: 'test', path: `/spec/waivers/${index}/name`, value: name },
     { op: 'remove', path: `/spec/waivers/${index}` },
   ];
