@@ -120,7 +120,8 @@ than guessing.
   `r.now()`: a wall-clock write makes a grace fire (or not) depending on when
   the run started.
 - Fuzz any parser of cluster-supplied text (suite labels, scan names, CSV
-  versions, timestamps). Commit corpus files under `testdata/fuzz/`; a crasher
+  versions, timestamps). Commit corpus files under
+  `internal/controller/testdata/fuzz/`; a crasher
   written during the fuzz CI job fails the run.
 
 ## Tests
