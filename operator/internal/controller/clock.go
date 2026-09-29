@@ -3,6 +3,8 @@ package controller
 import (
 	"context"
 	"time"
+
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 )
 
 // clock is the operator's wall-clock source. Every production read of "now"
@@ -70,4 +72,53 @@ func (l *lazyComplianceWatch) sleep(ctx context.Context, d time.Duration) error 
 		return realClock{}.Sleep(ctx, d)
 	}
 	return l.clock.Sleep(ctx, d)
+}
+
+// Conflict-retry pacing, matching client-go's retry.DefaultRetry (5 attempts,
+// 10ms apart) so the reconcile behaves as it did on the real backoff.
+const (
+	// conflictRetryAttempts is the number of tries a conflict gets, the last
+	// one returning the 409 to the caller as a requeue.
+	conflictRetryAttempts = 5
+	// conflictRetryInterval separates two attempts. Below it a live apiserver
+	// cannot have finished the racing write we collided with, so a shorter
+	// wait only burns attempts; above it a transient conflict holds the
+	// reconcile worker longer than the poll cadence needs.
+	conflictRetryInterval = 10 * time.Millisecond
+)
+
+// retryOnConflict re-runs fn while the apiserver answers 409, and waits on the
+// injected clock between attempts. client-go's retry.RetryOnConflict cannot be
+// used here: its backoff sleeps in wall time through a globally seeded math/rand
+// jitter, so a conflicting reconcile would consume real time and replay
+// differently every run. Here the wait is simulated time and the pacing is
+// fixed, so the attempt count for a given conflict sequence is the same on
+// every replay.
+//
+// A cancelled ctx ends the wait with its error rather than starting another
+// attempt against a dead reconcile, which is what the sleep would return to a
+// real timer too.
+func (r *ClusterBaselineReconciler) retryOnConflict(ctx context.Context, fn func() error) error {
+	var err error
+	for attempt := range conflictRetryAttempts {
+		if err = fn(); err == nil || !apierrors.IsConflict(err) {
+			return err
+		}
+		if attempt == conflictRetryAttempts-1 {
+			break
+		}
+		if serr := r.sleep(ctx, conflictRetryInterval); serr != nil {
+			return serr
+		}
+	}
+	return err
+}
+
+// sleep waits out d on the reconciler's injected clock, defaulting to the real
+// one when unset, mirroring now.
+func (r *ClusterBaselineReconciler) sleep(ctx context.Context, d time.Duration) error {
+	if r.Clock == nil {
+		return realClock{}.Sleep(ctx, d)
+	}
+	return r.Clock.Sleep(ctx, d)
 }

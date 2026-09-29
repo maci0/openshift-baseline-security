@@ -114,6 +114,15 @@ func sanitizeStatusForUpdate(cb *baselinev1alpha1.ClusterBaseline, now time.Time
 	sanitizeStatusConditions(cb, now)
 }
 
+// unknownTransitionTime stamps a condition whose transition time is unknown,
+// for a caller that passed a zero clock reading. A fixed instant rather than
+// the wall clock, so a replay of the same inputs stamps the same bytes. An
+// unrepaired zero stamp would fail date-time validation and brick every later
+// status update, so the fallback has to be a valid instant; the install-stall
+// and plugin-unavailable graces then read the condition as having transitioned
+// long ago and fire, which is the safe direction for an unknown time.
+var unknownTransitionTime = time.Unix(0, 0).UTC()
+
 // sanitizeStatusConditions clamps every status.conditions entry to the CRD
 // schema (reason pattern/minLength/maxLength, message maxLength, status Enum,
 // type pattern). Drops conditions that cannot be repaired (invalid type).
@@ -121,9 +130,7 @@ func sanitizeStatusForUpdate(cb *baselinev1alpha1.ClusterBaseline, now time.Time
 // now is the reconciler's clock reading: a hand-edited condition can arrive
 // with a zero LastTransitionTime, which fails OpenAPI date-time validation, so
 // one is stamped. It comes from the injected clock, not the wall, so the
-// install-stall and plugin-unavailable graces still measure simulated time. A
-// zero now (a caller that has no reading to give) falls back to the wall clock
-// because an unrepaired zero stamp would brick every later status update.
+// install-stall and plugin-unavailable graces still measure simulated time.
 func sanitizeStatusConditions(cb *baselinev1alpha1.ClusterBaseline, now time.Time) {
 	in := cb.Status.Conditions
 	if len(in) == 0 {
@@ -164,7 +171,7 @@ func sanitizeStatusConditions(cb *baselinev1alpha1.ClusterBaseline, now time.Tim
 		if c.LastTransitionTime.IsZero() {
 			// Required date-time; zero fails OpenAPI format validation.
 			if now.IsZero() {
-				now = time.Now()
+				now = unknownTransitionTime
 			}
 			c.LastTransitionTime = metav1.NewTime(now)
 		}

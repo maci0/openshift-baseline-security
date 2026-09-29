@@ -43,6 +43,13 @@ depend on those tags.
 
 ## [Unreleased]
 
+### Changed
+
+- An apiserver conflict (409) during a reconcile is now re-attempted on a fixed
+  10 ms cadence with the same 5-attempt budget, and the wait ends if the
+  reconcile is cancelled. The previous retry jittered its waits off a global
+  random source, so two runs of the same input could stop at different points.
+
 ## [0.8.0] - 2026-09-28
 
 ## [0.7.0] - 2026-09-28

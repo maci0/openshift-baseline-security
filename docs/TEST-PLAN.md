@@ -717,7 +717,15 @@ an accepted risk neither inflates nor tanks the score.
       to them, so the install-stall grace measures simulated time on both
       sides and a hand-edited condition repairs to the same stamp on every
       replay (`TestConditionStampsComeFromTheInjectedClock`,
-      `TestSanitizeStampsConditionFromTheInjectedClock`).
+      `TestSanitizeStampsConditionFromTheInjectedClock`); the zero-reading
+      fallback stamps a fixed instant rather than the wall clock
+      (`TestSanitizeStampsConditionWithoutAClockReading`).
+- [x] **Conflict retries wait on the injected clock**: a 409 is re-attempted
+      without advancing wall time, the attempt budget is
+      `conflictRetryAttempts`, a non-conflict error is not retried, and a
+      cancelled reconcile ends the wait
+      (`TestRetryOnConflictWaitsOnTheInjectedClock`,
+      `TestRetryOnConflictStopsOnACancelledContext`).
 - [ ] **Two rapid spec edits**: optimistic-lock conflict on status update is
       retried via requeue, not left as permanent Degraded.
 - [ ] **Reconcile during an in-progress scan**: score is the last completed

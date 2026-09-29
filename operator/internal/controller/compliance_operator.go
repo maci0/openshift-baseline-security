@@ -12,7 +12,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -246,7 +245,7 @@ func (r *ClusterBaselineReconciler) syncComplianceSubscriptionSource(
 		// transiently errors.
 		return nil
 	}
-	if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+	if err := r.retryOnConflict(ctx, func() error {
 		latest := u(subscriptionGVK)
 		if err := r.Get(ctx, types.NamespacedName{
 			Namespace: complianceNamespace, Name: complianceOperatorName,

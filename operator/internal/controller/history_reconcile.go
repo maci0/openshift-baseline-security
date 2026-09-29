@@ -11,7 +11,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -49,7 +48,7 @@ func (r *ClusterBaselineReconciler) persistHistoryScoringMode(ctx context.Contex
 		return nil
 	}
 	mode := string(scoringMode(cb))
-	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+	err := r.retryOnConflict(ctx, func() error {
 		latest := &baselinev1alpha1.ClusterBaseline{}
 		if err := r.Get(ctx, types.NamespacedName{Name: cb.Name}, latest); err != nil {
 			return err

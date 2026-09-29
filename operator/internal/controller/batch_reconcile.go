@@ -14,7 +14,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -74,7 +73,7 @@ func (r *ClusterBaselineReconciler) setMCPPaused(ctx context.Context, pool strin
 		log.FromContext(ctx).Info("skipping MachineConfigPool with invalid name", "pool", pool)
 		return nil
 	}
-	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+	return r.retryOnConflict(ctx, func() error {
 		mcp := u(mcpGVK)
 		if err := r.Get(ctx, types.NamespacedName{Name: pool}, mcp); err != nil {
 			// A missing pool or absent MCP CRD must not wedge the batch.
@@ -188,7 +187,7 @@ func (r *ClusterBaselineReconciler) ensureBatchMetadata(
 	// RetryOnConflict: a concurrent console patch (waiver, schedule, rescan)
 	// must not abort batch start after validation; without a stable
 	// batch-started-at the grace clock can reset across attempts.
-	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+	err := r.retryOnConflict(ctx, func() error {
 		// Re-read on every attempt so the ResourceVersion and any annotations
 		// written by a racing client are current before we merge ours.
 		latest := &baselinev1alpha1.ClusterBaseline{}
@@ -322,7 +321,7 @@ func (r *ClusterBaselineReconciler) clearBatchAnnotations(
 	ctx context.Context, cb *baselinev1alpha1.ClusterBaseline,
 	requestMatch []string, clearRecovery bool,
 ) error {
-	if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+	if err := r.retryOnConflict(ctx, func() error {
 		latest := &baselinev1alpha1.ClusterBaseline{}
 		if err := r.Get(ctx, types.NamespacedName{Name: cb.Name}, latest); err != nil {
 			return err
@@ -458,7 +457,7 @@ func validateBatchTarget(rem *unstructured.Unstructured) error {
 func (r *ClusterBaselineReconciler) applyOwnedRemediation(
 	ctx context.Context, cb *baselinev1alpha1.ClusterBaseline, name string, suites map[string]bool,
 ) error {
-	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+	return r.retryOnConflict(ctx, func() error {
 		rem, err := r.getBatchRemediation(ctx, name, suites)
 		if err != nil {
 			// Race after validation (suite flipped, deps, corrupt status/apply):

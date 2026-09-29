@@ -17,7 +17,6 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
-	"k8s.io/client-go/util/retry"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -96,7 +95,7 @@ func ValidRelatedImage(ref string) bool {
 // deregisterConsolePlugin drops our entry from consoles.operator.openshift.io/cluster.
 // Owned Deployment/Service/ConsolePlugin are GCed via owner refs on CR delete.
 func (r *ClusterBaselineReconciler) deregisterConsolePlugin(ctx context.Context) error {
-	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+	return r.retryOnConflict(ctx, func() error {
 		console := u(consoleGVK)
 		if err := r.Get(ctx, types.NamespacedName{Name: clusterBaselineName}, console); err != nil {
 			// Console capability disabled (CRD absent) or config gone: nothing to
@@ -379,7 +378,7 @@ func (r *ClusterBaselineReconciler) ensureConsolePlugin(ctx context.Context, cb 
 		return fmt.Errorf("ensuring ConsolePlugin %s: %w", pluginName, err)
 	}
 
-	if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+	if err := r.retryOnConflict(ctx, func() error {
 		console := u(consoleGVK)
 		if err := r.Get(ctx, types.NamespacedName{Name: clusterBaselineName}, console); err != nil {
 			return err

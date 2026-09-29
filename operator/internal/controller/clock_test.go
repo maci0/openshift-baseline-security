@@ -2,11 +2,14 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -158,5 +161,96 @@ func TestSanitizeStampsConditionFromTheInjectedClock(t *testing.T) {
 	c := meta.FindStatusCondition(cb.Status.Conditions, "ComplianceOperatorReady")
 	if c == nil || !c.LastTransitionTime.Time.Equal(now) {
 		t.Fatalf("repaired stamp = %v, want %v", c, now)
+	}
+}
+
+// TestSanitizeStampsConditionWithoutAClockReading: the zero-reading fallback is
+// the one place sanitize has no injected time, so it must stamp a fixed instant.
+// The wall clock here would make the repaired status bytes differ between two
+// replays of the same hand-edited object.
+func TestSanitizeStampsConditionWithoutAClockReading(t *testing.T) {
+	cb := newCB("cis")
+	cb.Status.Conditions = []metav1.Condition{
+		{Type: "ComplianceOperatorReady", Status: metav1.ConditionFalse, Reason: "Installing"},
+	}
+	sanitizeStatusConditions(cb, time.Time{})
+	c := meta.FindStatusCondition(cb.Status.Conditions, "ComplianceOperatorReady")
+	if c == nil || !c.LastTransitionTime.Time.Equal(unknownTransitionTime) {
+		t.Fatalf("fallback stamp = %v, want the fixed %v", c, unknownTransitionTime)
+	}
+}
+
+// TestRetryOnConflictWaitsOnTheInjectedClock: a conflict retry must spend
+// simulated time, so the same conflict sequence replays identically. It also
+// pins the attempt budget and the pass-through of a non-conflict error.
+func TestRetryOnConflictWaitsOnTheInjectedClock(t *testing.T) {
+	conflict := apierrors.NewConflict(
+		schema.GroupResource{Group: baselinev1alpha1.GroupVersion.Group, Resource: "clusterbaselines"},
+		"cluster", errors.New("object was modified"))
+	other := errors.New("not a conflict")
+
+	tests := []struct {
+		name         string
+		fail         []error // per attempt; nil terminates the loop
+		wantAttempts int
+		wantErr      error
+		wantElapsed  time.Duration
+	}{
+		{name: "first attempt wins", wantAttempts: 1},
+		{name: "conflict then success", fail: []error{conflict}, wantAttempts: 2,
+			wantElapsed: conflictRetryInterval},
+		{name: "non-conflict error is not retried", fail: []error{other}, wantAttempts: 1,
+			wantErr: other},
+		{name: "conflicts exhaust the attempt budget", fail: []error{conflict, conflict, conflict, conflict, conflict},
+			wantAttempts: conflictRetryAttempts, wantErr: conflict,
+			wantElapsed: (conflictRetryAttempts - 1) * conflictRetryInterval},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			clk := &virtualClock{at: time.Date(2024, 3, 1, 0, 0, 0, 0, time.UTC)}
+			r := &ClusterBaselineReconciler{Clock: clk}
+			start := clk.at
+			attempts := 0
+			err := r.retryOnConflict(context.Background(), func() error {
+				if attempts < len(tc.fail) {
+					err := tc.fail[attempts]
+					attempts++
+					return err
+				}
+				attempts++
+				return nil
+			})
+			if attempts != tc.wantAttempts {
+				t.Fatalf("attempts = %d, want %d", attempts, tc.wantAttempts)
+			}
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("error = %v, want %v", err, tc.wantErr)
+			}
+			if elapsed := clk.at.Sub(start); elapsed != tc.wantElapsed {
+				t.Fatalf("clock advanced by %v, want %v", elapsed, tc.wantElapsed)
+			}
+		})
+	}
+}
+
+// TestRetryOnConflictStopsOnACancelledContext: a reconcile that is cancelled
+// mid-retry must not start another attempt against a dead worker.
+func TestRetryOnConflictStopsOnACancelledContext(t *testing.T) {
+	clk := &virtualClock{at: time.Date(2024, 3, 1, 0, 0, 0, 0, time.UTC)}
+	r := &ClusterBaselineReconciler{Clock: clk}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	attempts := 0
+	err := r.retryOnConflict(ctx, func() error {
+		attempts++
+		return apierrors.NewConflict(
+			schema.GroupResource{Group: baselinev1alpha1.GroupVersion.Group, Resource: "clusterbaselines"},
+			"cluster", errors.New("object was modified"))
+	})
+	if attempts != 1 {
+		t.Fatalf("attempts = %d, want 1: a cancelled context must end the retry", attempts)
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v, want %v", err, context.Canceled)
 	}
 }

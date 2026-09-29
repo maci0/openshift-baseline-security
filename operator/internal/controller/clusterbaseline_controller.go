@@ -130,7 +130,7 @@ type ClusterBaselineReconciler struct {
 
 	// Clock is the reconcile loop's wall-clock source. Nil reads the real clock;
 	// a deterministic simulation sets a virtual one so a whole run replays from
-	// a seed. See clock.go for the one stamp that bypasses it.
+	// a seed. Every wait goes through it too (retryOnConflict).
 	Clock clock
 
 	// RelatedImageConsolePlugin is the console plugin image to deploy, injected

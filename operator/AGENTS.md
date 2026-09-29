@@ -107,7 +107,11 @@ than guessing.
 - No real timers in a runnable. A retry wait goes through the injected clock
   (`clock.Sleep` via `l.sleep` / `DefaultClusterBaseline.sleep`), so
   a simulated run spends simulated time on it. `time.NewTimer` in a reconcile
-  or Runnable loop makes a seeded replay depend on wall time.
+  or Runnable loop makes a seeded replay depend on wall time. Apiserver
+  conflicts go through `r.retryOnConflict`, never
+  `retry.RetryOnConflict`: its backoff sleeps in wall time behind a globally
+  seeded `math/rand` jitter, so a conflicting reconcile replays differently
+  every run.
 - A status condition's `LastTransitionTime` is stamped from the injected
   clock, so it is passed in explicitly (`setCond`, `setCondFalseLogOnce`,
   `setCondTrueLogRecovered`, `sanitizeStatusForUpdate`, and the free helpers
