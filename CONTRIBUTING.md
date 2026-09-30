@@ -9,8 +9,7 @@ commands that have to work.
 | Tool | Pin | Where |
 |---|---|---|
 | Go | `go` directive in `operator/go.mod` | Makefile sets `GOTOOLCHAIN` from that line; host Go 1.21+ downloads it |
-| Node | major 22, exact patch in `console-plugin/.nvmrc` | `package.json` `engines.node` is `>=22 <23`; `yarn` scripts refuse any other major |
-| Yarn 4 | `packageManager` in `console-plugin/package.json` | `corepack enable` then `corepack prepare` (same as CI) |
+| bun | `packageManager` in `console-plugin/package.json` | the version CI (`setup-bun`) and the image build stage use; `make check` refuses any other. No Node or Yarn needed |
 | shellcheck | n/a | `make lint` only (`lint-shell`); preinstalled on the CI runner, `brew install shellcheck` / `apt-get install shellcheck` elsewhere |
 | uv | n/a | `make lint` only (`lint-python` runs `uvx ruff`); the Makefile names it if `uvx` is missing |
 | docker | n/a | only for `make ci`, `make bundle`, `make catalog-prepare`, `make test-alerts`, and image builds |
@@ -32,17 +31,14 @@ make test test-race lint
 
 # console plugin
 cd ../console-plugin
-corepack enable
-yarn_pm=$(node -p "require('./package.json').packageManager")
-corepack prepare "${yarn_pm}" --activate
-yarn install --immutable
-yarn lint && yarn lint:oxlint && yarn typecheck && yarn test
+bun install --frozen-lockfile
+bun run lint && bun run lint:oxlint && bun run typecheck && bun run test
 ```
 
-From the repo root, `make setup` runs the `yarn install --immutable` line above
-once Yarn 4 is on PATH (it prints the two `corepack` commands and stops if
-`yarn` is missing) and then runs `make check`, which fails on anything else
-the setup above is missing that the per-clone loop needs (wrong Node major, no
+From the repo root, `make setup` runs the `bun install --frozen-lockfile` line above
+once bun is on PATH (it names the pinned version and stops if `bun` is
+missing) and then runs `make check`, which fails on anything else
+the setup above is missing that the per-clone loop needs (wrong bun version, no
 `node_modules`) before a build starts. `check` only warns about docker,
 shellcheck, and `uvx`: nothing in `make test` uses them, and `make lint` names
 whichever one is missing at the point of use. `make ci` needs docker.
@@ -57,18 +53,18 @@ the rest.
 |---|---|---|
 | `operator/` | `make test-one PKG=./internal/controller/` for a package, `make test-one PKG=./internal/controller/ RUN=TestName` for one test | `make ci` (needs docker for alerts + bundle validate) |
 | `operator/` CSV, RBAC, monitoring, or `VERSION` | `make verify` (no docker) | `make ci` |
-| `console-plugin/` | `yarn test` or one file: `yarn test src/scoring.test.ts`; watch: `yarn test:watch` | `yarn ci` |
+| `console-plugin/` | `bun run test` or one file: `bun run test src/scoring.test.ts`; watch: `bun run test:watch` | `bun run ci` |
 
-`make test` / `yarn test` do not need a cluster. Live e2e is
-`make test-e2e` (`KUBECONFIG`) and `yarn test-e2e` (`CONSOLE_URL` and
+`make test` / `bun run test` do not need a cluster. Live e2e is
+`make test-e2e` (`KUBECONFIG`) and `bun run test-e2e` (`CONSOLE_URL` and
 `KUBEADMIN_PASSWORD`; copy `console-plugin/.env.example` to `.env`).
 
-`yarn test-e2e` also needs the Playwright chromium build, which a clean clone
-does not have: `.yarnrc.yml` sets `enableScripts: false`, so no install script
+`bun run test-e2e` also needs the Playwright chromium build, which a clean clone
+does not have: `trustedDependencies` in `package.json` is empty, so no install script
 downloads it and CI sets `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD` for the same
-reason. Fetch it once with `yarn playwright install chromium` (a user-cache
+reason. Fetch it once with `bunx playwright install chromium` (a user-cache
 download, no system packages). On a bare Linux host the shared libraries are
-missing too and `yarn playwright install --with-deps chromium` installs them;
+missing too and `bunx playwright install --with-deps chromium` installs them;
 that step needs root, so it is not part of the per-clone loop.
 
 ## Before a PR
@@ -83,8 +79,8 @@ that step needs root, so it is not part of the per-clone loop.
    needs no docker, so it is the half of `make bundle` a contributor without a
    daemon can still run. Touching the CSV, `config/rbac/role.yaml`,
    `config/prometheus/`, or `VERSION` means running it.
-3. Plugin edits: `cd console-plugin && yarn lint && yarn lint:oxlint && yarn typecheck && yarn test`.
-   `yarn ci` also runs the production webpack build (CI does).
+3. Plugin edits: `cd console-plugin && bun run lint && bun run lint:oxlint && bun run typecheck && bun run test`.
+   `bun run ci` also runs the production webpack build (CI does).
 4. Consumer-visible behavior: a `[Unreleased]` entry in `CHANGELOG.md` (symptom,
    not the patch). See the changelog header for what is in contract.
 5. Regenerated files (`operator/config/crd/`, `operator/config/rbac/role.yaml`,
@@ -94,9 +90,9 @@ that step needs root, so it is not part of the per-clone loop.
 
 `make ci` at the repo root runs both: `operator/Makefile ci` (unit tests,
 lint, govulncheck, alert tests, generated-file drift, binary reproducibility,
-`make verify`, bundle validate) and `console-plugin` `yarn ci`. Together they
+`make verify`, bundle validate) and `console-plugin` `bun run ci`. Together they
 match the GitHub Actions `operator` and `console-plugin` jobs; the plugin side
-excludes `yarn npm audit`, which is CI-only. Image and catalog builds stay in
+excludes `bun audit`, which is CI-only. Image and catalog builds stay in
 CI.
 
 `cd operator && make verify-reproducible` on its own rebuilds the manager from

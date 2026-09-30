@@ -43,6 +43,15 @@ depend on those tags.
 
 ## [Unreleased]
 
+### Changed
+
+- The console plugin image builds on digest-pinned `oven/bun` 1.4.2 instead
+  of `ubi9/nodejs-22` with Yarn 4; the runtime image is still
+  `ubi9/nginx-120`. Dependencies resolve from `bun.lock`, which could not be
+  migrated from the Yarn 4 lockfile, so resolved versions moved within the
+  ranges `package.json` declares (PatternFly 6.6.1, webpack 5.111.1), and
+  `/licenses/THIRD-PARTY-NOTICES.txt` lists the new closure.
+
 ## [0.9.0] - 2026-09-29
 
 ### Security

@@ -21,8 +21,8 @@ run. A checklist item should name the cheapest tier that can prove it.
 
 | Tier | Purpose | Command / harness | Gate |
 |---|---|---|---|
-| 0 | Fast local correctness | `operator: make test test-race lint verify`; `console-plugin: yarn lint && yarn lint:oxlint && yarn typecheck && yarn test` | Every PR |
-| 1 | Generated/build artifacts | `operator: make build && make bundle`; repo: `operator: make verify-manifests` (renders every kustomize entry point and checks the render against its sources); `console-plugin: yarn build`, whose CI job then prints each `dist` asset raw and `gzip -9` bytes (`yarn ci` is tier 0 plus this build) | Every PR touching manifests, packaging, or frontend |
+| 0 | Fast local correctness | `operator: make test test-race lint verify`; `console-plugin: bun run lint && bun run lint:oxlint && bun run typecheck && bun run test` | Every PR |
+| 1 | Generated/build artifacts | `operator: make build && make bundle`; repo: `operator: make verify-manifests` (renders every kustomize entry point and checks the render against its sources); `console-plugin: bun run build`, whose CI job then prints each `dist` asset raw and `gzip -9` bytes (`bun run ci` is tier 0 plus this build) | Every PR touching manifests, packaging, or frontend |
 | 2 | Hardening | `operator: make test-race && make fuzz` (`make test-race` also runs in tier 0) | Nightly and before release |
 | 3 | API admission | envtest or server-side dry-run against generated CRDs | PRs touching API markers/CRD schema |
 | 4 | Live OpenShift | Go e2e with `KUBECONFIG`; Playwright with `CONSOLE_URL`, `KUBEADMIN_PASSWORD`, and seeded Compliance Operator data | Release candidates |
@@ -53,7 +53,7 @@ than a copied date.
 | Tier | How it's tracked | Last run | Result |
 |---|---|---|---|
 | 0 Fast local correctness | CI `ci.yml`, every PR/push | see latest Actions run on `main` | gating |
-| 1 Generated/build artifacts | CI `ci.yml` (`make bundle`, `yarn build`) | see latest Actions run | gating |
+| 1 Generated/build artifacts | CI `ci.yml` (`make bundle`, `bun run build`) | see latest Actions run | gating |
 | 2 Hardening (fuzz) | CI `ci.yml` job `fuzz` on schedule + workflow_dispatch; seeds also run under `make test`; `make test-race` gates every PR | see latest scheduled Actions run | gating (nightly), race run every PR |
 | 3 API admission (envtest) | manual (not yet automated) | envtest harness not yet run; live informer/batch rows below reuse this label | n/a |
 | 4 Live OpenShift (Go e2e + Playwright) | manual, logged below | 2026-07-11 | pass |
@@ -902,7 +902,7 @@ an accepted risk neither inflates nor tanks the score.
       with `gzip_vary on`; fails closed until service-ca cert files exist.
 - [ ] **Docker context audit**: `.dockerignore` excludes `node_modules`,
       `dist`, local e2e artifacts, and logs while preserving lockfiles.
-- [ ] **Dependency vulnerability scan**: Go module and Yarn dependency scan has
+- [ ] **Dependency vulnerability scan**: Go module and bun dependency scan has
       no high/critical unfixed findings before release.
 - [ ] **SBOM/provenance**: release pipeline emits SBOMs for operator and console
       images and records source commit + base image digests.
@@ -1092,7 +1092,7 @@ stale Available or eternal Progressing.
       lint/typecheck/Jest, and `git diff --check` on every PR.
 - [ ] **Generated drift gate**: CI runs controller-gen / bundle generation and
       fails if CRDs, RBAC, deepcopy, or bundle manifests drift.
-- [ ] **Frontend build gate**: CI runs `yarn build`; the known vendor chunk
+- [ ] **Frontend build gate**: CI runs `bun run build`; the known vendor chunk
       warning is allowed, but new webpack errors or missing locale assets fail.
 - [ ] **Race/fuzz scheduled job**: Tier 2 runs nightly or on demand with
       persisted fuzz corpora; new crashers are committed as regression seeds.
@@ -1107,7 +1107,7 @@ stale Available or eternal Progressing.
       ComplianceCheckResult objects instead of hand-rolled maps.
 - [ ] **Coverage smoke**: unit coverage does not drop materially for
       `internal/controller` and console helper modules when code changes.
-- [ ] **Version pin audit**: Go, Node, Yarn, kubectl, operator-sdk, and
+- [ ] **Version pin audit**: Go, bun, kubectl, operator-sdk, and
       controller-gen versions used locally match CI and Dockerfiles.
 
 ## X. Supportability, docs & runbooks
@@ -1283,7 +1283,7 @@ These are product contracts, not just "hope it's fast".
 |---|---|---|
 | Reconcile happy path (fake client, 1k check results) | < 200ms CPU | Go benchmark / unit timer |
 | Reconcile 10k check results | < 2s CPU; no O(n²) label maps; List Limit=500 | unit with generated list; paging in `TestAggregateStatusPagesCheckResults` |
-| Console plugin initial JS (critical path) | within the gzip ceilings in `console-plugin/tools/size/budget.ts`; the printed `first paint` line (initial JS + manifest + locales) recorded per build | `make size` (in `yarn build` and `yarn ci`); `tools/size/measure.test.ts` covers the classification, the served/non-served split, and the gate |
+| Console plugin initial JS (critical path) | within the gzip ceilings in `console-plugin/tools/size/budget.ts`; the printed `first paint` line (initial JS + manifest + locales) recorded per build | `make size` (in `bun run build` and `bun run ci`); `tools/size/measure.test.ts` covers the classification, the served/non-served split, and the gate |
 | Console Results first paint with 5k rows | interactive filters < 100ms after load | Playwright performance marks or manual |
 | CSV export 5k rows | < 3s in Chromium; no tab freeze dialog | Playwright |
 | History ring | max 30 points; status JSON stays small | unit size assert |

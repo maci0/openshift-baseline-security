@@ -68,7 +68,7 @@ shipped releases.
       images/tools digest-pinned where applicable.
 - [x] CI (unit, fuzz, lint, generated-file drift, image builds).
 - [x] E2E: operator Go (`make test-e2e`) + console Playwright
-      (`yarn test-e2e`, also regenerates `docs/screenshots`).
+      (`bun run test-e2e`, also regenerates `docs/screenshots`).
 - [x] Full OLM install + upgrade verified on the SNO via the internal
       registry (no quay dependency).
 

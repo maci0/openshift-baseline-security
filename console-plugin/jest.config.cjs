@@ -2,7 +2,7 @@ module.exports = {
   preset: 'ts-jest',
   testEnvironment: 'node',
   // e2e/ holds the unit-tested config loaders; the Playwright *.spec.ts files
-  // there are run by `yarn test-e2e` against a live console, not by jest.
+  // there are run by `bun run test-e2e` against a live console, not by jest.
   roots: [
     '<rootDir>/src',
     '<rootDir>/tools/attribution',

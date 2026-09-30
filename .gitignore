@@ -3,7 +3,6 @@ operator/catalog/
 node_modules/
 console-plugin/dist/
 console-plugin/coverage/
-console-plugin/.yarn/
 .playwright-mcp/
 *.log
 .review-loop.lock

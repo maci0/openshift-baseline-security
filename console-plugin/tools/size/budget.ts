@@ -4,7 +4,7 @@
 // These are tripwires, not targets. They sit well above the shipped size, so
 // ordinary growth does not fail the gate but a change that pulls a heavy
 // library back into the entry bundle (the charting library OverviewCharts
-// holds, for one) trips it. `yarn size` prints the actual figures; set a
+// holds, for one) trips it. `bun run size` prints the actual figures; set a
 // ceiling from those, not from memory. Raising one is a deliberate edit
 // carrying the reason; see console-plugin/AGENTS.md.
 export interface SizeBudget {

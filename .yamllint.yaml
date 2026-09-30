@@ -17,7 +17,6 @@ ignore: |
   # `make test-alerts` is the gate that reads them.
   operator/config/prometheus/testdata/
   node_modules/
-  .yarn/
 
 rules:
   # role.yaml and user_roles.yaml put their `rules:` sequence at the parent's

@@ -1,6 +1,6 @@
 // Print and gate the transferred size of the built plugin.
 //
-// Runs after webpack in `yarn build` and from `yarn ci`. Gzip level 9, which
+// Runs after webpack in `bun run build` and from `bun run ci`. Gzip level 9, which
 // is what nginx.conf serves at (gzip_comp_level 9): the printed figure is the
 // number on the wire, not an estimate of it. The level is fixed here so the
 // same tree reports the same figure on every runner regardless of the web
@@ -28,7 +28,7 @@ const GZIP_LEVEL = 9;
 function findProjectRoot(start: string): string | undefined {
 	let dir = path.resolve(start);
 	for (;;) {
-		if (fs.existsSync(path.join(dir, 'package.json')) && fs.existsSync(path.join(dir, 'yarn.lock'))) {
+		if (fs.existsSync(path.join(dir, 'package.json')) && fs.existsSync(path.join(dir, 'bun.lock'))) {
 			return dir;
 		}
 		const parent = path.dirname(dir);

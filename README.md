@@ -100,7 +100,7 @@ Describes `main`; install from published OLM tags for only the released surface.
 
 ## Layout
 
-- `CONTRIBUTING.md`: clone-to-PR commands (setup, single-test loop, `make ci` / `yarn ci`)
+- `CONTRIBUTING.md`: clone-to-PR commands (setup, single-test loop, `make ci` / `bun run ci`)
 - `AGENTS.md`: contributor contract (gate, version lockstep, house rules);
   `operator/` and `console-plugin/` each carry their own
 - `CHANGELOG.md`: consumer-facing release notes and migration notes
@@ -341,16 +341,13 @@ reports a missing tool before a build starts, and `make -C operator help` /
 # (needs docker for alert tests and bundle validate).
 cd operator && make test lint verify
 
-# console plugin (Node 22 per .nvmrc / package.json engines; Yarn 4 via corepack)
+# console plugin (bun, version pinned by packageManager in package.json)
 cd console-plugin
-corepack enable
-yarn_pm=$(node -p "require('./package.json').packageManager")
-corepack prepare "${yarn_pm}" --activate
-yarn install --immutable
-yarn lint && yarn lint:oxlint && yarn typecheck && yarn test
-# yarn ci also runs the production webpack build (matches GHA)
-# against a live console: yarn start (serves on :9001)
-# one file: yarn test src/scoring.test.ts   watch: yarn test:watch
+bun install --frozen-lockfile
+bun run lint && bun run lint:oxlint && bun run typecheck && bun run test
+# bun run ci also runs the production webpack build (matches GHA)
+# against a live console: bun run start (serves on :9001)
+# one file: bun run test src/scoring.test.ts   watch: bun run test:watch
 ```
 
 `make run` needs `RELATED_IMAGE_CONSOLE_PLUGIN` pointing at a plugin image
@@ -366,15 +363,15 @@ applies the CRD first).
 - Static consistency (CSV, RBAC, monitoring bundle, version lockstep, CRD
   shape, kustomize render): `cd operator && make verify`. No docker; it is the
   docker-free half of `make bundle`.
-- Unit (TypeScript): `cd console-plugin && yarn test`. One file:
-  `cd console-plugin && yarn test src/scoring.test.ts`. Watch: `yarn test:watch`.
+- Unit (TypeScript): `cd console-plugin && bun run test`. One file:
+  `cd console-plugin && bun run test src/scoring.test.ts`. Watch: `bun run test:watch`.
 - Full GHA replica: `make ci` at the repo root (needs docker), which is
-  `cd operator && make ci` plus `cd console-plugin && yarn ci`.
+  `cd operator && make ci` plus `cd console-plugin && bun run ci`.
 - E2E, live cluster (Go): `cd operator && make test-e2e` with `KUBECONFIG`
   set. Asserts the ClusterBaseline reaches `Available` with a score and
   healthy conditions, the owned ScanSetting/bindings and console plugin
   objects exist and are registered, and a profile add/prune round-trips.
-- E2E, live console (Playwright): `cd console-plugin && yarn test-e2e` with
+- E2E, live console (Playwright): `cd console-plugin && bun run test-e2e` with
   `CONSOLE_URL` and `KUBEADMIN_PASSWORD` set (see
   `console-plugin/.env.example`; a local `.env` is loaded automatically).
   Drives every tab and doubles as the screenshot generator

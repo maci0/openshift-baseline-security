@@ -1,6 +1,6 @@
 // Measure what the browser downloads from dist/.
 //
-// Every file webpack or `yarn licenses` leaves in dist/ is served by nginx out
+// Every file webpack or `bun run licenses` leaves in dist/ is served by nginx out
 // of the document root, except the license notice, which nothing links: it is
 // counted out of the totals below, and the served non-JS files (manifest,
 // locales) are added to the initial JS to report what a first paint waits on.
@@ -54,7 +54,7 @@ const ENTRY_MARKER = '-bundle-';
 const SDK_ENTRY_MARKER = 'plugin-entry';
 const CHUNK_MARKER = '-chunk-';
 const JS_SUFFIX = '.js';
-// The one file in dist/ no browser ever requests. `yarn licenses` writes it
+// The one file in dist/ no browser ever requests. `bun run licenses` writes it
 // next to the bundles, and the Dockerfile serves the same bytes from
 // /licenses/; nothing in the page, the manifest, or the console's plugin loader
 // links it. Counting it would let the tree grow on license text alone and push

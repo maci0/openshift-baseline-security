@@ -1,0 +1,11 @@
+[install]
+# node_modules layout the webpack module-federation build and the attribution
+# walker (tools/attribution) expect: hoisted, nested only on a version clash.
+linker = "hoisted"
+# `bun add` writes exact versions; existing ranges stay, bun.lock pins the graph.
+exact = true
+
+[run]
+# Run package bins (webpack, eslint, jest, tsc) under bun, not the node their
+# shebangs name.
+bun = true

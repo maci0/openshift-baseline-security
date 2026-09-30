@@ -135,7 +135,7 @@ function readPackage(dir: string): PackageNotice | undefined {
 	};
 }
 
-// Yarn's node-modules linker hoists and only nests on a version clash, so a
+// bun's hoisted linker (bunfig.toml) hoists and only nests on a version clash, so a
 // scope-unaware single-level walk would miss the nested copies.
 function listPackageDirs(modulesDir: string): readonly string[] {
 	if (!fs.existsSync(modulesDir)) {
@@ -191,7 +191,7 @@ export function collectNotices(projectRoot: string): NoticeReport {
 	if (notices.length === 0) {
 		return {
 			notices,
-			failures: [`no packages under ${modulesDir}: run yarn install first`],
+			failures: [`no packages under ${modulesDir}: run bun install first`],
 		};
 	}
 
@@ -226,7 +226,7 @@ export function renderNotices(report: NoticeReport, projectVersion: string): str
 		`Where a package ships no license file at all, the entry reads ${NO_LICENSE_FILE}`,
 		'and the identifier its manifest declares is the only record of its grant.',
 		'',
-		'Regenerate with: yarn licenses',
+		'Regenerate with: bun run licenses',
 		'',
 		'=======================================================================',
 		'',
@@ -254,7 +254,7 @@ export function renderNotices(report: NoticeReport, projectVersion: string): str
 export function findProjectRoot(start: string): string | undefined {
 	let dir = path.resolve(start);
 	for (;;) {
-		if (fs.existsSync(path.join(dir, 'package.json')) && fs.existsSync(path.join(dir, 'yarn.lock'))) {
+		if (fs.existsSync(path.join(dir, 'package.json')) && fs.existsSync(path.join(dir, 'bun.lock'))) {
 			return dir;
 		}
 		const parent = path.dirname(dir);

@@ -202,7 +202,7 @@ STRIDE, tied to entry points. Not a generic checklist.
 
 | Class | Concrete threat |
 |-------|-----------------|
-| Tampering | Substituted operator or plugin image. Recurring: `workflow_dispatch` shell injection (fixed 0.5.11 by env-passing the version). `ValidRelatedImage` does not pin digest or registry. A compromised npm package with a `postinstall` cannot run during `yarn install` (`enableScripts: false` in `console-plugin/.yarnrc.yml:11`; image `YARN_ENABLE_SCRIPTS=false`). |
+| Tampering | Substituted operator or plugin image. Recurring: `workflow_dispatch` shell injection (fixed 0.5.11 by env-passing the version). `ValidRelatedImage` does not pin digest or registry. A compromised npm package with a `postinstall` cannot run during `bun install` (`trustedDependencies: []` in `console-plugin/package.json:93`; image `bun install --ignore-scripts`). |
 | Denial of service | Standard-library infinite loop on invalid input via status text (fixed: `golang.org/x/text` bump, 0.5.9). Recurring class: untrusted string → parser, now including the status sanitizer. 60 fuzz targets exist across 16 files; `make fuzz` is a release gate, not a per-PR one. |
 
 ## 5. Mitigations mapping
@@ -234,7 +234,7 @@ Existing controls, with the threats they cover:
 | e2e `.env` key allowlist with hard errors | `console-plugin/e2e/dotenv.ts:12-17,23-76`, `dotenv.test.ts` | A typo'd key or an unrelated variable silently inheriting into the runner (which would also pull in `KUBEADMIN_PASSWORD` where it was not meant to go) |
 | e2e session file created owner-only before it is written | `console-plugin/e2e/global-setup.ts:57-68` | Another local user reading a live kubeadmin session cookie out of a world-readable file for the duration of the write |
 | Hermetic, digest-pinned image builds (`--network=none`, `GOPROXY=off`, lockfile, digest bases) | `operator/Dockerfile`, `console-plugin/Dockerfile`, `operator/catalog.Dockerfile` | Build-time supply chain for released images. `operator/Dockerfile.ci` is tag-pinned against `registry.ci.openshift.org`, not digest-pinned; it never ships |
-| Yarn install without lifecycle scripts | `console-plugin/.yarnrc.yml:11` `enableScripts: false`; `console-plugin/Dockerfile:12` `YARN_ENABLE_SCRIPTS=false` | Compromised registry package cannot run `preinstall`/`install`/`postinstall` |
+| bun install without lifecycle scripts | `console-plugin/package.json:93` `trustedDependencies: []`; `console-plugin/Dockerfile:13` `bun install --frozen-lockfile --ignore-scripts` | Compromised registry package cannot run `preinstall`/`install`/`postinstall` |
 | Release version not interpolated into `run:` | `.github/workflows/release.yml` | Workflow command injection |
 
 Threats with no (or only UI) mitigation:

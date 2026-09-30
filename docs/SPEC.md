@@ -298,7 +298,7 @@ fallback.
 
 Dynamic plugin per `openshift/console-plugin-template` (main / 4.22 line):
 `@openshift-console/dynamic-plugin-sdk` 4.22-latest, React 18, PatternFly 6,
-TypeScript 5.9, webpack 5 module federation, Yarn 4 (Berry), i18n namespace
+TypeScript 5.9, webpack 5 module federation, bun (install, scripts, build), i18n namespace
 `plugin__baseline-security-console-plugin`. **No backend**: all data comes
 from the Kubernetes API through the console's proxy using
 `useK8sWatchResource` against `compliance.openshift.io/v1alpha1` and
@@ -430,15 +430,15 @@ ComplianceAsCode/compliance-operator master, and npm dist-tags).
 | PatternFly | ~6.4.x | console 4.22 frontend |
 | TypeScript | 5.9.3 | console 4.22 frontend |
 | webpack | ^5.110.x | console-plugin-template main |
-| Node (build image) | 22 (`ubi9/nodejs-22`) | console 4.22 build image stream |
-| Yarn | 4.14 via corepack | console-plugin-template |
+| bun (build image) | 1.4.2 (`oven/bun`, digest-pinned) | `packageManager` in `console-plugin/package.json` |
 | Scaffold | kubebuilder go/v4 layout | operator-sdk CLI deprecated (last shipped in OCP 4.18); note operator-sdk v1.42.3 scaffolds still pin k8s 1.33, hence hand-pinned versions here |
 
 ## 8. Packaging and delivery
 
 - **Images**: `quay.io/<org>/baseline-security-operator`,
-  `quay.io/<org>/baseline-security-console-plugin`, both multi-stage UBI9
-  builds, Dockerfiles at each component root; the CI build variant
+  `quay.io/<org>/baseline-security-console-plugin`, both multi-stage with UBI9
+  runtime images (the plugin builds in `oven/bun`), Dockerfiles at each
+  component root; the CI build variant
   (`operator/Dockerfile.ci`, using `registry.ci.openshift.org` builders)
   ships since 0.5.0. Runtime images copy `LICENSE` to `/licenses/LICENSE`
   and set OCI labels (`org.opencontainers.image.{source,licenses,version}`).
@@ -464,7 +464,7 @@ pattern: plugin repos are always separate from operator repos) is `git mv`:
 ```
 openshift-baseline-security/
 ├── AGENTS.md                       # contributor contract (CLAUDE.md symlinks to it)
-├── CONTRIBUTING.md                 # clone-to-PR commands (setup, test loop, make ci / yarn ci)
+├── CONTRIBUTING.md                 # clone-to-PR commands (setup, test loop, make ci / bun run ci)
 ├── operator/                       # kubebuilder go/v4 shape
 │   ├── api/v1alpha1/
 │   ├── cmd/main.go
@@ -485,8 +485,8 @@ openshift-baseline-security/
 │   │                               # domain modules; tests live alongside as *.test.ts
 │   ├── src/testing/                # shared test-only helpers (fuzz PRNG)
 │   ├── tools/oxlint/               # local anti-slop oxlint plugin
-│   ├── tools/attribution/          # yarn licenses: SPDX allowlist over the node_modules closure
-│   ├── tools/size/                 # yarn size: gzip budget over dist/
+│   ├── tools/attribution/          # bun run licenses: SPDX allowlist over the node_modules closure
+│   ├── tools/size/                 # bun run size: gzip budget over dist/
 │   ├── locales/en/
 │   ├── e2e/                        # Playwright live-console suite
 │   ├── console-extensions.json

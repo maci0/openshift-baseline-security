@@ -33,7 +33,7 @@ function makeFixture(): void {
 	fs.rmSync(FIXTURE_ROOT, { force: true, recursive: true });
 	const modules = path.join(FIXTURE_ROOT, 'node_modules');
 	writePackage(path.join(FIXTURE_ROOT), { name: 'fixture', version: '1.0.0' });
-	fs.writeFileSync(path.join(FIXTURE_ROOT, 'yarn.lock'), '');
+	fs.writeFileSync(path.join(FIXTURE_ROOT, 'bun.lock'), '');
 	writePackage(path.join(modules, 'react'), { name: 'react', version: '18.3.1', license: 'MIT' }, 'LICENSE');
 	writePackage(
 		path.join(modules, '@patternfly', 'react-core'),
@@ -178,7 +178,7 @@ describe('collectNotices', () => {
 		const empty = path.resolve(__dirname, '../../../.scratch/attribution-empty');
 		fs.mkdirSync(empty, { recursive: true });
 		try {
-			expect(collectNotices(empty).failures.join('\n')).toContain('yarn install');
+			expect(collectNotices(empty).failures.join('\n')).toContain('bun install');
 		} finally {
 			fs.rmSync(empty, { force: true, recursive: true });
 		}
@@ -192,7 +192,7 @@ describe('renderNotices', () => {
 		expect(text).toContain('baseline-security-console-plugin 9.9.9');
 		expect(text).toContain('react@18.3.1');
 		expect(text).toContain('License:    MIT');
-		expect(text).toContain('yarn licenses');
+		expect(text).toContain('bun run licenses');
 	});
 
 	it('is byte-identical across runs', () => {
@@ -202,7 +202,7 @@ describe('renderNotices', () => {
 });
 
 describe('findProjectRoot', () => {
-	it('walks up to the directory holding package.json and yarn.lock', () => {
+	it('walks up to the directory holding package.json and bun.lock', () => {
 		expect(findProjectRoot(path.join(FIXTURE_ROOT, 'node_modules', 'react'))).toBe(FIXTURE_ROOT);
 	});
 });

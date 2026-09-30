@@ -44,7 +44,7 @@ function devAllowedOrigin(): URL {
 }
 
 // devServer is ignored by a production build, so the dev-only origin is read
-// only here: a mis-set PLUGIN_DEV_ALLOWED_ORIGIN must never fail `yarn build`.
+// only here: a mis-set PLUGIN_DEV_ALLOWED_ORIGIN must never fail `bun run build`.
 function devServerOptions(): DevServerConfiguration {
   const origin = devAllowedOrigin();
   const hosts = ['localhost'];
@@ -117,7 +117,7 @@ const config: Configuration & { devServer?: DevServerConfiguration } = {
 
 // Undefined in a production build, so devServerOptions (and the env it reads)
 // is never called there. Assigning it unconditionally evaluated
-// PLUGIN_DEV_ALLOWED_ORIGIN on every `yarn build`, so a mis-set dev-only value
+// PLUGIN_DEV_ALLOWED_ORIGIN on every `bun run build`, so a mis-set dev-only value
 // failed the image build this config claims it cannot affect.
 if (!isProd) {
   config.devServer = devServerOptions();

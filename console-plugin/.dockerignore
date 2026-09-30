@@ -1,7 +1,6 @@
 node_modules/
 dist/
 coverage/
-.yarn/
 e2e/
 test-results/
 playwright-report/
@@ -26,8 +25,7 @@ id_ed25519*
 .git
 .gitignore
 *.tsbuildinfo
-# Toolchain pins and local IDE state are not webpack inputs.
-.nvmrc
+# Local IDE state is not a webpack input.
 .vscode/
 .idea/
 # Not required by the webpack build stage (nginx.conf is copied in the final stage).
@@ -35,7 +33,7 @@ Dockerfile
 Makefile
 .oxlintrc.json
 tools/*
-# ...except the tools `yarn build` runs: the attribution generator emits
+# ...except the tools `bun run build` runs: the attribution generator emits
 # dist/THIRD-PARTY-NOTICES.txt and the size gate reads dist/ and fails the build
 # on a budget breach. `tools/oxlint` stays out (lint only, never in the image).
 # (`tools/*` rather than `tools/`: a negated child cannot re-include a file

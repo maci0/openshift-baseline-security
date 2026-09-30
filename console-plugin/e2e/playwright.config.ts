@@ -11,7 +11,7 @@ loadDotEnv(path.resolve(__dirname, '../.env'));
 //   KUBEADMIN_USER       login user (default: kubeadmin)
 //   KUBEADMIN_PASSWORD   login password (required)
 //   SCREENSHOT_DIR       where spec screenshots are written (default: ../docs/screenshots)
-// Optional: copy .env.example to .env (gitignored); yarn test-e2e loads it.
+// Optional: copy .env.example to .env (gitignored); bun run test-e2e loads it.
 const consoleURL = (process.env.CONSOLE_URL ?? '').trim();
 if (!consoleURL) {
   throw new Error('CONSOLE_URL must be set (see console-plugin/.env.example)');

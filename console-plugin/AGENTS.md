@@ -5,14 +5,22 @@ PatternFly 6, `@openshift-console/dynamic-plugin-sdk` on the 4.22 line.
 
 ## Toolchain
 
-**Yarn 4, not bun.** This package is standardized on Yarn (`packageManager` in
-`package.json` is the single source; `corepack prepare` activates it) with
-`enableImmutableInstalls`, `checksumBehavior: throw`, and `enableScripts: false`
-(no registry lifecycle scripts at install). Do not migrate it, and do not add
-a `package-lock.json` beside `yarn.lock`.
+**bun only.** `packageManager` in `package.json` pins the bun version; the
+digest-pinned `oven/bun` build stage in the Dockerfile and `setup-bun` in CI
+use the same one, and `make check` at the repo root refuses any other. No node,
+npm, or yarn is needed: `bunfig.toml` sets `[run] bun = true`, so webpack,
+eslint, jest, and tsc run under bun even though their bin shebangs name node.
+Do not add a `package-lock.json` or `yarn.lock` beside `bun.lock`.
 
-Node 22 exactly, pinned by `.nvmrc` to the same patch as the digest-pinned
-`ubi9/nodejs-22` build image. `yarn build` refuses any other major.
+Install rules: `bun install --frozen-lockfile` (CI, image, `make setup`)
+fails if `bun.lock` would change, and bun checks each tarball against the
+lockfile's integrity hash. `trustedDependencies: []` runs no registry
+lifecycle scripts at install; the image adds `--ignore-scripts`. `bunfig.toml`
+keeps the hoisted `node_modules` layout the attribution walker expects and
+makes `bun add` write exact versions.
+
+`resolutions` is top-level only in bun: `js-yaml` is forced to `^3.15.2` for
+every dependent, which holds while nothing in the closure wants js-yaml 4.
 
 `i18next` and `react-i18next` are the one pair held on a tilde range, and it
 has to stay that way. The console supplies both at runtime and the plugin's
@@ -24,25 +32,25 @@ the browser. No unit test can catch that mismatch.
 ## Gate
 
 ```sh
-yarn lint          # eslint ./src ./e2e ./tools/attribution ./tools/size webpack.config.ts (type-aware except webpack)
-yarn lint:oxlint   # oxlint: @rikalabs/oxlint-standards strict + test-jest preset, perf, react plugin, local anti-slop
-yarn typecheck     # tsc --noEmit
-yarn test          # jest
-yarn ci            # the four above plus the production webpack build
+bun run lint          # eslint ./src ./e2e ./tools/attribution ./tools/size webpack.config.ts (type-aware except webpack)
+bun run lint:oxlint   # oxlint: @rikalabs/oxlint-standards strict + test-jest preset, perf, react plugin, local anti-slop
+bun run typecheck     # tsc --noEmit
+bun run test          # jest
+bun run ci            # the four above plus the production webpack build
 ```
 
-One file: `yarn test src/scoring.test.ts`. Watch: `yarn test:watch`.
+One file: `bun run test src/scoring.test.ts`. Watch: `bun run test:watch`.
 `make help` lists the same commands.
 
-`yarn licenses` is a build step, not a report: it walks the installed
+`bun run licenses` is a build step, not a report: it walks the installed
 `node_modules` closure, writes `dist/THIRD-PARTY-NOTICES.txt`, and exits
 non-zero on a package whose license is missing, unrecognised, or copyleft, or
-that ships no license text. It runs after webpack in `yarn build` (webpack's
+that ships no license text. It runs after webpack in `bun run build` (webpack's
 `output.clean` wipes `dist/`) and the Dockerfile copies the result to
 `/licenses/`. Adding a dependency means adding it to `PERMISSIVE_SPDX` in
 `tools/attribution/spdx.ts` with the reason, never silencing the failure.
 
-`yarn size` is a build step for the same reason: it walks `dist/`, gzips every
+`bun run size` is a build step for the same reason: it walks `dist/`, gzips every
 file, prints the transferred size, and fails over the ceilings in
 `tools/size/budget.ts`. What it measures is the initial JS (the SDK's
 `plugin-entry*.js` remote entry and every `*-bundle-*.min.js`), the
@@ -70,7 +78,7 @@ error go away.
 
 ## Dev server
 
-`yarn start` serves the plugin on :9001 for a console on another origin, so it
+`bun run start` serves the plugin on :9001 for a console on another origin, so it
 needs CORS, and it serves source maps, so its CORS and Host policy name that
 console instead of admitting every origin (`allowedHosts: 'all'` is open to DNS
 rebinding). `PLUGIN_DEV_ALLOWED_ORIGIN` is the one knob: a bare http(s) origin,
@@ -149,7 +157,7 @@ double casts are rejected outright.
 - A counted string's key carries the raw `{{count}}` (that is what i18next
   matches for a plural form) and its value carries the locale-formatted
   `{{formattedCount}}`; both `_one` and `_other` exist in the English file, and
-  `yarn test src/i18n.test.ts` fails on a half-formed base. Numbers quoted in
+  `bun run test src/i18n.test.ts` fails on a half-formed base. Numbers quoted in
   prose come from the constant through `formatCount`, never written into the
   key.
 - `'—'` is the rendered placeholder for an absent or unscoreable value, and it
@@ -176,7 +184,7 @@ double casts are rejected outright.
 
 ## Screenshots
 
-`../docs/screenshots/` is generated by `yarn test-e2e` against a live console
+`../docs/screenshots/` is generated by `bun run test-e2e` against a live console
 (`SCREENSHOT_DIR` defaults there). Adding an image means adding the `shot()`
 call that produces it; a capture with no producer and no README reference does
 not belong in the repo. The Playwright `use` block pins reduced motion and
@@ -184,8 +192,8 @@ device scale factor, and `shot()` passes `animations` and `caret` to
 `page.screenshot` (they are screenshot options, not `use` options), so a
 re-capture of the same page produces the same PNG on any runner.
 
-`yarn test-e2e` needs `yarn playwright install chromium` first: `enableScripts:
-false` in `.yarnrc.yml` means no install script fetches the browser build.
+`bun run test-e2e` needs `bunx playwright install chromium` first: install
+scripts do not run (empty `trustedDependencies`), so none fetches the browser build.
 `e2e/global-setup.ts` names that command when the binary is missing.
 
 `.env` carries only the four keys `E2E_ENV_KEYS` allows: `CONSOLE_URL` and

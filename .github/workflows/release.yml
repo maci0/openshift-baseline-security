@@ -79,32 +79,26 @@ jobs:
 
       # The plugin image is built from the same commit, so it gets the same
       # gate; typecheck is included because jest cannot type a webpack build.
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          # Same reasoning as ci.yml: setup-node's yarn cache probe runs the
-          # runner's global Yarn 1.x, which aborts on the packageManager pin.
-          node-version-file: console-plugin/.nvmrc
-      # Project-local Yarn cache, keyed on the lockfile, as in ci.yml: the
+          bun-version-file: console-plugin/package.json
+      # bun's global install cache, keyed on the lockfile, as in ci.yml: the
       # tagged commit's install graph is the same one CI warmed that week.
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: console-plugin/.yarn/cache
-          key: yarn-cache-${{ runner.os }}-${{ hashFiles('console-plugin/yarn.lock') }}
+          path: ~/.bun/install/cache
+          key: bun-cache-${{ runner.os }}-${{ hashFiles('console-plugin/bun.lock') }}
           restore-keys: |
-            yarn-cache-${{ runner.os }}-
+            bun-cache-${{ runner.os }}-
       - name: test the tagged commit (console plugin)
         working-directory: console-plugin
         env:
           PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
         run: |
           set -euo pipefail
-          corepack enable
-          pm=$(node -p "require('./package.json').packageManager")
-          test -n "$pm"
-          corepack prepare "$pm" --activate
-          yarn install --immutable
-          yarn typecheck
-          yarn test
+          bun install --frozen-lockfile
+          bun run typecheck
+          bun run test
 
       - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:

@@ -7,7 +7,7 @@ on:
     - cron: '0 3 * * *'
   workflow_dispatch:
 
-# Least privilege: read-only. The cache (actions/cache, setup-go/node, buildx
+# Least privilege: read-only. The cache (actions/cache, setup-go, buildx
 # type=gha) authenticates with the runner-injected ACTIONS_RUNTIME_TOKEN, not the
 # GITHUB_TOKEN, so no `actions` scope is needed. Secrets (e.g. E2E_KUBECONFIG)
 # remain available to steps that reference them.
@@ -171,81 +171,76 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          # Exact patch from .nvmrc (matches digest-pinned ubi9/nodejs-22 in Dockerfile).
-          # No cache: yarn here. setup-node's yarn cache probe runs the runner's
-          # global Yarn 1.x, which aborts on the package.json packageManager pin
-          # (yarn@4) before corepack activates it. Cache is restored below instead.
-          node-version-file: console-plugin/.nvmrc
-      # Node 22 ships corepack; do not npm i -g corepack (unpinned latest).
-      # package.json packageManager is the single source for the Yarn version.
-      - run: |
-          corepack enable
-          yarn_pm=$(node -p "require('./package.json').packageManager")
-          test -n "$yarn_pm"
-          corepack prepare "${yarn_pm}" --activate
-      # Project-local Yarn cache (enableGlobalCache: false). Keyed on the lockfile
-      # so an unchanged graph restores exactly; falls back to the latest partial.
+          # packageManager in package.json is the single source for the bun
+          # version; the Dockerfile build stage pins the same one.
+          bun-version-file: console-plugin/package.json
+      # bun's global install cache, keyed on the lockfile so an unchanged graph
+      # restores exactly; falls back to the latest partial.
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: console-plugin/.yarn/cache
-          key: yarn-cache-${{ runner.os }}-${{ hashFiles('console-plugin/yarn.lock') }}
+          path: ~/.bun/install/cache
+          key: bun-cache-${{ runner.os }}-${{ hashFiles('console-plugin/bun.lock') }}
           restore-keys: |
-            yarn-cache-${{ runner.os }}-
-      - run: yarn install --immutable
+            bun-cache-${{ runner.os }}-
+      - run: bun install --frozen-lockfile
       # Retry only transient registry/network errors. Real audit findings fail once.
-      - name: yarn npm audit
+      - name: bun audit
         run: |
           set -euo pipefail
           out=""
-          # --exclude immutable: the console dynamic-plugin-sdk pins immutable
+          # Drops immutable: the console dynamic-plugin-sdk pins immutable
           # ^3.8.3 to match the console host's shared (module-federated) copy;
           # the plugin does not bundle it, and forcing the 4.3.9 fix would break
           # runtime compat with the 4.22 host. Not ours to bump; re-audit if the
           # SDK moves off immutable 3.x.
           #
-          # --exclude react-router: same shape, and unmovable on the console 4.22
+          # Drops react-router: same shape, and unmovable on the console 4.22
           # line. The console provides react-router as a shared singleton
           # (ConsoleRemotePlugin sets import: false, so no react-router code
           # reaches dist/), the SDK declares its peer range as ~7.13.1, and the
           # build asserts the installed version against that range: any bump
-          # fails `yarn build` with "Console provides shared module react-router
+          # fails `bun run build` with "Console provides shared module react-router
           # ~7.13.1 but plugin uses version X". The advisories the audit reports
           # for 7.13.x are RSC mode, SSR hydration, single-fetch and the
           # __manifest server path, none of which a browser-only plugin can run,
           # plus the host's own client router. Clearing them means the console
           # moving react-router and the SDK peer range following it; re-audit
           # when it reaches ~7.18.1 (4.23.0-prerelease.5).
+          #
+          # bun audit has no per-package exclude, so the JSON report (package
+          # name -> advisories) is filtered here instead.
           for attempt in 1 2 3; do
             set +e
-            out=$(yarn npm audit --all --recursive --exclude immutable --exclude react-router 2>&1)
+            out=$(bun audit --json 2>&1)
             rc=$?
             set -e
+            # A JSON object is a completed audit; anything else is a registry
+            # or network failure and is retried.
+            if findings=$(printf '%s' "$out" | jq -e 'if type == "object" then del(.immutable, ."react-router") else error end' 2>/dev/null); then
+              if [ "$findings" = "{}" ]; then
+                exit 0
+              fi
+              printf '%s\n' "$findings"
+              echo "bun audit reported findings (not retrying)" >&2
+              exit 1
+            fi
             printf '%s\n' "$out"
-            if [ "$rc" -eq 0 ]; then
-              exit 0
-            fi
-            # Yarn audit prints vulnerability tables for package issues; network
-            # failures look like fetch/ECONNRESET/503 without a findings header.
-            if printf '%s\n' "$out" | grep -qiE 'vulnerabilit|severity|moderate|high severity|critical severity|Package '; then
-              echo "yarn npm audit reported findings (not retrying)" >&2
-              exit "$rc"
-            fi
             if [ "$attempt" -eq 3 ]; then
               exit "$rc"
             fi
-            echo "yarn npm audit failed (attempt ${attempt}/3); retrying..." >&2
+            echo "bun audit failed (attempt ${attempt}/3); retrying..." >&2
             sleep $((attempt * 5))
           done
-      - run: yarn lint
-      # Separate from `yarn lint`: oxlint carries the type-aware anti-slop rules,
+      - run: bun run lint
+      # Separate from `bun run lint`: oxlint carries the type-aware anti-slop rules,
       # which eslint has no port of. Ungated, they would drift silently.
-      - run: yarn lint:oxlint
-      - run: yarn typecheck
-      - run: yarn test
+      - run: bun run lint:oxlint
+      - run: bun run typecheck
+      - run: bun run test
       # SOURCE_DATE_EPOCH matches image/local production build (webpack/minifiers).
-      - run: yarn build
+      - run: bun run build
         env:
           SOURCE_DATE_EPOCH: "0"
           TZ: UTC

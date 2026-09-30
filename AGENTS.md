@@ -18,17 +18,17 @@ deviations from them; `docs/DESIGN-DECISIONS.md` holds the ADRs.
 Both halves must be green before a change lands. Neither runs the other's.
 
 ```sh
-make setup                                    # yarn install (plugin), then preflight
+make setup                                    # bun install (plugin), then preflight
 make check                                    # preflight, both modules
 cd operator       && make test test-race lint verify  # + make fuzz before a release
-cd console-plugin && yarn lint && yarn lint:oxlint && yarn typecheck && yarn test
+cd console-plugin && bun run lint && bun run lint:oxlint && bun run typecheck && bun run test
 ```
 
 `make ci` at the repo root runs both local replicas: `operator/Makefile ci`, the
 GHA `operator` job (also build, the reproducible-binary check, `govulncheck`,
 `mod-tidy-check`, alert tests, generated-file drift, `make bundle`; needs
-docker), and `console-plugin` `yarn ci`, the replica of the GHA
-`console-plugin` job except `yarn npm audit`. The required `images` and
+docker), and `console-plugin` `bun run ci`, the replica of the GHA
+`console-plugin` job except `bun audit`. The required `images` and
 `catalog` jobs have no local replica beyond `make -C operator bundle` and
 `make -C operator catalog-prepare` (both need docker); a Dockerfile, bundle, or
 CSV change should have run those first. The required `portability` job runs
@@ -72,8 +72,8 @@ Cutting a release:
    no change is not a release: leave the version where it is.
 5. Tag `vX.Y.Z`. `REQUIRE_GIT_TAGS=1` adds the tag's existence to the check.
    The release workflow runs both gates and the tagged commit's own
-   `make -C operator test` plus the console plugin's `yarn typecheck` and
-   `yarn test` before pushing images, and refuses to publish a version from a
+   `make -C operator test` plus the console plugin's `bun run typecheck` and
+   `bun run test` before pushing images, and refuses to publish a version from a
    commit other than `vX.Y.Z`. A re-dispatch of an already published version
    fails at the pre-build tag check rather than overwriting it. Version
    resolution lives in

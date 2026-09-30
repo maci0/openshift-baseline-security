@@ -17,7 +17,7 @@ SHELL := /usr/bin/env bash
 .SHELLFLAGS := -euo pipefail -c
 .DELETE_ON_ERROR:
 
-# A bare `make` must not start a docker build. Everyday commands are Yarn;
+# A bare `make` must not start a docker build. Everyday commands are bun;
 # this Makefile wraps the ones contributors look for next to operator/.
 .DEFAULT_GOAL := help
 
@@ -25,36 +25,36 @@ SHELL := /usr/bin/env bash
 
 help:
 	@echo "Console plugin contributor commands:"
-	@echo "  yarn install --immutable"
-	@echo "  make test          yarn test (jest)"
-	@echo "  make lint          yarn lint && yarn lint:oxlint"
-	@echo "  make ci            yarn ci (lint, oxlint, typecheck, test, production build)"
-	@echo "  yarn test:watch    jest --watch"
-	@echo "  yarn test src/scoring.test.ts"
-	@echo "  yarn start         webpack-dev-server on :9001 (console origin:"
-	@echo "                    PLUGIN_DEV_ALLOWED_ORIGIN, default http://localhost:3000)"
-	@echo "  yarn test-e2e      Playwright (needs CONSOLE_URL; see .env.example)"
-	@echo "                    plus a one-time: yarn playwright install chromium"
-	@echo "  make size          yarn size (transferred bytes and the budget gate)"
-	@echo "  yarn licenses      regenerate dist/THIRD-PARTY-NOTICES.txt (also a build step)"
+	@echo "  bun install --frozen-lockfile"
+	@echo "  make test              bun run test (jest)"
+	@echo "  make lint              bun run lint && bun run lint:oxlint"
+	@echo "  make ci                bun run ci (lint, oxlint, typecheck, test, production build)"
+	@echo "  bun run test:watch     jest --watch"
+	@echo "  bun run test src/scoring.test.ts"
+	@echo "  bun run start          webpack-dev-server on :9001 (console origin:"
+	@echo "                         PLUGIN_DEV_ALLOWED_ORIGIN, default http://localhost:3000)"
+	@echo "  bun run test-e2e       Playwright (needs CONSOLE_URL; see .env.example)"
+	@echo "                         plus a one-time: bunx playwright install chromium"
+	@echo "  make size              bun run size (transferred bytes and the budget gate)"
+	@echo "  bun run licenses       regenerate dist/THIRD-PARTY-NOTICES.txt (also a build step)"
 	@echo "Image:"
 	@echo "  make docker-build docker-push IMG=... [VERSION=x.y.z]"
 
 test:
-	@command -v yarn >/dev/null || { echo "yarn not on PATH; enable Yarn 4 via corepack (see CONTRIBUTING.md)" >&2; exit 1; }
-	yarn test
+	@command -v bun >/dev/null || { echo "bun not on PATH; install the bun version packageManager in package.json pins (see CONTRIBUTING.md)" >&2; exit 1; }
+	bun run test
 
 lint:
-	@command -v yarn >/dev/null || { echo "yarn not on PATH; enable Yarn 4 via corepack (see CONTRIBUTING.md)" >&2; exit 1; }
-	yarn lint && yarn lint:oxlint
+	@command -v bun >/dev/null || { echo "bun not on PATH; install the bun version packageManager in package.json pins (see CONTRIBUTING.md)" >&2; exit 1; }
+	bun run lint && bun run lint:oxlint
 
 size:
-	@command -v yarn >/dev/null || { echo "yarn not on PATH; enable Yarn 4 via corepack (see CONTRIBUTING.md)" >&2; exit 1; }
-	yarn size
+	@command -v bun >/dev/null || { echo "bun not on PATH; install the bun version packageManager in package.json pins (see CONTRIBUTING.md)" >&2; exit 1; }
+	bun run size
 
 ci:
-	@command -v yarn >/dev/null || { echo "yarn not on PATH; enable Yarn 4 via corepack (see CONTRIBUTING.md)" >&2; exit 1; }
-	yarn ci
+	@command -v bun >/dev/null || { echo "bun not on PATH; install the bun version packageManager in package.json pins (see CONTRIBUTING.md)" >&2; exit 1; }
+	bun run ci
 
 docker-build:
 	# An unreadable or empty version would stamp org.opencontainers.image.version

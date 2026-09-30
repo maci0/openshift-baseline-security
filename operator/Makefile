@@ -302,7 +302,7 @@ YAMLLINT_VERSION ?= 1.38.0
 # tool configs are listed explicitly: a directory glob would sweep in
 # operator/bundle and operator/catalog, which .yamllint.yaml ignores anyway,
 # and would miss the root-level ones that no directory covers.
-YAML_PATHS ?= operator/config .github .yamllint.yaml .ci-operator.yaml operator/.golangci.yml console-plugin/.yarnrc.yml
+YAML_PATHS ?= operator/config .github .yamllint.yaml .ci-operator.yaml operator/.golangci.yml
 .PHONY: lint
 lint: lint-go lint-shell lint-python lint-yaml
 
@@ -574,7 +574,7 @@ verify-versions:
 	grep -qF 'hack/normalize-mtimes.sh catalog' Makefile \
 		|| { echo "make catalog-prepare must clamp the catalog tree's mtimes (the opm cache and the COPY layer read them)"; fail=1; }; \
 	grep -qF 'find dist -exec touch' ../console-plugin/Dockerfile \
-		|| { echo "console-plugin Dockerfile must clamp dist/ mtimes after yarn build; the runtime image digest would otherwise follow the build time"; fail=1; }; \
+		|| { echo "console-plugin Dockerfile must clamp dist/ mtimes after bun run build; the runtime image digest would otherwise follow the build time"; fail=1; }; \
 	grep -qF -- '-X main.version=$${VERSION}' Dockerfile \
 		|| { echo "release Dockerfile must stamp the version into the binary so manager --version matches the image label"; fail=1; }; \
 	grep -qF -- '-X main.version=$${VERSION}' Dockerfile.ci \
@@ -595,10 +595,12 @@ verify-versions:
 		|| { echo "console-plugin Dockerfile must COPY the notices with --from=build; a bare source path resolves against the build context, where dist/ is .dockerignore'd, so the copy fails or ships nothing"; fail=1; }; \
 	grep -qE '^USER 1001:1001$$' catalog.Dockerfile \
 		|| { echo "catalog.Dockerfile must pin USER 1001:1001; a bare uid leaves the primary group to the base image passwd entry"; fail=1; }; \
-	grep -qE 'YARN_ENABLE_SCRIPTS=false' ../console-plugin/Dockerfile \
-		|| { echo "console-plugin Dockerfile must set YARN_ENABLE_SCRIPTS=false so yarn install cannot run registry lifecycle scripts"; fail=1; }; \
+	grep -qE '^RUN bun install --frozen-lockfile --ignore-scripts$$' ../console-plugin/Dockerfile \
+		|| { echo "console-plugin Dockerfile must run bun install --frozen-lockfile --ignore-scripts so the install cannot drift from bun.lock or run registry lifecycle scripts"; fail=1; }; \
+	grep -qE '^  "trustedDependencies": \[\],?$$' "$$pkg" \
+		|| { echo "console-plugin package.json must set trustedDependencies to [] so a local bun install runs no registry lifecycle scripts either"; fail=1; }; \
 	grep -qE 'PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1' ../console-plugin/Dockerfile \
-		|| { echo "console-plugin Dockerfile must skip Playwright browser download during yarn install"; fail=1; }; \
+		|| { echo "console-plugin Dockerfile must skip Playwright browser download during bun install"; fail=1; }; \
 	grep -qE '^RUN --network=none' catalog.Dockerfile \
 		|| { echo "catalog.Dockerfile opm cache RUN must use --network=none (local FBC only)"; fail=1; }; \
 	for df in Dockerfile Dockerfile.ci bundle.Dockerfile catalog.Dockerfile ../console-plugin/Dockerfile; do \
@@ -617,14 +619,16 @@ verify-versions:
 		test "$$(grep -c '^ARG SOURCE_DATE_EPOCH' "$$df")" -eq "$$(grep -c '^FROM ' "$$df")" \
 			|| { echo "$$df must declare ARG SOURCE_DATE_EPOCH in every stage (found $$(grep -c '^ARG SOURCE_DATE_EPOCH' "$$df") for $$(grep -c '^FROM ' "$$df") stages)"; fail=1; }; \
 	done; \
-	nvm=$$(tr -d '[:space:]' < ../console-plugin/.nvmrc); \
-	grep -qE "Node in this digest is $${nvm}" ../console-plugin/Dockerfile \
-		|| { echo "console-plugin Dockerfile must document Node $${nvm} (matches .nvmrc); image/node would drift"; fail=1; }; \
+	bunv=$$(sed -n 's/^  "packageManager": "bun@\([0-9.]*\)",*$$/\1/p' "$$pkg"); \
+	test -n "$$bunv" \
+		|| { echo "console-plugin package.json must pin packageManager to bun@X.Y.Z"; fail=1; }; \
+	grep -qE "^FROM docker\.io/oven/bun:$${bunv}@sha256:[0-9a-f]{64} AS build$$" ../console-plugin/Dockerfile \
+		|| { echo "console-plugin Dockerfile build stage must be digest-pinned oven/bun:$${bunv} (matches packageManager); image and local bun would drift"; fail=1; }; \
 	for tdir in $$(grep -oE 'tools/[a-z0-9-]+' "$$pkg" | sort -u); do \
 		grep -qE "^COPY $${tdir}/ $${tdir}/" ../console-plugin/Dockerfile \
-			|| { echo "console-plugin Dockerfile must COPY $${tdir}/ into the build stage; \`yarn build\` runs it and .dockerignore excludes tools/*"; fail=1; }; \
+			|| { echo "console-plugin Dockerfile must COPY $${tdir}/ into the build stage; \`bun run build\` runs it and .dockerignore excludes tools/*"; fail=1; }; \
 		grep -qE "^!$${tdir}/" ../console-plugin/.dockerignore \
-			|| { echo "console-plugin .dockerignore must re-include $${tdir}/; it excludes tools/*, so the Dockerfile COPY would find nothing and \`yarn build\` would fail"; fail=1; }; \
+			|| { echo "console-plugin .dockerignore must re-include $${tdir}/; it excludes tools/*, so the Dockerfile COPY would find nothing and \`bun run build\` would fail"; fail=1; }; \
 	done; \
 	grep -qE '^ *defaultMode: 0*[0-7]([4-7][0-7]|[0-3][4-7])$$' config/manager/manager.yaml \
 		|| { echo "config/manager/manager.yaml metrics-certs defaultMode must carry a group or other read bit; the manager runs at uid 65532 (no fsGroup, OLM owns the pod spec) against a root-owned projection, so an owner-only mode leaves the service-ca cert unreadable and metrics fall back to self-signed"; fail=1; }; \

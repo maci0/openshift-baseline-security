@@ -8,7 +8,7 @@
 // "CONSOLE_URL must be set", so it is rejected here instead.
 import { existsSync, readFileSync } from 'node:fs';
 
-// Keys `yarn test-e2e` reads from .env (see .env.example).
+// Keys `bun run test-e2e` reads from .env (see .env.example).
 export const E2E_ENV_KEYS: ReadonlySet<string> = new Set([
   'CONSOLE_URL',
   'KUBEADMIN_USER',

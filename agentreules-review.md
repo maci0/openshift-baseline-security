@@ -47,7 +47,7 @@ Review the following:
   `operator/`, `package.json` scripts in `console-plugin/`, and the GHA jobs in
   `.github/workflows/ci.yml` and `release.yml` that those commands are claimed
   to mirror.
-- Findable pattern: cross-check each `make <target>` and `yarn <script>` name
+- Findable pattern: cross-check each `make <target>` and `bun run <script>` name
   against `make help` output, `package.json` `scripts`, and the workflow step
   names. A documented target absent from the Makefile, or a CI job the docs say
   is local-only, is the finding.
