@@ -79,7 +79,7 @@ jobs:
 
       # The plugin image is built from the same commit, so it gets the same
       # gate; typecheck is included because jest cannot type a webpack build.
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           # Same reasoning as ci.yml: setup-node's yarn cache probe runs the
           # runner's global Yarn 1.x, which aborts on the packageManager pin.
