@@ -1434,12 +1434,12 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@patternfly/react-charts@npm:^8.6.0":
-  version: 8.6.0
-  resolution: "@patternfly/react-charts@npm:8.6.0"
+"@patternfly/react-charts@npm:^8.6.1":
+  version: 8.6.1
+  resolution: "@patternfly/react-charts@npm:8.6.1"
   dependencies:
-    "@patternfly/react-styles": "npm:^6.6.0"
-    "@patternfly/react-tokens": "npm:^6.6.0"
+    "@patternfly/react-styles": "npm:^6.6.1"
+    "@patternfly/react-tokens": "npm:^6.6.1"
     hoist-non-react-statics: "npm:^3.3.2"
     lodash: "npm:^4.17.23"
     tslib: "npm:^2.8.1"
@@ -1501,7 +1501,7 @@ __metadata:
       optional: true
     victory-zoom-container:
       optional: true
-  checksum: 10c0/7dad9d325eb496fe9d4d8c1c181a187c871ce89e2bd621567213e261322eeeb5fc9183f508751c7163abd8003ed8df37f20b82260c5925c38a744f4c971899f2
+  checksum: 10c0/29a7a087b0d01db9d57c3c6a26eae3b21b690bf23ceec1895952875389ca6cd4c47aafb6ebcaa1b111ae043ed9ed7f82fc285872280723f0ad409c990d8f59b3
   languageName: node
   linkType: hard
 
@@ -1553,6 +1553,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@patternfly/react-styles@npm:^6.6.1":
+  version: 6.6.1
+  resolution: "@patternfly/react-styles@npm:6.6.1"
+  checksum: 10c0/0c50bf72fade26d30e6ff9abe0d2d8dbb5b546fe434067f70665ce704e63767a9f8ea7627871e2c6ce17ea4f475daa931fd420e1f1aee891c1f48b5905e57433
+  languageName: node
+  linkType: hard
+
 "@patternfly/react-table@npm:^6.4.3":
   version: 6.6.0
   resolution: "@patternfly/react-table@npm:6.6.0"
@@ -1574,6 +1581,13 @@ __metadata:
   version: 6.6.0
   resolution: "@patternfly/react-tokens@npm:6.6.0"
   checksum: 10c0/3084a23e28e693163e68a8215a13eea036acf4c528dfbf794dd9b7f994e8e999a33a1874505cadb32c37e8e300d228b4eef3fc746acabae97f7be5ce8d65fd15
+  languageName: node
+  linkType: hard
+
+"@patternfly/react-tokens@npm:^6.6.1":
+  version: 6.6.1
+  resolution: "@patternfly/react-tokens@npm:6.6.1"
+  checksum: 10c0/818f0539722c147a83c35bd53860b80566117c823706e51228f652754c2053410da987712b21def02d55c39845c9d129819e96a78870cc390db80df59c127a8b
   languageName: node
   linkType: hard
 
@@ -2950,7 +2964,7 @@ __metadata:
     "@openshift-console/dynamic-plugin-sdk": "npm:4.22.0"
     "@openshift-console/dynamic-plugin-sdk-webpack": "npm:4.22.0"
     "@oxlint/plugins": "npm:1.81.0"
-    "@patternfly/react-charts": "npm:^8.6.0"
+    "@patternfly/react-charts": "npm:^8.6.1"
     "@patternfly/react-core": "npm:^6.4.3"
     "@patternfly/react-icons": "npm:^6.6.1"
     "@patternfly/react-table": "npm:^6.4.3"
