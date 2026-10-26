@@ -7,7 +7,7 @@
 # `ARG VERSION` so the global default reaches it; make verify-versions fails if
 # this line is ever duplicated.
 ARG VERSION=0.9.0
-FROM registry.access.redhat.com/ubi9/go-toolset@sha256:0a4666f7a4eb0644c97a73cba198eb268691b270d97831822689e7a2088f87be AS build
+FROM registry.access.redhat.com/ubi9/go-toolset@sha256:c51f0f31cbaa7e91dede6013f636d54fe10dd7d581cfc4cda014ba9d62bcd779 AS build
 # BuildKit special-case ARG: clamps image/layer timestamps when passed by the client.
 ARG SOURCE_DATE_EPOCH=0
 # Pulls the global VERSION above into this stage for the linker stamp.
