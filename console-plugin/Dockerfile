@@ -1,6 +1,6 @@
 # ubi9/nodejs-22 (digest-pinned for reproducible builds; bump deliberately).
 # Node in this digest is 22.23.2; keep console-plugin/.nvmrc on the same patch.
-FROM registry.access.redhat.com/ubi9/nodejs-22@sha256:1fda929ce9a6a42a9f12286b5616f5b9fdd55aca98b045659fd6ceac5fa5e515 AS build
+FROM registry.access.redhat.com/ubi9/nodejs-22@sha256:3dabbb65c76405761159315437fdd8795da6906f5a8a422b0d3ab25810a42c8f AS build
 # BuildKit special-case ARG: clamps image/layer timestamps when passed by the client.
 ARG SOURCE_DATE_EPOCH=0
 USER root
