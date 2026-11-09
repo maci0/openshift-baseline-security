@@ -35,7 +35,7 @@ RUN --network=none CGO_ENABLED=0 go build -trimpath -buildvcs=false -mod=readonl
 	&& test -s /tmp/manager
 
 # ubi9/ubi-micro
-FROM registry.access.redhat.com/ubi9/ubi-micro@sha256:7a0454cbd9bd847e8f6a63b6f0254a6efbeb6e0ed71a5d824a4f6cccbe626650
+FROM registry.access.redhat.com/ubi9/ubi-micro@sha256:d3499a0896e2d6a1642f922615831bc5c2fd513bbb34f3446cabba530d9d54a2
 ARG SOURCE_DATE_EPOCH=0
 # The global default above; --build-arg VERSION (make docker-build) overrides it.
 ARG VERSION
